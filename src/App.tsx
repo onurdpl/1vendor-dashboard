@@ -17,6 +17,9 @@ const OrderDetailPage = lazy(() =>
 const AdminShopifyOrderPage = lazy(() =>
   import('./pages/AdminShopifyOrderPage').then((module) => ({ default: module.AdminShopifyOrderPage })),
 );
+const AdminOperationsQueuePage = lazy(() =>
+  import('./pages/AdminOperationsQueuePage').then((module) => ({ default: module.AdminOperationsQueuePage })),
+);
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then((module) => ({ default: module.ReturnsPage })));
 const ReturnDetailPage = lazy(() =>
   import('./pages/ReturnDetailPage').then((module) => ({ default: module.ReturnDetailPage })),
@@ -66,6 +69,16 @@ export default function App() {
               <RequirePermission permission="orders:read">
                 <Suspense fallback={loadingFallback}>
                   <OrderDetailPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/operations"
+            element={
+              <RequirePermission permission="orders:write">
+                <Suspense fallback={loadingFallback}>
+                  <AdminOperationsQueuePage />
                 </Suspense>
               </RequirePermission>
             }

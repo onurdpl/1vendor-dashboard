@@ -290,3 +290,15 @@ Refunds follow the same single-store, multi-vendor model as orders.
 - Real backend mode is controlled by API environment configuration.
 - The frontend expects the same route paths in mock and real modes.
 - When the real backend is added, it should preserve these endpoint shapes or introduce a versioned compatibility layer.
+
+## Admin Operations Queue
+
+- The admin operations queue is admin-only.
+- It aggregates operational issues across allocations, fulfillment state, and refund attention.
+- Current frontend mock derives queue items from existing mock allocations and returns.
+- Planned queue categories include:
+  - `pending_reassignment`
+  - `vendor_blocked`
+  - `awaiting_shipment`
+  - `refund_attention`
+- Backend should eventually provide an authoritative queue endpoint with consistent severity/status semantics and auditability.

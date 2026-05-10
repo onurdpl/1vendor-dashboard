@@ -239,3 +239,22 @@ export type DashboardOverview = {
   recentActivity: string[];
   workspaceStatus: string;
 };
+
+export type OperationsQueueItemType = 'pending_reassignment' | 'vendor_blocked' | 'awaiting_shipment' | 'refund_attention';
+export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
+
+export type OperationsQueueItem = {
+  id: string;
+  type: OperationsQueueItemType;
+  severity: OperationsQueueSeverity;
+  title: string;
+  description: string;
+  vendorId: VendorId;
+  vendorName?: string;
+  relatedOrderId?: string;
+  relatedShopifyOrderId?: string;
+  status: string;
+  createdAt: string;
+  actionLabel?: string;
+  actionTo?: string;
+};

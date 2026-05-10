@@ -13,12 +13,14 @@ const navItems = [
   { to: '/returns', label: 'Returns' },
   { to: '/finance', label: 'Finance' },
   { to: '/automation', label: 'Automation' },
+  { to: '/admin/operations', label: 'Operations Queue', adminOnly: true },
 ];
 
 export function AppShell() {
   const navigate = useNavigate();
   const token = getToken();
   const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === 'admin';
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
@@ -85,6 +87,7 @@ export function AppShell() {
           <div className="nav-group-label">Operations</div>
           <nav className="nav" aria-label="Operations">
             {navItems.slice(1).map((item) => (
+              (item.adminOnly && !isAdmin) ? null : (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -92,6 +95,7 @@ export function AppShell() {
               >
                 {item.label}
               </NavLink>
+              )
             ))}
           </nav>
         </div>
