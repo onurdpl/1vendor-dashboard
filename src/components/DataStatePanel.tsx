@@ -21,9 +21,9 @@ export function DataStatePanel({
   actionNode,
 }: DataStatePanelProps) {
   return (
-    <section className="dashboard">
-      <div className={`hero-card state-card state-${tone}`}>
-        <div>
+    <section className="dashboard state-workspace">
+      <div className={`hero-card operational-card state-card state-${tone}`}>
+        <div className="state-copy">
           <p className="eyebrow">{eyebrow}</p>
           <div className="state-title-row">
             {tone === 'loading' ? <span className="spinner" aria-hidden="true" /> : null}
@@ -31,12 +31,16 @@ export function DataStatePanel({
           </div>
           <p className="page-description">{description}</p>
         </div>
-        {actionNode ??
-          (actionLabel && actionTo ? (
-            <Link className="button button-secondary" to={actionTo}>
-              {actionLabel}
-            </Link>
-          ) : null)}
+        {actionNode || (actionLabel && actionTo) ? (
+          <div className="state-actions">
+            {actionNode ??
+              (actionLabel && actionTo ? (
+                <Link className="button button-secondary" to={actionTo}>
+                  {actionLabel}
+                </Link>
+              ) : null)}
+          </div>
+        ) : null}
       </div>
     </section>
   );

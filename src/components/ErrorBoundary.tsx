@@ -29,18 +29,24 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       return (
-        <div className="auth-page">
-          <section className="auth-panel">
-            <p className="eyebrow">Dashboard error</p>
-            <h1>Something went wrong</h1>
-            <p className="page-description">
-              The dashboard could not render. Reload the page to try again.
-            </p>
-            <button type="button" className="button button-primary" onClick={this.handleRetry}>
-              Retry
-            </button>
-          </section>
-        </div>
+        <section className="dashboard state-workspace">
+          <div className="hero-card operational-card state-card state-error">
+            <div className="state-copy">
+              <p className="eyebrow">Dashboard recovery</p>
+              <div className="state-title-row">
+                <h2>Something went wrong</h2>
+              </div>
+              <p className="page-description">
+                An unexpected rendering error stopped this dashboard section. Reload to recover.
+              </p>
+            </div>
+            <div className="state-actions">
+              <button type="button" className="button button-primary" onClick={this.handleRetry}>
+                Reload dashboard
+              </button>
+            </div>
+          </div>
+        </section>
       );
     }
 

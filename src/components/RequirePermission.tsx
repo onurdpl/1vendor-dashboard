@@ -14,10 +14,10 @@ export function RequirePermission({ permission, children }: RequirePermissionPro
   if (!currentUser || !hasPermission(currentRole, permission)) {
     return (
       <DataStatePanel
-        tone="error"
-        eyebrow="Access"
+        tone="info"
+        eyebrow="Access Control"
         title="Access denied"
-        description="Your account does not have permission to view this page."
+        description="Your current role can sign in, but it cannot open this operational area."
         actionLabel="Back to dashboard"
         actionTo="/"
       />

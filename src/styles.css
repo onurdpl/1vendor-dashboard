@@ -303,6 +303,20 @@ h3 {
 .state-card {
   min-height: 220px;
   align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.state-copy {
+  display: grid;
+  gap: 10px;
+}
+
+.state-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .state-title-row {
@@ -319,14 +333,22 @@ h3 {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.7)),
     linear-gradient(90deg, rgba(40, 72, 255, 0.08), rgba(40, 72, 255, 0.02));
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .state-empty {
-  background: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.76);
+  border-color: rgba(59, 130, 246, 0.22);
 }
 
 .state-error {
+  background: rgba(255, 255, 255, 0.84);
+  border-color: rgba(239, 68, 68, 0.22);
+}
+
+.state-info {
   background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(59, 130, 246, 0.2);
 }
 
 .spinner {
@@ -427,10 +449,13 @@ h3 {
 .action-feedback {
   margin: 0;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 12px;
   border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.86);
   color: #18202b;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .action-success {
@@ -458,6 +483,10 @@ h3 {
 .dashboard {
   display: grid;
   gap: 18px;
+}
+
+.state-workspace {
+  gap: 14px;
 }
 
 .hero-card {
@@ -1473,6 +1502,10 @@ h3 {
   .queue-meta {
     display: grid;
     gap: 6px;
+  }
+
+  .state-actions {
+    width: 100%;
   }
 
   .queue-actions {
