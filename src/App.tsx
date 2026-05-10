@@ -11,6 +11,7 @@ import { ReturnsPage } from './pages/ReturnsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 export default function App() {
   return (
@@ -19,7 +20,13 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
       </Route>
       <Route element={<RequireAuth />}>
-        <Route element={<AppShell />}>
+        <Route
+          element={
+            <ErrorBoundary>
+              <AppShell />
+            </ErrorBoundary>
+          }
+        >
           <Route path="/" element={<DashboardPage />} />
           <Route path="/orders" element={<OrdersPage />} />
           <Route path="/orders/:orderId" element={<OrderDetailPage />} />
