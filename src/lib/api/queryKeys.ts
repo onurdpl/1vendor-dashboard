@@ -10,8 +10,8 @@ export const queryKeys = {
     detail: (returnId: string) => ['returns', 'detail', getCurrentVendorContext().vendorId, returnId] as const,
   },
   finance: {
-    summary: () => ['finance', 'summary'] as const,
-    records: () => ['finance', 'records'] as const,
+    summary: () => ['finance', 'summary', getCurrentVendorContext().vendorId] as const,
+    records: () => ['finance', 'records', getCurrentVendorContext().vendorId] as const,
   },
   automation: {
     alerts: () => ['automation', 'alerts'] as const,

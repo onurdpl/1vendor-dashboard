@@ -96,7 +96,7 @@ function resolveMockResponse(path: string, options: RequestOptions): MockRespons
   if (method === 'GET' && path === '/finance') {
     return {
       status: 200,
-      body: getMockFinanceDashboard(),
+      body: getMockFinanceDashboard(getCurrentVendorContext().vendorId),
     };
   }
 
