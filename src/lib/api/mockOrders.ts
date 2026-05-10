@@ -1,8 +1,14 @@
+import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
 import type { OrderDetail, OrderSummary } from './contracts';
 
-const orders: OrderDetail[] = [
+type VendorOrder = OrderDetail & {
+  vendorId: VendorId;
+};
+
+const orders: VendorOrder[] = [
   {
-    id: 'ORD-10482',
+    vendorId: 'demo-vendor-a',
+    id: 'ORD-A-1001',
     status: 'Processing',
     date: '2026-05-09T10:15:00Z',
     customer: 'Northwind Retail',
@@ -21,67 +27,80 @@ const orders: OrderDetail[] = [
     ],
   },
   {
-    id: 'ORD-10483',
-    status: 'Pending',
-    date: '2026-05-09T13:40:00Z',
-    customer: 'Acme Supply Co.',
-    amount: '$1,920.00',
-    channel: 'Marketplace',
-    shippingAddress: '22 Harbor Ave, Dublin',
-    notes: 'Waiting on stock confirmation from warehouse.',
-    items: [
-      { name: 'Thermal receipt rolls', quantity: 20, price: '$18.00' },
-      { name: 'Desktop scanner dock', quantity: 1, price: '$420.00' },
-    ],
-    timeline: [
-      { label: 'Order received', at: '2026-05-09T13:40:00Z' },
-      { label: 'Awaiting inventory review', at: '2026-05-09T13:55:00Z' },
-    ],
-  },
-  {
-    id: 'ORD-10484',
-    status: 'Shipped',
-    date: '2026-05-08T18:05:00Z',
-    customer: 'Warehouse One',
-    amount: '$9,740.00',
-    channel: 'Direct',
-    shippingAddress: '8 Foundry Road, Amsterdam',
-    notes: 'Carrier pickup completed and tracking shared.',
-    items: [
-      { name: 'Industrial tablet', quantity: 8, price: '$1,100.00' },
-      { name: 'Mounting cradle', quantity: 8, price: '$120.00' },
-    ],
-    timeline: [
-      { label: 'Order received', at: '2026-05-08T18:05:00Z' },
-      { label: 'Packed for shipment', at: '2026-05-08T20:30:00Z' },
-      { label: 'Carrier collected', at: '2026-05-09T07:45:00Z' },
-    ],
-  },
-  {
-    id: 'ORD-10485',
+    vendorId: 'demo-vendor-a',
+    id: 'ORD-A-1002',
     status: 'Delivered',
-    date: '2026-05-07T09:20:00Z',
-    customer: 'Cobalt Logistics',
+    date: '2026-05-08T09:20:00Z',
+    customer: 'Acme Supply Co.',
     amount: '$2,630.00',
-    channel: 'Web',
-    shippingAddress: '76 King Street, London',
+    channel: 'Direct',
+    shippingAddress: '22 Harbor Ave, Dublin',
     notes: 'Delivered without exceptions.',
     items: [
       { name: 'Barcode gateway license', quantity: 3, price: '$650.00' },
       { name: 'Support training module', quantity: 1, price: '$680.00' },
     ],
     timeline: [
-      { label: 'Order received', at: '2026-05-07T09:20:00Z' },
-      { label: 'Shipped', at: '2026-05-07T16:10:00Z' },
-      { label: 'Delivered', at: '2026-05-08T12:25:00Z' },
+      { label: 'Order received', at: '2026-05-08T09:20:00Z' },
+      { label: 'Shipped', at: '2026-05-08T16:10:00Z' },
+      { label: 'Delivered', at: '2026-05-09T12:25:00Z' },
+    ],
+  },
+  {
+    vendorId: 'demo-vendor-b',
+    id: 'ORD-B-2001',
+    status: 'Pending',
+    date: '2026-05-10T13:40:00Z',
+    customer: 'Warehouse One',
+    amount: '$1,920.00',
+    channel: 'Marketplace',
+    shippingAddress: '8 Foundry Road, Amsterdam',
+    notes: 'Waiting on stock confirmation from warehouse.',
+    items: [
+      { name: 'Thermal receipt rolls', quantity: 20, price: '$18.00' },
+      { name: 'Desktop scanner dock', quantity: 1, price: '$420.00' },
+    ],
+    timeline: [
+      { label: 'Order received', at: '2026-05-10T13:40:00Z' },
+      { label: 'Awaiting inventory review', at: '2026-05-10T13:55:00Z' },
+    ],
+  },
+  {
+    vendorId: 'demo-vendor-b',
+    id: 'ORD-B-2002',
+    status: 'Shipped',
+    date: '2026-05-09T18:05:00Z',
+    customer: 'Cobalt Logistics',
+    amount: '$9,740.00',
+    channel: 'Web',
+    shippingAddress: '76 King Street, London',
+    notes: 'Carrier pickup completed and tracking shared.',
+    items: [
+      { name: 'Industrial tablet', quantity: 8, price: '$1,100.00' },
+      { name: 'Mounting cradle', quantity: 8, price: '$120.00' },
+    ],
+    timeline: [
+      { label: 'Order received', at: '2026-05-09T18:05:00Z' },
+      { label: 'Packed for shipment', at: '2026-05-09T20:30:00Z' },
+      { label: 'Carrier collected', at: '2026-05-10T07:45:00Z' },
     ],
   },
 ];
 
-export function listMockOrders(): OrderSummary[] {
-  return orders.map(({ shippingAddress, notes, items, timeline, ...summary }) => summary);
+function resolveVendorId(vendorId?: VendorId) {
+  return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
-export function getMockOrder(orderId: string): OrderDetail | null {
-  return orders.find((order) => order.id === orderId) ?? null;
+export function listMockOrders(vendorId?: VendorId): OrderSummary[] {
+  const currentVendorId = resolveVendorId(vendorId);
+
+  return orders
+    .filter((order) => order.vendorId === currentVendorId)
+    .map(({ vendorId: _vendorId, shippingAddress, notes, items, timeline, ...summary }) => summary);
+}
+
+export function getMockOrder(orderId: string, vendorId?: VendorId): OrderDetail | null {
+  const currentVendorId = resolveVendorId(vendorId);
+
+  return orders.find((order) => order.vendorId === currentVendorId && order.id === orderId) ?? null;
 }

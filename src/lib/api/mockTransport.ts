@@ -1,4 +1,5 @@
 import { getToken } from '../auth';
+import { getCurrentVendorContext } from '../auth/vendorContext';
 import { getMockAutomationDashboard } from './mockAutomation';
 import { getMockFinanceDashboard } from './mockFinance';
 import { getMockOrder, listMockOrders } from './mockOrders';
@@ -45,14 +46,14 @@ function resolveMockResponse(path: string, options: RequestOptions): MockRespons
   if (method === 'GET' && path === '/orders') {
     return {
       status: 200,
-      body: listMockOrders(),
+      body: listMockOrders(getCurrentVendorContext().vendorId),
     };
   }
 
   const orderMatch = path.match(/^\/orders\/([^/]+)$/);
 
   if (method === 'GET' && orderMatch) {
-    const order = getMockOrder(orderMatch[1]);
+    const order = getMockOrder(orderMatch[1], getCurrentVendorContext().vendorId);
 
     if (!order) {
       return {

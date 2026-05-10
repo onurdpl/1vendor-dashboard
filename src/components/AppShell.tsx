@@ -1,6 +1,9 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken, getToken } from '../lib/auth';
+import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
+import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { ActionFeedback } from './ActionFeedback';
 
@@ -16,6 +19,9 @@ export function AppShell() {
   const navigate = useNavigate();
   const token = getToken();
   const { message, tone, showFeedback } = useActionFeedback();
+  const vendors = getAvailableVendors();
+  const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
+  const currentVendor = vendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? vendors[0];
 
   function handleLogout() {
     clearToken();
@@ -23,6 +29,16 @@ export function AppShell() {
     globalThis.setTimeout(() => {
       navigate('/login', { replace: true });
     }, 180);
+  }
+
+  function handleVendorChange(nextVendorId: string) {
+    if (nextVendorId !== 'demo-vendor-a' && nextVendorId !== 'demo-vendor-b') {
+      return;
+    }
+
+    setCurrentVendorId(nextVendorId);
+    setSelectedVendorId(nextVendorId);
+    void queryClient.invalidateQueries({ queryKey: ['orders'] });
   }
 
   return (
@@ -67,6 +83,27 @@ export function AppShell() {
               </NavLink>
             ))}
           </nav>
+        </div>
+
+        <div className="vendor-card">
+          <div>
+            <div className="session-label">Vendor</div>
+            <div className="session-state">{currentVendor.vendorName}</div>
+          </div>
+          <label className="vendor-switcher">
+            <span className="sr-only">Select vendor</span>
+            <select
+              className="vendor-select"
+              value={selectedVendorId}
+              onChange={(event) => handleVendorChange(event.target.value)}
+            >
+              {vendors.map((vendor) => (
+                <option key={vendor.vendorId} value={vendor.vendorId}>
+                  {vendor.vendorName}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="session-card">

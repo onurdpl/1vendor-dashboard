@@ -16,7 +16,9 @@ export {
 } from './auth/permissions';
 
 export {
+  getAvailableVendors,
   getCurrentVendorContext,
+  setCurrentVendorId,
   type VendorContext,
   type VendorId,
 } from './auth/vendorContext';

@@ -1,7 +1,9 @@
+import { getCurrentVendorContext } from '../auth/vendorContext';
+
 export const queryKeys = {
   orders: {
-    list: () => ['orders', 'list'] as const,
-    detail: (orderId: string) => ['orders', 'detail', orderId] as const,
+    list: () => ['orders', 'list', getCurrentVendorContext().vendorId] as const,
+    detail: (orderId: string) => ['orders', 'detail', getCurrentVendorContext().vendorId, orderId] as const,
   },
   returns: {
     list: () => ['returns', 'list'] as const,
