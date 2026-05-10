@@ -42,68 +42,144 @@ export function AdminOperationsQueuePage() {
     acc[item.type] = (acc[item.type] ?? 0) + 1;
     return acc;
   }, {});
+  const criticalCount = queue.filter((item) => item.severity === 'critical').length;
+  const warningCount = queue.filter((item) => item.severity === 'high').length;
+  const attentionCount = queue.filter((item) => item.severity === 'medium').length;
+  const severityOrder: Record<string, number> = {
+    critical: 0,
+    high: 1,
+    medium: 2,
+    low: 3,
+  };
+  const sortedQueue = [...queue].sort((a, b) => {
+    const severityDiff = (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99);
+    if (severityDiff !== 0) {
+      return severityDiff;
+    }
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+  });
+
+  function getSeverityClass(severity: string) {
+    if (severity === 'critical') {
+      return 'severity-critical';
+    }
+    if (severity === 'high') {
+      return 'severity-warning';
+    }
+    if (severity === 'medium') {
+      return 'severity-attention';
+    }
+    return 'severity-normal';
+  }
+
+  function getActionLabel(type: string, fallback?: string) {
+    if (type === 'pending_reassignment') {
+      return 'Review Allocation';
+    }
+    if (type === 'vendor_blocked') {
+      return 'Review Allocation';
+    }
+    if (type === 'awaiting_shipment') {
+      return 'View Shopify Order';
+    }
+    if (type === 'refund_attention') {
+      return 'View Shopify Order';
+    }
+    return fallback ?? 'View details';
+  }
 
   return (
-    <section className="dashboard">
-      <div className="hero-card">
-        <div>
+    <section className="dashboard operations-workspace">
+      <div className="hero-card operational-card queue-header">
+        <div className="queue-header-copy">
           <p className="eyebrow">Admin operations</p>
-          <h2>Operations queue</h2>
-          <p className="page-description">Central queue for reassignment, blocking, shipment, and refund attention.</p>
+          <h2>Operations Queue</h2>
+          <p className="page-description">
+            Unified control center for reassignment risk, shipping progress, blocked allocations, and refund review.
+          </p>
+        </div>
+        <div className="queue-health">
+          <span className="severity-chip severity-critical">Critical {criticalCount}</span>
+          <span className="severity-chip severity-warning">Warning {warningCount}</span>
+          <span className="severity-chip severity-attention">Attention {attentionCount}</span>
+          <span className="severity-chip severity-normal">Total {sortedQueue.length}</span>
         </div>
       </div>
 
-      <div className="stats-grid">
-        <article className="stat-card">
+      <div className="stats-grid queue-stats">
+        <article className="stat-card operational-card">
           <span className="stat-label">Pending reassignment</span>
           <strong>{summary.pending_reassignment ?? 0}</strong>
         </article>
-        <article className="stat-card">
-          <span className="stat-label">Vendor blocked</span>
-          <strong>{summary.vendor_blocked ?? 0}</strong>
-        </article>
-        <article className="stat-card">
+        <article className="stat-card operational-card">
           <span className="stat-label">Awaiting shipment</span>
           <strong>{summary.awaiting_shipment ?? 0}</strong>
         </article>
-        <article className="stat-card">
+        <article className="stat-card operational-card">
+          <span className="stat-label">Vendor blocked</span>
+          <strong>{summary.vendor_blocked ?? 0}</strong>
+        </article>
+        <article className="stat-card operational-card">
           <span className="stat-label">Refund attention</span>
           <strong>{summary.refund_attention ?? 0}</strong>
         </article>
       </div>
 
-      <article className="panel">
-        <h3>Queue items</h3>
-        <div className="line-item-table">
-          <div className="line-item-head">
-            <span>Type</span>
-            <span>Severity</span>
-            <span>Vendor</span>
-            <span>Related order</span>
-            <span>Status</span>
-            <span>Created</span>
-            <span>Action</span>
-          </div>
-          {queue.map((item) => (
-            <div key={item.id} className="line-item-row">
-              <span>{item.type}</span>
-              <span>{item.severity}</span>
-              <span>{item.vendorName ?? item.vendorId}</span>
-              <span>{item.relatedOrderId ?? item.relatedShopifyOrderId ?? 'N/A'}</span>
-              <span>{item.status}</span>
-              <span>{formatDate(item.createdAt)}</span>
-              <span>
-                {item.actionTo ? (
-                  <Link className="button button-secondary" to={item.actionTo}>
-                    {item.actionLabel ?? 'Open'}
-                  </Link>
-                ) : (
-                  item.actionLabel ?? 'N/A'
-                )}
-              </span>
-            </div>
-          ))}
+      <article className="panel operational-card">
+        <div className="queue-list-header">
+          <h3>Operational tasks</h3>
+          <p className="page-description">Prioritized admin tasks derived from current vendor allocation workflows.</p>
         </div>
+        {sortedQueue.length === 0 ? (
+          <div className="queue-empty">
+            <p className="eyebrow">Queue health</p>
+            <h3>No active operational issues</h3>
+            <p className="page-description">
+              Reassignment, blocked allocation, shipment, and refund queues are currently clear.
+            </p>
+          </div>
+        ) : (
+          <div className="queue-list">
+            {sortedQueue.map((item) => (
+              <article key={item.id} className={`queue-item queue-${item.severity}`}>
+                <header className="queue-item-top">
+                  <div className="queue-title-block">
+                    <span className={`severity-chip ${getSeverityClass(item.severity)}`}>{item.severity}</span>
+                    <h4>{item.title}</h4>
+                  </div>
+                  <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
+                </header>
+                <p className="queue-description">{item.description}</p>
+                <div className="queue-meta">
+                  <span>
+                    <strong>Type:</strong> {item.type}
+                  </span>
+                  <span>
+                    <strong>Vendor:</strong> {item.vendorName ?? item.vendorId}
+                  </span>
+                  <span>
+                    <strong>Order:</strong> {item.relatedOrderId ?? item.relatedShopifyOrderId ?? 'N/A'}
+                  </span>
+                  <span>
+                    <strong>Created:</strong> {formatDate(item.createdAt)}
+                  </span>
+                </div>
+                <div className="queue-actions">
+                  {item.actionTo ? (
+                    <Link
+                      className={item.type === 'pending_reassignment' || item.type === 'vendor_blocked' ? 'button button-primary' : 'button button-secondary'}
+                      to={item.actionTo}
+                    >
+                      {getActionLabel(item.type, item.actionLabel)}
+                    </Link>
+                  ) : (
+                    <span className="queue-muted-action">{item.actionLabel ?? 'No action available'}</span>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
       </article>
     </section>
   );
