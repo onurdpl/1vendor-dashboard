@@ -73,6 +73,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `403` behavior: return `403 Forbidden` if the session is authenticated but not permitted for the vendor scope or route.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
 - Order records are vendor-scoped views of Shopify source orders and must include a vendor-safe internal order id.
+- Fulfillment and shipping fields are vendor-scoped too; vendor allocations may have different fulfillment states for the same Shopify order.
 
 ### GET /orders/:orderId
 
@@ -84,6 +85,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
+- Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
 
 ### GET /returns
 
@@ -174,6 +176,7 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
 - Shopify refunds should be allocated by vendor-owned refunded line items, not by the full order total.
+- Shopify fulfillment events should also be allocated by vendor-owned line items so vendors only see their own shipping/tracking metadata.
 
 ## Single Shopify Store Multi-Vendor Order Allocation
 

@@ -72,6 +72,26 @@ export function OrderDetailPage() {
               <dd>{order.amount}</dd>
             </div>
             <div>
+              <dt>Fulfillment</dt>
+              <dd>{order.fulfillmentStatus}</dd>
+            </div>
+            <div>
+              <dt>Shipping</dt>
+              <dd>{order.shippingStatus}</dd>
+            </div>
+            <div>
+              <dt>Carrier</dt>
+              <dd>{order.carrier ?? 'Not assigned'}</dd>
+            </div>
+            <div>
+              <dt>Tracking number</dt>
+              <dd>{order.trackingNumber ?? 'Not assigned'}</dd>
+            </div>
+            <div>
+              <dt>Estimated delivery</dt>
+              <dd>{order.estimatedDelivery ? formatDate(order.estimatedDelivery) : 'Not available'}</dd>
+            </div>
+            <div>
               <dt>Channel</dt>
               <dd>{order.channel}</dd>
             </div>
@@ -108,6 +128,7 @@ export function OrderDetailPage() {
             <span>Item</span>
             <span>Quantity</span>
             <span>Price</span>
+            <span>Fulfillment</span>
           </div>
           {(order.lineItems ?? order.items).map((item) => (
             <div key={item.id} className="line-item-row">
@@ -116,6 +137,14 @@ export function OrderDetailPage() {
               <span>{item.name}</span>
               <span>{item.quantity}</span>
               <span>{item.price}</span>
+              <span className="order-state-stack">
+                <span className={`status-badge status-${item.fulfillmentStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                  {item.fulfillmentStatus}
+                </span>
+                <span className={`status-badge status-${item.shippingStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                  {item.shippingStatus}
+                </span>
+              </span>
             </div>
           ))}
         </div>

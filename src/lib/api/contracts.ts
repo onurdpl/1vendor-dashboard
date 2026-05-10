@@ -1,6 +1,8 @@
 import type { VendorId } from '../auth/vendorContext';
 
 export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
+export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partially Fulfilled';
+export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
 
 export type OrderSummary = {
   id: string;
@@ -8,6 +10,11 @@ export type OrderSummary = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
+  fulfillmentStatus: FulfillmentStatus;
+  shippingStatus: ShippingStatus;
+  trackingNumber?: string;
+  carrier?: string;
+  estimatedDelivery?: string;
   date: string;
   customer: string;
   amount: string;
@@ -22,6 +29,11 @@ export type OrderLineItem = {
   quantity: number;
   price: string;
   vendorId: VendorId;
+  fulfillmentStatus: FulfillmentStatus;
+  shippingStatus: ShippingStatus;
+  trackingNumber?: string;
+  carrier?: string;
+  estimatedDelivery?: string;
 };
 
 export type OrderDetail = OrderSummary & {

@@ -64,6 +64,7 @@ export function OrdersPage() {
         <div className="orders-row orders-head">
           <span>Order</span>
           <span>Status</span>
+          <span>Fulfillment</span>
           <span>Date</span>
           <span>Customer</span>
           <span>Amount</span>
@@ -74,6 +75,14 @@ export function OrdersPage() {
             <span className="order-id">{order.id}</span>
             <span className={`status-badge status-${order.status.toLowerCase().replace(/\s+/g, '-')}`}>
               {order.status}
+            </span>
+            <span className="order-state-stack">
+              <span className={`status-badge status-${order.fulfillmentStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                {order.fulfillmentStatus}
+              </span>
+              <span className={`status-badge status-${order.shippingStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                {order.shippingStatus}
+              </span>
             </span>
             <span>{formatDate(order.date)}</span>
             <span>{order.customer}</span>

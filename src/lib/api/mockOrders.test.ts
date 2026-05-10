@@ -14,6 +14,10 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.lineItems).toHaveLength(2);
     expect(sharedOrder?.lineItems.every((item) => item.vendorId === 'demo-vendor-a')).toBe(true);
     expect(sharedOrder?.lineItems.map((item) => item.sku)).toEqual(['SKU123', 'STANDARD']);
+    expect(sharedOrder?.fulfillmentStatus).toBe('Processing');
+    expect(sharedOrder?.shippingStatus).toBe('Awaiting Shipment');
+    expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Processing')).toBe(true);
+    expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'Awaiting Shipment')).toBe(true);
   });
 
   it('shows the same Shopify order as a vendor B allocation', () => {
@@ -28,6 +32,12 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.lineItems).toHaveLength(1);
     expect(sharedOrder?.lineItems.every((item) => item.vendorId === 'demo-vendor-b')).toBe(true);
     expect(sharedOrder?.lineItems[0].variantTitle).toBe('Large');
+    expect(sharedOrder?.fulfillmentStatus).toBe('Fulfilled');
+    expect(sharedOrder?.shippingStatus).toBe('In Transit');
+    expect(sharedOrder?.trackingNumber).toBe('TRK-B-1001');
+    expect(sharedOrder?.carrier).toBe('UPS');
+    expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Fulfilled')).toBe(true);
+    expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'In Transit')).toBe(true);
   });
 
   it('blocks cross-vendor order detail access', () => {

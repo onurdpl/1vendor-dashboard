@@ -1,6 +1,13 @@
 import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
 import { allocateShopifyOrderToVendors, type ShopifyOrderInput } from '../shopify/vendorMapping';
-import type { OrderDetail, OrderSummary, OrderLineItem, OrderStatus } from './contracts';
+import type {
+  OrderDetail,
+  OrderSummary,
+  OrderLineItem,
+  OrderStatus,
+  FulfillmentStatus,
+  ShippingStatus,
+} from './contracts';
 
 type ShopifySourceOrder = ShopifyOrderInput & {
   customer: string;
@@ -14,6 +21,15 @@ type ShopifySourceOrder = ShopifyOrderInput & {
 
 type VendorOrder = OrderDetail & {
   vendorId: VendorId;
+};
+
+type AllocationFulfillmentState = {
+  status: OrderStatus;
+  fulfillmentStatus: FulfillmentStatus;
+  shippingStatus: ShippingStatus;
+  trackingNumber?: string;
+  carrier?: string;
+  estimatedDelivery?: string;
 };
 
 function parseMoney(value: string) {
@@ -32,12 +48,77 @@ function formatMoney(value: number) {
 function createLineItems(
   vendorId: VendorId,
   allocationLineItems: ShopifySourceOrder['lineItems'],
+  allocationFulfillment: AllocationFulfillmentState,
 ): OrderLineItem[] {
   return allocationLineItems.map(({ vendorMetafield: _vendorMetafield, ...lineItem }) => ({
     ...lineItem,
     vendorId,
     name: lineItem.title,
+    fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
+    shippingStatus: allocationFulfillment.shippingStatus,
+    trackingNumber: allocationFulfillment.trackingNumber,
+    carrier: allocationFulfillment.carrier,
+    estimatedDelivery: allocationFulfillment.estimatedDelivery,
   }));
+}
+
+function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | number): AllocationFulfillmentState {
+  const normalizedOrderNumber = Number(orderNumber);
+
+  if (normalizedOrderNumber === 1001 && vendorId === 'demo-vendor-a') {
+    return {
+      status: 'Processing',
+      fulfillmentStatus: 'Processing',
+      shippingStatus: 'Awaiting Shipment',
+    };
+  }
+
+  if (normalizedOrderNumber === 1001 && vendorId === 'demo-vendor-b') {
+    return {
+      status: 'Shipped',
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'In Transit',
+      trackingNumber: 'TRK-B-1001',
+      carrier: 'UPS',
+      estimatedDelivery: '2026-05-12T12:00:00Z',
+    };
+  }
+
+  if (normalizedOrderNumber === 1002 && vendorId === 'demo-vendor-a') {
+    return {
+      status: 'Delivered',
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'Delivered',
+      trackingNumber: 'TRK-A-1002',
+      carrier: 'DHL',
+      estimatedDelivery: '2026-05-09T12:00:00Z',
+    };
+  }
+
+  if (normalizedOrderNumber === 2001 && vendorId === 'demo-vendor-b') {
+    return {
+      status: 'Pending',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+    };
+  }
+
+  if (normalizedOrderNumber === 2002 && vendorId === 'demo-vendor-b') {
+    return {
+      status: 'Shipped',
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'In Transit',
+      trackingNumber: 'TRK-B-2002',
+      carrier: 'FedEx',
+      estimatedDelivery: '2026-05-11T12:00:00Z',
+    };
+  }
+
+  return {
+    status: sourceOrders.find((order) => order.orderNumber === normalizedOrderNumber)?.status ?? 'Pending',
+    fulfillmentStatus: 'Processing',
+    shippingStatus: 'Awaiting Shipment',
+  };
 }
 
 const sourceOrders: ShopifySourceOrder[] = [
@@ -208,7 +289,8 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
   const allocationResult = allocateShopifyOrderToVendors(sourceOrder);
 
   return allocationResult.allocations.map<VendorOrder>((allocation) => {
-    const lineItems = createLineItems(allocation.vendorId, allocation.lineItems);
+    const allocationFulfillment = getAllocationFulfillment(allocation.vendorId, sourceOrder.orderNumber);
+    const lineItems = createLineItems(allocation.vendorId, allocation.lineItems, allocationFulfillment);
     const amount = lineItems.reduce((total, lineItem) => total + parseMoney(lineItem.price) * lineItem.quantity, 0);
 
     return {
@@ -216,7 +298,12 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
       id: `ORD-${allocation.vendorId === 'demo-vendor-a' ? 'A' : 'B'}-${sourceOrder.orderNumber}`,
       sourceShopifyOrderId: sourceOrder.id,
       sourceShopifyOrderNumber: sourceOrder.orderNumber,
-      status: sourceOrder.status,
+      status: allocationFulfillment.status,
+      fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
+      shippingStatus: allocationFulfillment.shippingStatus,
+      trackingNumber: allocationFulfillment.trackingNumber,
+      carrier: allocationFulfillment.carrier,
+      estimatedDelivery: allocationFulfillment.estimatedDelivery,
       date: sourceOrder.date,
       customer: sourceOrder.customer,
       amount: formatMoney(amount),
