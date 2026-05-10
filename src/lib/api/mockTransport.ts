@@ -1,8 +1,8 @@
-import { getToken } from '../auth';
+import { getCurrentUser, getToken } from '../auth';
 import { getCurrentVendorContext } from '../auth/vendorContext';
 import { getMockAutomationDashboard } from './mockAutomation';
 import { getMockFinanceDashboard } from './mockFinance';
-import { getMockOrder, listMockOrders } from './mockOrders';
+import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from './mockOrders';
 import { getMockReturn, listMockReturns } from './mockReturns';
 
 export type RequestOptions = Omit<RequestInit, 'body' | 'headers'> & {
@@ -16,15 +16,15 @@ type MockResponse =
       body: unknown;
     }
   | {
-      status: 401 | 404 | 500;
+      status: 401 | 403 | 404 | 500;
       body: unknown;
     };
 
 export class MockRequestError extends Error {
-  readonly status: 401 | 404 | 500;
+  readonly status: 401 | 403 | 404 | 500;
   readonly body: unknown;
 
-  constructor(message: string, status: 401 | 404 | 500, body: unknown) {
+  constructor(message: string, status: 401 | 403 | 404 | 500, body: unknown) {
     super(message);
     this.name = 'MockRequestError';
     this.status = status;
@@ -47,6 +47,33 @@ function resolveMockResponse(path: string, options: RequestOptions): MockRespons
     return {
       status: 200,
       body: listMockOrders(getCurrentVendorContext().vendorId),
+    };
+  }
+
+  const adminOrderMatch = path.match(/^\/admin\/orders\/([^/]+)$/);
+
+  if (method === 'GET' && adminOrderMatch) {
+    const currentUser = getCurrentUser();
+
+    if (!currentUser || currentUser.role !== 'admin') {
+      return {
+        status: 403,
+        body: { message: 'Forbidden' },
+      };
+    }
+
+    const breakdown = getShopifyOrderBreakdown(adminOrderMatch[1]);
+
+    if (!breakdown) {
+      return {
+        status: 404,
+        body: { message: 'Shopify order not found' },
+      };
+    }
+
+    return {
+      status: 200,
+      body: breakdown,
     };
   }
 
@@ -118,7 +145,7 @@ export async function mockRequest<T = unknown>(path: string, options: RequestOpt
   }
 
   if (response.status >= 400) {
-    const status = response.status as 401 | 404 | 500;
+    const status = response.status as 401 | 403 | 404 | 500;
     throw new MockRequestError(
       typeof response.body === 'object' && response.body && 'message' in response.body
         ? String((response.body as { message?: unknown }).message)

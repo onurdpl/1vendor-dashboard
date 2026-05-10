@@ -1,4 +1,4 @@
-import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
+import { getAvailableVendors, getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
 import { allocateShopifyOrderToVendors, type ShopifyOrderInput } from '../shopify/vendorMapping';
 import type {
   OrderDetail,
@@ -7,7 +7,9 @@ import type {
   OrderStatus,
   FulfillmentStatus,
   ShippingStatus,
+  ShopifyOrderBreakdown,
 } from './contracts';
+import { getMockReturn, listMockReturns } from './mockReturns';
 
 type ShopifySourceOrder = ShopifyOrderInput & {
   customer: string;
@@ -319,6 +321,16 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
 
 const orders = sourceOrders.flatMap(mapSourceOrder);
 
+function parseSourceOrderKey(shopifyOrderId: string) {
+  if (/^\d+$/.test(shopifyOrderId)) {
+    return Number(shopifyOrderId);
+  }
+
+  const idSegment = shopifyOrderId.split('/').pop();
+  const maybeNumber = Number(idSegment);
+  return Number.isNaN(maybeNumber) ? shopifyOrderId : maybeNumber;
+}
+
 export function listMockOrders(vendorId?: VendorId): OrderSummary[] {
   const currentVendorId = resolveVendorId(vendorId);
 
@@ -334,4 +346,61 @@ export function getMockOrder(orderId: string, vendorId?: VendorId): OrderDetail 
   const currentVendorId = resolveVendorId(vendorId);
 
   return orders.find((order) => order.vendorId === currentVendorId && order.id === orderId) ?? null;
+}
+
+export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBreakdown | null {
+  const sourceKey = parseSourceOrderKey(shopifyOrderId);
+  const sourceMatches = orders.filter(
+    (order) =>
+      order.sourceShopifyOrderId === shopifyOrderId ||
+      order.sourceShopifyOrderNumber === sourceKey ||
+      String(order.sourceShopifyOrderNumber) === String(sourceKey),
+  );
+
+  if (sourceMatches.length === 0) {
+    return null;
+  }
+
+  const vendorLookup = new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
+  const allocationMap = new Map(sourceMatches.map((order) => [order.vendorId, order] as const));
+  const sourceOrderNumber = sourceMatches[0].sourceShopifyOrderNumber;
+  const sourceReturns = listMockReturns('demo-vendor-a')
+    .concat(listMockReturns('demo-vendor-b'))
+    .filter((returnRequest) => String(returnRequest.sourceShopifyOrderNumber) === String(sourceOrderNumber));
+
+  const allocations = Array.from(allocationMap.values()).map((allocationOrder) => {
+    const vendorReturns = sourceReturns.filter((item) => item.vendorId === allocationOrder.vendorId);
+    const refundedItems = vendorReturns.flatMap((item) => {
+      const detail = getMockReturn(item.id, allocationOrder.vendorId);
+      return detail?.items ?? [];
+    });
+
+    return {
+      vendorId: allocationOrder.vendorId,
+      vendorName: vendorLookup.get(allocationOrder.vendorId) ?? allocationOrder.vendorId,
+      allocationOrderId: allocationOrder.id,
+      status: allocationOrder.status,
+      fulfillmentStatus: allocationOrder.fulfillmentStatus,
+      shippingStatus: allocationOrder.shippingStatus,
+      trackingNumber: allocationOrder.trackingNumber,
+      carrier: allocationOrder.carrier,
+      estimatedDelivery: allocationOrder.estimatedDelivery,
+      allocationTotal: allocationOrder.amount,
+      lineItems: allocationOrder.lineItems,
+      refundedItems,
+      refundTotal: formatMoney(
+        vendorReturns.reduce((total, returnRequest) => total + parseMoney(returnRequest.amount), 0),
+      ),
+    };
+  });
+
+  const reference = sourceMatches[0];
+
+  return {
+    sourceShopifyOrderId: reference.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: reference.sourceShopifyOrderNumber,
+    customer: reference.customer,
+    createdAt: reference.date,
+    allocations,
+  };
 }

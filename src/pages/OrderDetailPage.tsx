@@ -3,6 +3,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder } from '../features/orders/api';
+import { getCurrentUserRole } from '../lib/auth';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -13,6 +14,7 @@ function formatDate(value: string) {
 
 export function OrderDetailPage() {
   const { orderId } = useParams();
+  const isAdmin = getCurrentUserRole() === 'admin';
   const { data: order, isLoading, isError, error } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
     () => {
@@ -149,6 +151,16 @@ export function OrderDetailPage() {
           ))}
         </div>
       </article>
+
+      {isAdmin ? (
+        <article className="panel">
+          <h3>Admin tools</h3>
+          <p className="page-description">Inspect the full Shopify order graph across all vendor allocations.</p>
+          <Link className="button button-secondary" to={`/admin/orders/${order.sourceShopifyOrderNumber}`}>
+            Open Shopify order breakdown
+          </Link>
+        </article>
+      ) : null}
     </section>
   );
 }

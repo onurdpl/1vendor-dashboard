@@ -44,6 +44,30 @@ export type OrderDetail = OrderSummary & {
   timeline: Array<{ label: string; at: string }>;
 };
 
+export type VendorAllocationSummary = {
+  vendorId: VendorId;
+  vendorName: string;
+  allocationOrderId: string;
+  status: OrderStatus;
+  fulfillmentStatus: FulfillmentStatus;
+  shippingStatus: ShippingStatus;
+  trackingNumber?: string;
+  carrier?: string;
+  estimatedDelivery?: string;
+  allocationTotal: string;
+  lineItems: OrderLineItem[];
+  refundedItems: ReturnLineItem[];
+  refundTotal: string;
+};
+
+export type ShopifyOrderBreakdown = {
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string | number;
+  customer: string;
+  createdAt: string;
+  allocations: VendorAllocationSummary[];
+};
+
 export type ReturnStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'In Review';
 
 export type ReturnSummary = {

@@ -1,6 +1,11 @@
 import { getCurrentVendorContext } from '../auth/vendorContext';
 
 export const queryKeys = {
+  admin: {
+    orders: {
+      breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,
+    },
+  },
   dashboard: {
     overview: () => ['dashboard', 'overview', getCurrentVendorContext().vendorId] as const,
   },

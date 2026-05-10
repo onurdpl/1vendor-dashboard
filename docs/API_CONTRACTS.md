@@ -54,6 +54,7 @@ The current frontend directly or indirectly expects the following read endpoints
 
 - `GET /orders`
 - `GET /orders/:orderId`
+- `GET /admin/orders/:shopifyOrderId` (admin operational view)
 - `GET /returns`
 - `GET /returns/:returnId`
 - `GET /finance`
@@ -86,6 +87,22 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
+
+### GET /admin/orders/:shopifyOrderId
+
+- Purpose: return a full operational Shopify order breakdown across vendor allocations.
+- Required auth: yes.
+- Vendor scoping rule: admin-only access; vendor users must not receive cross-vendor allocation graphs.
+- Expected success response shape: `ShopifyOrderBreakdown`.
+- Expected `401` behavior: return `401 Unauthorized`.
+- Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
+- Expected `404` behavior: return `404 Not Found` when the Shopify order does not exist.
+- Response should include:
+  - source Shopify order metadata
+  - all vendor allocations for that source order
+  - per-allocation fulfillment/shipping status
+  - per-allocation tracking metadata
+  - per-allocation refunded items and totals when present
 
 ### GET /returns
 
@@ -142,6 +159,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 
 - `OrderSummary`
 - `OrderDetail`
+- `ShopifyOrderBreakdown`
+- `VendorAllocationSummary`
 - `ReturnSummary`
 - `ReturnDetail`
 - `FinanceSummary`
@@ -189,6 +208,7 @@ The expected production model is a single Shopify store that can contain product
 - Vendors must only receive their own allocated line items.
 - Admin users may inspect the full order and the per-vendor allocation breakdown.
 - The frontend receives already-scoped vendor order data and must not perform Shopify allocation in production.
+- Vendor users must only receive scoped allocations and must never receive cross-vendor shipping or tracking details.
 
 ### Allocation Rules
 

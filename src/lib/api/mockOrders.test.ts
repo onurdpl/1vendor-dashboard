@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMockOrder, listMockOrders } from './mockOrders';
+import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from './mockOrders';
 
 describe('mock orders vendor allocations', () => {
   it('shows the shared Shopify order as a vendor A allocation', () => {
@@ -43,5 +43,17 @@ describe('mock orders vendor allocations', () => {
   it('blocks cross-vendor order detail access', () => {
     expect(getMockOrder('ORD-B-1001', 'demo-vendor-a')).toBeNull();
     expect(getMockOrder('ORD-A-1001', 'demo-vendor-b')).toBeNull();
+  });
+
+  it('returns full cross-vendor breakdown for shared Shopify order', () => {
+    const breakdown = getShopifyOrderBreakdown('1001');
+
+    expect(breakdown).not.toBeNull();
+    expect(breakdown?.sourceShopifyOrderNumber).toBe(1001);
+    expect(breakdown?.allocations).toHaveLength(2);
+    expect(breakdown?.allocations.map((allocation) => allocation.vendorId).sort()).toEqual([
+      'demo-vendor-a',
+      'demo-vendor-b',
+    ]);
   });
 });
