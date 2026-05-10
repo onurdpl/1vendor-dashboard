@@ -1,3 +1,5 @@
+import { getCurrentUserRole } from './session';
+
 export type UserRole = 'admin' | 'vendor' | 'support' | 'finance';
 
 export type Permission =
@@ -31,5 +33,5 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
 }
 
 export function getDefaultRole(): UserRole {
-  return 'admin';
+  return getCurrentUserRole();
 }

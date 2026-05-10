@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
-import { clearToken, getToken } from '../lib/auth';
+import { clearToken, getCurrentUser, getToken } from '../lib/auth';
 import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
@@ -18,10 +18,17 @@ const navItems = [
 export function AppShell() {
   const navigate = useNavigate();
   const token = getToken();
+  const currentUser = getCurrentUser();
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
-  const currentVendor = vendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? vendors[0];
+  const visibleVendors = currentUser
+    ? currentUser.canSwitchVendors
+      ? vendors
+      : vendors.filter((vendor) => currentUser.vendorAccess.includes(vendor.vendorId))
+    : vendors;
+  const currentVendor =
+    visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0];
 
   function handleLogout() {
     clearToken();
@@ -92,15 +99,19 @@ export function AppShell() {
           <div>
             <div className="session-label">Vendor</div>
             <div className="session-state">{currentVendor.vendorName}</div>
+            <div className="session-meta">
+              {currentUser?.name ?? 'Unknown user'} · {currentUser?.role ?? 'admin'}
+            </div>
           </div>
           <label className="vendor-switcher">
             <span className="sr-only">Select vendor</span>
             <select
               className="vendor-select"
               value={selectedVendorId}
+              disabled={!currentUser?.canSwitchVendors}
               onChange={(event) => handleVendorChange(event.target.value)}
             >
-              {vendors.map((vendor) => (
+              {visibleVendors.map((vendor) => (
                 <option key={vendor.vendorId} value={vendor.vendorId}>
                   {vendor.vendorName}
                 </option>

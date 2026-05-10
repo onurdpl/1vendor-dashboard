@@ -1,9 +1,16 @@
 export {
   clearToken,
+  clearCurrentUser,
   createMockSession,
+  type CurrentUser,
+  getCurrentUser,
+  getCurrentUserRole,
+  getDemoUserByCredentials,
+  getDemoUsers,
   getToken,
   isAuthenticated,
   onSessionReset,
+  setCurrentUser,
   setToken,
   validateSession,
 } from './auth/session';

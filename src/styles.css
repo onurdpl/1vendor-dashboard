@@ -144,6 +144,12 @@ input {
   font-weight: 700;
 }
 
+.session-meta {
+  margin-top: 4px;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+
 .vendor-switcher {
   display: inline-flex;
   align-items: center;
@@ -310,6 +316,34 @@ h3 {
   display: grid;
   gap: 16px;
   margin: 28px 0 20px;
+}
+
+.demo-credentials {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.demo-credentials-list {
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.demo-credentials-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: baseline;
+  color: var(--text-muted);
+}
+
+.demo-credentials-list strong {
+  color: #18202b;
 }
 
 .field {
