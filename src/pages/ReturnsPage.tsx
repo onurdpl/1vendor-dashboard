@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import { queryKeys } from '../lib/api/queryKeys';
 import { useServerResource } from '../lib/data';
 import { listReturns, type ReturnSummary } from '../features/returns/api';
 
@@ -12,7 +13,7 @@ function formatDate(value: string) {
 }
 
 export function ReturnsPage() {
-  const { data: returns, isLoading, isError, error } = useServerResource(() => listReturns(), []);
+  const { data: returns, isLoading, isError, error } = useServerResource(() => listReturns(), queryKeys.returns.list());
 
   if (isLoading) {
     return (

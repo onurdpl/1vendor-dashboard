@@ -1,5 +1,6 @@
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { queryKeys } from '../lib/api/queryKeys';
 import { useServerResource } from '../lib/data';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard, type AutomationDashboard } from '../features/automation/api';
@@ -15,7 +16,10 @@ function formatDate(value: string) {
 }
 
 export function AutomationPage() {
-  const { data: automation, isLoading, isError, error } = useServerResource(() => getAutomationDashboard(), []);
+  const { data: automation, isLoading, isError, error } = useServerResource(
+    () => getAutomationDashboard(),
+    queryKeys.automation.alerts(),
+  );
   const { message, tone, showFeedback } = useActionFeedback();
 
   if (isLoading) {

@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import { queryKeys } from '../lib/api/queryKeys';
 import { useServerResource } from '../lib/data';
 import { getReturn, type ReturnDetail as ReturnDetailType } from '../features/returns/api';
 
@@ -20,7 +21,7 @@ export function ReturnDetailPage() {
 
       return getReturn(returnId);
     },
-    [returnId],
+    returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
   );
 
   if (isLoading) {

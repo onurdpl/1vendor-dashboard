@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import { queryKeys } from '../lib/api/queryKeys';
 import { useServerResource } from '../lib/data';
 import { listOrders, type OrderSummary } from '../features/orders/api';
 
@@ -12,7 +13,7 @@ function formatDate(value: string) {
 }
 
 export function OrdersPage() {
-  const { data: orders, isLoading, isError, error } = useServerResource(() => listOrders(), []);
+  const { data: orders, isLoading, isError, error } = useServerResource(() => listOrders(), queryKeys.orders.list());
 
   if (isLoading) {
     return (
