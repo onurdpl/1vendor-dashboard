@@ -6,8 +6,8 @@ export const queryKeys = {
     detail: (orderId: string) => ['orders', 'detail', getCurrentVendorContext().vendorId, orderId] as const,
   },
   returns: {
-    list: () => ['returns', 'list'] as const,
-    detail: (returnId: string) => ['returns', 'detail', returnId] as const,
+    list: () => ['returns', 'list', getCurrentVendorContext().vendorId] as const,
+    detail: (returnId: string) => ['returns', 'detail', getCurrentVendorContext().vendorId, returnId] as const,
   },
   finance: {
     summary: () => ['finance', 'summary'] as const,

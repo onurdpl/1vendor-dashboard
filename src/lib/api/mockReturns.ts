@@ -1,10 +1,16 @@
+import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
 import type { ReturnDetail, ReturnSummary } from './contracts';
 
-const returns: ReturnDetail[] = [
+type VendorReturn = ReturnDetail & {
+  vendorId: VendorId;
+};
+
+const returns: VendorReturn[] = [
   {
-    id: 'RET-20041',
+    vendorId: 'demo-vendor-a',
+    id: 'RET-A-3001',
     status: 'Pending',
-    relatedOrderId: 'ORD-10483',
+    relatedOrderId: 'ORD-A-1001',
     date: '2026-05-10T08:20:00Z',
     customer: 'Acme Supply Co.',
     reason: 'Wrong accessory kit delivered.',
@@ -12,18 +18,17 @@ const returns: ReturnDetail[] = [
     resolution: 'Waiting on warehouse inspection.',
     refundMethod: 'Original payment method',
     processedBy: 'Unassigned',
-    items: [
-      { name: 'Accessory kit', quantity: 1, condition: 'Opened' },
-    ],
+    items: [{ name: 'Accessory kit', quantity: 1, condition: 'Opened' }],
     timeline: [
       { label: 'Return created', at: '2026-05-10T08:20:00Z' },
       { label: 'Awaiting review', at: '2026-05-10T08:32:00Z' },
     ],
   },
   {
-    id: 'RET-20042',
+    vendorId: 'demo-vendor-a',
+    id: 'RET-A-3002',
     status: 'Approved',
-    relatedOrderId: 'ORD-10482',
+    relatedOrderId: 'ORD-A-1002',
     date: '2026-05-09T15:10:00Z',
     customer: 'Northwind Retail',
     reason: 'Damaged shipment on arrival.',
@@ -31,9 +36,7 @@ const returns: ReturnDetail[] = [
     resolution: 'Approved for replacement and refund.',
     refundMethod: 'Store credit',
     processedBy: 'Maya Chen',
-    items: [
-      { name: 'Wireless label printer', quantity: 1, condition: 'Damaged' },
-    ],
+    items: [{ name: 'Wireless label printer', quantity: 1, condition: 'Damaged' }],
     timeline: [
       { label: 'Return created', at: '2026-05-09T15:10:00Z' },
       { label: 'Reviewed by support', at: '2026-05-09T16:05:00Z' },
@@ -41,9 +44,10 @@ const returns: ReturnDetail[] = [
     ],
   },
   {
-    id: 'RET-20043',
+    vendorId: 'demo-vendor-b',
+    id: 'RET-B-4001',
     status: 'Rejected',
-    relatedOrderId: 'ORD-10484',
+    relatedOrderId: 'ORD-B-2001',
     date: '2026-05-08T21:40:00Z',
     customer: 'Warehouse One',
     reason: 'Return requested outside policy window.',
@@ -51,9 +55,7 @@ const returns: ReturnDetail[] = [
     resolution: 'Rejected due to policy limits.',
     refundMethod: 'None',
     processedBy: 'Jordan Lee',
-    items: [
-      { name: 'Mounting cradle', quantity: 1, condition: 'Opened' },
-    ],
+    items: [{ name: 'Mounting cradle', quantity: 1, condition: 'Opened' }],
     timeline: [
       { label: 'Return created', at: '2026-05-08T21:40:00Z' },
       { label: 'Policy check completed', at: '2026-05-08T22:05:00Z' },
@@ -61,9 +63,10 @@ const returns: ReturnDetail[] = [
     ],
   },
   {
-    id: 'RET-20044',
+    vendorId: 'demo-vendor-b',
+    id: 'RET-B-4002',
     status: 'Refunded',
-    relatedOrderId: 'ORD-10485',
+    relatedOrderId: 'ORD-B-2002',
     date: '2026-05-07T14:15:00Z',
     customer: 'Cobalt Logistics',
     reason: 'Duplicate billing on training module.',
@@ -71,9 +74,7 @@ const returns: ReturnDetail[] = [
     resolution: 'Refund issued and return closed.',
     refundMethod: 'Original payment method',
     processedBy: 'Sarah Patel',
-    items: [
-      { name: 'Support training module', quantity: 1, condition: 'New' },
-    ],
+    items: [{ name: 'Support training module', quantity: 1, condition: 'New' }],
     timeline: [
       { label: 'Return created', at: '2026-05-07T14:15:00Z' },
       { label: 'Refund approved', at: '2026-05-07T15:10:00Z' },
@@ -82,10 +83,20 @@ const returns: ReturnDetail[] = [
   },
 ];
 
-export function listMockReturns(): ReturnSummary[] {
-  return returns.map(({ resolution, refundMethod, processedBy, items, timeline, ...summary }) => summary);
+function resolveVendorId(vendorId?: VendorId) {
+  return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
-export function getMockReturn(returnId: string): ReturnDetail | null {
-  return returns.find((item) => item.id === returnId) ?? null;
+export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
+  const currentVendorId = resolveVendorId(vendorId);
+
+  return returns
+    .filter((item) => item.vendorId === currentVendorId)
+    .map(({ vendorId: _vendorId, resolution, refundMethod, processedBy, items, timeline, ...summary }) => summary);
+}
+
+export function getMockReturn(returnId: string, vendorId?: VendorId): ReturnDetail | null {
+  const currentVendorId = resolveVendorId(vendorId);
+
+  return returns.find((item) => item.vendorId === currentVendorId && item.id === returnId) ?? null;
 }

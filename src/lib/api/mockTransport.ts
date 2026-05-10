@@ -71,14 +71,14 @@ function resolveMockResponse(path: string, options: RequestOptions): MockRespons
   if (method === 'GET' && path === '/returns') {
     return {
       status: 200,
-      body: listMockReturns(),
+      body: listMockReturns(getCurrentVendorContext().vendorId),
     };
   }
 
   const returnMatch = path.match(/^\/returns\/([^/]+)$/);
 
   if (method === 'GET' && returnMatch) {
-    const returnRequest = getMockReturn(returnMatch[1]);
+    const returnRequest = getMockReturn(returnMatch[1], getCurrentVendorContext().vendorId);
 
     if (!returnRequest) {
       return {

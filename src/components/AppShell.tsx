@@ -39,6 +39,7 @@ export function AppShell() {
     setCurrentVendorId(nextVendorId);
     setSelectedVendorId(nextVendorId);
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
+    void queryClient.invalidateQueries({ queryKey: ['returns'] });
   }
 
   return (
