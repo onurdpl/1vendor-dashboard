@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { queryKeys } from '../lib/api/queryKeys';
-import { useServerResource } from '../lib/data';
+import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, type ReturnDetail as ReturnDetailType } from '../features/returns/api';
 
 function formatDate(value: string) {
@@ -13,7 +13,8 @@ function formatDate(value: string) {
 
 export function ReturnDetailPage() {
   const { returnId } = useParams();
-  const { data: returnRequest, isLoading, isError, error } = useServerResource(
+  const { data: returnRequest, isLoading, isError, error } = useQueryResource(
+    returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
     () => {
       if (!returnId) {
         throw new Error('Return not found.');
@@ -21,7 +22,6 @@ export function ReturnDetailPage() {
 
       return getReturn(returnId);
     },
-    returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
   );
 
   if (isLoading) {
