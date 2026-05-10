@@ -9,7 +9,8 @@ function formatDate(value: string) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
-    timeStyle: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
