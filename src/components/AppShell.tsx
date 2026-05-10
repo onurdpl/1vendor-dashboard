@@ -41,6 +41,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['orders'] });
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
     void queryClient.invalidateQueries({ queryKey: ['finance'] });
+    void queryClient.invalidateQueries({ queryKey: ['automation'] });
   }
 
   return (

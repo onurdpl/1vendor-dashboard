@@ -103,7 +103,7 @@ function resolveMockResponse(path: string, options: RequestOptions): MockRespons
   if (method === 'GET' && path === '/automation') {
     return {
       status: 200,
-      body: getMockAutomationDashboard(),
+      body: getMockAutomationDashboard(getCurrentVendorContext().vendorId),
     };
   }
 

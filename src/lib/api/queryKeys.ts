@@ -14,7 +14,7 @@ export const queryKeys = {
     records: () => ['finance', 'records', getCurrentVendorContext().vendorId] as const,
   },
   automation: {
-    alerts: () => ['automation', 'alerts'] as const,
-    actions: () => ['automation', 'actions'] as const,
+    alerts: () => ['automation', 'alerts', getCurrentVendorContext().vendorId] as const,
+    actions: () => ['automation', 'actions', getCurrentVendorContext().vendorId] as const,
   },
 } as const;
