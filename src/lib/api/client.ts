@@ -69,7 +69,7 @@ export async function request<T = unknown>(path: string, options: RequestOptions
   const timeoutId = globalThis.setTimeout(() => controller.abort(), apiConfig.timeoutMs);
 
   try {
-    if (apiConfig.baseUrl === '/api') {
+    if (apiConfig.mode === 'mock') {
       try {
         return await mockRequest<T>(path, options);
       } catch (error) {

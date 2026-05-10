@@ -8,7 +8,28 @@ Production hosting must support SPA fallback/rewrite behavior so direct visits a
 - Static hosting is supported.
 - The host must rewrite unknown routes to `index.html`.
 - The app does not require a backend to build or serve the frontend bundle.
-- No environment variables are required for the current frontend build.
+- No environment variables are required for the current mock frontend build.
+
+## API Mode Configuration
+
+- API behavior is controlled through environment variables in `.env` files.
+- `VITE_API_MODE=mock` keeps the app in local/demo mode.
+- `VITE_API_MODE=real` switches the client to a real backend base URL.
+- `VITE_API_BASE_URL` is only required when `VITE_API_MODE=real`.
+- If `VITE_API_MODE` is omitted, the app defaults to `mock` for local safety.
+- Production should not use `mock` mode once a real backend is available.
+
+### Mock Mode
+
+- Mock mode continues to use the local mock transport.
+- This is the default when no API mode is provided.
+- It is appropriate for local development and demo testing.
+
+### Real Mode
+
+- Real mode uses `VITE_API_BASE_URL` for outgoing requests.
+- A missing base URL in real mode throws a clear configuration error during startup.
+- This is the intended mode for future backend or Shopify integration.
 
 ## Fallback Strategy
 
