@@ -1,4 +1,5 @@
 import { clearToken, getToken } from '../auth';
+import { getCurrentVendorContext } from '../auth/vendorContext';
 import { apiConfig } from './config';
 import { ApiError } from './errors';
 import { MockRequestError, mockRequest } from './mockTransport';
@@ -24,9 +25,14 @@ function buildUrl(path: string) {
 function buildHeaders(initHeaders?: HeadersInit, hasBody = false) {
   const headers = new Headers(initHeaders);
   const token = getToken();
+  const { vendorId } = getCurrentVendorContext();
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
+  }
+
+  if (vendorId) {
+    headers.set('X-Vendor-Id', vendorId);
   }
 
   if (hasBody && !headers.has('Content-Type')) {
