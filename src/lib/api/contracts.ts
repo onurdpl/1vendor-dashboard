@@ -71,6 +71,11 @@ export type ReturnDetail = ReturnSummary & {
 export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed';
 
 export type FinanceSummary = {
+  grossSales: string;
+  refunds: string;
+  netRevenue: string;
+  platformFee: string;
+  payoutEstimate: string;
   totalRevenue: string;
   availableBalance: string;
   pendingPayouts: string;

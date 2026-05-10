@@ -60,20 +60,20 @@ export function FinancePage() {
 
       <div className="finance-summary-grid">
         <article className="finance-summary-card">
-          <span>Total revenue</span>
-          <strong>{finance.summary.totalRevenue}</strong>
+          <span>Gross sales</span>
+          <strong>{finance.summary.grossSales}</strong>
         </article>
         <article className="finance-summary-card">
-          <span>Available balance</span>
-          <strong>{finance.summary.availableBalance}</strong>
+          <span>Refunds</span>
+          <strong>{finance.summary.refunds}</strong>
         </article>
         <article className="finance-summary-card">
-          <span>Pending payouts</span>
-          <strong>{finance.summary.pendingPayouts}</strong>
+          <span>Net revenue</span>
+          <strong>{finance.summary.netRevenue}</strong>
         </article>
         <article className="finance-summary-card">
-          <span>Refunds this month</span>
-          <strong>{finance.summary.refundsThisMonth}</strong>
+          <span>Payout estimate</span>
+          <strong>{finance.summary.payoutEstimate}</strong>
         </article>
       </div>
 

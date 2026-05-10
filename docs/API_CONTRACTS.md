@@ -116,6 +116,13 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access finance data.
 - Expected `404` behavior: not typically used for this collection-like response, unless the backend intentionally obscures access.
+- Finance summary values should be computed from vendor-allocated Shopify order items and vendor-allocated Shopify refund items.
+- Gross sales come from the vendor’s allocated order line items.
+- Refunds come from the vendor’s allocated refunded line items.
+- Net revenue is gross sales minus refunds.
+- Platform fee or commission is an authoritative backend calculation; the current frontend demo uses a deterministic 10% rule.
+- Payout estimate is net revenue minus platform fee.
+- The frontend should receive already vendor-scoped finance data and should not perform financial allocation in production.
 
 ### GET /automation
 
@@ -149,6 +156,7 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - IDs are opaque strings.
 - Collections are returned as arrays.
 - The backend should preserve the same field names unless the frontend contracts are updated first.
+- `FinanceSummary` includes vendor-derived fields such as `grossSales`, `refunds`, `netRevenue`, `platformFee`, and `payoutEstimate` in addition to compatibility aliases used by the current frontend shell.
 
 ## Security Requirements
 
