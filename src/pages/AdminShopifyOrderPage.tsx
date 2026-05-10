@@ -229,6 +229,30 @@ export function AdminShopifyOrderPage() {
               ))}
             </div>
           ) : null}
+
+          <h3>Assignment history</h3>
+          <div className="line-item-table">
+            <div className="line-item-head">
+              <span>Action</span>
+              <span>From</span>
+              <span>To</span>
+              <span>Reason</span>
+              <span>Actor</span>
+              <span>At</span>
+            </div>
+            {allocation.assignmentHistory.map((entry, index) => (
+              <div key={`${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`} className="line-item-row">
+                <span>{entry.action}</span>
+                <span>{entry.fromVendorId ?? 'Unassigned'}</span>
+                <span>{entry.toVendorId}</span>
+                <span>{entry.reason ?? 'None'}</span>
+                <span>
+                  {entry.actorName} ({entry.actorRole})
+                </span>
+                <span>{formatDate(entry.createdAt)}</span>
+              </div>
+            ))}
+          </div>
         </article>
       ))}
 

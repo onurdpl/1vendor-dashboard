@@ -21,6 +21,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.allocationStatus).toBe('pending_reassignment');
     expect(sharedOrder?.cancellationReason).toBe('out_of_stock');
     expect(sharedOrder?.reassignmentRequired).toBe(true);
+    expect(sharedOrder?.assignmentHistory.some((entry) => entry.action === 'vendor_blocked')).toBe(true);
+    expect(sharedOrder?.assignmentHistory.some((entry) => entry.action === 'reassignment_requested')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Processing')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'Awaiting Shipment')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.allocationStatus === 'pending_reassignment')).toBe(true);
@@ -46,6 +48,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.carrier).toBe('UPS');
     expect(sharedOrder?.allocationStatus).toBe('active');
     expect(sharedOrder?.reassignmentRequired).toBe(false);
+    expect(sharedOrder?.assignmentHistory).toHaveLength(1);
+    expect(sharedOrder?.assignmentHistory[0].action).toBe('assigned');
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Fulfilled')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'In Transit')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.allocationStatus === 'active')).toBe(true);
@@ -82,6 +86,10 @@ describe('mock orders vendor allocations', () => {
     expect(
       pendingAllocation?.reassignmentCandidateVendorIds.includes(pendingAllocation.assignedVendorId ?? 'demo-vendor-a'),
     ).toBe(false);
+    expect(pendingAllocation?.assignmentHistory.some((entry) => entry.action === 'vendor_blocked')).toBe(true);
+    expect(pendingAllocation?.assignmentHistory.some((entry) => entry.action === 'reassignment_requested')).toBe(true);
+    const activeAllocation = breakdown?.allocations.find((allocation) => allocation.vendorId === 'demo-vendor-b');
+    expect(activeAllocation?.assignmentHistory[0].action).toBe('assigned');
   });
 
   it('prevents vendors from reporting fulfillment issues for other vendors', () => {

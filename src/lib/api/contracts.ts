@@ -10,6 +10,18 @@ export type AllocationBlockReason =
   | 'damaged_inventory'
   | 'fulfillment_issue';
 
+export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';
+
+export type AssignmentHistoryEntry = {
+  action: AssignmentHistoryAction;
+  fromVendorId: VendorId | null;
+  toVendorId: VendorId;
+  reason?: string;
+  actorName: string;
+  actorRole: 'admin' | 'vendor' | 'support' | 'finance' | 'system';
+  createdAt: string;
+};
+
 export type OrderSummary = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;
@@ -23,6 +35,7 @@ export type OrderSummary = {
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
+  assignmentHistory: AssignmentHistoryEntry[];
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
@@ -79,6 +92,7 @@ export type VendorAllocationSummary = {
   reassignmentNote?: string;
   reassignedAt?: string;
   reassignedBy?: string;
+  assignmentHistory: AssignmentHistoryEntry[];
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;

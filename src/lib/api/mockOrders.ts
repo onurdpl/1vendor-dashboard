@@ -15,6 +15,7 @@ import type {
   ShopifyOrderBreakdown,
   AllocationStatus,
   AllocationBlockReason,
+  AssignmentHistoryEntry,
 } from './contracts';
 import { getMockReturn, listMockReturns } from './mockReturns';
 
@@ -318,6 +319,55 @@ function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
+function getAssignmentHistory(vendorId: VendorId, orderNumber: string | number): AssignmentHistoryEntry[] {
+  const orderDate = sourceOrders.find((order) => Number(order.orderNumber) === Number(orderNumber))?.date;
+  const assignedAt = orderDate ?? '2026-05-09T10:15:00Z';
+
+  if (Number(orderNumber) === 1001 && vendorId === 'demo-vendor-a') {
+    return [
+      {
+        action: 'assigned',
+        fromVendorId: null,
+        toVendorId: 'demo-vendor-a',
+        reason: 'Variant metafield matched Demo Vendor A',
+        actorName: 'System Allocation Engine',
+        actorRole: 'system',
+        createdAt: assignedAt,
+      },
+      {
+        action: 'vendor_blocked',
+        fromVendorId: 'demo-vendor-a',
+        toVendorId: 'demo-vendor-a',
+        reason: 'out_of_stock',
+        actorName: 'Vendor A User',
+        actorRole: 'vendor',
+        createdAt: '2026-05-09T15:05:00Z',
+      },
+      {
+        action: 'reassignment_requested',
+        fromVendorId: 'demo-vendor-a',
+        toVendorId: 'demo-vendor-a',
+        reason: 'Fulfillment blocked, admin reassignment requested',
+        actorName: 'Ops Monitor',
+        actorRole: 'system',
+        createdAt: '2026-05-09T15:06:00Z',
+      },
+    ];
+  }
+
+  return [
+    {
+      action: 'assigned',
+      fromVendorId: null,
+      toVendorId: vendorId,
+      reason: `Variant metafield matched ${vendorId}`,
+      actorName: 'System Allocation Engine',
+      actorRole: 'system',
+      createdAt: assignedAt,
+    },
+  ];
+}
+
 export function getReassignmentCandidates(allocation: { assignedVendorId: VendorId }): VendorId[] {
   return getAvailableVendors()
     .map((vendor) => vendor.vendorId)
@@ -344,6 +394,7 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
       cancellationReason: allocationFulfillment.cancellationReason,
       reassignmentRequired: allocationFulfillment.reassignmentRequired,
       assignmentBlockedAt: allocationFulfillment.assignmentBlockedAt,
+      assignmentHistory: getAssignmentHistory(allocation.assignedVendorId, sourceOrder.orderNumber),
       fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
       shippingStatus: allocationFulfillment.shippingStatus,
       trackingNumber: allocationFulfillment.trackingNumber,
@@ -448,6 +499,7 @@ export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBr
         : undefined,
       reassignedAt: undefined,
       reassignedBy: undefined,
+      assignmentHistory: allocationOrder.assignmentHistory,
       fulfillmentStatus: allocationOrder.fulfillmentStatus,
       shippingStatus: allocationOrder.shippingStatus,
       trackingNumber: allocationOrder.trackingNumber,

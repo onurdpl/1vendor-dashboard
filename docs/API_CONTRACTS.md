@@ -94,6 +94,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
 - In the assigned-vendor model, vendor-facing order endpoints should scope by `assignedVendorId`.
 - Allocation workflow fields include `allocationStatus`, `cancellationReason`, `reassignmentRequired`, and optional `assignmentBlockedAt`.
+- Allocation records should include `assignmentHistory` for auditability (`assigned`, `vendor_blocked`, `reassignment_requested`, `reassigned`).
 - Vendor-reported blocking reasons may include `out_of_stock`, `vendor_cancelled`, `damaged_inventory`, or `fulfillment_issue`.
 
 ### GET /admin/orders/:shopifyOrderId
@@ -110,6 +111,7 @@ No write endpoints are currently wired in the frontend, but future write actions
   - all vendor allocations for that source order
   - per-allocation fulfillment/shipping status
   - reassignment workflow fields (`reassignmentRequired`, candidate vendors, notes, and audit fields when present)
+  - assignment history entries with actor, role, reason, and timestamps
   - per-allocation tracking metadata
   - per-allocation refunded items and totals when present
 
@@ -210,6 +212,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - `originalVendorId` must remain immutable across reassignment changes.
 - `assignedVendorId` changes only when reassignment is committed by backend.
 - Reassignment actions should be stored with audit history (`reassignedBy`, `reassignedAt`, and note/reason trail).
+- Assignment history is required for auditability and should be persisted by backend as an append-only timeline.
+- Audit history entries should include actor identity, actor role, reason, and timestamps.
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
