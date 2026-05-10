@@ -1,84 +1,162 @@
 import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
-import type { ReturnDetail, ReturnSummary } from './contracts';
+import type {
+  ReturnDetail,
+  ReturnLineItem,
+  ReturnSummary,
+  ReturnStatus,
+} from './contracts';
+import {
+  allocateShopifyOrderToVendors,
+  type ShopifyOrderInput,
+  type ShopifyOrderLineItemInput,
+} from '../shopify/vendorMapping';
+
+type RefundLineItemInput = ShopifyOrderLineItemInput & {
+  condition: ReturnLineItem['condition'];
+};
+
+type ShopifySourceRefund = ShopifyOrderInput & {
+  refundId: string;
+  status: ReturnStatus;
+  date: string;
+  reason: string;
+  customer: string;
+  resolution: string;
+  refundMethod: string;
+  processedBy: string;
+  timeline: Array<{ label: string; at: string }>;
+  lineItems: RefundLineItemInput[];
+};
 
 type VendorReturn = ReturnDetail & {
   vendorId: VendorId;
 };
 
-const returns: VendorReturn[] = [
+function parseMoney(value: string) {
+  return Number(value.replace(/[^0-9.-]/g, ''));
+}
+
+function formatMoney(value: number) {
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function toReturnLineItems(vendorId: VendorId, items: RefundLineItemInput[]): ReturnLineItem[] {
+  return items.map(({ vendorMetafield: _vendorMetafield, ...item }) => ({
+    id: item.id,
+    sku: item.sku,
+    variantTitle: item.variantTitle,
+    name: item.title,
+    quantity: item.quantity,
+    condition: item.condition,
+    refundAmount: item.price,
+    vendorId,
+  }));
+}
+
+const sourceRefunds: ShopifySourceRefund[] = [
   {
-    vendorId: 'demo-vendor-a',
-    id: 'RET-A-3001',
+    id: 'gid://shopify/Order/1001',
+    orderNumber: 1001,
+    refundId: 'gid://shopify/Refund/5001',
     status: 'Pending',
-    relatedOrderId: 'ORD-A-1001',
     date: '2026-05-10T08:20:00Z',
     customer: 'Acme Supply Co.',
-    reason: 'Wrong accessory kit delivered.',
-    amount: '$420.00',
-    resolution: 'Waiting on warehouse inspection.',
+    reason: 'Mixed vendor refund from shared Shopify order.',
+    resolution: 'Waiting on operations review.',
     refundMethod: 'Original payment method',
     processedBy: 'Unassigned',
-    items: [{ name: 'Accessory kit', quantity: 1, condition: 'Opened' }],
     timeline: [
-      { label: 'Return created', at: '2026-05-10T08:20:00Z' },
+      { label: 'Refund created', at: '2026-05-10T08:20:00Z' },
       { label: 'Awaiting review', at: '2026-05-10T08:32:00Z' },
+    ],
+    lineItems: [
+      {
+        id: 'refund-1001-a1',
+        variantId: 'variant-refund-1001-a1',
+        sku: 'SKU123',
+        title: 'Wireless label printer',
+        variantTitle: 'Medium',
+        quantity: 1,
+        price: '$1,250.00',
+        vendorMetafield: 'Demo Vendor A',
+        condition: 'Opened',
+      },
+      {
+        id: 'refund-1001-b1',
+        variantId: 'variant-refund-1001-b1',
+        sku: 'SKU123',
+        title: 'Wireless label printer',
+        variantTitle: 'Large',
+        quantity: 1,
+        price: '$1,600.00',
+        vendorMetafield: 'Demo Vendor B',
+        condition: 'Opened',
+      },
     ],
   },
   {
-    vendorId: 'demo-vendor-a',
-    id: 'RET-A-3002',
+    id: 'gid://shopify/Order/1002',
+    orderNumber: 1002,
+    refundId: 'gid://shopify/Refund/5002',
     status: 'Approved',
-    relatedOrderId: 'ORD-A-1002',
     date: '2026-05-09T15:10:00Z',
     customer: 'Northwind Retail',
     reason: 'Damaged shipment on arrival.',
-    amount: '$1,250.00',
     resolution: 'Approved for replacement and refund.',
     refundMethod: 'Store credit',
     processedBy: 'Maya Chen',
-    items: [{ name: 'Wireless label printer', quantity: 1, condition: 'Damaged' }],
     timeline: [
-      { label: 'Return created', at: '2026-05-09T15:10:00Z' },
+      { label: 'Refund created', at: '2026-05-09T15:10:00Z' },
       { label: 'Reviewed by support', at: '2026-05-09T16:05:00Z' },
       { label: 'Approved', at: '2026-05-09T16:18:00Z' },
     ],
-  },
-  {
-    vendorId: 'demo-vendor-b',
-    id: 'RET-B-4001',
-    status: 'Rejected',
-    relatedOrderId: 'ORD-B-2001',
-    date: '2026-05-08T21:40:00Z',
-    customer: 'Warehouse One',
-    reason: 'Return requested outside policy window.',
-    amount: '$120.00',
-    resolution: 'Rejected due to policy limits.',
-    refundMethod: 'None',
-    processedBy: 'Jordan Lee',
-    items: [{ name: 'Mounting cradle', quantity: 1, condition: 'Opened' }],
-    timeline: [
-      { label: 'Return created', at: '2026-05-08T21:40:00Z' },
-      { label: 'Policy check completed', at: '2026-05-08T22:05:00Z' },
-      { label: 'Rejected', at: '2026-05-08T22:12:00Z' },
+    lineItems: [
+      {
+        id: 'refund-1002-a1',
+        variantId: 'variant-refund-1002-a1',
+        sku: 'SKU456',
+        title: 'Barcode gateway license',
+        variantTitle: 'Standard',
+        quantity: 1,
+        price: '$650.00',
+        vendorMetafield: 'Demo Vendor A',
+        condition: 'Damaged',
+      },
     ],
   },
   {
-    vendorId: 'demo-vendor-b',
-    id: 'RET-B-4002',
+    id: 'gid://shopify/Order/2002',
+    orderNumber: 2002,
+    refundId: 'gid://shopify/Refund/6001',
     status: 'Refunded',
-    relatedOrderId: 'ORD-B-2002',
     date: '2026-05-07T14:15:00Z',
     customer: 'Cobalt Logistics',
     reason: 'Duplicate billing on training module.',
-    amount: '$680.00',
     resolution: 'Refund issued and return closed.',
     refundMethod: 'Original payment method',
     processedBy: 'Sarah Patel',
-    items: [{ name: 'Support training module', quantity: 1, condition: 'New' }],
     timeline: [
-      { label: 'Return created', at: '2026-05-07T14:15:00Z' },
+      { label: 'Refund created', at: '2026-05-07T14:15:00Z' },
       { label: 'Refund approved', at: '2026-05-07T15:10:00Z' },
       { label: 'Refund completed', at: '2026-05-07T15:35:00Z' },
+    ],
+    lineItems: [
+      {
+        id: 'refund-2002-b1',
+        variantId: 'variant-refund-2002-b1',
+        sku: 'SKU777',
+        title: 'Industrial tablet',
+        variantTitle: 'One size',
+        quantity: 1,
+        price: '$1,100.00',
+        vendorMetafield: 'Demo Vendor B',
+        condition: 'New',
+      },
     ],
   },
 ];
@@ -87,12 +165,58 @@ function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
+function mapSourceRefund(sourceRefund: ShopifySourceRefund): VendorReturn[] {
+  const allocationResult = allocateShopifyOrderToVendors(sourceRefund);
+
+  return allocationResult.allocations.map<VendorReturn>((allocation) => {
+    const refundedItems = toReturnLineItems(allocation.vendorId, allocation.lineItems);
+    const amount = refundedItems.reduce((total, item) => total + parseMoney(item.refundAmount) * item.quantity, 0);
+    const suffix = allocation.vendorId === 'demo-vendor-a' ? 'A' : 'B';
+
+    return {
+      vendorId: allocation.vendorId,
+      id: `RET-${suffix}-${sourceRefund.orderNumber}`,
+      sourceShopifyOrderId: sourceRefund.id,
+      sourceShopifyOrderNumber: sourceRefund.orderNumber,
+      sourceShopifyRefundId: sourceRefund.refundId,
+      status: sourceRefund.status,
+      relatedOrderId: `ORD-${suffix}-${sourceRefund.orderNumber}`,
+      date: sourceRefund.date,
+      customer: sourceRefund.customer,
+      reason: sourceRefund.reason,
+      amount: formatMoney(amount),
+      resolution: sourceRefund.resolution,
+      refundMethod: sourceRefund.refundMethod,
+      processedBy: sourceRefund.processedBy,
+      refundedItems,
+      items: refundedItems,
+      timeline: sourceRefund.timeline,
+    };
+  });
+}
+
+const returns = sourceRefunds.flatMap(mapSourceRefund);
+
 export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
   const currentVendorId = resolveVendorId(vendorId);
 
   return returns
     .filter((item) => item.vendorId === currentVendorId)
-    .map(({ vendorId: _vendorId, resolution, refundMethod, processedBy, items, timeline, ...summary }) => summary);
+    .map(
+      ({
+        vendorId,
+        resolution,
+        refundMethod,
+        processedBy,
+        refundedItems,
+        items,
+        timeline,
+        ...summary
+      }) => ({
+        ...summary,
+        vendorId,
+      }),
+    );
 }
 
 export function getMockReturn(returnId: string, vendorId?: VendorId): ReturnDetail | null {

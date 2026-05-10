@@ -16,16 +16,16 @@ export type ShopifyOrderLineItemInput = {
   vendorMetafield?: ShopifyVendorMetafieldValue;
 };
 
-export type VendorAllocationLineItem = ShopifyOrderLineItemInput & {
+export type VendorAllocationLineItem<TLineItem extends ShopifyOrderLineItemInput = ShopifyOrderLineItemInput> = TLineItem & {
   vendorId: VendorId;
 };
 
-export type VendorOrderAllocation = {
+export type VendorOrderAllocation<TLineItem extends ShopifyOrderLineItemInput = ShopifyOrderLineItemInput> = {
   shopifyOrderId: string;
   shopifyOrderNumber: string | number;
   vendorId: VendorId;
   vendorName: string;
-  lineItems: VendorAllocationLineItem[];
+  lineItems: VendorAllocationLineItem<TLineItem>[];
 };
 
 export type ShopifyOrderAllocationResult = {
@@ -60,8 +60,13 @@ export type ShopifyOrderInput = {
   lineItems: ShopifyOrderLineItemInput[];
 };
 
-export function allocateShopifyOrderToVendors(orderInput: ShopifyOrderInput): ShopifyOrderAllocationResult {
-  const allocations = new Map<VendorId, VendorOrderAllocation>();
+export function allocateShopifyOrderToVendors<TLineItem extends ShopifyOrderLineItemInput>(
+  orderInput: { id: string; orderNumber: string | number; lineItems: TLineItem[] },
+): {
+  allocations: VendorOrderAllocation<TLineItem>[];
+  unmappedLineItems: TLineItem[];
+} {
+  const allocations = new Map<VendorId, VendorOrderAllocation<TLineItem>>();
   const unmappedLineItems: ShopifyOrderLineItemInput[] = [];
 
   for (const lineItem of orderInput.lineItems) {
@@ -80,7 +85,7 @@ export function allocateShopifyOrderToVendors(orderInput: ShopifyOrderInput): Sh
     }
 
     const existingAllocation = allocations.get(vendorId);
-    const allocationLineItem: VendorAllocationLineItem = {
+    const allocationLineItem: VendorAllocationLineItem<TLineItem> = {
       ...lineItem,
       vendorId,
     };
@@ -101,6 +106,6 @@ export function allocateShopifyOrderToVendors(orderInput: ShopifyOrderInput): Sh
 
   return {
     allocations: Array.from(allocations.values()),
-    unmappedLineItems,
+    unmappedLineItems: unmappedLineItems as TLineItem[],
   };
 }

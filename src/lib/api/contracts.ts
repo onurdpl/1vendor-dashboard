@@ -36,6 +36,10 @@ export type ReturnStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'I
 
 export type ReturnSummary = {
   id: string;
+  vendorId: VendorId;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string | number;
+  sourceShopifyRefundId: string;
   status: ReturnStatus;
   relatedOrderId: string;
   date: string;
@@ -45,15 +49,21 @@ export type ReturnSummary = {
 };
 
 export type ReturnLineItem = {
+  id: string;
+  sku: string;
+  variantTitle: string;
   name: string;
   quantity: number;
   condition: 'New' | 'Opened' | 'Damaged';
+  refundAmount: string;
+  vendorId: VendorId;
 };
 
 export type ReturnDetail = ReturnSummary & {
   resolution: string;
   refundMethod: string;
   processedBy: string;
+  refundedItems: ReturnLineItem[];
   items: ReturnLineItem[];
   timeline: Array<{ label: string; at: string }>;
 };

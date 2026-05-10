@@ -94,6 +94,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
+- Return records are vendor-scoped allocations of Shopify refund activity and must include a vendor-safe internal return id.
 
 ### GET /returns/:returnId
 
@@ -104,6 +105,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the return does not exist or when the backend hides cross-vendor resources.
+- Detail records should expose `vendorId`, `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `sourceShopifyRefundId`, and vendor-allocated refunded line items so the frontend can show the current vendor slice only.
 
 ### GET /finance
 
@@ -163,6 +165,7 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
+- Shopify refunds should be allocated by vendor-owned refunded line items, not by the full order total.
 
 ## Single Shopify Store Multi-Vendor Order Allocation
 
@@ -183,6 +186,35 @@ The expected production model is a single Shopify store that can contain product
 - The original Shopify order ID and order number must be preserved across allocations.
 - Multiple allocations can be produced for a single Shopify order when line items belong to different vendors.
 - Vendor allocation logic must be deterministic and idempotent.
+
+## Single Shopify Store Multi-Vendor Refund Allocation
+
+Refunds follow the same single-store, multi-vendor model as orders.
+
+- One Shopify refund can contain refunded line items from multiple vendors.
+- Vendor identity comes from variant or product metafield data during ingestion.
+- The backend must allocate Shopify refund line items by vendor before exposing them to the frontend.
+- Stored vendor-facing return records must always be scoped by `vendorId`.
+- Vendors must only receive their own refunded line items.
+- Admin users may inspect the full refund and the per-vendor allocation breakdown.
+- The frontend receives already-scoped vendor return/refund data and must not perform Shopify refund allocation in production.
+
+### Refund Allocation Rules
+
+- Each refunded Shopify line item should be matched to a vendor using metafield data.
+- If a refunded line item cannot be mapped to a vendor, the backend should keep it unmapped for review or exclude it from vendor-facing records according to ingestion policy.
+- The original Shopify order ID, order number, and refund ID must be preserved across allocations.
+- Multiple return allocations can be produced for a single Shopify refund when refunded line items belong to different vendors.
+- Vendor refund allocation logic must be deterministic and idempotent.
+
+### Example
+
+- Shopify Order `#1001`
+  - `SKU123 / Medium` -> Demo Vendor A
+  - `SKU123 / Large` -> Demo Vendor B
+
+- If only `SKU123 / Medium` is refunded, Vendor A receives the refund allocation.
+- Vendor B does not receive that refund allocation.
 
 ### Example
 

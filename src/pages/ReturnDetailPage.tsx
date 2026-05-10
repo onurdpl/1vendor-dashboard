@@ -75,6 +75,14 @@ export function ReturnDetailPage() {
               <dd>{formatDate(returnRequest.date)}</dd>
             </div>
             <div>
+              <dt>Source Shopify order</dt>
+              <dd>#{returnRequest.sourceShopifyOrderNumber}</dd>
+            </div>
+            <div>
+              <dt>Source refund</dt>
+              <dd>{returnRequest.sourceShopifyRefundId}</dd>
+            </div>
+            <div>
               <dt>Amount</dt>
               <dd>{returnRequest.amount}</dd>
             </div>
@@ -112,18 +120,24 @@ export function ReturnDetailPage() {
 
       <div className="detail-grid">
         <article className="panel">
-          <h3>Item details</h3>
+          <h3>Refunded items</h3>
           <div className="line-item-table">
             <div className="line-item-head">
+              <span>SKU</span>
+              <span>Variant</span>
               <span>Item</span>
               <span>Quantity</span>
               <span>Condition</span>
+              <span>Refund amount</span>
             </div>
-            {returnRequest.items.map((item) => (
-              <div key={item.name} className="line-item-row">
+            {(returnRequest.refundedItems ?? returnRequest.items).map((item) => (
+              <div key={item.id} className="line-item-row">
+                <span>{item.sku}</span>
+                <span>{item.variantTitle}</span>
                 <span>{item.name}</span>
                 <span>{item.quantity}</span>
                 <span>{item.condition}</span>
+                <span>{item.refundAmount}</span>
               </div>
             ))}
           </div>
