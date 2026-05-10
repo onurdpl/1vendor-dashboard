@@ -5,7 +5,10 @@ export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partia
 export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
 
 export type OrderSummary = {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   id: string;
+  // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
@@ -22,12 +25,15 @@ export type OrderSummary = {
 };
 
 export type OrderLineItem = {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   id: string;
   sku: string;
   variantTitle: string;
   name: string;
   quantity: number;
   price: string;
+  // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
@@ -45,6 +51,8 @@ export type OrderDetail = OrderSummary & {
 };
 
 export type VendorAllocationSummary = {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   vendorId: VendorId;
   vendorName: string;
   allocationOrderId: string;
@@ -71,7 +79,10 @@ export type ShopifyOrderBreakdown = {
 export type ReturnStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'In Review';
 
 export type ReturnSummary = {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   id: string;
+  // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
@@ -85,6 +96,8 @@ export type ReturnSummary = {
 };
 
 export type ReturnLineItem = {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   id: string;
   sku: string;
   variantTitle: string;
@@ -92,6 +105,7 @@ export type ReturnLineItem = {
   quantity: number;
   condition: 'New' | 'Opened' | 'Damaged';
   refundAmount: string;
+  // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
 };
 

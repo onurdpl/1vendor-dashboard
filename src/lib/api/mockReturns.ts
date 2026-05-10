@@ -9,6 +9,7 @@ import {
   allocateShopifyOrderToVendors,
   type ShopifyOrderInput,
   type ShopifyOrderLineItemInput,
+  type VendorAllocationLineItem,
 } from '../shopify/vendorMapping';
 
 type RefundLineItemInput = ShopifyOrderLineItemInput & {
@@ -45,8 +46,10 @@ function formatMoney(value: number) {
   });
 }
 
-function toReturnLineItems(vendorId: VendorId, items: RefundLineItemInput[]): ReturnLineItem[] {
+function toReturnLineItems(vendorId: VendorId, items: Array<VendorAllocationLineItem<RefundLineItemInput>>): ReturnLineItem[] {
   return items.map(({ vendorMetafield: _vendorMetafield, ...item }) => ({
+    originalVendorId: item.originalVendorId,
+    assignedVendorId: item.assignedVendorId,
     id: item.id,
     sku: item.sku,
     variantTitle: item.variantTitle,
@@ -169,12 +172,14 @@ function mapSourceRefund(sourceRefund: ShopifySourceRefund): VendorReturn[] {
   const allocationResult = allocateShopifyOrderToVendors(sourceRefund);
 
   return allocationResult.allocations.map<VendorReturn>((allocation) => {
-    const refundedItems = toReturnLineItems(allocation.vendorId, allocation.lineItems);
+    const refundedItems = toReturnLineItems(allocation.assignedVendorId, allocation.lineItems);
     const amount = refundedItems.reduce((total, item) => total + parseMoney(item.refundAmount) * item.quantity, 0);
-    const suffix = allocation.vendorId === 'demo-vendor-a' ? 'A' : 'B';
+    const suffix = allocation.assignedVendorId === 'demo-vendor-a' ? 'A' : 'B';
 
     return {
-      vendorId: allocation.vendorId,
+      originalVendorId: allocation.originalVendorId,
+      assignedVendorId: allocation.assignedVendorId,
+      vendorId: allocation.assignedVendorId,
       id: `RET-${suffix}-${sourceRefund.orderNumber}`,
       sourceShopifyOrderId: sourceRefund.id,
       sourceShopifyOrderNumber: sourceRefund.orderNumber,
@@ -201,7 +206,7 @@ export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
   const currentVendorId = resolveVendorId(vendorId);
 
   return returns
-    .filter((item) => item.vendorId === currentVendorId)
+    .filter((item) => item.assignedVendorId === currentVendorId)
     .map(
       ({
         vendorId,
@@ -214,6 +219,7 @@ export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
         ...summary
       }) => ({
         ...summary,
+        assignedVendorId: currentVendorId,
         vendorId,
       }),
     );
@@ -222,5 +228,5 @@ export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
 export function getMockReturn(returnId: string, vendorId?: VendorId): ReturnDetail | null {
   const currentVendorId = resolveVendorId(vendorId);
 
-  return returns.find((item) => item.vendorId === currentVendorId && item.id === returnId) ?? null;
+  return returns.find((item) => item.assignedVendorId === currentVendorId && item.id === returnId) ?? null;
 }

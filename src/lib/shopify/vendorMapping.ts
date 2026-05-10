@@ -17,12 +17,16 @@ export type ShopifyOrderLineItemInput = {
 };
 
 export type VendorAllocationLineItem<TLineItem extends ShopifyOrderLineItemInput = ShopifyOrderLineItemInput> = TLineItem & {
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   vendorId: VendorId;
 };
 
 export type VendorOrderAllocation<TLineItem extends ShopifyOrderLineItemInput = ShopifyOrderLineItemInput> = {
   shopifyOrderId: string;
   shopifyOrderNumber: string | number;
+  originalVendorId: VendorId;
+  assignedVendorId: VendorId;
   vendorId: VendorId;
   vendorName: string;
   lineItems: VendorAllocationLineItem<TLineItem>[];
@@ -70,24 +74,27 @@ export function allocateShopifyOrderToVendors<TLineItem extends ShopifyOrderLine
   const unmappedLineItems: ShopifyOrderLineItemInput[] = [];
 
   for (const lineItem of orderInput.lineItems) {
-    const vendorId = resolveVendorFromVariantMetafield(lineItem.vendorMetafield);
+    const originalVendorId = resolveVendorFromVariantMetafield(lineItem.vendorMetafield);
 
-    if (!vendorId) {
+    if (!originalVendorId) {
       unmappedLineItems.push(lineItem);
       continue;
     }
+    const assignedVendorId = originalVendorId;
 
-    const vendor = getAvailableVendors().find((candidate) => candidate.vendorId === vendorId);
+    const vendor = getAvailableVendors().find((candidate) => candidate.vendorId === assignedVendorId);
 
     if (!vendor) {
       unmappedLineItems.push(lineItem);
       continue;
     }
 
-    const existingAllocation = allocations.get(vendorId);
+    const existingAllocation = allocations.get(assignedVendorId);
     const allocationLineItem: VendorAllocationLineItem<TLineItem> = {
       ...lineItem,
-      vendorId,
+      originalVendorId,
+      assignedVendorId,
+      vendorId: assignedVendorId,
     };
 
     if (existingAllocation) {
@@ -95,10 +102,12 @@ export function allocateShopifyOrderToVendors<TLineItem extends ShopifyOrderLine
       continue;
     }
 
-    allocations.set(vendorId, {
+    allocations.set(assignedVendorId, {
       shopifyOrderId: orderInput.id,
       shopifyOrderNumber: orderInput.orderNumber,
-      vendorId,
+      originalVendorId,
+      assignedVendorId,
+      vendorId: assignedVendorId,
       vendorName: vendor.vendorName,
       lineItems: [allocationLineItem],
     });

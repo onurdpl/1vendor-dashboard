@@ -65,8 +65,15 @@ export function AdminShopifyOrderPage() {
           <h3>{allocation.vendorName} allocation</h3>
           <dl className="detail-list">
             <div>
-              <dt>Vendor id</dt>
-              <dd>{allocation.vendorId}</dd>
+              <dt>Original vendor</dt>
+              <dd>{allocation.originalVendorId}</dd>
+            </div>
+            <div>
+              <dt>Assigned vendor</dt>
+              <dd>
+                {allocation.assignedVendorId}
+                {allocation.originalVendorId === allocation.assignedVendorId ? ' (same as original)' : ''}
+              </dd>
             </div>
             <div>
               <dt>Allocation order</dt>

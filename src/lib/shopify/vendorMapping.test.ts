@@ -80,11 +80,21 @@ describe('shopify vendor mapping', () => {
     expect(vendorB).toBeDefined();
 
     expect(vendorA?.lineItems).toHaveLength(2);
+    expect(vendorA?.originalVendorId).toBe('demo-vendor-a');
+    expect(vendorA?.assignedVendorId).toBe('demo-vendor-a');
+    expect(vendorA?.vendorId).toBe('demo-vendor-a');
     expect(vendorA?.lineItems.every((lineItem) => lineItem.vendorId === 'demo-vendor-a')).toBe(true);
+    expect(vendorA?.lineItems.every((lineItem) => lineItem.originalVendorId === 'demo-vendor-a')).toBe(true);
+    expect(vendorA?.lineItems.every((lineItem) => lineItem.assignedVendorId === lineItem.originalVendorId)).toBe(true);
     expect(vendorA?.lineItems.map((lineItem) => lineItem.title)).toEqual(['Medium', 'Standard Product']);
 
     expect(vendorB?.lineItems).toHaveLength(1);
+    expect(vendorB?.originalVendorId).toBe('demo-vendor-b');
+    expect(vendorB?.assignedVendorId).toBe('demo-vendor-b');
+    expect(vendorB?.vendorId).toBe('demo-vendor-b');
     expect(vendorB?.lineItems.every((lineItem) => lineItem.vendorId === 'demo-vendor-b')).toBe(true);
+    expect(vendorB?.lineItems.every((lineItem) => lineItem.originalVendorId === 'demo-vendor-b')).toBe(true);
+    expect(vendorB?.lineItems.every((lineItem) => lineItem.assignedVendorId === lineItem.originalVendorId)).toBe(true);
     expect(vendorB?.lineItems[0].title).toBe('Large');
 
     expect(result.unmappedLineItems[0].title).toBe('Unmapped Item');

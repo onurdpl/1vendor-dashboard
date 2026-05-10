@@ -20,6 +20,10 @@ The frontend currently uses mock transport in local/demo mode, but the same rout
 - Cross-vendor access must not leak data.
 - If a resource belongs to another vendor, the backend should return `403 Forbidden` or `404 Not Found` consistently across the API.
 - The frontend treats cross-vendor access as unavailable data, not as a different UI flow.
+- Allocation records include:
+  - `originalVendorId`: mapped from Shopify variant/product metafield.
+  - `assignedVendorId`: operational owner responsible for fulfillment/shipping.
+- Current compatibility field `vendorId` aliases `assignedVendorId`.
 
 ## Role and Permission Rules
 
@@ -87,6 +91,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
+- In the assigned-vendor model, vendor-facing order endpoints should scope by `assignedVendorId`.
 
 ### GET /admin/orders/:shopifyOrderId
 
@@ -178,6 +183,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Collections are returned as arrays.
 - The backend should preserve the same field names unless the frontend contracts are updated first.
 - `FinanceSummary` includes vendor-derived fields such as `grossSales`, `refunds`, `netRevenue`, `platformFee`, and `payoutEstimate` in addition to compatibility aliases used by the current frontend shell.
+- Allocation-related shapes include both `originalVendorId` and `assignedVendorId`.
+- `vendorId` remains for compatibility and currently aliases `assignedVendorId`.
 
 ## Security Requirements
 
@@ -191,6 +198,9 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 
 - A Shopify store connection belongs to a vendor.
 - Shopify orders must be stored with a `vendorId`.
+- Shopify metafield mapping determines `originalVendorId`.
+- Operational assignment determines `assignedVendorId`.
+- Reassignment from original to assigned vendor is future work; this contract prepares for it.
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.

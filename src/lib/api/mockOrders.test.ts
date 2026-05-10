@@ -10,6 +10,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder).not.toBeNull();
     expect(sharedOrder?.sourceShopifyOrderId).toBe('gid://shopify/Order/1001');
     expect(sharedOrder?.sourceShopifyOrderNumber).toBe(1001);
+    expect(sharedOrder?.originalVendorId).toBe('demo-vendor-a');
+    expect(sharedOrder?.assignedVendorId).toBe('demo-vendor-a');
     expect(sharedOrder?.vendorId).toBe('demo-vendor-a');
     expect(sharedOrder?.lineItems).toHaveLength(2);
     expect(sharedOrder?.lineItems.every((item) => item.vendorId === 'demo-vendor-a')).toBe(true);
@@ -28,6 +30,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder).not.toBeNull();
     expect(sharedOrder?.sourceShopifyOrderId).toBe('gid://shopify/Order/1001');
     expect(sharedOrder?.sourceShopifyOrderNumber).toBe(1001);
+    expect(sharedOrder?.originalVendorId).toBe('demo-vendor-b');
+    expect(sharedOrder?.assignedVendorId).toBe('demo-vendor-b');
     expect(sharedOrder?.vendorId).toBe('demo-vendor-b');
     expect(sharedOrder?.lineItems).toHaveLength(1);
     expect(sharedOrder?.lineItems.every((item) => item.vendorId === 'demo-vendor-b')).toBe(true);
@@ -55,5 +59,8 @@ describe('mock orders vendor allocations', () => {
       'demo-vendor-a',
       'demo-vendor-b',
     ]);
+    expect(
+      breakdown?.allocations.every((allocation) => allocation.assignedVendorId === allocation.originalVendorId),
+    ).toBe(true);
   });
 });

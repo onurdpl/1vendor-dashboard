@@ -1,5 +1,10 @@
 import { getAvailableVendors, getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
-import { allocateShopifyOrderToVendors, type ShopifyOrderInput } from '../shopify/vendorMapping';
+import {
+  allocateShopifyOrderToVendors,
+  type ShopifyOrderInput,
+  type VendorAllocationLineItem,
+  type ShopifyOrderLineItemInput,
+} from '../shopify/vendorMapping';
 import type {
   OrderDetail,
   OrderSummary,
@@ -49,11 +54,13 @@ function formatMoney(value: number) {
 
 function createLineItems(
   vendorId: VendorId,
-  allocationLineItems: ShopifySourceOrder['lineItems'],
+  allocationLineItems: Array<VendorAllocationLineItem<ShopifyOrderLineItemInput>>,
   allocationFulfillment: AllocationFulfillmentState,
 ): OrderLineItem[] {
   return allocationLineItems.map(({ vendorMetafield: _vendorMetafield, ...lineItem }) => ({
     ...lineItem,
+    originalVendorId: lineItem.originalVendorId,
+    assignedVendorId: lineItem.assignedVendorId,
     vendorId,
     name: lineItem.title,
     fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
@@ -291,13 +298,15 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
   const allocationResult = allocateShopifyOrderToVendors(sourceOrder);
 
   return allocationResult.allocations.map<VendorOrder>((allocation) => {
-    const allocationFulfillment = getAllocationFulfillment(allocation.vendorId, sourceOrder.orderNumber);
-    const lineItems = createLineItems(allocation.vendorId, allocation.lineItems, allocationFulfillment);
+    const allocationFulfillment = getAllocationFulfillment(allocation.assignedVendorId, sourceOrder.orderNumber);
+    const lineItems = createLineItems(allocation.assignedVendorId, allocation.lineItems, allocationFulfillment);
     const amount = lineItems.reduce((total, lineItem) => total + parseMoney(lineItem.price) * lineItem.quantity, 0);
 
     return {
-      vendorId: allocation.vendorId,
-      id: `ORD-${allocation.vendorId === 'demo-vendor-a' ? 'A' : 'B'}-${sourceOrder.orderNumber}`,
+      originalVendorId: allocation.originalVendorId,
+      assignedVendorId: allocation.assignedVendorId,
+      vendorId: allocation.assignedVendorId,
+      id: `ORD-${allocation.assignedVendorId === 'demo-vendor-a' ? 'A' : 'B'}-${sourceOrder.orderNumber}`,
       sourceShopifyOrderId: sourceOrder.id,
       sourceShopifyOrderNumber: sourceOrder.orderNumber,
       status: allocationFulfillment.status,
@@ -335,9 +344,10 @@ export function listMockOrders(vendorId?: VendorId): OrderSummary[] {
   const currentVendorId = resolveVendorId(vendorId);
 
   return orders
-    .filter((order) => order.vendorId === currentVendorId)
+    .filter((order) => order.assignedVendorId === currentVendorId)
     .map(({ vendorId: _vendorId, shippingAddress, notes, lineItems, items, timeline, ...summary }) => ({
       ...summary,
+      assignedVendorId: currentVendorId,
       vendorId: currentVendorId,
     }));
 }
@@ -345,7 +355,7 @@ export function listMockOrders(vendorId?: VendorId): OrderSummary[] {
 export function getMockOrder(orderId: string, vendorId?: VendorId): OrderDetail | null {
   const currentVendorId = resolveVendorId(vendorId);
 
-  return orders.find((order) => order.vendorId === currentVendorId && order.id === orderId) ?? null;
+  return orders.find((order) => order.assignedVendorId === currentVendorId && order.id === orderId) ?? null;
 }
 
 export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBreakdown | null {
@@ -362,22 +372,24 @@ export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBr
   }
 
   const vendorLookup = new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
-  const allocationMap = new Map(sourceMatches.map((order) => [order.vendorId, order] as const));
+  const allocationMap = new Map(sourceMatches.map((order) => [order.assignedVendorId, order] as const));
   const sourceOrderNumber = sourceMatches[0].sourceShopifyOrderNumber;
   const sourceReturns = listMockReturns('demo-vendor-a')
     .concat(listMockReturns('demo-vendor-b'))
     .filter((returnRequest) => String(returnRequest.sourceShopifyOrderNumber) === String(sourceOrderNumber));
 
   const allocations = Array.from(allocationMap.values()).map((allocationOrder) => {
-    const vendorReturns = sourceReturns.filter((item) => item.vendorId === allocationOrder.vendorId);
+    const vendorReturns = sourceReturns.filter((item) => item.assignedVendorId === allocationOrder.assignedVendorId);
     const refundedItems = vendorReturns.flatMap((item) => {
-      const detail = getMockReturn(item.id, allocationOrder.vendorId);
+      const detail = getMockReturn(item.id, allocationOrder.assignedVendorId);
       return detail?.items ?? [];
     });
 
     return {
-      vendorId: allocationOrder.vendorId,
-      vendorName: vendorLookup.get(allocationOrder.vendorId) ?? allocationOrder.vendorId,
+      originalVendorId: allocationOrder.originalVendorId,
+      assignedVendorId: allocationOrder.assignedVendorId,
+      vendorId: allocationOrder.assignedVendorId,
+      vendorName: vendorLookup.get(allocationOrder.assignedVendorId) ?? allocationOrder.assignedVendorId,
       allocationOrderId: allocationOrder.id,
       status: allocationOrder.status,
       fulfillmentStatus: allocationOrder.fulfillmentStatus,

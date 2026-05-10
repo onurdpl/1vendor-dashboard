@@ -39,6 +39,11 @@ describe('mock admin Shopify order breakdown transport', () => {
       'demo-vendor-a',
       'demo-vendor-b',
     ]);
+    expect(
+      breakdown.allocations.every(
+        (allocation) => allocation.assignedVendorId === allocation.originalVendorId && allocation.vendorId === allocation.assignedVendorId,
+      ),
+    ).toBe(true);
   });
 
   it('blocks vendor user from admin Shopify breakdown endpoint', async () => {
