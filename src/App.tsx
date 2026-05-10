@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { RequirePermission } from './components/RequirePermission';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -49,49 +50,61 @@ export default function App() {
           <Route
             path="/orders"
             element={
-              <Suspense fallback={loadingFallback}>
-                <OrdersPage />
-              </Suspense>
+              <RequirePermission permission="orders:read">
+                <Suspense fallback={loadingFallback}>
+                  <OrdersPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
           <Route
             path="/orders/:orderId"
             element={
-              <Suspense fallback={loadingFallback}>
-                <OrderDetailPage />
-              </Suspense>
+              <RequirePermission permission="orders:read">
+                <Suspense fallback={loadingFallback}>
+                  <OrderDetailPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
           <Route
             path="/returns"
             element={
-              <Suspense fallback={loadingFallback}>
-                <ReturnsPage />
-              </Suspense>
+              <RequirePermission permission="returns:read">
+                <Suspense fallback={loadingFallback}>
+                  <ReturnsPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
           <Route
             path="/returns/:returnId"
             element={
-              <Suspense fallback={loadingFallback}>
-                <ReturnDetailPage />
-              </Suspense>
+              <RequirePermission permission="returns:read">
+                <Suspense fallback={loadingFallback}>
+                  <ReturnDetailPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
           <Route
             path="/finance"
             element={
-              <Suspense fallback={loadingFallback}>
-                <FinancePage />
-              </Suspense>
+              <RequirePermission permission="finance:read">
+                <Suspense fallback={loadingFallback}>
+                  <FinancePage />
+                </Suspense>
+              </RequirePermission>
             }
           />
           <Route
             path="/automation"
             element={
-              <Suspense fallback={loadingFallback}>
-                <AutomationPage />
-              </Suspense>
+              <RequirePermission permission="automation:read">
+                <Suspense fallback={loadingFallback}>
+                  <AutomationPage />
+                </Suspense>
+              </RequirePermission>
             }
           />
         </Route>
