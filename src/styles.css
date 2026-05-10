@@ -465,6 +465,22 @@ h3 {
   gap: 10px;
 }
 
+.returns-workspace {
+  gap: 14px;
+}
+
+.returns-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.refund-record {
+  gap: 12px;
+}
+
+.refund-summary-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .orders-row {
   display: grid;
   grid-template-columns: 1.2fr 0.8fr 1.1fr 1fr 1.4fr 0.9fr;
@@ -949,6 +965,11 @@ h3 {
 .vendor-line-items .line-item-head,
 .vendor-line-items .line-item-row {
   grid-template-columns: 0.8fr 0.9fr 1.6fr 0.5fr 0.7fr 0.7fr;
+}
+
+.return-line-items .line-item-head,
+.return-line-items .line-item-row {
+  grid-template-columns: 0.8fr 0.9fr 1.4fr 0.5fr 0.8fr 0.7fr;
 }
 
 /* Dashboard workspace */

@@ -3,6 +3,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn } from '../features/returns/api';
+import { getCurrentVendorContext } from '../lib/auth';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -13,6 +14,7 @@ function formatDate(value: string) {
 
 export function ReturnDetailPage() {
   const { returnId } = useParams();
+  const currentVendor = getCurrentVendorContext();
   const { data: returnRequest, isLoading, isError, error } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
     () => {
@@ -52,60 +54,55 @@ export function ReturnDetailPage() {
   }
 
   return (
-    <section className="dashboard return-detail">
-      <div className="hero-card">
+    <section className="dashboard return-detail returns-workspace">
+      <div className="hero-card operational-card queue-header">
         <div>
-          <p className="eyebrow">Returns</p>
+          <p className="eyebrow">Refund allocation</p>
           <h2>{returnRequest.id}</h2>
           <p className="page-description">
-            {returnRequest.customer} · Related order {returnRequest.relatedOrderId}
+            Shopify order #{returnRequest.sourceShopifyOrderNumber} · Refund {returnRequest.sourceShopifyRefundId}
           </p>
         </div>
-        <div className={`status-badge status-${returnRequest.status.toLowerCase().replace(/\s+/g, '-')}`}>
-          {returnRequest.status}
+        <div className="chip-row">
+          <span className={`status-badge status-${returnRequest.status.toLowerCase().replace(/\s+/g, '-')}`}>
+            {returnRequest.status}
+          </span>
+          <span className="severity-chip severity-normal">Vendor {currentVendor.vendorName}</span>
         </div>
       </div>
 
       <div className="detail-grid">
-        <article className="panel">
-          <h3>Summary</h3>
-          <dl className="detail-list">
-            <div>
-              <dt>Date</dt>
-              <dd>{formatDate(returnRequest.date)}</dd>
+        <article className="panel operational-card">
+          <h3>Refund summary</h3>
+          <div className="allocation-summary-grid refund-summary-grid">
+            <div className="summary-row">
+              <span>Total refund amount</span>
+              <strong className="finance-negative">-{returnRequest.amount}</strong>
             </div>
-            <div>
-              <dt>Source Shopify order</dt>
-              <dd>#{returnRequest.sourceShopifyOrderNumber}</dd>
+            <div className="summary-row">
+              <span>Refunded item count</span>
+              <strong>{(returnRequest.refundedItems ?? returnRequest.items).length}</strong>
             </div>
-            <div>
-              <dt>Source refund</dt>
-              <dd>{returnRequest.sourceShopifyRefundId}</dd>
+            <div className="summary-row">
+              <span>Vendor impact</span>
+              <strong>{currentVendor.vendorName}</strong>
             </div>
-            <div>
-              <dt>Amount</dt>
-              <dd>{returnRequest.amount}</dd>
+            <div className="summary-row">
+              <span>Related order</span>
+              <strong>{returnRequest.relatedOrderId}</strong>
             </div>
-            <div>
-              <dt>Reason</dt>
-              <dd>{returnRequest.reason}</dd>
+            <div className="summary-row">
+              <span>Reason</span>
+              <strong>{returnRequest.reason}</strong>
             </div>
-            <div>
-              <dt>Resolution</dt>
-              <dd>{returnRequest.resolution}</dd>
+            <div className="summary-row">
+              <span>Date</span>
+              <strong>{formatDate(returnRequest.date)}</strong>
             </div>
-            <div>
-              <dt>Refund method</dt>
-              <dd>{returnRequest.refundMethod}</dd>
-            </div>
-            <div>
-              <dt>Processed by</dt>
-              <dd>{returnRequest.processedBy}</dd>
-            </div>
-          </dl>
+          </div>
         </article>
 
-        <article className="panel">
+        <article className="panel operational-card">
           <h3>Workflow timeline</h3>
           <ul className="timeline">
             {returnRequest.timeline.map((entry) => (
@@ -119,9 +116,9 @@ export function ReturnDetailPage() {
       </div>
 
       <div className="detail-grid">
-        <article className="panel">
+        <article className="panel operational-card">
           <h3>Refunded items</h3>
-          <div className="line-item-table">
+          <div className="line-item-table return-line-items">
             <div className="line-item-head">
               <span>SKU</span>
               <span>Variant</span>
@@ -137,18 +134,48 @@ export function ReturnDetailPage() {
                 <span>{item.name}</span>
                 <span>{item.quantity}</span>
                 <span>{item.condition}</span>
-                <span>{item.refundAmount}</span>
+                <span className="finance-negative">-{item.refundAmount}</span>
               </div>
             ))}
           </div>
         </article>
 
-        <article className="panel">
+        <article className="panel operational-card">
           <h3>Operational context</h3>
-          <p>
-            This return workflow is structured to support review, approval, rejection, and refund
-            states without needing to change the surrounding dashboard patterns.
-          </p>
+          <div className="compact-meta-grid">
+            <div className="meta-item">
+              <span>Vendor</span>
+              <strong>{currentVendor.vendorName}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Vendor ID</span>
+              <strong>{returnRequest.vendorId}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Source Shopify order ID</span>
+              <strong>{returnRequest.sourceShopifyOrderId}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Source Shopify refund ID</span>
+              <strong>{returnRequest.sourceShopifyRefundId}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Resolution</span>
+              <strong>{returnRequest.resolution}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Refund method</span>
+              <strong>{returnRequest.refundMethod}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Processed by</span>
+              <strong>{returnRequest.processedBy}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Customer</span>
+              <strong>{returnRequest.customer}</strong>
+            </div>
+          </div>
         </article>
       </div>
     </section>
