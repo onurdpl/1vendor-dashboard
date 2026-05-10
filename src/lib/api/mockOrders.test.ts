@@ -77,6 +77,11 @@ describe('mock orders vendor allocations', () => {
         (allocation) => allocation.reassignmentRequired && allocation.cancellationReason === 'out_of_stock',
       ),
     ).toBe(true);
+    const pendingAllocation = breakdown?.allocations.find((allocation) => allocation.allocationStatus === 'pending_reassignment');
+    expect(pendingAllocation?.reassignmentCandidateVendorIds).toEqual(['demo-vendor-b']);
+    expect(
+      pendingAllocation?.reassignmentCandidateVendorIds.includes(pendingAllocation.assignedVendorId ?? 'demo-vendor-a'),
+    ).toBe(false);
   });
 
   it('prevents vendors from reporting fulfillment issues for other vendors', () => {

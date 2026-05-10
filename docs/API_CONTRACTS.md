@@ -109,6 +109,7 @@ No write endpoints are currently wired in the frontend, but future write actions
   - source Shopify order metadata
   - all vendor allocations for that source order
   - per-allocation fulfillment/shipping status
+  - reassignment workflow fields (`reassignmentRequired`, candidate vendors, notes, and audit fields when present)
   - per-allocation tracking metadata
   - per-allocation refunded items and totals when present
 
@@ -205,7 +206,10 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Operational assignment determines `assignedVendorId`.
 - Reassignment from original to assigned vendor is future work; this contract prepares for it.
 - Vendor cancellation/out-of-stock reporting can mark allocations as blocked and pending reassignment.
-- Reassignment execution itself remains future work.
+- Reassignment is admin-controlled and must be persisted by backend workflow APIs in the future.
+- `originalVendorId` must remain immutable across reassignment changes.
+- `assignedVendorId` changes only when reassignment is committed by backend.
+- Reassignment actions should be stored with audit history (`reassignedBy`, `reassignedAt`, and note/reason trail).
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.

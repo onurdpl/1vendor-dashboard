@@ -318,6 +318,12 @@ function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
+export function getReassignmentCandidates(allocation: { assignedVendorId: VendorId }): VendorId[] {
+  return getAvailableVendors()
+    .map((vendor) => vendor.vendorId)
+    .filter((vendorId) => vendorId !== allocation.assignedVendorId);
+}
+
 function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
   const allocationResult = allocateShopifyOrderToVendors(sourceOrder);
 
@@ -434,6 +440,14 @@ export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBr
       cancellationReason: allocationOrder.cancellationReason,
       reassignmentRequired: allocationOrder.reassignmentRequired,
       assignmentBlockedAt: allocationOrder.assignmentBlockedAt,
+      reassignmentCandidateVendorIds: getReassignmentCandidates({
+        assignedVendorId: allocationOrder.assignedVendorId,
+      }),
+      reassignmentNote: allocationOrder.reassignmentRequired
+        ? 'Vendor reported a fulfillment issue. Reassignment review is required.'
+        : undefined,
+      reassignedAt: undefined,
+      reassignedBy: undefined,
       fulfillmentStatus: allocationOrder.fulfillmentStatus,
       shippingStatus: allocationOrder.shippingStatus,
       trackingNumber: allocationOrder.trackingNumber,

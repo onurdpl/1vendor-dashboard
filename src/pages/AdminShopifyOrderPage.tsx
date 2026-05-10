@@ -1,8 +1,11 @@
 import { Link, useParams } from 'react-router-dom';
+import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { getAdminShopifyOrderBreakdown } from '../features/orders/api';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
+import { useActionFeedback } from '../lib/ui';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -13,6 +16,21 @@ function formatDate(value: string) {
 
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
+  const { message, tone, showFeedback } = useActionFeedback();
+  const reassignAllocation = useMutationAction(
+    async (payload: { allocationOrderId: string; nextVendorId: string }) => payload,
+    {
+      onSuccess: (result) => {
+        showFeedback(
+          `Reassignment request prepared for ${result.allocationOrderId} -> ${result.nextVendorId} (mock only).`,
+          'success',
+        );
+      },
+      onError: () => {
+        showFeedback('Unable to prepare reassignment request.', 'error');
+      },
+    },
+  );
   const { data: breakdown, isLoading, isError, error } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
     () => {
@@ -90,6 +108,18 @@ export function AdminShopifyOrderPage() {
             <div>
               <dt>Reassignment required</dt>
               <dd>{allocation.reassignmentRequired ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Reassignment note</dt>
+              <dd>{allocation.reassignmentNote ?? 'None'}</dd>
+            </div>
+            <div>
+              <dt>Reassigned at</dt>
+              <dd>{allocation.reassignedAt ? formatDate(allocation.reassignedAt) : 'Not reassigned'}</dd>
+            </div>
+            <div>
+              <dt>Reassigned by</dt>
+              <dd>{allocation.reassignedBy ?? 'Not reassigned'}</dd>
             </div>
             <div>
               <dt>Assignment blocked at</dt>
@@ -175,10 +205,35 @@ export function AdminShopifyOrderPage() {
               ))}
             </div>
           )}
+
+          {allocation.reassignmentRequired ? (
+            <div className="detail-actions">
+              <p className="page-description">
+                Reassignment candidates: {allocation.reassignmentCandidateVendorIds.join(', ')}
+              </p>
+              {allocation.reassignmentCandidateVendorIds.map((candidateVendorId) => (
+                <button
+                  key={candidateVendorId}
+                  className="button button-secondary"
+                  type="button"
+                  disabled={reassignAllocation.isPending}
+                  onClick={() => {
+                    reassignAllocation.mutate({
+                      allocationOrderId: allocation.allocationOrderId,
+                      nextVendorId: candidateVendorId,
+                    });
+                  }}
+                >
+                  {reassignAllocation.isPending ? 'Preparing...' : `Reassign to ${candidateVendorId}`}
+                </button>
+              ))}
+            </div>
+          ) : null}
         </article>
       ))}
 
       <article className="panel">
+        {message ? <ActionFeedback tone={tone} message={message} /> : null}
         <Link className="button button-secondary" to="/orders">
           Back to vendor orders
         </Link>

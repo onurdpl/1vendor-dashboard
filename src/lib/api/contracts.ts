@@ -75,6 +75,10 @@ export type VendorAllocationSummary = {
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
+  reassignmentCandidateVendorIds: VendorId[];
+  reassignmentNote?: string;
+  reassignedAt?: string;
+  reassignedBy?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;

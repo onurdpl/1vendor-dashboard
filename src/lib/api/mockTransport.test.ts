@@ -49,7 +49,8 @@ describe('mock admin Shopify order breakdown transport', () => {
         (allocation) =>
           allocation.allocationStatus === 'pending_reassignment' &&
           allocation.reassignmentRequired &&
-          allocation.cancellationReason === 'out_of_stock',
+          allocation.cancellationReason === 'out_of_stock' &&
+          allocation.reassignmentCandidateVendorIds.length > 0,
       ),
     ).toBe(true);
   });
