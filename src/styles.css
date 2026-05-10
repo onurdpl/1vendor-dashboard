@@ -779,7 +779,7 @@ h3 {
 .line-item-head,
 .line-item-row {
   display: grid;
-  grid-template-columns: 1.6fr 0.4fr 0.5fr;
+  grid-template-columns: 0.9fr 0.9fr 1.6fr 0.4fr 0.5fr;
   gap: 12px;
 }
 

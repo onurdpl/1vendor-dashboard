@@ -1,7 +1,12 @@
+import type { VendorId } from '../auth/vendorContext';
+
 export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
 
 export type OrderSummary = {
   id: string;
+  vendorId: VendorId;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
   date: string;
   customer: string;
@@ -10,14 +15,19 @@ export type OrderSummary = {
 };
 
 export type OrderLineItem = {
+  id: string;
+  sku: string;
+  variantTitle: string;
   name: string;
   quantity: number;
   price: string;
+  vendorId: VendorId;
 };
 
 export type OrderDetail = OrderSummary & {
   shippingAddress: string;
   notes: string;
+  lineItems: OrderLineItem[];
   items: OrderLineItem[];
   timeline: Array<{ label: string; at: string }>;
 };

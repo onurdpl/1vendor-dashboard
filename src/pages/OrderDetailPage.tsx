@@ -103,12 +103,16 @@ export function OrderDetailPage() {
         <h3>Line items</h3>
         <div className="line-item-table">
           <div className="line-item-head">
+            <span>SKU</span>
+            <span>Variant</span>
             <span>Item</span>
             <span>Quantity</span>
             <span>Price</span>
           </div>
-          {order.items.map((item) => (
-            <div key={item.name} className="line-item-row">
+          {(order.lineItems ?? order.items).map((item) => (
+            <div key={item.id} className="line-item-row">
+              <span>{item.sku}</span>
+              <span>{item.variantTitle}</span>
               <span>{item.name}</span>
               <span>{item.quantity}</span>
               <span>{item.price}</span>

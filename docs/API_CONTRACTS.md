@@ -72,6 +72,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the session is authenticated but not permitted for the vendor scope or route.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
+- Order records are vendor-scoped views of Shopify source orders and must include a vendor-safe internal order id.
 
 ### GET /orders/:orderId
 
@@ -82,6 +83,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
+- Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 
 ### GET /returns
 
