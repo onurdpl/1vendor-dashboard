@@ -610,6 +610,12 @@ h3 {
   align-items: flex-start;
 }
 
+.automation-action-stack {
+  display: grid;
+  gap: 10px;
+  justify-items: start;
+}
+
 .automation-action p {
   margin: 8px 0 0;
   color: var(--text-muted);

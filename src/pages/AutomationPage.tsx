@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -22,6 +23,7 @@ export function AutomationPage() {
     getAutomationDashboard,
   );
   const { message, tone, showFeedback } = useActionFeedback();
+  const [queuedActionMessage, setQueuedActionMessage] = useState<string | null>(null);
   const primaryActionTitle = automation?.suggestions[0]?.title ?? null;
   const { mutateAsync: queueAction, isPending: isQueueingAction } = useMutationAction(
     async (title: string) => {
@@ -35,6 +37,20 @@ export function AutomationPage() {
       invalidateQueryKeys: [queryKeys.automation.alerts(), queryKeys.automation.actions()],
     },
   );
+
+  useEffect(() => {
+    if (!queuedActionMessage) {
+      return;
+    }
+
+    const timeout = globalThis.setTimeout(() => {
+      setQueuedActionMessage(null);
+    }, 2200);
+
+    return () => {
+      globalThis.clearTimeout(timeout);
+    };
+  }, [queuedActionMessage]);
 
   if (isLoading) {
     return (
@@ -116,19 +132,26 @@ export function AutomationPage() {
                   <p>{item.description}</p>
                 </div>
                 {item.title === primaryActionTitle ? (
-                  <button
-                    type="button"
-                    className="button button-secondary"
-                    onClick={() => {
-                      void queueAction(item.title).catch(() => {
-                        showFeedback(`${item.title} could not be queued.`, 'error');
-                      });
-                      showFeedback(`${item.title} queued.`, 'success');
-                    }}
-                    disabled={isQueueingAction}
-                  >
-                    {item.actionLabel}
-                  </button>
+                  <div className="automation-action-stack">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => {
+                        setQueuedActionMessage(`${item.title} queued.`);
+                        void queueAction(item.title).catch(() => {
+                          setQueuedActionMessage(`${item.title} could not be queued.`);
+                          showFeedback(`${item.title} could not be queued.`, 'error');
+                        });
+                        showFeedback(`${item.title} queued.`, 'success');
+                      }}
+                      disabled={isQueueingAction}
+                    >
+                      {item.actionLabel}
+                    </button>
+                    {queuedActionMessage ? (
+                      <ActionFeedback tone={queuedActionMessage.includes('could not') ? 'error' : 'success'} message={queuedActionMessage} />
+                    ) : null}
+                  </div>
                 ) : (
                   <button
                     type="button"
