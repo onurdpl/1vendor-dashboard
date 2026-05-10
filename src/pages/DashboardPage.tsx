@@ -1,36 +1,39 @@
-import { useActionFeedback } from '../lib/ui';
+import { useEffect, useMemo, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
-
-const stats = [
-  { label: 'Open tickets', value: '18' },
-  { label: 'Pending payouts', value: '7' },
-  { label: 'Vendor checks', value: '24' },
-];
+import { useActionFeedback } from '../lib/ui';
+import { buildDashboardOverview } from '../lib/api/dashboard';
+import { getCurrentVendorContext, onVendorChange } from '../lib/auth';
 
 export function DashboardPage() {
+  const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
+  const dashboard = useMemo(() => buildDashboardOverview(vendorId), [vendorId]);
   const { message, tone, showFeedback } = useActionFeedback();
+
+  useEffect(() => {
+    return onVendorChange(() => {
+      setVendorId(getCurrentVendorContext().vendorId);
+    });
+  }, []);
 
   return (
     <section className="dashboard">
       <div className="hero-card">
         <div>
           <p className="eyebrow">Dashboard</p>
-          <h2>Command center for daily operations</h2>
-          <p className="page-description">
-            Track vendor activity, support workload, and finance status from one place.
-          </p>
+          <h2>{dashboard.title}</h2>
+          <p className="page-description">{dashboard.description}</p>
         </div>
         <button
           className="button button-secondary"
           type="button"
-          onClick={() => showFeedback('Task drafted for operations review.', 'success')}
+          onClick={() => showFeedback(`Task drafted for ${dashboard.vendorName} review.`, 'success')}
         >
           Create task
         </button>
       </div>
 
       <div className="stats-grid">
-        {stats.map((stat) => (
+        {dashboard.stats.map((stat) => (
           <article key={stat.label} className="stat-card">
             <span>{stat.label}</span>
             <strong>{stat.value}</strong>
@@ -42,18 +45,15 @@ export function DashboardPage() {
         <article className="panel">
           <h3>Recent activity</h3>
           <ul className="list">
-            <li>Vendor onboarding queue updated</li>
-            <li>Support escalation acknowledged</li>
-            <li>Finance review scheduled</li>
+            {dashboard.recentActivity.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </article>
 
         <article className="panel">
           <h3>Workspace status</h3>
-          <p>
-            This foundation is ready for authenticated sessions, role-specific modules, and live
-            data integration in later phases.
-          </p>
+          <p>{dashboard.workspaceStatus}</p>
         </article>
       </div>
 

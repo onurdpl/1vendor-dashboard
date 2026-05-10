@@ -94,3 +94,18 @@ export type AutomationDashboard = {
   alerts: AutomationAlert[];
   suggestions: AutomationSuggestion[];
 };
+
+export type DashboardStat = {
+  label: string;
+  value: string;
+};
+
+export type DashboardOverview = {
+  vendorId: string;
+  vendorName: string;
+  title: string;
+  description: string;
+  stats: DashboardStat[];
+  recentActivity: string[];
+  workspaceStatus: string;
+};

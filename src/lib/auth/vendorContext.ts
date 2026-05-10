@@ -1,6 +1,7 @@
 import { getCurrentUser } from './session';
 
 const VENDOR_STORAGE_KEY = 'vendor-dashboard.current-vendor-id';
+const VENDOR_CHANGE_EVENT = 'vendor-dashboard:vendor-change';
 
 export type VendorId = 'demo-vendor-a' | 'demo-vendor-b';
 
@@ -25,6 +26,14 @@ const availableVendors = [
 
 function isVendorId(value: string | null): value is VendorId {
   return value === 'demo-vendor-a' || value === 'demo-vendor-b';
+}
+
+function dispatchVendorChange() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new Event(VENDOR_CHANGE_EVENT));
 }
 
 function resolveVendorIdForCurrentUser(storedVendorId: string | null) {
@@ -65,6 +74,7 @@ export function setCurrentVendorId(vendorId: VendorId) {
   }
 
   window.localStorage.setItem(VENDOR_STORAGE_KEY, vendorId);
+  dispatchVendorChange();
 }
 
 export function getCurrentVendorContext(): VendorContext {
@@ -80,4 +90,16 @@ export function getCurrentVendorContext(): VendorContext {
   }
 
   return availableVendors.find((vendor) => vendor.vendorId === vendorId) ?? availableVendors[0];
+}
+
+export function onVendorChange(handler: () => void) {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  window.addEventListener(VENDOR_CHANGE_EVENT, handler);
+
+  return () => {
+    window.removeEventListener(VENDOR_CHANGE_EVENT, handler);
+  };
 }

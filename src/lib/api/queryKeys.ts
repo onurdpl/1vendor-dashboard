@@ -1,6 +1,9 @@
 import { getCurrentVendorContext } from '../auth/vendorContext';
 
 export const queryKeys = {
+  dashboard: {
+    overview: () => ['dashboard', 'overview', getCurrentVendorContext().vendorId] as const,
+  },
   orders: {
     list: () => ['orders', 'list', getCurrentVendorContext().vendorId] as const,
     detail: (orderId: string) => ['orders', 'detail', getCurrentVendorContext().vendorId, orderId] as const,

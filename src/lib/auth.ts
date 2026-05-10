@@ -26,6 +26,7 @@ export {
 export {
   getAvailableVendors,
   getCurrentVendorContext,
+  onVendorChange,
   setCurrentVendorId,
   type VendorContext,
   type VendorId,
