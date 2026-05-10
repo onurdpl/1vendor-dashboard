@@ -1,17 +1,35 @@
+import { lazy, Suspense } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { DataStatePanel } from './components/DataStatePanel';
 import { AppShell } from './components/AppShell';
-import { AutomationPage } from './pages/AutomationPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { FinancePage } from './pages/FinancePage';
 import { LoginPage } from './pages/LoginPage';
-import { OrderDetailPage } from './pages/OrderDetailPage';
-import { OrdersPage } from './pages/OrdersPage';
-import { ReturnDetailPage } from './pages/ReturnDetailPage';
-import { ReturnsPage } from './pages/ReturnsPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
 import { ErrorBoundary } from './components/ErrorBoundary';
+
+const OrdersPage = lazy(() => import('./pages/OrdersPage').then((module) => ({ default: module.OrdersPage })));
+const OrderDetailPage = lazy(() =>
+  import('./pages/OrderDetailPage').then((module) => ({ default: module.OrderDetailPage })),
+);
+const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then((module) => ({ default: module.ReturnsPage })));
+const ReturnDetailPage = lazy(() =>
+  import('./pages/ReturnDetailPage').then((module) => ({ default: module.ReturnDetailPage })),
+);
+const FinancePage = lazy(() => import('./pages/FinancePage').then((module) => ({ default: module.FinancePage })));
+const AutomationPage = lazy(() =>
+  import('./pages/AutomationPage').then((module) => ({ default: module.AutomationPage })),
+);
+
+const loadingFallback = (
+  <DataStatePanel
+    tone="loading"
+    eyebrow="Dashboard"
+    title="Loading workspace"
+    description="Preparing the selected dashboard section."
+  />
+);
 
 export default function App() {
   return (
@@ -28,12 +46,54 @@ export default function App() {
           }
         >
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/orders" element={<OrdersPage />} />
-          <Route path="/orders/:orderId" element={<OrderDetailPage />} />
-          <Route path="/returns" element={<ReturnsPage />} />
-          <Route path="/returns/:returnId" element={<ReturnDetailPage />} />
-          <Route path="/finance" element={<FinancePage />} />
-          <Route path="/automation" element={<AutomationPage />} />
+          <Route
+            path="/orders"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <OrdersPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/orders/:orderId"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <OrderDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/returns"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <ReturnsPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/returns/:returnId"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <ReturnDetailPage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/finance"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <FinancePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="/automation"
+            element={
+              <Suspense fallback={loadingFallback}>
+                <AutomationPage />
+              </Suspense>
+            }
+          />
         </Route>
       </Route>
       <Route path="/home" element={<Navigate to="/" replace />} />
