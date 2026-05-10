@@ -57,7 +57,7 @@ export function AppShell() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="brand">
+        <div className="brand shell-brand">
           <div className="brand-mark" aria-hidden="true">
             VD
           </div>
@@ -99,36 +99,46 @@ export function AppShell() {
             ))}
           </nav>
         </div>
+        {isAdmin ? <div className="nav-group-label admin-nav-label">Admin tools</div> : null}
 
-        <div className="vendor-card">
+        <div className="vendor-card shell-card">
           <div>
-            <div className="session-label">Vendor</div>
+            <div className="session-label">Operational vendor</div>
             <div className="session-state">{currentVendor.vendorName}</div>
             <div className="session-meta">
               {currentUser?.name ?? 'Unknown user'} · {currentUser?.role ?? 'admin'}
             </div>
+            {!currentUser?.canSwitchVendors ? (
+              <div className="session-meta">Vendor scope is fixed for your account.</div>
+            ) : (
+              <div className="session-meta">Switch vendor context for orders, returns, finance, and automation.</div>
+            )}
           </div>
-          <label className="vendor-switcher">
-            <span className="sr-only">Select vendor</span>
-            <select
-              className="vendor-select"
-              value={selectedVendorId}
-              disabled={!currentUser?.canSwitchVendors}
-              onChange={(event) => handleVendorChange(event.target.value)}
-            >
-              {visibleVendors.map((vendor) => (
-                <option key={vendor.vendorId} value={vendor.vendorId}>
-                  {vendor.vendorName}
-                </option>
-              ))}
-            </select>
-          </label>
+          {currentUser?.canSwitchVendors ? (
+            <label className="vendor-switcher">
+              <span className="sr-only">Select vendor</span>
+              <select
+                className="vendor-select"
+                value={selectedVendorId}
+                onChange={(event) => handleVendorChange(event.target.value)}
+              >
+                {visibleVendors.map((vendor) => (
+                  <option key={vendor.vendorId} value={vendor.vendorId}>
+                    {vendor.vendorName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <div className="vendor-fixed-chip">{currentVendor.vendorName}</div>
+          )}
         </div>
 
-        <div className="session-card">
+        <div className="session-card shell-card">
           <div>
             <div className="session-label">Session</div>
             <div className="session-state">{token ? 'Authenticated' : 'Unauthenticated'}</div>
+            <div className="session-meta">Signed in as {currentUser?.email ?? 'unknown'}</div>
           </div>
           <button type="button" className="button button-secondary" onClick={handleLogout}>
             Logout
@@ -143,6 +153,11 @@ export function AppShell() {
           title="Operations"
           description="Core workspace for admin, vendor, support, and finance activity."
         />
+        <div className="shell-context-bar">
+          <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
+          <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'admin'}</span>
+          <span className="severity-chip severity-low">Vendor {currentVendor.vendorName}</span>
+        </div>
         <main className="page-frame">
           <Outlet />
         </main>

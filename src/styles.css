@@ -57,6 +57,9 @@ input {
   border-right: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.58);
   backdrop-filter: blur(18px);
+  display: grid;
+  align-content: start;
+  gap: 14px;
 }
 
 .brand {
@@ -99,7 +102,7 @@ input {
 .nav-group {
   display: grid;
   gap: 10px;
-  margin-bottom: 18px;
+  margin-bottom: 8px;
 }
 
 .nav-group-label {
@@ -112,7 +115,6 @@ input {
 }
 
 .session-card {
-  margin-top: 20px;
   padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--border);
@@ -124,7 +126,6 @@ input {
 }
 
 .vendor-card {
-  margin-top: 20px;
   padding: 16px;
   border-radius: 18px;
   border: 1px solid var(--border);
@@ -156,7 +157,7 @@ input {
 }
 
 .vendor-select {
-  min-width: 154px;
+  min-width: 168px;
   padding: 10px 12px;
   border-radius: 12px;
   border: 1px solid var(--border);
@@ -166,17 +167,25 @@ input {
 }
 
 .nav-link {
-  padding: 12px 14px;
+  padding: 11px 13px;
   border-radius: 12px;
+  border: 1px solid transparent;
+  font-weight: 600;
   transition:
     background-color 0.2s ease,
-    color 0.2s ease;
+    color 0.2s ease,
+    border-color 0.2s ease;
 }
 
 .nav-link.active,
 .nav-link:hover {
   color: #18202b;
   background: rgba(40, 72, 255, 0.1);
+  border-color: rgba(40, 72, 255, 0.2);
+}
+
+.nav-link.active {
+  box-shadow: inset 0 0 0 1px rgba(40, 72, 255, 0.12);
 }
 
 .app-content {
@@ -190,6 +199,37 @@ input {
   gap: 20px;
   align-items: flex-start;
   margin-bottom: 20px;
+}
+
+.shell-brand {
+  margin-bottom: 6px;
+}
+
+.admin-nav-label {
+  margin-top: -2px;
+  color: #9a3412;
+}
+
+.shell-card {
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.vendor-fixed-chip {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(59, 130, 246, 0.24);
+  background: rgba(59, 130, 246, 0.12);
+  color: #1e3a8a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.shell-context-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
 }
 
 .eyebrow {
@@ -1306,6 +1346,7 @@ h3 {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--border);
+    padding-bottom: 20px;
   }
 
   .page-header,
@@ -1354,6 +1395,12 @@ h3 {
 
   .queue-health {
     justify-content: flex-start;
+  }
+
+  .vendor-card,
+  .session-card {
+    flex-direction: column;
+    align-items: flex-start;
   }
 }
 
