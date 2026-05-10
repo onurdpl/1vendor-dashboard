@@ -1,9 +1,9 @@
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
-import { useServerResource } from '../lib/data';
+import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
-import { getFinanceDashboard, type FinanceDashboard } from '../features/finance/api';
+import { getFinanceDashboard } from '../features/finance/api';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -14,10 +14,7 @@ function formatDate(value: string) {
 }
 
 export function FinancePage() {
-  const { data: finance, isLoading, isError, error } = useServerResource(
-    () => getFinanceDashboard(),
-    queryKeys.finance.summary(),
-  );
+  const { data: finance, isLoading, isError, error } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
   const { message, tone, showFeedback } = useActionFeedback();
 
   if (isLoading) {

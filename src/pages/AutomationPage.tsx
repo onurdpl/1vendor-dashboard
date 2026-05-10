@@ -1,9 +1,9 @@
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
-import { useServerResource } from '../lib/data';
+import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
-import { getAutomationDashboard, type AutomationDashboard } from '../features/automation/api';
+import { getAutomationDashboard } from '../features/automation/api';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -16,9 +16,9 @@ function formatDate(value: string) {
 }
 
 export function AutomationPage() {
-  const { data: automation, isLoading, isError, error } = useServerResource(
-    () => getAutomationDashboard(),
+  const { data: automation, isLoading, isError, error } = useQueryResource(
     queryKeys.automation.alerts(),
+    getAutomationDashboard,
   );
   const { message, tone, showFeedback } = useActionFeedback();
 
