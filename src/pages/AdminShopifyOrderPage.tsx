@@ -68,114 +68,135 @@ export function AdminShopifyOrderPage() {
 
   return (
     <section className="dashboard order-detail">
-      <div className="hero-card">
+      <div className="hero-card operational-card">
         <div>
           <p className="eyebrow">Admin orders</p>
           <h2>Shopify Order #{breakdown.sourceShopifyOrderNumber}</h2>
-          <p className="page-description">
-            Source order {breakdown.sourceShopifyOrderId} · {breakdown.customer} · {formatDate(breakdown.createdAt)}
-          </p>
+          <p className="page-description">Operational allocation overview across assigned vendors.</p>
+        </div>
+        <div className="operational-meta-grid">
+          <div className="meta-item">
+            <span>Source order</span>
+            <strong>{breakdown.sourceShopifyOrderId}</strong>
+          </div>
+          <div className="meta-item">
+            <span>Customer</span>
+            <strong>{breakdown.customer}</strong>
+          </div>
+          <div className="meta-item">
+            <span>Created</span>
+            <strong>{formatDate(breakdown.createdAt)}</strong>
+          </div>
+          <div className="meta-item">
+            <span>Allocations</span>
+            <strong>{breakdown.allocations.length}</strong>
+          </div>
         </div>
       </div>
 
       {breakdown.allocations.map((allocation) => (
-        <article key={allocation.vendorId} className="panel">
-          <h3>{allocation.vendorName} allocation</h3>
-          <dl className="detail-list">
+        <article key={allocation.vendorId} className="panel allocation-card operational-card">
+          <header className="allocation-header">
             <div>
-              <dt>Original vendor</dt>
-              <dd>{allocation.originalVendorId}</dd>
+              <p className="eyebrow">Vendor allocation</p>
+              <h3>{allocation.vendorName}</h3>
             </div>
-            <div>
-              <dt>Assigned vendor</dt>
-              <dd>
-                {allocation.assignedVendorId}
-                {allocation.originalVendorId === allocation.assignedVendorId ? ' (same as original)' : ''}
-              </dd>
+            <div className="chip-row">
+              <span className={`status-badge status-${allocation.allocationStatus}`}>{allocation.allocationStatus}</span>
+              <span
+                className={`status-badge status-${allocation.fulfillmentActionState.toLowerCase().replace(/\s+/g, '-')}`}
+              >
+                {allocation.fulfillmentActionState}
+              </span>
+              <span className={`status-badge status-${allocation.shippingStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                {allocation.shippingStatus}
+              </span>
             </div>
-            <div>
-              <dt>Allocation order</dt>
-              <dd>{allocation.allocationOrderId}</dd>
-            </div>
-            <div>
-              <dt>Allocation status</dt>
-              <dd>{allocation.allocationStatus}</dd>
-            </div>
-            <div>
-              <dt>Cancellation reason</dt>
-              <dd>{allocation.cancellationReason ?? 'None'}</dd>
-            </div>
-            <div>
-              <dt>Reassignment required</dt>
-              <dd>{allocation.reassignmentRequired ? 'Yes' : 'No'}</dd>
-            </div>
-            <div>
-              <dt>Reassignment note</dt>
-              <dd>{allocation.reassignmentNote ?? 'None'}</dd>
-            </div>
-            <div>
-              <dt>Reassigned at</dt>
-              <dd>{allocation.reassignedAt ? formatDate(allocation.reassignedAt) : 'Not reassigned'}</dd>
-            </div>
-            <div>
-              <dt>Reassigned by</dt>
-              <dd>{allocation.reassignedBy ?? 'Not reassigned'}</dd>
-            </div>
-            <div>
-              <dt>Assignment blocked at</dt>
-              <dd>{allocation.assignmentBlockedAt ? formatDate(allocation.assignmentBlockedAt) : 'Not blocked'}</dd>
-            </div>
-            <div>
-              <dt>Total</dt>
-              <dd>{allocation.allocationTotal}</dd>
-            </div>
-            <div>
-              <dt>Refund total</dt>
-              <dd>{allocation.refundTotal}</dd>
-            </div>
-            <div>
-              <dt>Fulfillment</dt>
-              <dd>{allocation.fulfillmentStatus}</dd>
-            </div>
-            <div>
-              <dt>Fulfillment action state</dt>
-              <dd>{allocation.fulfillmentActionState}</dd>
-            </div>
-            <div>
-              <dt>Fulfillment action available</dt>
-              <dd>{allocation.fulfillmentActionAvailable ? 'Yes' : 'No'}</dd>
-            </div>
-            <div>
-              <dt>Shipping</dt>
-              <dd>{allocation.shippingStatus}</dd>
-            </div>
-            <div>
-              <dt>Carrier</dt>
-              <dd>{allocation.carrier ?? 'Not assigned'}</dd>
-            </div>
-            <div>
-              <dt>Tracking</dt>
-              <dd>{allocation.trackingNumber ?? 'Not assigned'}</dd>
-            </div>
-            <div>
-              <dt>Shipment created at</dt>
-              <dd>{allocation.shipmentCreatedAt ? formatDate(allocation.shipmentCreatedAt) : 'Not created'}</dd>
-            </div>
-            <div>
-              <dt>Shipment updated at</dt>
-              <dd>{allocation.shipmentUpdatedAt ? formatDate(allocation.shipmentUpdatedAt) : 'Not updated'}</dd>
-            </div>
-            <div>
-              <dt>Fulfilled at</dt>
-              <dd>{allocation.fulfilledAt ? formatDate(allocation.fulfilledAt) : 'Not fulfilled'}</dd>
-            </div>
-            <div>
-              <dt>Fulfilled by vendor</dt>
-              <dd>{allocation.fulfilledByVendorId ?? 'Not fulfilled'}</dd>
-            </div>
-          </dl>
+          </header>
 
-          <h3>Allocated line items</h3>
+          <div className="allocation-summary-grid">
+            <div className="summary-row">
+              <span>Original vendor</span>
+              <strong>{allocation.originalVendorId}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Assigned vendor</span>
+              <strong>{allocation.assignedVendorId}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Allocation order</span>
+              <strong>{allocation.allocationOrderId}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Total</span>
+              <strong>{allocation.allocationTotal}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Refund impact</span>
+              <strong>{allocation.refundTotal}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Fulfillment</span>
+              <strong>{allocation.fulfillmentStatus}</strong>
+            </div>
+          </div>
+
+          <section className="compact-meta-grid">
+            <div className="meta-item">
+              <span>Cancellation reason</span>
+              <strong className={allocation.cancellationReason ? '' : 'muted'}>{allocation.cancellationReason ?? 'None'}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Reassignment required</span>
+              <strong>{allocation.reassignmentRequired ? 'Yes' : 'No'}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Assignment blocked</span>
+              <strong className={allocation.assignmentBlockedAt ? '' : 'muted'}>
+                {allocation.assignmentBlockedAt ? formatDate(allocation.assignmentBlockedAt) : 'Not blocked'}
+              </strong>
+            </div>
+            <div className="meta-item">
+              <span>Reassigned by</span>
+              <strong className={allocation.reassignedBy ? '' : 'muted'}>{allocation.reassignedBy ?? 'Not reassigned'}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Carrier</span>
+              <strong className={allocation.carrier ? '' : 'muted'}>{allocation.carrier ?? 'Not assigned'}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Tracking</span>
+              <strong className={allocation.trackingNumber ? '' : 'muted'}>
+                {allocation.trackingNumber ?? 'Not assigned'}
+              </strong>
+            </div>
+          </section>
+
+          {allocation.reassignmentRequired ? (
+            <section className="action-row">
+              <p className="page-description">{allocation.reassignmentNote ?? 'Reassignment review required.'}</p>
+              <div className="detail-actions">
+                {allocation.reassignmentCandidateVendorIds.map((candidateVendorId) => (
+                  <button
+                    key={candidateVendorId}
+                    className="button button-primary"
+                    type="button"
+                    disabled={reassignAllocation.isPending}
+                    onClick={() => {
+                      reassignAllocation.mutate({
+                        allocationOrderId: allocation.allocationOrderId,
+                        nextVendorId: candidateVendorId,
+                      });
+                    }}
+                  >
+                    {reassignAllocation.isPending ? 'Preparing...' : `Reassign to ${candidateVendorId}`}
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
+          <h3 className="section-header">Allocated line items</h3>
           <div className="line-item-table">
             <div className="line-item-head">
               <span>SKU</span>
@@ -204,7 +225,7 @@ export function AdminShopifyOrderPage() {
             ))}
           </div>
 
-          <h3>Allocated refunded items</h3>
+          <h3 className="section-header">Allocated refunded items</h3>
           {allocation.refundedItems.length === 0 ? (
             <p className="page-description">No refunded items in this vendor allocation.</p>
           ) : (
@@ -230,50 +251,21 @@ export function AdminShopifyOrderPage() {
             </div>
           )}
 
-          {allocation.reassignmentRequired ? (
-            <div className="detail-actions">
-              <p className="page-description">
-                Reassignment candidates: {allocation.reassignmentCandidateVendorIds.join(', ')}
-              </p>
-              {allocation.reassignmentCandidateVendorIds.map((candidateVendorId) => (
-                <button
-                  key={candidateVendorId}
-                  className="button button-secondary"
-                  type="button"
-                  disabled={reassignAllocation.isPending}
-                  onClick={() => {
-                    reassignAllocation.mutate({
-                      allocationOrderId: allocation.allocationOrderId,
-                      nextVendorId: candidateVendorId,
-                    });
-                  }}
-                >
-                  {reassignAllocation.isPending ? 'Preparing...' : `Reassign to ${candidateVendorId}`}
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          <h3>Assignment history</h3>
-          <div className="line-item-table">
-            <div className="line-item-head">
-              <span>Action</span>
-              <span>From</span>
-              <span>To</span>
-              <span>Reason</span>
-              <span>Actor</span>
-              <span>At</span>
-            </div>
+          <h3 className="section-header">Assignment timeline</h3>
+          <div className="timeline-block">
             {allocation.assignmentHistory.map((entry, index) => (
-              <div key={`${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`} className="line-item-row">
-                <span>{entry.action}</span>
-                <span>{entry.fromVendorId ?? 'Unassigned'}</span>
-                <span>{entry.toVendorId}</span>
-                <span>{entry.reason ?? 'None'}</span>
-                <span>
-                  {entry.actorName} ({entry.actorRole})
-                </span>
-                <span>{formatDate(entry.createdAt)}</span>
+              <div key={`${allocation.vendorId}-${entry.action}-${entry.createdAt}-${index}`} className="timeline-event">
+                <div className="timeline-dot" aria-hidden="true" />
+                <div>
+                  <p className="timeline-title">
+                    {entry.action.replace(/_/g, ' ')} · {entry.toVendorId}
+                  </p>
+                  <p className="timeline-meta">
+                    {entry.fromVendorId ? `From ${entry.fromVendorId} · ` : ''}
+                    {entry.reason ?? 'No reason provided'} · {entry.actorName} ({entry.actorRole}) ·{' '}
+                    {formatDate(entry.createdAt)}
+                  </p>
+                </div>
               </div>
             ))}
           </div>
