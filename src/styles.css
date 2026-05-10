@@ -689,6 +689,12 @@ h3 {
   justify-items: start;
 }
 
+.automation-permission-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
 .automation-action p {
   margin: 8px 0 0;
   color: var(--text-muted);

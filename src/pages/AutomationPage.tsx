@@ -6,6 +6,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
+import { canPerformAction } from '../lib/auth';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -25,6 +26,7 @@ export function AutomationPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [queuedActionMessage, setQueuedActionMessage] = useState<string | null>(null);
   const primaryActionTitle = automation?.suggestions[0]?.title ?? null;
+  const canRunAutomationAction = canPerformAction('automation:write');
   const { mutateAsync: queueAction, isPending: isQueueingAction } = useMutationAction(
     async (title: string) => {
       await new Promise((resolve) => {
@@ -137,6 +139,11 @@ export function AutomationPage() {
                       type="button"
                       className="button button-secondary"
                       onClick={() => {
+                        if (!canRunAutomationAction) {
+                          showFeedback('You do not have permission to run this automation action.', 'error');
+                          return;
+                        }
+
                         setQueuedActionMessage(`${item.title} queued.`);
                         void queueAction(item.title).catch(() => {
                           setQueuedActionMessage(`${item.title} could not be queued.`);
@@ -144,10 +151,20 @@ export function AutomationPage() {
                         });
                         showFeedback(`${item.title} queued.`, 'success');
                       }}
-                      disabled={isQueueingAction}
+                      disabled={isQueueingAction || !canRunAutomationAction}
+                      title={
+                        canRunAutomationAction
+                          ? undefined
+                          : 'Automation actions require write access.'
+                      }
                     >
                       {item.actionLabel}
                     </button>
+                    {!canRunAutomationAction ? (
+                      <p className="automation-permission-note">
+                        Automation actions are read-only for your account.
+                      </p>
+                    ) : null}
                     {queuedActionMessage ? (
                       <ActionFeedback tone={queuedActionMessage.includes('could not') ? 'error' : 'success'} message={queuedActionMessage} />
                     ) : null}
@@ -156,7 +173,20 @@ export function AutomationPage() {
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={() => showFeedback(`${item.title} queued.`, 'success')}
+                    onClick={() => {
+                      if (!canRunAutomationAction) {
+                        showFeedback('You do not have permission to run automation actions.', 'error');
+                        return;
+                      }
+
+                      showFeedback(`${item.title} queued.`, 'success');
+                    }}
+                    disabled={!canRunAutomationAction}
+                    title={
+                      canRunAutomationAction
+                        ? undefined
+                        : 'Automation actions require write access.'
+                    }
                   >
                     {item.actionLabel}
                   </button>

@@ -16,6 +16,7 @@ export {
 } from './auth/session';
 
 export {
+  canPerformAction,
   getDefaultRole,
   hasPermission,
   type Permission,

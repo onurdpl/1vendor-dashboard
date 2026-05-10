@@ -32,6 +32,10 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
   return rolePermissions[role].includes(permission);
 }
 
+export function canPerformAction(permission: Permission): boolean {
+  return hasPermission(getCurrentUserRole(), permission);
+}
+
 export function getDefaultRole(): UserRole {
   return getCurrentUserRole();
 }
