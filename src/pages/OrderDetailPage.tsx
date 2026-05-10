@@ -41,11 +41,28 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
     },
   );
+  const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
+    async (payload: { orderId: string; action: 'label' | 'ship' | 'tracking' }) => {
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 300);
+      });
+      return payload;
+    },
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+    },
+  );
 
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
   const canReportIssue =
     isVendorAssignedOwner && !!order && (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
+  const canUseFulfillmentActions =
+    isVendorAssignedOwner &&
+    !!order &&
+    order.fulfillmentActionAvailable &&
+    order.allocationStatus !== 'pending_reassignment' &&
+    order.allocationStatus !== 'vendor_blocked';
 
   if (isLoading) {
     return (
@@ -99,6 +116,10 @@ export function OrderDetailPage() {
               <dd>{order.fulfillmentStatus}</dd>
             </div>
             <div>
+              <dt>Fulfillment action state</dt>
+              <dd>{order.fulfillmentActionState}</dd>
+            </div>
+            <div>
               <dt>Allocation workflow</dt>
               <dd>{order.allocationStatus}</dd>
             </div>
@@ -125,6 +146,22 @@ export function OrderDetailPage() {
             <div>
               <dt>Tracking number</dt>
               <dd>{order.trackingNumber ?? 'Not assigned'}</dd>
+            </div>
+            <div>
+              <dt>Shipment created at</dt>
+              <dd>{order.shipmentCreatedAt ? formatDate(order.shipmentCreatedAt) : 'Not created'}</dd>
+            </div>
+            <div>
+              <dt>Shipment updated at</dt>
+              <dd>{order.shipmentUpdatedAt ? formatDate(order.shipmentUpdatedAt) : 'Not updated'}</dd>
+            </div>
+            <div>
+              <dt>Fulfilled at</dt>
+              <dd>{order.fulfilledAt ? formatDate(order.fulfilledAt) : 'Not fulfilled'}</dd>
+            </div>
+            <div>
+              <dt>Fulfilled by vendor</dt>
+              <dd>{order.fulfilledByVendorId ?? 'Not fulfilled'}</dd>
             </div>
             <div>
               <dt>Estimated delivery</dt>
@@ -232,6 +269,63 @@ export function OrderDetailPage() {
           {!canReportIssue ? (
             <p className="automation-permission-note">This allocation is currently not reportable.</p>
           ) : null}
+        </article>
+      ) : null}
+
+      {canUseFulfillmentActions ? (
+        <article className="panel">
+          <h3>Fulfillment actions</h3>
+          <p className="page-description">These actions are available only to the assigned vendor for this allocation.</p>
+          <div className="detail-actions">
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={isRunningFulfillmentAction}
+              onClick={() => {
+                if (!order) {
+                  return;
+                }
+
+                void runFulfillmentAction({ orderId: order.id, action: 'label' })
+                  .then(() => showFeedback('Shipping label creation requested (mock).', 'success'))
+                  .catch(() => showFeedback('Unable to create shipping label right now.', 'error'));
+              }}
+            >
+              Create shipping label
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={isRunningFulfillmentAction}
+              onClick={() => {
+                if (!order) {
+                  return;
+                }
+
+                void runFulfillmentAction({ orderId: order.id, action: 'ship' })
+                  .then(() => showFeedback('Order marked as shipped (mock).', 'success'))
+                  .catch(() => showFeedback('Unable to mark shipment right now.', 'error'));
+              }}
+            >
+              Mark as shipped
+            </button>
+            <button
+              type="button"
+              className="button button-secondary"
+              disabled={isRunningFulfillmentAction}
+              onClick={() => {
+                if (!order) {
+                  return;
+                }
+
+                void runFulfillmentAction({ orderId: order.id, action: 'tracking' })
+                  .then(() => showFeedback('Tracking update submitted (mock).', 'success'))
+                  .catch(() => showFeedback('Unable to update tracking right now.', 'error'));
+              }}
+            >
+              Update tracking
+            </button>
+          </div>
         </article>
       ) : null}
 

@@ -138,6 +138,14 @@ export function AdminShopifyOrderPage() {
               <dd>{allocation.fulfillmentStatus}</dd>
             </div>
             <div>
+              <dt>Fulfillment action state</dt>
+              <dd>{allocation.fulfillmentActionState}</dd>
+            </div>
+            <div>
+              <dt>Fulfillment action available</dt>
+              <dd>{allocation.fulfillmentActionAvailable ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
               <dt>Shipping</dt>
               <dd>{allocation.shippingStatus}</dd>
             </div>
@@ -148,6 +156,22 @@ export function AdminShopifyOrderPage() {
             <div>
               <dt>Tracking</dt>
               <dd>{allocation.trackingNumber ?? 'Not assigned'}</dd>
+            </div>
+            <div>
+              <dt>Shipment created at</dt>
+              <dd>{allocation.shipmentCreatedAt ? formatDate(allocation.shipmentCreatedAt) : 'Not created'}</dd>
+            </div>
+            <div>
+              <dt>Shipment updated at</dt>
+              <dd>{allocation.shipmentUpdatedAt ? formatDate(allocation.shipmentUpdatedAt) : 'Not updated'}</dd>
+            </div>
+            <div>
+              <dt>Fulfilled at</dt>
+              <dd>{allocation.fulfilledAt ? formatDate(allocation.fulfilledAt) : 'Not fulfilled'}</dd>
+            </div>
+            <div>
+              <dt>Fulfilled by vendor</dt>
+              <dd>{allocation.fulfilledByVendorId ?? 'Not fulfilled'}</dd>
             </div>
           </dl>
 

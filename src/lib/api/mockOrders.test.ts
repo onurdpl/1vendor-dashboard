@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { canVendorReportFulfillmentIssue, getMockOrder, getShopifyOrderBreakdown, listMockOrders } from './mockOrders';
+import {
+  canVendorPerformFulfillmentActions,
+  canVendorReportFulfillmentIssue,
+  getMockOrder,
+  getShopifyOrderBreakdown,
+  listMockOrders,
+} from './mockOrders';
 
 describe('mock orders vendor allocations', () => {
   it('shows the shared Shopify order as a vendor A allocation', () => {
@@ -21,6 +27,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.allocationStatus).toBe('pending_reassignment');
     expect(sharedOrder?.cancellationReason).toBe('out_of_stock');
     expect(sharedOrder?.reassignmentRequired).toBe(true);
+    expect(sharedOrder?.fulfillmentActionState).toBe('awaiting_shipment');
+    expect(sharedOrder?.fulfillmentActionAvailable).toBe(false);
     expect(sharedOrder?.assignmentHistory.some((entry) => entry.action === 'vendor_blocked')).toBe(true);
     expect(sharedOrder?.assignmentHistory.some((entry) => entry.action === 'reassignment_requested')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Processing')).toBe(true);
@@ -48,6 +56,8 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.carrier).toBe('UPS');
     expect(sharedOrder?.allocationStatus).toBe('active');
     expect(sharedOrder?.reassignmentRequired).toBe(false);
+    expect(sharedOrder?.fulfillmentActionState).toBe('shipped');
+    expect(sharedOrder?.fulfillmentActionAvailable).toBe(true);
     expect(sharedOrder?.assignmentHistory).toHaveLength(1);
     expect(sharedOrder?.assignmentHistory[0].action).toBe('assigned');
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Fulfilled')).toBe(true);
@@ -96,5 +106,14 @@ describe('mock orders vendor allocations', () => {
     expect(canVendorReportFulfillmentIssue('ORD-B-1001', 'demo-vendor-a')).toBe(false);
     expect(canVendorReportFulfillmentIssue('ORD-A-1001', 'demo-vendor-b')).toBe(false);
     expect(canVendorReportFulfillmentIssue('ORD-B-1001', 'demo-vendor-b')).toBe(true);
+  });
+
+  it('allows only assigned vendor to access fulfillment actions', () => {
+    expect(canVendorPerformFulfillmentActions('ORD-B-1001', 'demo-vendor-b')).toBe(true);
+    expect(canVendorPerformFulfillmentActions('ORD-B-1001', 'demo-vendor-a')).toBe(false);
+  });
+
+  it('blocks fulfillment actions for pending reassignment allocations', () => {
+    expect(canVendorPerformFulfillmentActions('ORD-A-1001', 'demo-vendor-a')).toBe(false);
   });
 });

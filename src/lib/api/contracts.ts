@@ -3,6 +3,7 @@ import type { VendorId } from '../auth/vendorContext';
 export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
 export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partially Fulfilled';
 export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
+export type FulfillmentActionState = 'awaiting_shipment' | 'label_created' | 'shipped' | 'delivered';
 export type AllocationStatus = 'active' | 'vendor_blocked' | 'pending_reassignment' | 'reassigned' | 'fulfilled';
 export type AllocationBlockReason =
   | 'out_of_stock'
@@ -36,6 +37,12 @@ export type OrderSummary = {
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
   assignmentHistory: AssignmentHistoryEntry[];
+  fulfillmentActionState: FulfillmentActionState;
+  fulfillmentActionAvailable: boolean;
+  fulfilledAt?: string;
+  fulfilledByVendorId?: VendorId;
+  shipmentCreatedAt?: string;
+  shipmentUpdatedAt?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
@@ -63,6 +70,12 @@ export type OrderLineItem = {
   cancellationReason?: AllocationBlockReason;
   reassignmentRequired: boolean;
   assignmentBlockedAt?: string;
+  fulfillmentActionState: FulfillmentActionState;
+  fulfillmentActionAvailable: boolean;
+  fulfilledAt?: string;
+  fulfilledByVendorId?: VendorId;
+  shipmentCreatedAt?: string;
+  shipmentUpdatedAt?: string;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
@@ -93,6 +106,12 @@ export type VendorAllocationSummary = {
   reassignedAt?: string;
   reassignedBy?: string;
   assignmentHistory: AssignmentHistoryEntry[];
+  fulfillmentActionState: FulfillmentActionState;
+  fulfillmentActionAvailable: boolean;
+  fulfilledAt?: string;
+  fulfilledByVendorId?: VendorId;
+  shipmentCreatedAt?: string;
+  shipmentUpdatedAt?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;

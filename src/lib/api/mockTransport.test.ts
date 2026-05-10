@@ -54,6 +54,14 @@ describe('mock admin Shopify order breakdown transport', () => {
           allocation.assignmentHistory.some((entry) => entry.action === 'reassignment_requested'),
       ),
     ).toBe(true);
+    expect(
+      breakdown.allocations.some(
+        (allocation) =>
+          allocation.fulfillmentActionState === 'shipped' &&
+          allocation.fulfillmentActionAvailable &&
+          allocation.shipmentUpdatedAt !== undefined,
+      ),
+    ).toBe(true);
   });
 
   it('blocks vendor user from admin Shopify breakdown endpoint', async () => {

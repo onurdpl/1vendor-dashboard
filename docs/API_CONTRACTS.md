@@ -92,10 +92,12 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
+- Fulfillment actions belong to the assigned vendor only. Suggested action state fields include `fulfillmentActionState`, `fulfillmentActionAvailable`, `shipmentCreatedAt`, `shipmentUpdatedAt`, `fulfilledAt`, and `fulfilledByVendorId`.
 - In the assigned-vendor model, vendor-facing order endpoints should scope by `assignedVendorId`.
 - Allocation workflow fields include `allocationStatus`, `cancellationReason`, `reassignmentRequired`, and optional `assignmentBlockedAt`.
 - Allocation records should include `assignmentHistory` for auditability (`assigned`, `vendor_blocked`, `reassignment_requested`, `reassigned`).
 - Vendor-reported blocking reasons may include `out_of_stock`, `vendor_cancelled`, `damaged_inventory`, or `fulfillment_issue`.
+- Blocked allocations (`vendor_blocked`, `pending_reassignment`) must not allow fulfillment execution until reassignment or recovery.
 
 ### GET /admin/orders/:shopifyOrderId
 
@@ -214,6 +216,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Reassignment actions should be stored with audit history (`reassignedBy`, `reassignedAt`, and note/reason trail).
 - Assignment history is required for auditability and should be persisted by backend as an append-only timeline.
 - Audit history entries should include actor identity, actor role, reason, and timestamps.
+- Fulfillment actions (`create_label`, `mark_shipped`, `update_tracking`) should be audit logged by backend with actor and timestamp.
+- Carrier/shipping API integrations are future work and should plug into this assigned-vendor fulfillment model.
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
