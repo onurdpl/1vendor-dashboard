@@ -1,7 +1,7 @@
 import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { queryKeys } from '../lib/api/queryKeys';
-import { useServerResource } from '../lib/data';
+import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, type OrderDetail as OrderDetailType } from '../features/orders/api';
 
 function formatDate(value: string) {
@@ -13,7 +13,8 @@ function formatDate(value: string) {
 
 export function OrderDetailPage() {
   const { orderId } = useParams();
-  const { data: order, isLoading, isError, error } = useServerResource(
+  const { data: order, isLoading, isError, error } = useQueryResource(
+    orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
     () => {
       if (!orderId) {
         throw new Error('Order not found.');
@@ -21,7 +22,6 @@ export function OrderDetailPage() {
 
       return getOrder(orderId);
     },
-    orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
   );
 
   if (isLoading) {
