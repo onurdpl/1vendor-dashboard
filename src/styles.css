@@ -1111,10 +1111,22 @@ h3 {
   gap: 18px;
 }
 
+.automation-workspace {
+  gap: 14px;
+}
+
+.automation-summary-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .automation-grid {
   display: grid;
   gap: 18px;
   grid-template-columns: 1.4fr 1fr;
+}
+
+.operational-grid {
+  align-items: start;
 }
 
 .automation-alerts,
@@ -1162,6 +1174,7 @@ h3 {
   display: grid;
   gap: 10px;
   justify-items: start;
+  min-width: 180px;
 }
 
 .automation-permission-note {
