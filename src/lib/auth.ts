@@ -14,3 +14,9 @@ export {
   type Permission,
   type UserRole,
 } from './auth/permissions';
+
+export {
+  getCurrentVendorContext,
+  type VendorContext,
+  type VendorId,
+} from './auth/vendorContext';
