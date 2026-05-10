@@ -19,6 +19,7 @@
   --accent: #2848ff;
   --accent-strong: #203cd4;
   --shadow: 0 24px 64px rgba(17, 24, 39, 0.12);
+  --transition-fast: 0.18s ease;
 }
 
 * {
@@ -44,6 +45,14 @@ a {
 button,
 input {
   font: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+a:focus-visible {
+  outline: 2px solid rgba(40, 72, 255, 0.5);
+  outline-offset: 2px;
 }
 
 .app-shell {
@@ -92,6 +101,11 @@ input {
 .panel p,
 .nav-link {
   color: var(--text-muted);
+}
+
+.page-description {
+  line-height: 1.5;
+  overflow-wrap: anywhere;
 }
 
 .nav {
@@ -164,6 +178,9 @@ input {
   background: white;
   color: inherit;
   font: inherit;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .nav-link {
@@ -172,9 +189,9 @@ input {
   border: 1px solid transparent;
   font-weight: 600;
   transition:
-    background-color 0.2s ease,
-    color 0.2s ease,
-    border-color 0.2s ease;
+    background-color var(--transition-fast),
+    color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .nav-link.active,
@@ -428,6 +445,11 @@ h3 {
   padding: 13px 18px;
   font-weight: 700;
   cursor: pointer;
+  transition:
+    transform var(--transition-fast),
+    box-shadow var(--transition-fast),
+    background-color var(--transition-fast),
+    border-color var(--transition-fast);
 }
 
 .button-primary {
@@ -438,6 +460,25 @@ h3 {
 .button-secondary {
   background: white;
   border: 1px solid var(--border);
+}
+
+.button:hover {
+  transform: translateY(-1px);
+}
+
+.button:disabled {
+  transform: none;
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.button-primary:hover {
+  box-shadow: 0 10px 24px rgba(40, 72, 255, 0.28);
+}
+
+.button-secondary:hover {
+  border-color: rgba(40, 72, 255, 0.24);
+  background: rgba(255, 255, 255, 0.96);
 }
 
 .button-link {
@@ -572,9 +613,9 @@ h3 {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.72);
   transition:
-    transform 0.18s ease,
-    border-color 0.18s ease,
-    box-shadow 0.18s ease;
+    transform var(--transition-fast),
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .orders-link:hover {
@@ -598,6 +639,8 @@ h3 {
   font-size: 0.85rem;
   font-weight: 700;
   border: 1px solid transparent;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .order-state-stack {
@@ -769,6 +812,7 @@ h3 {
 
 .summary-row strong {
   font-size: 0.98rem;
+  overflow-wrap: anywhere;
 }
 
 .operational-meta-grid,
@@ -797,6 +841,7 @@ h3 {
 
 .meta-item strong {
   font-size: 0.92rem;
+  overflow-wrap: anywhere;
 }
 
 .muted {
@@ -868,6 +913,7 @@ h3 {
   margin: 0;
   font-weight: 700;
   text-transform: capitalize;
+  overflow-wrap: anywhere;
 }
 
 .timeline-meta {
@@ -921,6 +967,9 @@ h3 {
   background: rgba(255, 255, 255, 0.74);
   display: grid;
   gap: 10px;
+  transition:
+    border-color var(--transition-fast),
+    box-shadow var(--transition-fast);
 }
 
 .queue-critical {
@@ -960,6 +1009,7 @@ h3 {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.9rem;
+  overflow-wrap: anywhere;
 }
 
 .queue-meta {
@@ -970,6 +1020,10 @@ h3 {
   color: var(--text-muted);
 }
 
+.queue-meta span {
+  overflow-wrap: anywhere;
+}
+
 .queue-meta strong {
   color: #18202b;
 }
@@ -978,6 +1032,7 @@ h3 {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: center;
 }
 
 .queue-muted-action {
@@ -1356,6 +1411,11 @@ h3 {
   border-top: 1px solid var(--border);
 }
 
+.line-item-row span,
+.line-item-head span {
+  overflow-wrap: anywhere;
+}
+
 .order-detail {
   gap: 18px;
 }
@@ -1515,6 +1575,12 @@ h3 {
 
   .button {
     width: 100%;
+  }
+
+  .status-badge,
+  .severity-chip {
+    white-space: normal;
+    text-align: center;
   }
 
   .vendor-select {
