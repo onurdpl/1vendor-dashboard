@@ -162,6 +162,36 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
 
+## Single Shopify Store Multi-Vendor Order Allocation
+
+The expected production model is a single Shopify store that can contain products from multiple vendors.
+
+- One Shopify order can contain line items from multiple vendors.
+- Vendor identity comes from variant or product metafield data during ingestion.
+- The backend must allocate Shopify order line items by vendor before exposing them to the frontend.
+- Stored vendor-facing order records must always be scoped by `vendorId`.
+- Vendors must only receive their own allocated line items.
+- Admin users may inspect the full order and the per-vendor allocation breakdown.
+- The frontend receives already-scoped vendor order data and must not perform Shopify allocation in production.
+
+### Allocation Rules
+
+- Each Shopify line item should be matched to a vendor using metafield data.
+- If a line item cannot be mapped to a vendor, the backend should keep it unmapped for review or exclude it from vendor-facing records according to ingestion policy.
+- The original Shopify order ID and order number must be preserved across allocations.
+- Multiple allocations can be produced for a single Shopify order when line items belong to different vendors.
+- Vendor allocation logic must be deterministic and idempotent.
+
+### Example
+
+- Shopify Order `#1001`
+  - `SKU123 / Medium` -> Demo Vendor A
+  - `SKU123 / Large` -> Demo Vendor B
+  - `Standard Product` -> Demo Vendor A
+
+- Vendor A should receive only the Vendor A line items for order `#1001`.
+- Vendor B should receive only the Vendor B line items for order `#1001`.
+
 ## Frontend Integration Notes
 
 - The frontend currently uses mock transport in local/demo mode.
