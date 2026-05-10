@@ -1,9 +1,12 @@
 import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder } from '../features/orders/api';
-import { getCurrentUserRole } from '../lib/auth';
+import { getCurrentUser, getCurrentUserRole } from '../lib/auth';
+import { useActionFeedback } from '../lib/ui';
+import { useMutationAction } from '../hooks/useMutationAction';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -15,6 +18,8 @@ function formatDate(value: string) {
 export function OrderDetailPage() {
   const { orderId } = useParams();
   const isAdmin = getCurrentUserRole() === 'admin';
+  const currentUser = getCurrentUser();
+  const { message, tone, showFeedback } = useActionFeedback();
   const { data: order, isLoading, isError, error } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
     () => {
@@ -25,6 +30,22 @@ export function OrderDetailPage() {
       return getOrder(orderId);
     },
   );
+  const { mutateAsync: reportFulfillmentIssue, isPending: isReportingIssue } = useMutationAction(
+    async (issueOrderId: string) => {
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 300);
+      });
+      return issueOrderId;
+    },
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+    },
+  );
+
+  const isVendorAssignedOwner =
+    currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
+  const canReportIssue =
+    isVendorAssignedOwner && !!order && (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
 
   if (isLoading) {
     return (
@@ -76,6 +97,22 @@ export function OrderDetailPage() {
             <div>
               <dt>Fulfillment</dt>
               <dd>{order.fulfillmentStatus}</dd>
+            </div>
+            <div>
+              <dt>Allocation workflow</dt>
+              <dd>{order.allocationStatus}</dd>
+            </div>
+            <div>
+              <dt>Cancellation reason</dt>
+              <dd>{order.cancellationReason ?? 'None'}</dd>
+            </div>
+            <div>
+              <dt>Reassignment required</dt>
+              <dd>{order.reassignmentRequired ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Assignment blocked at</dt>
+              <dd>{order.assignmentBlockedAt ? formatDate(order.assignmentBlockedAt) : 'Not blocked'}</dd>
             </div>
             <div>
               <dt>Shipping</dt>
@@ -140,6 +177,9 @@ export function OrderDetailPage() {
               <span>{item.quantity}</span>
               <span>{item.price}</span>
               <span className="order-state-stack">
+                <span className={`status-badge status-${item.allocationStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                  {item.allocationStatus}
+                </span>
                 <span className={`status-badge status-${item.fulfillmentStatus.toLowerCase().replace(/\s+/g, '-')}`}>
                   {item.fulfillmentStatus}
                 </span>
@@ -161,6 +201,41 @@ export function OrderDetailPage() {
           </Link>
         </article>
       ) : null}
+
+      {isVendorAssignedOwner ? (
+        <article className="panel">
+          <h3>Vendor workflow</h3>
+          <p className="page-description">
+            Report allocation blocking issues to mark this fulfillment as pending reassignment for admin follow-up.
+          </p>
+          <button
+            type="button"
+            className="button button-secondary"
+            onClick={() => {
+              if (!canReportIssue || !order) {
+                showFeedback('This allocation is already blocked for reassignment.', 'info');
+                return;
+              }
+
+              void reportFulfillmentIssue(order.id)
+                .then(() => {
+                  showFeedback('Fulfillment issue reported. Allocation marked for admin review.', 'success');
+                })
+                .catch(() => {
+                  showFeedback('Unable to report fulfillment issue right now.', 'error');
+                });
+            }}
+            disabled={isReportingIssue || !canReportIssue}
+          >
+            Report fulfillment issue
+          </button>
+          {!canReportIssue ? (
+            <p className="automation-permission-note">This allocation is currently not reportable.</p>
+          ) : null}
+        </article>
+      ) : null}
+
+      {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>
   );
 }

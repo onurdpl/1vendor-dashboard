@@ -44,6 +44,14 @@ describe('mock admin Shopify order breakdown transport', () => {
         (allocation) => allocation.assignedVendorId === allocation.originalVendorId && allocation.vendorId === allocation.assignedVendorId,
       ),
     ).toBe(true);
+    expect(
+      breakdown.allocations.some(
+        (allocation) =>
+          allocation.allocationStatus === 'pending_reassignment' &&
+          allocation.reassignmentRequired &&
+          allocation.cancellationReason === 'out_of_stock',
+      ),
+    ).toBe(true);
   });
 
   it('blocks vendor user from admin Shopify breakdown endpoint', async () => {

@@ -13,6 +13,8 @@ import type {
   FulfillmentStatus,
   ShippingStatus,
   ShopifyOrderBreakdown,
+  AllocationStatus,
+  AllocationBlockReason,
 } from './contracts';
 import { getMockReturn, listMockReturns } from './mockReturns';
 
@@ -32,6 +34,10 @@ type VendorOrder = OrderDetail & {
 
 type AllocationFulfillmentState = {
   status: OrderStatus;
+  allocationStatus: AllocationStatus;
+  cancellationReason?: AllocationBlockReason;
+  reassignmentRequired: boolean;
+  assignmentBlockedAt?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
@@ -63,6 +69,10 @@ function createLineItems(
     assignedVendorId: lineItem.assignedVendorId,
     vendorId,
     name: lineItem.title,
+    allocationStatus: allocationFulfillment.allocationStatus,
+    cancellationReason: allocationFulfillment.cancellationReason,
+    reassignmentRequired: allocationFulfillment.reassignmentRequired,
+    assignmentBlockedAt: allocationFulfillment.assignmentBlockedAt,
     fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
     shippingStatus: allocationFulfillment.shippingStatus,
     trackingNumber: allocationFulfillment.trackingNumber,
@@ -77,6 +87,10 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
   if (normalizedOrderNumber === 1001 && vendorId === 'demo-vendor-a') {
     return {
       status: 'Processing',
+      allocationStatus: 'pending_reassignment',
+      cancellationReason: 'out_of_stock',
+      reassignmentRequired: true,
+      assignmentBlockedAt: '2026-05-09T15:05:00Z',
       fulfillmentStatus: 'Processing',
       shippingStatus: 'Awaiting Shipment',
     };
@@ -85,6 +99,8 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
   if (normalizedOrderNumber === 1001 && vendorId === 'demo-vendor-b') {
     return {
       status: 'Shipped',
+      allocationStatus: 'active',
+      reassignmentRequired: false,
       fulfillmentStatus: 'Fulfilled',
       shippingStatus: 'In Transit',
       trackingNumber: 'TRK-B-1001',
@@ -96,6 +112,8 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
   if (normalizedOrderNumber === 1002 && vendorId === 'demo-vendor-a') {
     return {
       status: 'Delivered',
+      allocationStatus: 'fulfilled',
+      reassignmentRequired: false,
       fulfillmentStatus: 'Fulfilled',
       shippingStatus: 'Delivered',
       trackingNumber: 'TRK-A-1002',
@@ -107,6 +125,8 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
   if (normalizedOrderNumber === 2001 && vendorId === 'demo-vendor-b') {
     return {
       status: 'Pending',
+      allocationStatus: 'active',
+      reassignmentRequired: false,
       fulfillmentStatus: 'Pending',
       shippingStatus: 'Awaiting Shipment',
     };
@@ -115,6 +135,8 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
   if (normalizedOrderNumber === 2002 && vendorId === 'demo-vendor-b') {
     return {
       status: 'Shipped',
+      allocationStatus: 'active',
+      reassignmentRequired: false,
       fulfillmentStatus: 'Fulfilled',
       shippingStatus: 'In Transit',
       trackingNumber: 'TRK-B-2002',
@@ -125,6 +147,8 @@ function getAllocationFulfillment(vendorId: VendorId, orderNumber: string | numb
 
   return {
     status: sourceOrders.find((order) => order.orderNumber === normalizedOrderNumber)?.status ?? 'Pending',
+    allocationStatus: 'active',
+    reassignmentRequired: false,
     fulfillmentStatus: 'Processing',
     shippingStatus: 'Awaiting Shipment',
   };
@@ -310,6 +334,10 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
       sourceShopifyOrderId: sourceOrder.id,
       sourceShopifyOrderNumber: sourceOrder.orderNumber,
       status: allocationFulfillment.status,
+      allocationStatus: allocationFulfillment.allocationStatus,
+      cancellationReason: allocationFulfillment.cancellationReason,
+      reassignmentRequired: allocationFulfillment.reassignmentRequired,
+      assignmentBlockedAt: allocationFulfillment.assignmentBlockedAt,
       fulfillmentStatus: allocationFulfillment.fulfillmentStatus,
       shippingStatus: allocationFulfillment.shippingStatus,
       trackingNumber: allocationFulfillment.trackingNumber,
@@ -358,6 +386,16 @@ export function getMockOrder(orderId: string, vendorId?: VendorId): OrderDetail 
   return orders.find((order) => order.assignedVendorId === currentVendorId && order.id === orderId) ?? null;
 }
 
+export function canVendorReportFulfillmentIssue(orderId: string, vendorId: VendorId): boolean {
+  const order = getMockOrder(orderId, vendorId);
+
+  if (!order) {
+    return false;
+  }
+
+  return order.assignedVendorId === vendorId && (order.allocationStatus === 'active' || order.allocationStatus === 'fulfilled');
+}
+
 export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBreakdown | null {
   const sourceKey = parseSourceOrderKey(shopifyOrderId);
   const sourceMatches = orders.filter(
@@ -392,6 +430,10 @@ export function getShopifyOrderBreakdown(shopifyOrderId: string): ShopifyOrderBr
       vendorName: vendorLookup.get(allocationOrder.assignedVendorId) ?? allocationOrder.assignedVendorId,
       allocationOrderId: allocationOrder.id,
       status: allocationOrder.status,
+      allocationStatus: allocationOrder.allocationStatus,
+      cancellationReason: allocationOrder.cancellationReason,
+      reassignmentRequired: allocationOrder.reassignmentRequired,
+      assignmentBlockedAt: allocationOrder.assignmentBlockedAt,
       fulfillmentStatus: allocationOrder.fulfillmentStatus,
       shippingStatus: allocationOrder.shippingStatus,
       trackingNumber: allocationOrder.trackingNumber,

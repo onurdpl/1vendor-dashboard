@@ -80,6 +80,22 @@ export function AdminShopifyOrderPage() {
               <dd>{allocation.allocationOrderId}</dd>
             </div>
             <div>
+              <dt>Allocation status</dt>
+              <dd>{allocation.allocationStatus}</dd>
+            </div>
+            <div>
+              <dt>Cancellation reason</dt>
+              <dd>{allocation.cancellationReason ?? 'None'}</dd>
+            </div>
+            <div>
+              <dt>Reassignment required</dt>
+              <dd>{allocation.reassignmentRequired ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt>Assignment blocked at</dt>
+              <dd>{allocation.assignmentBlockedAt ? formatDate(allocation.assignmentBlockedAt) : 'Not blocked'}</dd>
+            </div>
+            <div>
               <dt>Total</dt>
               <dd>{allocation.allocationTotal}</dd>
             </div>

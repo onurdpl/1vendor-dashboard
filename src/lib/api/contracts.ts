@@ -3,6 +3,12 @@ import type { VendorId } from '../auth/vendorContext';
 export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
 export type FulfillmentStatus = 'Pending' | 'Processing' | 'Fulfilled' | 'Partially Fulfilled';
 export type ShippingStatus = 'Awaiting Shipment' | 'Label Created' | 'In Transit' | 'Delivered';
+export type AllocationStatus = 'active' | 'vendor_blocked' | 'pending_reassignment' | 'reassigned' | 'fulfilled';
+export type AllocationBlockReason =
+  | 'out_of_stock'
+  | 'vendor_cancelled'
+  | 'damaged_inventory'
+  | 'fulfillment_issue';
 
 export type OrderSummary = {
   originalVendorId: VendorId;
@@ -13,6 +19,10 @@ export type OrderSummary = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
   status: OrderStatus;
+  allocationStatus: AllocationStatus;
+  cancellationReason?: AllocationBlockReason;
+  reassignmentRequired: boolean;
+  assignmentBlockedAt?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
@@ -36,6 +46,10 @@ export type OrderLineItem = {
   // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
   fulfillmentStatus: FulfillmentStatus;
+  allocationStatus: AllocationStatus;
+  cancellationReason?: AllocationBlockReason;
+  reassignmentRequired: boolean;
+  assignmentBlockedAt?: string;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
@@ -57,6 +71,10 @@ export type VendorAllocationSummary = {
   vendorName: string;
   allocationOrderId: string;
   status: OrderStatus;
+  allocationStatus: AllocationStatus;
+  cancellationReason?: AllocationBlockReason;
+  reassignmentRequired: boolean;
+  assignmentBlockedAt?: string;
   fulfillmentStatus: FulfillmentStatus;
   shippingStatus: ShippingStatus;
   trackingNumber?: string;

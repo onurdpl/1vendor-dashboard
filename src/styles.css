@@ -569,6 +569,30 @@ h3 {
   border-color: rgba(249, 115, 22, 0.18);
 }
 
+.status-active {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.status-vendor_blocked {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.status-pending_reassignment {
+  color: #7c2d12;
+  background: rgba(249, 115, 22, 0.12);
+  border-color: rgba(249, 115, 22, 0.18);
+}
+
+.status-reassigned {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.12);
+  border-color: rgba(59, 130, 246, 0.18);
+}
+
 .status-delivered {
   color: #166534;
   background: rgba(34, 197, 94, 0.12);

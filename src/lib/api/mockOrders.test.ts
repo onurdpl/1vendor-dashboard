@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from './mockOrders';
+import { canVendorReportFulfillmentIssue, getMockOrder, getShopifyOrderBreakdown, listMockOrders } from './mockOrders';
 
 describe('mock orders vendor allocations', () => {
   it('shows the shared Shopify order as a vendor A allocation', () => {
@@ -18,8 +18,12 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.lineItems.map((item) => item.sku)).toEqual(['SKU123', 'STANDARD']);
     expect(sharedOrder?.fulfillmentStatus).toBe('Processing');
     expect(sharedOrder?.shippingStatus).toBe('Awaiting Shipment');
+    expect(sharedOrder?.allocationStatus).toBe('pending_reassignment');
+    expect(sharedOrder?.cancellationReason).toBe('out_of_stock');
+    expect(sharedOrder?.reassignmentRequired).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Processing')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'Awaiting Shipment')).toBe(true);
+    expect(sharedOrder?.lineItems.every((item) => item.allocationStatus === 'pending_reassignment')).toBe(true);
   });
 
   it('shows the same Shopify order as a vendor B allocation', () => {
@@ -40,8 +44,11 @@ describe('mock orders vendor allocations', () => {
     expect(sharedOrder?.shippingStatus).toBe('In Transit');
     expect(sharedOrder?.trackingNumber).toBe('TRK-B-1001');
     expect(sharedOrder?.carrier).toBe('UPS');
+    expect(sharedOrder?.allocationStatus).toBe('active');
+    expect(sharedOrder?.reassignmentRequired).toBe(false);
     expect(sharedOrder?.lineItems.every((item) => item.fulfillmentStatus === 'Fulfilled')).toBe(true);
     expect(sharedOrder?.lineItems.every((item) => item.shippingStatus === 'In Transit')).toBe(true);
+    expect(sharedOrder?.lineItems.every((item) => item.allocationStatus === 'active')).toBe(true);
   });
 
   it('blocks cross-vendor order detail access', () => {
@@ -62,5 +69,19 @@ describe('mock orders vendor allocations', () => {
     expect(
       breakdown?.allocations.every((allocation) => allocation.assignedVendorId === allocation.originalVendorId),
     ).toBe(true);
+    expect(breakdown?.allocations.some((allocation) => allocation.allocationStatus === 'pending_reassignment')).toBe(
+      true,
+    );
+    expect(
+      breakdown?.allocations.some(
+        (allocation) => allocation.reassignmentRequired && allocation.cancellationReason === 'out_of_stock',
+      ),
+    ).toBe(true);
+  });
+
+  it('prevents vendors from reporting fulfillment issues for other vendors', () => {
+    expect(canVendorReportFulfillmentIssue('ORD-B-1001', 'demo-vendor-a')).toBe(false);
+    expect(canVendorReportFulfillmentIssue('ORD-A-1001', 'demo-vendor-b')).toBe(false);
+    expect(canVendorReportFulfillmentIssue('ORD-B-1001', 'demo-vendor-b')).toBe(true);
   });
 });

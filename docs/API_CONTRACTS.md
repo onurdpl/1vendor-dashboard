@@ -23,6 +23,7 @@ The frontend currently uses mock transport in local/demo mode, but the same rout
 - Allocation records include:
   - `originalVendorId`: mapped from Shopify variant/product metafield.
   - `assignedVendorId`: operational owner responsible for fulfillment/shipping.
+- Assigned vendor owns fulfillment responsibility and can report allocation blocking issues.
 - Current compatibility field `vendorId` aliases `assignedVendorId`.
 
 ## Role and Permission Rules
@@ -92,6 +93,8 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
 - In the assigned-vendor model, vendor-facing order endpoints should scope by `assignedVendorId`.
+- Allocation workflow fields include `allocationStatus`, `cancellationReason`, `reassignmentRequired`, and optional `assignmentBlockedAt`.
+- Vendor-reported blocking reasons may include `out_of_stock`, `vendor_cancelled`, `damaged_inventory`, or `fulfillment_issue`.
 
 ### GET /admin/orders/:shopifyOrderId
 
@@ -201,6 +204,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - Shopify metafield mapping determines `originalVendorId`.
 - Operational assignment determines `assignedVendorId`.
 - Reassignment from original to assigned vendor is future work; this contract prepares for it.
+- Vendor cancellation/out-of-stock reporting can mark allocations as blocked and pending reassignment.
+- Reassignment execution itself remains future work.
 - Shopify webhooks must resolve to a vendor/store connection before processing.
 - Webhook processing must be idempotent.
 - Any imported Shopify order or event must preserve vendor scoping from the source connection.
