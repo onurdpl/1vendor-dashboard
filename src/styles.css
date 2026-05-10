@@ -974,10 +974,18 @@ h3 {
   gap: 18px;
 }
 
+.finance-workspace {
+  gap: 14px;
+}
+
 .finance-summary-grid {
   display: grid;
   gap: 18px;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.finance-kpi-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .finance-summary-card {
@@ -997,6 +1005,57 @@ h3 {
 
 .finance-summary-card strong {
   font-size: 1.8rem;
+}
+
+.deduction-card strong {
+  color: #b45309;
+}
+
+.payout-card {
+  border-color: rgba(37, 99, 235, 0.26);
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.payout-card strong {
+  color: #1d4ed8;
+}
+
+.finance-formula-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.finance-formula-note {
+  margin-top: 12px;
+}
+
+.finance-record {
+  gap: 12px;
+}
+
+.finance-amount {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-weight: 700;
+}
+
+.finance-negative {
+  color: #991b1b;
+}
+
+.finance-amount.finance-negative {
+  color: #991b1b;
+  border-color: rgba(239, 68, 68, 0.2);
+  background: rgba(239, 68, 68, 0.12);
+}
+
+.finance-positive {
+  color: #166534;
+  border-color: rgba(34, 197, 94, 0.2);
+  background: rgba(34, 197, 94, 0.12);
 }
 
 .finance-table {
