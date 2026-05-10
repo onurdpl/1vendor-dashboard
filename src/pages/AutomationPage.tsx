@@ -2,6 +2,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
 
@@ -21,6 +22,19 @@ export function AutomationPage() {
     getAutomationDashboard,
   );
   const { message, tone, showFeedback } = useActionFeedback();
+  const primaryActionTitle = automation?.suggestions[0]?.title ?? null;
+  const { mutateAsync: queueAction, isPending: isQueueingAction } = useMutationAction(
+    async (title: string) => {
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 300);
+      });
+
+      return title;
+    },
+    {
+      invalidateQueryKeys: [queryKeys.automation.alerts(), queryKeys.automation.actions()],
+    },
+  );
 
   if (isLoading) {
     return (
@@ -101,13 +115,29 @@ export function AutomationPage() {
                   <strong>{item.title}</strong>
                   <p>{item.description}</p>
                 </div>
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  onClick={() => showFeedback(`${item.title} queued.`, 'success')}
-                >
-                  {item.actionLabel}
-                </button>
+                {item.title === primaryActionTitle ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      void queueAction(item.title).catch(() => {
+                        showFeedback(`${item.title} could not be queued.`, 'error');
+                      });
+                      showFeedback(`${item.title} queued.`, 'success');
+                    }}
+                    disabled={isQueueingAction}
+                  >
+                    {item.actionLabel}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => showFeedback(`${item.title} queued.`, 'success')}
+                  >
+                    {item.actionLabel}
+                  </button>
+                )}
               </div>
             ))}
           </div>
