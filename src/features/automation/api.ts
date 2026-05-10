@@ -3,4 +3,4 @@ export type {
   AutomationAlert,
   AutomationDashboard,
   AutomationSuggestion,
-} from '../../lib/api/mockAutomation';
+} from '../../lib/api/contracts';

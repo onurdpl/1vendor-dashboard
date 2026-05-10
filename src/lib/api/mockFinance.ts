@@ -1,26 +1,4 @@
-export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed';
-
-export type FinanceSummary = {
-  totalRevenue: string;
-  availableBalance: string;
-  pendingPayouts: string;
-  refundsThisMonth: string;
-};
-
-export type FinanceTransaction = {
-  id: string;
-  date: string;
-  description: string;
-  counterparty: string;
-  category: 'Payout' | 'Refund' | 'Invoice' | 'Adjustment';
-  amount: string;
-  status: FinanceTransactionStatus;
-};
-
-export type FinanceDashboard = {
-  summary: FinanceSummary;
-  transactions: FinanceTransaction[];
-};
+import type { FinanceDashboard } from './contracts';
 
 const financeDashboard: FinanceDashboard = {
   summary: {

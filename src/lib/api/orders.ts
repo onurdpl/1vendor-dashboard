@@ -1,5 +1,5 @@
 import { request } from './client';
-import type { OrderDetail, OrderSummary } from './mockOrders';
+import type { OrderDetail, OrderSummary } from './contracts';
 
 export async function listOrders() {
   return request<OrderSummary[]>('/orders');

@@ -1,28 +1,4 @@
-export type ReturnStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'In Review';
-
-export type ReturnSummary = {
-  id: string;
-  status: ReturnStatus;
-  relatedOrderId: string;
-  date: string;
-  customer: string;
-  reason: string;
-  amount: string;
-};
-
-export type ReturnLineItem = {
-  name: string;
-  quantity: number;
-  condition: 'New' | 'Opened' | 'Damaged';
-};
-
-export type ReturnDetail = ReturnSummary & {
-  resolution: string;
-  refundMethod: string;
-  processedBy: string;
-  items: ReturnLineItem[];
-  timeline: Array<{ label: string; at: string }>;
-};
+import type { ReturnDetail, ReturnSummary } from './contracts';
 
 const returns: ReturnDetail[] = [
   {

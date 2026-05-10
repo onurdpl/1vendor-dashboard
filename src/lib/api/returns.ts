@@ -1,5 +1,5 @@
 import { request } from './client';
-import type { ReturnDetail, ReturnSummary } from './mockReturns';
+import type { ReturnDetail, ReturnSummary } from './contracts';
 
 export async function listReturns() {
   return request<ReturnSummary[]>('/returns');

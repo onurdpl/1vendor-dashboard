@@ -1,25 +1,4 @@
-export type AutomationAlertType = 'Info' | 'Warning' | 'Critical';
-export type AutomationAlertStatus = 'New' | 'In Progress' | 'Resolved';
-
-export type AutomationAlert = {
-  id: string;
-  type: AutomationAlertType;
-  message: string;
-  status: AutomationAlertStatus;
-  timestamp: string;
-  source: string;
-};
-
-export type AutomationSuggestion = {
-  title: string;
-  description: string;
-  actionLabel: string;
-};
-
-export type AutomationDashboard = {
-  alerts: AutomationAlert[];
-  suggestions: AutomationSuggestion[];
-};
+import type { AutomationDashboard } from './contracts';
 
 const automationDashboard: AutomationDashboard = {
   alerts: [

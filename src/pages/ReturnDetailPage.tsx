@@ -2,7 +2,7 @@ import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getReturn, type ReturnDetail as ReturnDetailType } from '../features/returns/api';
+import { getReturn } from '../features/returns/api';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {

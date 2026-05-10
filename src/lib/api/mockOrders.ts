@@ -1,26 +1,4 @@
-export type OrderStatus = 'Pending' | 'Processing' | 'Shipped' | 'Delivered' | 'On Hold';
-
-export type OrderSummary = {
-  id: string;
-  status: OrderStatus;
-  date: string;
-  customer: string;
-  amount: string;
-  channel: string;
-};
-
-export type OrderLineItem = {
-  name: string;
-  quantity: number;
-  price: string;
-};
-
-export type OrderDetail = OrderSummary & {
-  shippingAddress: string;
-  notes: string;
-  items: OrderLineItem[];
-  timeline: Array<{ label: string; at: string }>;
-};
+import type { OrderDetail, OrderSummary } from './contracts';
 
 const orders: OrderDetail[] = [
   {
