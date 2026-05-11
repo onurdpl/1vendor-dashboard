@@ -53,6 +53,7 @@ type OrderSummaryDto = {
 type OrderDetailDto = OrderSummaryDto & {
   carrier: string | null;
   trackingNumber: string | null;
+  trackingUrl: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   lineItems: Array<{
@@ -229,6 +230,7 @@ function mapOrderLineItems(
   fulfillmentStatus: FulfillmentStatus,
   trackingNumber?: string | null,
   carrier?: string | null,
+  trackingUrl?: string | null,
 ): OrderLineItem[] {
   const fulfillmentActionState = toFulfillmentActionState(shippingStatus);
   const fulfillmentActionAvailable = allocationStatus === 'active';
@@ -251,6 +253,7 @@ function mapOrderLineItems(
     shippingStatus,
     trackingNumber: trackingNumber ?? undefined,
     carrier: carrier ?? undefined,
+    trackingUrl: trackingUrl ?? undefined,
   }));
 }
 
@@ -289,6 +292,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     ...summary,
     trackingNumber: dto.trackingNumber ?? undefined,
     carrier: dto.carrier ?? undefined,
+    trackingUrl: dto.trackingUrl ?? undefined,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
@@ -303,6 +307,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       summary.fulfillmentStatus,
       dto.trackingNumber,
       dto.carrier,
+      dto.trackingUrl,
     ),
     items: mapOrderLineItems(
       dto.lineItems,
@@ -313,6 +318,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       summary.fulfillmentStatus,
       dto.trackingNumber,
       dto.carrier,
+      dto.trackingUrl,
     ),
     timeline: history.map((entry) => ({
       label: entry.action.replace(/_/g, ' '),

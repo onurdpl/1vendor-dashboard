@@ -58,12 +58,14 @@
 - Data load is backend-backed.
 - Action visibility is partially meaningful because it reflects allocation state and assigned-vendor ownership.
 - Tracking submission is now wired to the real backend fulfillment mutation in real mode.
+- Real-mode order detail now presents live allocation ownership, Shopify order identifiers, fulfillment/shipping status, and tracking state more clearly.
+- Already-shipped allocations now show a live tracking summary instead of encouraging duplicate submission.
 - Remaining mock-only actions:
   - create shipping label
   - mark as shipped
   - report fulfillment issue
 - Result:
-  - detail page is operationally useful for vendor tracking submission
+  - detail page is operationally useful for vendor tracking submission and live fulfillment readability
   - the broader action layer is still not fully production-ready in the frontend yet
 
 ### Admin Shopify Order Breakdown
@@ -188,6 +190,7 @@
 - Orders: working.
 - Order detail for live Yalı Spor allocation: working for read path, partial for action path.
   - tracking submission path is real-mode/backend-backed
+  - readability for live allocation state is improved
 - Returns: working.
 - Finance: working.
 - Fulfillment/tracking action visibility:

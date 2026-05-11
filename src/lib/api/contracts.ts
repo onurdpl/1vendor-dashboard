@@ -47,6 +47,7 @@ export type OrderSummary = {
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
+  trackingUrl?: string;
   estimatedDelivery?: string;
   date: string;
   customer: string;
@@ -79,6 +80,7 @@ export type OrderLineItem = {
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
+  trackingUrl?: string;
   estimatedDelivery?: string;
 };
 

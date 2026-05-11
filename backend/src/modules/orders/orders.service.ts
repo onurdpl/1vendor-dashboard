@@ -63,6 +63,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     },
     include: {
       order: true,
+      fulfillment: true,
       lineItems: {
         include: {
           shopifyOrderLineItem: true,
@@ -98,6 +99,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     updatedAt: allocation.updatedAt.toISOString(),
     carrier: allocation.carrier,
     trackingNumber: allocation.trackingNumber,
+    trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,
     lineItems: allocation.lineItems.map((item) => ({

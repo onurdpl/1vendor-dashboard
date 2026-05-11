@@ -39,6 +39,12 @@ function getTrackingMutationErrorMessage(error: unknown) {
   return 'Unable to submit tracking right now.';
 }
 
+function toTitleCaseLabel(value: string) {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function OrderDetailPage() {
   const { orderId } = useParams();
   const isAdmin = getCurrentUserRole() === 'admin';
@@ -105,6 +111,14 @@ export function OrderDetailPage() {
     order.fulfillmentActionAvailable &&
     order.allocationStatus !== 'pending_reassignment' &&
     order.allocationStatus !== 'vendor_blocked';
+  const hasTrackingSync =
+    !!order?.trackingNumber ||
+    !!order?.carrier ||
+    !!order?.trackingUrl ||
+    order?.shippingStatus === 'In Transit' ||
+    order?.shippingStatus === 'Delivered' ||
+    order?.fulfillmentStatus === 'Fulfilled';
+  const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
 
   useEffect(() => {
     if (!order) {
@@ -150,9 +164,14 @@ export function OrderDetailPage() {
           <p className="page-description">
             {order.customer} · {formatDate(order.date)}
           </p>
+          {isRealMode ? (
+            <p className="page-description operational-helper-copy">
+              Tracking submission is synced through backend Shopify fulfillment flow.
+            </p>
+          ) : null}
         </div>
         <div className="chip-row">
-          <span className={`status-badge status-${order.allocationStatus}`}>{order.allocationStatus}</span>
+          <span className={`status-badge status-${order.allocationStatus}`}>{toTitleCaseLabel(order.allocationStatus)}</span>
           <span className={`status-badge status-${order.fulfillmentStatus.toLowerCase().replace(/\s+/g, '-')}`}>
             {order.fulfillmentStatus}
           </span>
@@ -169,6 +188,10 @@ export function OrderDetailPage() {
             <strong>{order.sourceShopifyOrderNumber}</strong>
           </div>
           <div className="meta-item">
+            <span>Shopify order ID</span>
+            <strong>{order.sourceShopifyOrderId}</strong>
+          </div>
+          <div className="meta-item">
             <span>Assigned vendor</span>
             <strong>{order.assignedVendorId}</strong>
           </div>
@@ -180,6 +203,10 @@ export function OrderDetailPage() {
             <span>Channel</span>
             <strong>{order.channel}</strong>
           </div>
+          <div className="meta-item">
+            <span>Allocation ownership</span>
+            <strong>{order.assignedVendorId === order.originalVendorId ? 'Original vendor owner' : 'Reassigned operational owner'}</strong>
+          </div>
         </div>
       </article>
 
@@ -189,90 +216,127 @@ export function OrderDetailPage() {
           <div className="action-row vendor-action-panel">
             {isRealMode ? (
               <>
-                <p className="page-description">
-                  This allocation is fulfillable. Submit shipment tracking to sync the vendor-owned fulfillment with the backend.
-                </p>
-                <form
-                  className="detail-actions tracking-form"
-                  onSubmit={(event) => {
-                    event.preventDefault();
+                <div className="real-mode-action-copy">
+                  <p className="page-description">
+                    {shouldShowRealTrackingForm
+                      ? 'This allocation is ready for tracking submission. Add the shipment details below to sync the vendor-owned fulfillment.'
+                      : 'Tracking has already been synced for this allocation. Review the live shipment details below.'}
+                  </p>
+                  <p className="operational-helper-copy">Other fulfillment actions are not enabled in real mode yet.</p>
+                </div>
+                {hasTrackingSync ? (
+                  <div className="tracking-summary-card">
+                    <div className="summary-row">
+                      <span>Live shipping status</span>
+                      <strong>{order.shippingStatus}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Live fulfillment status</span>
+                      <strong>{order.fulfillmentStatus}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Tracking number</span>
+                      <strong className={order.trackingNumber ? '' : 'muted'}>{order.trackingNumber ?? 'Not available'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Carrier</span>
+                      <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Tracking link</span>
+                      {order.trackingUrl ? (
+                        <a className="inline-link" href={order.trackingUrl} target="_blank" rel="noreferrer">
+                          Open live tracking
+                        </a>
+                      ) : (
+                        <strong className="muted">Not available</strong>
+                      )}
+                    </div>
+                  </div>
+                ) : null}
+                {shouldShowRealTrackingForm ? (
+                  <form
+                    className="detail-actions tracking-form"
+                    onSubmit={(event) => {
+                      event.preventDefault();
 
-                    if (!order) {
-                      return;
-                    }
+                      if (!order) {
+                        return;
+                      }
 
-                    const normalizedTrackingNumber = trackingNumber.trim();
-                    const normalizedCarrier = carrier.trim();
-                    const normalizedTrackingUrl = trackingUrl.trim();
+                      const normalizedTrackingNumber = trackingNumber.trim();
+                      const normalizedCarrier = carrier.trim();
+                      const normalizedTrackingUrl = trackingUrl.trim();
 
-                    if (!normalizedCarrier) {
-                      showFeedback('Carrier is required before submitting tracking.', 'error');
-                      return;
-                    }
+                      if (!normalizedCarrier) {
+                        showFeedback('Carrier is required before submitting tracking.', 'error');
+                        return;
+                      }
 
-                    if (!normalizedTrackingNumber) {
-                      showFeedback('Tracking number is required before submitting tracking.', 'error');
-                      return;
-                    }
+                      if (!normalizedTrackingNumber) {
+                        showFeedback('Tracking number is required before submitting tracking.', 'error');
+                        return;
+                      }
 
-                    void submitTrackingMutation({
-                      allocationId: order.id,
-                      trackingNumber: normalizedTrackingNumber,
-                      carrier: normalizedCarrier,
-                      trackingUrl: normalizedTrackingUrl || undefined,
-                      notifyCustomer,
-                    })
-                      .then((result) => {
-                        showFeedback(
-                          `Tracking ${result.trackingNumber} submitted via ${result.shopifySyncSource}. Shipping status: ${result.shippingStatus}.`,
-                          'success',
-                        );
+                      void submitTrackingMutation({
+                        allocationId: order.id,
+                        trackingNumber: normalizedTrackingNumber,
+                        carrier: normalizedCarrier,
+                        trackingUrl: normalizedTrackingUrl || undefined,
+                        notifyCustomer,
                       })
-                      .catch((mutationError) => {
-                        showFeedback(getTrackingMutationErrorMessage(mutationError), 'error');
-                      });
-                  }}
-                >
-                  <label className="field">
-                    <span>Carrier</span>
-                    <input
-                      value={carrier}
-                      onChange={(event) => setCarrier(event.target.value)}
-                      placeholder="Yurtiçi Kargo"
-                      disabled={isSubmittingTracking}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Tracking number</span>
-                    <input
-                      value={trackingNumber}
-                      onChange={(event) => setTrackingNumber(event.target.value)}
-                      placeholder="TRACK123"
-                      disabled={isSubmittingTracking}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Tracking URL (optional)</span>
-                    <input
-                      value={trackingUrl}
-                      onChange={(event) => setTrackingUrl(event.target.value)}
-                      placeholder="https://tracking.example/TRACK123"
-                      disabled={isSubmittingTracking}
-                    />
-                  </label>
-                  <label className="checkbox-field">
-                    <input
-                      type="checkbox"
-                      checked={notifyCustomer}
-                      onChange={(event) => setNotifyCustomer(event.target.checked)}
-                      disabled={isSubmittingTracking}
-                    />
-                    <span>Notify customer</span>
-                  </label>
-                  <button type="submit" className="button button-primary" disabled={isSubmittingTracking}>
-                    {isSubmittingTracking ? 'Submitting tracking...' : 'Submit tracking'}
-                  </button>
-                </form>
+                        .then((result) => {
+                          showFeedback(
+                            `Tracking ${result.trackingNumber} submitted via ${result.shopifySyncSource}. Shipping status: ${result.shippingStatus}.`,
+                            'success',
+                          );
+                        })
+                        .catch((mutationError) => {
+                          showFeedback(getTrackingMutationErrorMessage(mutationError), 'error');
+                        });
+                    }}
+                  >
+                    <label className="field">
+                      <span>Carrier</span>
+                      <input
+                        value={carrier}
+                        onChange={(event) => setCarrier(event.target.value)}
+                        placeholder="Yurtiçi Kargo"
+                        disabled={isSubmittingTracking}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tracking number</span>
+                      <input
+                        value={trackingNumber}
+                        onChange={(event) => setTrackingNumber(event.target.value)}
+                        placeholder="TRACK123"
+                        disabled={isSubmittingTracking}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Tracking URL (optional)</span>
+                      <input
+                        value={trackingUrl}
+                        onChange={(event) => setTrackingUrl(event.target.value)}
+                        placeholder="https://tracking.example/TRACK123"
+                        disabled={isSubmittingTracking}
+                      />
+                    </label>
+                    <label className="checkbox-field">
+                      <input
+                        type="checkbox"
+                        checked={notifyCustomer}
+                        onChange={(event) => setNotifyCustomer(event.target.checked)}
+                        disabled={isSubmittingTracking}
+                      />
+                      <span>Notify customer</span>
+                    </label>
+                    <button type="submit" className="button button-primary" disabled={isSubmittingTracking}>
+                      {isSubmittingTracking ? 'Submitting tracking...' : 'Submit tracking'}
+                    </button>
+                  </form>
+                ) : null}
               </>
             ) : (
               <>
@@ -370,6 +434,10 @@ export function OrderDetailPage() {
           <h3>Fulfillment summary</h3>
           <div className="allocation-summary-grid">
             <div className="summary-row">
+              <span>Allocation status</span>
+              <strong>{toTitleCaseLabel(order.allocationStatus)}</strong>
+            </div>
+            <div className="summary-row">
               <span>Fulfillment status</span>
               <strong>{order.fulfillmentStatus}</strong>
             </div>
@@ -384,6 +452,16 @@ export function OrderDetailPage() {
             <div className="summary-row">
               <span>Tracking</span>
               <strong className={order.trackingNumber ? '' : 'muted'}>{order.trackingNumber ?? 'Not assigned'}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Tracking URL</span>
+              {order.trackingUrl ? (
+                <a className="inline-link" href={order.trackingUrl} target="_blank" rel="noreferrer">
+                  Open tracking
+                </a>
+              ) : (
+                <strong className="muted">Not available</strong>
+              )}
             </div>
             <div className="summary-row">
               <span>Estimated delivery</span>

@@ -37,6 +37,7 @@ export type OrderAssignmentHistoryDto = {
 export type OrderDetailDto = OrderSummaryDto & {
   carrier: string | null;
   trackingNumber: string | null;
+  trackingUrl: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   lineItems: OrderDetailLineItemDto[];

@@ -1177,6 +1177,25 @@ h3 {
   gap: 12px;
 }
 
+.real-mode-action-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.operational-helper-copy {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+}
+
+.tracking-summary-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 16px;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
 .tracking-form .field {
   max-width: 520px;
 }
@@ -1191,6 +1210,16 @@ h3 {
 .checkbox-field input {
   width: 16px;
   height: 16px;
+}
+
+.inline-link {
+  color: var(--accent-strong);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.inline-link:hover {
+  text-decoration: underline;
 }
 
 .vendor-blocked-panel {
