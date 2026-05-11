@@ -120,6 +120,8 @@ model VendorAllocation {
   allocationStatus         AllocationStatus               @default(ACTIVE)
   cancellationReason       CancellationReason?
   reassignmentRequired     Boolean                        @default(false)
+  fulfillmentStatus        String                         @default("Pending")
+  shippingStatus           String                         @default("Awaiting Shipment")
   trackingNumber           String?
   carrier                  String?
   createdAt                DateTime                       @default(now())

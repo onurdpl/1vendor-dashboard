@@ -80,6 +80,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
 - Order records are vendor-scoped views of Shopify source orders and must include a vendor-safe internal order id.
 - Fulfillment and shipping fields are vendor-scoped too; vendor allocations may have different fulfillment states for the same Shopify order.
+- Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
 
 ### GET /orders/:orderId
 
@@ -90,6 +91,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the order does not exist or when the backend hides cross-vendor resources.
+- Backend implementation note: in current vendor-scoped query semantics, cross-vendor order ids resolve to `404` after vendor context is validated.
 - Detail records should expose `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `vendorId`, and vendor-allocated `lineItems` so the frontend can show the current vendor slice only.
 - Detail records should also expose vendor-scoped fulfillment/shipping metadata such as `fulfillmentStatus`, `shippingStatus`, `trackingNumber`, `carrier`, and `estimatedDelivery` when available.
 - Fulfillment actions belong to the assigned vendor only. Suggested action state fields include `fulfillmentActionState`, `fulfillmentActionAvailable`, `shipmentCreatedAt`, `shipmentUpdatedAt`, `fulfilledAt`, and `fulfilledByVendorId`.

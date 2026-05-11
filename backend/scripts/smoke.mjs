@@ -160,6 +160,86 @@ async function runSmoke() {
         `/debug/vendor-context forbidden vendor expected 403, got ${forbiddenVendorContextResponse.status}`,
       );
     }
+
+    const adminOrdersYaliResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!adminOrdersYaliResponse.ok) {
+      throw new Error(`/orders admin yalispor failed with ${adminOrdersYaliResponse.status}`);
+    }
+    const adminOrdersYali = await adminOrdersYaliResponse.json();
+    if (!Array.isArray(adminOrdersYali) || adminOrdersYali.length === 0) {
+      throw new Error('/orders admin yalispor returned empty or invalid payload.');
+    }
+
+    const adminOrdersSporjinalResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (!adminOrdersSporjinalResponse.ok) {
+      throw new Error(`/orders admin sporjinal failed with ${adminOrdersSporjinalResponse.status}`);
+    }
+    const adminOrdersSporjinal = await adminOrdersSporjinalResponse.json();
+    if (!Array.isArray(adminOrdersSporjinal) || adminOrdersSporjinal.length === 0) {
+      throw new Error('/orders admin sporjinal returned empty or invalid payload.');
+    }
+
+    const vendorOrdersYaliResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!vendorOrdersYaliResponse.ok) {
+      throw new Error(`/orders vendor yalispor failed with ${vendorOrdersYaliResponse.status}`);
+    }
+    const vendorOrdersYali = await vendorOrdersYaliResponse.json();
+    if (!Array.isArray(vendorOrdersYali) || vendorOrdersYali.length === 0) {
+      throw new Error('/orders vendor yalispor returned empty or invalid payload.');
+    }
+
+    const vendorOrdersForbiddenResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (vendorOrdersForbiddenResponse.status !== 403) {
+      throw new Error(`/orders vendor forbidden expected 403, got ${vendorOrdersForbiddenResponse.status}`);
+    }
+
+    const ownOrderId = vendorOrdersYali[0]?.id;
+    if (!ownOrderId) {
+      throw new Error('Unable to resolve vendor-owning orderId from /orders payload.');
+    }
+    const ownOrderResponse = await fetch(`${baseUrl}/orders/${ownOrderId}`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!ownOrderResponse.ok) {
+      throw new Error(`/orders/:orderId vendor own access failed with ${ownOrderResponse.status}`);
+    }
+
+    const nonOwnedOrderId = adminOrdersSporjinal[0]?.id;
+    if (!nonOwnedOrderId) {
+      throw new Error('Unable to resolve cross-vendor orderId from admin /orders payload.');
+    }
+    const nonOwnedOrderResponse = await fetch(`${baseUrl}/orders/${nonOwnedOrderId}`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (nonOwnedOrderResponse.status !== 404) {
+      throw new Error(`/orders/:orderId cross-vendor expected 404, got ${nonOwnedOrderResponse.status}`);
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([

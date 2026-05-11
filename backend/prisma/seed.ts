@@ -47,6 +47,36 @@ const users: SeedUserInput[] = [
   },
 ];
 
+const shopifyOrderSeed = {
+  id: 'shopify-order-internal-1001',
+  sourceShopifyOrderId: '1001',
+  sourceShopifyOrderNumber: '#1001',
+  customerName: 'Demo Customer',
+};
+
+const shopifyLineItemsSeed = [
+  {
+    id: 'shopify-line-item-1001-a',
+    sourceLineItemId: '1001-li-a',
+    sourceVariantId: '394053-103-36,5',
+    sku: '394053-103-36,5',
+    title: 'SKU123 / 36,5',
+    quantity: 1,
+    unitPrice: '120.00',
+    originalVendorId: 'yalispor',
+  },
+  {
+    id: 'shopify-line-item-1001-b',
+    sourceLineItemId: '1001-li-b',
+    sourceVariantId: '394053-103-36',
+    sku: '394053-103-36',
+    title: 'SKU123 / 36',
+    quantity: 1,
+    unitPrice: '135.00',
+    originalVendorId: 'sporjinal',
+  },
+] as const;
+
 function makeDemoPasswordHash(password: string) {
   // Demo-only deterministic hash. Not suitable for production auth storage.
   return `demo_sha256_v1:${createHash('sha256').update(`vendor-dashboard-demo:${password}`).digest('hex')}`;
@@ -89,6 +119,169 @@ async function runSeed() {
       skipDuplicates: true,
     });
   }
+
+  await prisma.shopifyOrder.upsert({
+    where: { sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId },
+    update: {
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      customerName: shopifyOrderSeed.customerName,
+    },
+    create: {
+      id: shopifyOrderSeed.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      customerName: shopifyOrderSeed.customerName,
+    },
+  });
+
+  for (const lineItem of shopifyLineItemsSeed) {
+    await prisma.shopifyOrderLineItem.upsert({
+      where: { id: lineItem.id },
+      update: {
+        sourceLineItemId: lineItem.sourceLineItemId,
+        sourceVariantId: lineItem.sourceVariantId,
+        sku: lineItem.sku,
+        title: lineItem.title,
+        quantity: lineItem.quantity,
+        unitPrice: lineItem.unitPrice,
+        originalVendorId: lineItem.originalVendorId,
+      },
+      create: {
+        ...lineItem,
+        shopifyOrderId: shopifyOrderSeed.id,
+      },
+    });
+  }
+
+  const yaliAllocation = await prisma.vendorAllocation.upsert({
+    where: { id: 'alloc-yalispor-1001' },
+    update: {
+      sourceShopifyOrderId: shopifyOrderSeed.id,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      originalVendorId: 'yalispor',
+      assignedVendorId: 'yalispor',
+      allocationStatus: 'ACTIVE',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Processing',
+      shippingStatus: 'Awaiting Shipment',
+      carrier: null,
+      trackingNumber: null,
+    },
+    create: {
+      id: 'alloc-yalispor-1001',
+      sourceShopifyOrderId: shopifyOrderSeed.id,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      originalVendorId: 'yalispor',
+      assignedVendorId: 'yalispor',
+      allocationStatus: 'ACTIVE',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Processing',
+      shippingStatus: 'Awaiting Shipment',
+    },
+  });
+
+  const sporjinalAllocation = await prisma.vendorAllocation.upsert({
+    where: { id: 'alloc-sporjinal-1001' },
+    update: {
+      sourceShopifyOrderId: shopifyOrderSeed.id,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      allocationStatus: 'FULFILLED',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'In Transit',
+      carrier: 'Yurtici Kargo',
+      trackingNumber: 'TRK-1001-SJ',
+    },
+    create: {
+      id: 'alloc-sporjinal-1001',
+      sourceShopifyOrderId: shopifyOrderSeed.id,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      originalVendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      allocationStatus: 'FULFILLED',
+      reassignmentRequired: false,
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'In Transit',
+      carrier: 'Yurtici Kargo',
+      trackingNumber: 'TRK-1001-SJ',
+    },
+  });
+
+  await prisma.vendorAllocationLineItem.upsert({
+    where: {
+      vendorAllocationId_shopifyLineItemId: {
+        vendorAllocationId: yaliAllocation.id,
+        shopifyLineItemId: 'shopify-line-item-1001-a',
+      },
+    },
+    update: {
+      quantity: 1,
+      lineAmount: '120.00',
+    },
+    create: {
+      vendorAllocationId: yaliAllocation.id,
+      shopifyLineItemId: 'shopify-line-item-1001-a',
+      quantity: 1,
+      lineAmount: '120.00',
+    },
+  });
+
+  await prisma.vendorAllocationLineItem.upsert({
+    where: {
+      vendorAllocationId_shopifyLineItemId: {
+        vendorAllocationId: sporjinalAllocation.id,
+        shopifyLineItemId: 'shopify-line-item-1001-b',
+      },
+    },
+    update: {
+      quantity: 1,
+      lineAmount: '135.00',
+    },
+    create: {
+      vendorAllocationId: sporjinalAllocation.id,
+      shopifyLineItemId: 'shopify-line-item-1001-b',
+      quantity: 1,
+      lineAmount: '135.00',
+    },
+  });
+
+  await prisma.allocationAssignmentHistory.upsert({
+    where: { id: 'assignment-history-yalispor-1001' },
+    update: {
+      action: 'assigned',
+      fromVendorId: null,
+      toVendorId: 'yalispor',
+      reason: 'Initial vendor metafield allocation',
+    },
+    create: {
+      id: 'assignment-history-yalispor-1001',
+      vendorAllocationId: yaliAllocation.id,
+      action: 'assigned',
+      fromVendorId: null,
+      toVendorId: 'yalispor',
+      reason: 'Initial vendor metafield allocation',
+    },
+  });
+
+  await prisma.allocationAssignmentHistory.upsert({
+    where: { id: 'assignment-history-sporjinal-1001' },
+    update: {
+      action: 'assigned',
+      fromVendorId: null,
+      toVendorId: 'sporjinal',
+      reason: 'Initial vendor metafield allocation',
+    },
+    create: {
+      id: 'assignment-history-sporjinal-1001',
+      vendorAllocationId: sporjinalAllocation.id,
+      action: 'assigned',
+      fromVendorId: null,
+      toVendorId: 'sporjinal',
+      reason: 'Initial vendor metafield allocation',
+    },
+  });
 }
 
 runSeed()

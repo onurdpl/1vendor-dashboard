@@ -25,6 +25,9 @@
 - Backend auth foundation endpoints:
   - `POST /auth/login`
   - `GET /auth/me`
+- First DB-backed vendor-scoped read API:
+  - `GET /orders`
+  - `GET /orders/:orderId`
 
 ## Local Backend Verification
 Run from repository root:
@@ -179,3 +182,14 @@ Frontend note:
   - requires auth and vendor access middleware
   - intended only for integration validation in development/test
 - Future data routes should use the same middleware for safe vendor scoping.
+
+## First DB-Backed Read API (Phase 13 Step 8)
+- Orders read routes are now backed by PostgreSQL via Prisma:
+  - `GET /orders`
+  - `GET /orders/:orderId`
+- Both routes require:
+  - authenticated user
+  - `requireVendorAccess` middleware
+- Order reads are scoped using backend-resolved `request.vendorContext.vendorId`, not raw frontend header trust.
+- Cross-vendor detail access returns `404` under vendor-scoped query semantics.
+- Frontend remains mock-based in this phase; backend routes are prepared for future integration.
