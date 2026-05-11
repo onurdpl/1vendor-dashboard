@@ -48,6 +48,8 @@ model User {
   email       String             @unique
   name        String
   role        UserRole
+  status      String             @default("active")
+  passwordHash String
   createdAt   DateTime           @default(now())
   updatedAt   DateTime           @updatedAt
   vendorLinks UserVendorAccess[]
@@ -57,6 +59,7 @@ model User {
 model Vendor {
   id                    String                   @id
   name                  String
+  status                String                   @default("active")
   createdAt             DateTime                 @default(now())
   updatedAt             DateTime                 @updatedAt
   users                 UserVendorAccess[]

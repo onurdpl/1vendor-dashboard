@@ -56,6 +56,7 @@ Common workflow:
 3. `npm run backend:db:generate`
 4. `npm run backend:db:migrate` (creates/applies local dev migration)
 5. `npm run backend:db:studio` (optional data inspection)
+6. `npm run backend:db:seed` (idempotent demo data seed)
 
 Alternative for quick schema sync without migration history:
 - `npm run backend:db:push`
@@ -125,3 +126,26 @@ GitHub Actions CI validates both frontend and backend on push/PR to `main`:
 ## Migration Expectations
 - Migrations should be created only with a real local PostgreSQL connection.
 - If local PostgreSQL is unavailable, migration generation is intentionally deferred (no fake SQL migration files).
+
+## Demo Seed Data (Local Only)
+Seed command:
+- `npm run backend:db:seed`
+
+Seeded vendors:
+- `yalispor` → `Yalı Spor`
+- `sporjinal` → `Sporjinal`
+- `sporvol` → `Sporvol`
+
+Seeded users:
+- `admin@demo.com` (role: `admin`, access: all three vendors)
+- `yalispor@demo.com` (role: `vendor`, access: `yalispor`)
+- `sporjinal@demo.com` (role: `vendor`, access: `sporjinal`)
+- `sporvol@demo.com` (role: `vendor`, access: `sporvol`)
+
+Seed credentials are demo/local only:
+- password: `demo123`
+- stored as a clearly marked demo hash format in DB seed flow
+- not suitable for production authentication
+
+Frontend note:
+- frontend continues using mock authentication and mock vendor IDs until real API/auth migration is implemented.
