@@ -1,7 +1,9 @@
 import { spawn } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 
 const port = 4010;
 const baseUrl = `http://127.0.0.1:${port}`;
+const shopifyWebhookSecret = 'dev-shopify-webhook-secret';
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -121,6 +123,50 @@ async function runSmoke() {
     const vendorMappingUnknownJson = await vendorMappingUnknownResponse.json();
     if (vendorMappingUnknownJson?.vendorId !== null) {
       throw new Error('/debug/shopify/vendor-mapping unknown vendor should resolve to null.');
+    }
+
+    const webhookPayload = JSON.stringify({
+      id: 'shopify-order-1001',
+      order_number: 1001,
+      line_items: [
+        {
+          id: 'li-1',
+          sku: '394053-103-36,5',
+        },
+      ],
+    });
+    const validWebhookHmac = createHmac('sha256', shopifyWebhookSecret).update(webhookPayload, 'utf8').digest('base64');
+
+    const validWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': validWebhookHmac,
+        'x-shopify-topic': 'orders/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-valid-${Date.now()}`,
+      },
+      body: webhookPayload,
+    });
+    if (validWebhookResponse.status !== 202) {
+      throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
+    }
+
+    const invalidWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': 'invalid-signature',
+        'x-shopify-topic': 'orders/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-invalid-${Date.now()}`,
+      },
+      body: webhookPayload,
+    });
+    if (invalidWebhookResponse.status !== 401) {
+      throw new Error(
+        `/webhooks/shopify/orders-create invalid signature expected 401, got ${invalidWebhookResponse.status}`,
+      );
     }
 
     const adminLoginResponse = await fetch(`${baseUrl}/auth/login`, {

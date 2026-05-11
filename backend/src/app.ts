@@ -10,11 +10,23 @@ import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
 import { registerOperationsRoutes } from './modules/operations/operations.routes.js';
 import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.service.js';
+import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.js';
 
 export function createApp() {
   const env = loadEnv();
   const app = Fastify({
     logger: env.NODE_ENV !== 'test',
+  });
+
+  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
+    const rawBody = typeof body === 'string' ? body : body.toString('utf8');
+    request.rawBody = rawBody;
+
+    try {
+      done(null, rawBody ? JSON.parse(rawBody) : {});
+    } catch (error) {
+      done(error as Error, undefined);
+    }
   });
 
   app.get('/health', async () => {
@@ -57,6 +69,7 @@ export function createApp() {
   registerReturnsRoutes(app, env);
   registerFinanceRoutes(app, env);
   registerOperationsRoutes(app, env);
+  registerShopifyWebhookRoutes(app, env);
 
   if (env.NODE_ENV !== 'production') {
     const authService = createAuthService(env);

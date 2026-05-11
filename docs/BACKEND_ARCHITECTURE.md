@@ -147,6 +147,20 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 - Keep payload hash and processing state for safe retries/reprocessing.
 - Move webhook processing to async job flow in later phases (Redis/BullMQ not included in this step).
 
+## Shopify Webhook Verification Skeleton (Phase 13 Step 15)
+- First webhook endpoint exists:
+  - `POST /webhooks/shopify/orders-create`
+- Current behavior:
+  - reads raw request body
+  - verifies `X-Shopify-Hmac-Sha256`
+  - returns `202 Accepted` for valid signatures
+  - returns `401` for invalid signatures
+  - does not ingest orders into allocations yet
+- Secret handling:
+  - production requires explicit `SHOPIFY_WEBHOOK_SECRET`
+  - development/test use safe local default `dev-shopify-webhook-secret`
+- Persistence in this phase is limited to raw webhook envelope metadata through `WebhookEvent`; payload processing is deferred.
+
 ## CI Validation
 GitHub Actions CI validates both frontend and backend on push/PR to `main`:
 - frontend install/build/test

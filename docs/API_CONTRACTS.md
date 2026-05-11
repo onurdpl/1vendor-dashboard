@@ -67,6 +67,10 @@ The current frontend directly or indirectly expects the following read endpoints
 
 No write endpoints are currently wired in the frontend, but future write actions are expected to follow the same auth, vendor, and permission rules.
 
+Backend-only integration skeleton endpoints also exist for future Shopify ingestion:
+
+- `POST /webhooks/shopify/orders-create`
+
 ## Endpoint Contracts
 
 ### GET /orders
@@ -135,6 +139,15 @@ No write endpoints are currently wired in the frontend, but future write actions
   - `vendor_blocked`: allocation blocked by vendor state
   - `awaiting_shipment`: allocation in shipping wait state
   - `refund_attention`: return/refund records requiring review
+
+### POST /webhooks/shopify/orders-create
+
+- Purpose: receive verified Shopify `orders/create` webhook payloads for future ingestion.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape: `{ accepted: true, topic, processing: "deferred" }`.
+- Expected `202` behavior: valid HMAC signature accepted for deferred processing.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Processing note: this phase only verifies and accepts payloads. Order ingestion, allocation creation, and idempotent processing are deferred to later phases.
 
 ### GET /returns
 

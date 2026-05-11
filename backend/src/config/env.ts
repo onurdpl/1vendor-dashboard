@@ -6,6 +6,7 @@ export type AppEnv = {
   DATABASE_URL?: string;
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
+  SHOPIFY_WEBHOOK_SECRET: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -32,9 +33,16 @@ function parsePort(value: string | undefined): number {
 export function loadEnv(): AppEnv {
   const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
   const jwtSecret = process.env.JWT_SECRET || (nodeEnv !== 'production' ? 'dev-only-jwt-secret-change-in-production' : undefined);
+  const shopifyWebhookSecret =
+    process.env.SHOPIFY_WEBHOOK_SECRET ||
+    (nodeEnv !== 'production' ? 'dev-shopify-webhook-secret' : undefined);
 
   if (!jwtSecret) {
     throw new Error('JWT_SECRET is required in production.');
+  }
+
+  if (!shopifyWebhookSecret) {
+    throw new Error('SHOPIFY_WEBHOOK_SECRET is required in production.');
   }
 
   return {
@@ -43,5 +51,6 @@ export function loadEnv(): AppEnv {
     DATABASE_URL: process.env.DATABASE_URL || undefined,
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
+    SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
   };
 }
