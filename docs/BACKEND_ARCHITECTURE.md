@@ -207,6 +207,15 @@ Alternative for quick schema sync without migration history:
   - Phase 15 entry criteria
   - recommended production-readiness steps before real merchant rollout
 
+## Phase 15 Roadmap Baseline
+- The official Phase 15 roadmap baseline is documented in [PHASE_15_PLAN.md](/Users/onur/Documents/New project 4/docs/PHASE_15_PLAN.md).
+- Use that document as the planning source of truth for:
+  - operational frontend maturity targets
+  - async processing preparation boundaries
+  - observability baseline direction
+  - deployment-readiness direction
+  - operational UX and reliability-hardening workstreams
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.
