@@ -85,6 +85,81 @@ async function runSmoke() {
     if (!dbHealthJson || !validDbStatuses.has(dbHealthJson.status)) {
       throw new Error(`/health/db payload invalid: ${JSON.stringify(dbHealthJson)}`);
     }
+
+    const adminLoginResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'admin@demo.com',
+        password: 'demo123',
+      }),
+    });
+
+    if (!adminLoginResponse.ok) {
+      throw new Error(`/auth/login admin failed with ${adminLoginResponse.status}`);
+    }
+
+    const adminLoginJson = await adminLoginResponse.json();
+    const adminToken = adminLoginJson?.token;
+    if (!adminToken) {
+      throw new Error('Admin login token missing in /auth/login response.');
+    }
+
+    const adminVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+
+    if (!adminVendorContextResponse.ok) {
+      throw new Error(`/debug/vendor-context admin check failed with ${adminVendorContextResponse.status}`);
+    }
+
+    const vendorLoginResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'yalispor@demo.com',
+        password: 'demo123',
+      }),
+    });
+
+    if (!vendorLoginResponse.ok) {
+      throw new Error(`/auth/login vendor failed with ${vendorLoginResponse.status}`);
+    }
+
+    const vendorLoginJson = await vendorLoginResponse.json();
+    const vendorToken = vendorLoginJson?.token;
+    if (!vendorToken) {
+      throw new Error('Vendor login token missing in /auth/login response.');
+    }
+
+    const allowedVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+
+    if (!allowedVendorContextResponse.ok) {
+      throw new Error(
+        `/debug/vendor-context allowed vendor check failed with ${allowedVendorContextResponse.status}`,
+      );
+    }
+
+    const forbiddenVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+
+    if (forbiddenVendorContextResponse.status !== 403) {
+      throw new Error(
+        `/debug/vendor-context forbidden vendor expected 403, got ${forbiddenVendorContextResponse.status}`,
+      );
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([

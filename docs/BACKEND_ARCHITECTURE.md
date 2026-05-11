@@ -162,3 +162,20 @@ Frontend note:
 - In development/test, a default JWT secret is allowed for local convenience.
 - In production, `JWT_SECRET` must be explicitly set.
 - Password hashing in this phase is demo-only and must be replaced with production-grade hashing before real auth rollout.
+
+## Vendor Access Validation Foundation (Phase 13 Step 7)
+- Backend resolves request vendor context from authenticated user access + requested `X-Vendor-Id`.
+- `X-Vendor-Id` is request context only and is never blindly trusted.
+- Admin behavior:
+  - may request vendors only if mapped in backend `UserVendorAccess`
+  - if no vendor is requested, backend resolves first accessible vendor
+- Vendor behavior:
+  - may request only mapped vendor IDs
+  - requesting another vendor returns `403`
+  - if only one vendor mapping exists and header is missing, backend resolves that vendor
+- Middleware `requireVendorAccess` enforces this and attaches `request.vendorContext`.
+- Temporary diagnostic route (non-production):
+  - `GET /debug/vendor-context`
+  - requires auth and vendor access middleware
+  - intended only for integration validation in development/test
+- Future data routes should use the same middleware for safe vendor scoping.
