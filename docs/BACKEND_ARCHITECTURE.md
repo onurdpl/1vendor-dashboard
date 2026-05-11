@@ -49,6 +49,7 @@ Smoke verifies:
 - `GET /health` returns `{ "ok": true }`
 - `GET /version` returns service and version metadata
 - process shuts down cleanly after checks
+- Shopify webhook smoke signs test payloads with the same effective `SHOPIFY_WEBHOOK_SECRET` the spawned backend process uses, so local live secrets do not break deterministic smoke verification
 
 Real API dry-run verifies:
 - backend login succeeds for seeded admin demo credentials

@@ -1,9 +1,37 @@
 import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const port = 4010;
 const baseUrl = `http://127.0.0.1:${port}`;
-const shopifyWebhookSecret = 'dev-shopify-webhook-secret';
+
+function loadEnvFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return {};
+  }
+
+  const content = fs.readFileSync(filePath, 'utf8');
+  return content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#') && line.includes('='))
+    .reduce((acc, line) => {
+      const separatorIndex = line.indexOf('=');
+      const key = line.slice(0, separatorIndex).trim();
+      const value = line.slice(separatorIndex + 1).trim().replace(/^['"]|['"]$/g, '');
+      acc[key] = value;
+      return acc;
+    }, {});
+}
+
+function resolveEffectiveWebhookSecret() {
+  const backendEnvPath = path.join(process.cwd(), '.env');
+  const backendEnv = loadEnvFile(backendEnvPath);
+  return process.env.SHOPIFY_WEBHOOK_SECRET || backendEnv.SHOPIFY_WEBHOOK_SECRET || 'dev-shopify-webhook-secret';
+}
+
+const shopifyWebhookSecret = resolveEffectiveWebhookSecret();
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -71,6 +99,7 @@ async function runSmoke() {
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'test',
+      SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
       SHOPIFY_MOCK_FULFILLMENT_ORDERS: mockFulfillmentOrders,
     },
