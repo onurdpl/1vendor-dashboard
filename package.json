@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
-    "backend:typecheck": "npm --prefix backend run typecheck"
+    "backend:typecheck": "npm --prefix backend run typecheck",
+    "backend:smoke": "npm --prefix backend run smoke"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.9",

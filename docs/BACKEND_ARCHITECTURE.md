@@ -23,6 +23,22 @@
   - `DATABASE_URL` optional for now (required when DB actions are added).
 - Prisma schema drafted for the marketplace domain model.
 
+## Local Backend Verification
+Run from repository root:
+
+1. `npm --prefix backend ci`
+2. `npm run backend:build`
+3. `npm run backend:typecheck`
+4. `npm run backend:smoke`
+
+Smoke verifies:
+- backend process starts without a database connection
+- `GET /health` returns `{ "ok": true }`
+- `GET /version` returns service and version metadata
+- process shuts down cleanly after checks
+
+`DATABASE_URL` is not required for this smoke because DB actions are not wired yet.
+
 ## Single Shopify Store Model
 - One Shopify store for the whole platform.
 - Vendors do not connect independent stores.
@@ -72,3 +88,8 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 - Keep payload hash and processing state for safe retries/reprocessing.
 - Move webhook processing to async job flow in later phases (Redis/BullMQ not included in this step).
 
+## CI Validation
+GitHub Actions CI validates both frontend and backend on push/PR to `main`:
+- frontend install/build/test
+- backend install/build/typecheck
+- backend smoke (`/health` + `/version`)

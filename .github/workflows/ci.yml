@@ -25,8 +25,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install backend dependencies
+        run: npm --prefix backend ci
+
       - name: Build
         run: npm run build
 
       - name: Test
         run: npm run test
+
+      - name: Backend build
+        run: npm run backend:build
+
+      - name: Backend typecheck
+        run: npm run backend:typecheck
+
+      - name: Backend smoke
+        run: npm run backend:smoke
