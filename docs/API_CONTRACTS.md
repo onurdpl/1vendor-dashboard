@@ -118,6 +118,8 @@ No write endpoints are currently wired in the frontend, but future write actions
   - assignment history entries with actor, role, reason, and timestamps
   - per-allocation tracking metadata
   - per-allocation refunded items and totals when present
+- Backend implementation note: route is auth-protected and admin-only; authenticated vendor users receive `403`.
+- Missing Shopify orders return `404`.
 
 ### GET /admin/operations
 

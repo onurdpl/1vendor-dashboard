@@ -28,6 +28,7 @@
 - First DB-backed vendor-scoped read API:
   - `GET /orders`
   - `GET /orders/:orderId`
+  - `GET /admin/orders/:shopifyOrderId`
   - `GET /returns`
   - `GET /returns/:returnId`
   - `GET /finance`
@@ -243,3 +244,19 @@ Frontend note:
   - summary counters by severity and queue type
   - operational items with vendor/order/return/refund references
 - Frontend remains mock-based in this phase; backend operations route is prepared for future integration.
+
+## DB-Backed Admin Shopify Order Breakdown API (Phase 13 Step 12)
+- Admin order breakdown route is now backed by PostgreSQL via Prisma:
+  - `GET /admin/orders/:shopifyOrderId`
+- Route requires:
+  - authenticated user
+  - admin role
+- Vendor users are denied with `403`.
+- Missing Shopify orders return `404`.
+- Response returns:
+  - source Shopify order metadata
+  - all vendor allocations for the order
+  - allocation line items
+  - assignment history
+  - vendor-scoped return/refund records tied to each allocation
+- Frontend remains mock-based in this phase; backend admin order breakdown route is prepared for future integration.

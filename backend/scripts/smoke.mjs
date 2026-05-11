@@ -400,6 +400,46 @@ async function runSmoke() {
     if (vendorOperationsResponse.status !== 403) {
       throw new Error(`/admin/operations vendor forbidden expected 403, got ${vendorOperationsResponse.status}`);
     }
+
+    const adminOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/1001`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (!adminOrderBreakdownResponse.ok) {
+      throw new Error(`/admin/orders/:shopifyOrderId admin failed with ${adminOrderBreakdownResponse.status}`);
+    }
+    const adminOrderBreakdown = await adminOrderBreakdownResponse.json();
+    if (!adminOrderBreakdown?.order || !Array.isArray(adminOrderBreakdown?.allocations)) {
+      throw new Error('/admin/orders/:shopifyOrderId returned invalid shape.');
+    }
+    if (adminOrderBreakdown.allocations.length < 2) {
+      throw new Error('/admin/orders/:shopifyOrderId expected at least two allocations.');
+    }
+    const allocationVendorIds = new Set(adminOrderBreakdown.allocations.map((allocation) => allocation.vendorId));
+    if (!allocationVendorIds.has('yalispor') || !allocationVendorIds.has('sporjinal')) {
+      throw new Error('/admin/orders/:shopifyOrderId missing expected yalispor/sporjinal allocations.');
+    }
+
+    const vendorOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/1001`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorOrderBreakdownResponse.status !== 403) {
+      throw new Error(
+        `/admin/orders/:shopifyOrderId vendor forbidden expected 403, got ${vendorOrderBreakdownResponse.status}`,
+      );
+    }
+
+    const adminOrderMissingResponse = await fetch(`${baseUrl}/admin/orders/does-not-exist`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (adminOrderMissingResponse.status !== 404) {
+      throw new Error(`/admin/orders/:shopifyOrderId missing expected 404, got ${adminOrderMissingResponse.status}`);
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([

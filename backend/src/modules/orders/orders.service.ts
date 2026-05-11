@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import type { OrderDetailDto, OrderSummaryDto } from './orders.types.js';
+import type { AdminOrderBreakdownDto, OrderDetailDto, OrderSummaryDto } from './orders.types.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -14,6 +14,11 @@ function computeTotalAmount(lineItems: Array<{ lineAmount: unknown; quantity: nu
 
     return sum + numeric;
   }, 0);
+}
+
+function toNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
 }
 
 export async function listVendorOrders(vendorId: string): Promise<OrderSummaryDto[]> {
@@ -116,3 +121,120 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
   };
 }
 
+export async function getAdminShopifyOrderBreakdown(
+  shopifyOrderId: string,
+): Promise<AdminOrderBreakdownDto | null> {
+  const order = await prisma.shopifyOrder.findUnique({
+    where: {
+      sourceShopifyOrderId: shopifyOrderId,
+    },
+    include: {
+      allocations: {
+        include: {
+          assignedVendor: true,
+          lineItems: {
+            include: {
+              shopifyOrderLineItem: true,
+            },
+          },
+          assignmentHistory: {
+            orderBy: {
+              createdAt: 'asc',
+            },
+          },
+          returnRecords: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+          },
+          refundRecords: {
+            orderBy: {
+              createdAt: 'desc',
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const orderTotal = order.allocations.reduce(
+    (sum, allocation) =>
+      sum +
+      allocation.lineItems.reduce((lineSum, lineItem) => lineSum + toNumber(lineItem.lineAmount), 0),
+    0,
+  );
+
+  return {
+    order: {
+      sourceShopifyOrderId: order.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: order.sourceShopifyOrderNumber,
+      customerName: order.customerName,
+      customerEmail: null,
+      totalAmount: toAmountString(orderTotal),
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+    },
+    allocations: order.allocations.map((allocation) => {
+      const allocationTotal = allocation.lineItems.reduce(
+        (sum, lineItem) => sum + toNumber(lineItem.lineAmount),
+        0,
+      );
+
+      return {
+        id: allocation.id,
+        vendorId: allocation.assignedVendorId,
+        vendorName: allocation.assignedVendor.name,
+        originalVendorId: allocation.originalVendorId,
+        assignedVendorId: allocation.assignedVendorId,
+        allocationStatus: allocation.allocationStatus,
+        cancellationReason: allocation.cancellationReason,
+        reassignmentRequired: allocation.reassignmentRequired,
+        fulfillmentStatus: allocation.fulfillmentStatus,
+        shippingStatus: allocation.shippingStatus,
+        trackingNumber: allocation.trackingNumber,
+        carrier: allocation.carrier,
+        totalAmount: toAmountString(allocationTotal),
+        lineItems: allocation.lineItems.map((lineItem) => ({
+          id: lineItem.id,
+          sourceLineItemId: lineItem.shopifyOrderLineItem.sourceLineItemId,
+          sourceVariantId: lineItem.shopifyOrderLineItem.sourceVariantId,
+          sku: lineItem.shopifyOrderLineItem.sku,
+          title: lineItem.shopifyOrderLineItem.title,
+          quantity: lineItem.quantity,
+          lineAmount: toAmountString(toNumber(lineItem.lineAmount)),
+        })),
+        assignmentHistory: allocation.assignmentHistory.map((history) => ({
+          id: history.id,
+          action: history.action,
+          fromVendorId: history.fromVendorId,
+          toVendorId: history.toVendorId,
+          reason: history.reason,
+          actorUserId: history.actorUserId,
+          createdAt: history.createdAt.toISOString(),
+        })),
+        returnRecords: allocation.returnRecords.map((returnRecord) => ({
+          id: returnRecord.id,
+          status: returnRecord.status,
+          reason: returnRecord.reason,
+          createdAt: returnRecord.createdAt.toISOString(),
+          updatedAt: returnRecord.updatedAt.toISOString(),
+        })),
+        refundRecords: allocation.refundRecords.map((refundRecord) => ({
+          id: refundRecord.id,
+          sourceShopifyRefundId: refundRecord.sourceShopifyRefundId,
+          amount: toAmountString(toNumber(refundRecord.amount)),
+          status: refundRecord.status,
+          createdAt: refundRecord.createdAt.toISOString(),
+          updatedAt: refundRecord.updatedAt.toISOString(),
+        })),
+      };
+    }),
+  };
+}
