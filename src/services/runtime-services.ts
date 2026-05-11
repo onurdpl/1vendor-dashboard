@@ -11,6 +11,7 @@ import * as realOrders from './real/orders';
 import * as realReturns from './real/returns';
 import * as realFinance from './real/finance';
 import * as realOperations from './real/operations';
+import * as realDiagnostics from './real/diagnostics';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
@@ -116,5 +117,70 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realOperations.listAdminOperationsQueue()
         : Promise.resolve(listMockAdminOperationsQueue()),
+  },
+  diagnostics: {
+    webhooks: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.listWebhookDiagnostics()
+        : Promise.resolve({
+            summary: {
+              total: 0,
+              received: 0,
+              processed: 0,
+              failed: 0,
+              duplicates: 0,
+              needsAttention: 0,
+            },
+            events: [],
+          }),
+    webhookDetail: (webhookEventId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.getWebhookDiagnostic(webhookEventId)
+        : Promise.resolve({
+            id: webhookEventId,
+            topic: 'mock',
+            shopDomain: 'mock.local',
+            shopifyWebhookId: null,
+            idempotencyKey: null,
+            payloadHash: null,
+            rawPayload: null,
+            payloadAvailable: false,
+            status: 'MOCK',
+            errorMessage: null,
+            receivedAt: new Date().toISOString(),
+            processedAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            relatedShopifyOrderId: null,
+          }),
+    syncEvents: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.listSyncEvents()
+        : Promise.resolve({
+            items: [],
+          }),
+    reconciliation: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.getReconciliationDiagnostics()
+        : Promise.resolve({
+            summary: {
+              stuckReceived: 0,
+              failedWebhooks: 0,
+              fulfillmentSyncFailures: 0,
+              missingPayload: 0,
+              total: 0,
+            },
+            items: [],
+          }),
+    replay: (webhookEventId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.replayWebhook(webhookEventId)
+        : Promise.resolve({
+            ok: true as const,
+            topic: 'mock',
+            action: 'mock_only',
+            processingStatus: 'mock_only',
+            message: `Replay is not available in mock mode for ${webhookEventId}.`,
+          }),
   },
 } as const;

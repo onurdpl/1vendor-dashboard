@@ -14,6 +14,7 @@ const navItems = [
   { to: '/finance', label: 'Finance' },
   { to: '/automation', label: 'Automation' },
   { to: '/admin/operations', label: 'Operations Queue', adminOnly: true },
+  { to: '/admin/diagnostics', label: 'Diagnostics', adminOnly: true },
 ];
 
 export function AppShell() {
@@ -52,6 +53,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
     void queryClient.invalidateQueries({ queryKey: ['finance'] });
     void queryClient.invalidateQueries({ queryKey: ['automation'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'diagnostics'] });
   }
 
   return (

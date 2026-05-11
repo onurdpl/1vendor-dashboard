@@ -2,6 +2,12 @@ import { getCurrentVendorContext } from '../auth/vendorContext';
 
 export const queryKeys = {
   admin: {
+    diagnostics: {
+      webhooks: () => ['admin', 'diagnostics', 'webhooks'] as const,
+      webhookDetail: (webhookEventId: string) => ['admin', 'diagnostics', 'webhooks', webhookEventId] as const,
+      syncEvents: () => ['admin', 'diagnostics', 'sync-events'] as const,
+      reconciliation: () => ['admin', 'diagnostics', 'reconciliation'] as const,
+    },
     operations: {
       queue: () => ['admin', 'operations', 'queue'] as const,
     },
