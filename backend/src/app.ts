@@ -8,6 +8,7 @@ import { requireVendorAccess } from './modules/vendor-access/vendor-access.middl
 import { registerOrdersRoutes } from './modules/orders/orders.routes.js';
 import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
+import { registerOperationsRoutes } from './modules/operations/operations.routes.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -54,6 +55,7 @@ export function createApp() {
   registerOrdersRoutes(app, env);
   registerReturnsRoutes(app, env);
   registerFinanceRoutes(app, env);
+  registerOperationsRoutes(app, env);
 
   if (env.NODE_ENV !== 'production') {
     const authService = createAuthService(env);

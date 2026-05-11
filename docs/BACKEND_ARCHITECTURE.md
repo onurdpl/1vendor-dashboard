@@ -31,6 +31,7 @@
   - `GET /returns`
   - `GET /returns/:returnId`
   - `GET /finance`
+  - `GET /admin/operations`
 
 ## Local Backend Verification
 Run from repository root:
@@ -225,3 +226,20 @@ Frontend note:
   - deterministic platform fee in this phase (`10%` of net revenue)
   - payout estimate (`netRevenue - platformFee`)
 - Frontend remains mock-based in this phase; backend finance route is prepared for future integration.
+
+## DB-Backed Admin Operations Queue API (Phase 13 Step 11)
+- Admin operations queue route is now backed by PostgreSQL via Prisma:
+  - `GET /admin/operations`
+- Route requires:
+  - authenticated user
+  - admin role
+- Vendor users are denied with `403`.
+- Queue is derived from DB-backed operational state:
+  - vendor allocations needing reassignment
+  - vendor blocked allocations
+  - awaiting shipment allocations
+  - pending/open return-refund attention signals
+- Response includes:
+  - summary counters by severity and queue type
+  - operational items with vendor/order/return/refund references
+- Frontend remains mock-based in this phase; backend operations route is prepared for future integration.

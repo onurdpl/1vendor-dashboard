@@ -119,6 +119,21 @@ No write endpoints are currently wired in the frontend, but future write actions
   - per-allocation tracking metadata
   - per-allocation refunded items and totals when present
 
+### GET /admin/operations
+
+- Purpose: return admin operations queue items aggregated from allocations, fulfillment, and return/refund state.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: `{ summary, items }`.
+- Expected `401` behavior: return `401 Unauthorized`.
+- Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
+- Expected `404` behavior: not used for this route.
+- Queue item semantics:
+  - `pending_reassignment`: allocation requires reassignment (`reassignmentRequired` or pending reassignment status)
+  - `vendor_blocked`: allocation blocked by vendor state
+  - `awaiting_shipment`: allocation in shipping wait state
+  - `refund_attention`: return/refund records requiring review
+
 ### GET /returns
 
 - Purpose: return the current vendor’s return request list.

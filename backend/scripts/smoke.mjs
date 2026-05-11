@@ -372,6 +372,34 @@ async function runSmoke() {
     if (vendorFinanceForbiddenResponse.status !== 403) {
       throw new Error(`/finance vendor forbidden expected 403, got ${vendorFinanceForbiddenResponse.status}`);
     }
+
+    const adminOperationsResponse = await fetch(`${baseUrl}/admin/operations`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (!adminOperationsResponse.ok) {
+      throw new Error(`/admin/operations admin failed with ${adminOperationsResponse.status}`);
+    }
+    const adminOperations = await adminOperationsResponse.json();
+    if (!adminOperations?.summary || !Array.isArray(adminOperations?.items)) {
+      throw new Error('/admin/operations returned invalid shape.');
+    }
+    const hasBlockedOrPending = adminOperations.items.some(
+      (item) => item?.type === 'pending_reassignment' || item?.type === 'vendor_blocked',
+    );
+    if (!hasBlockedOrPending) {
+      throw new Error('/admin/operations missing pending_reassignment/vendor_blocked item.');
+    }
+
+    const vendorOperationsResponse = await fetch(`${baseUrl}/admin/operations`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorOperationsResponse.status !== 403) {
+      throw new Error(`/admin/operations vendor forbidden expected 403, got ${vendorOperationsResponse.status}`);
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([
