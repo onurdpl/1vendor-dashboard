@@ -1,0 +1,228 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  VENDOR
+  SUPPORT
+  FINANCE
+}
+
+enum AllocationStatus {
+  ACTIVE
+  VENDOR_BLOCKED
+  PENDING_REASSIGNMENT
+  REASSIGNED
+  FULFILLED
+}
+
+enum CancellationReason {
+  OUT_OF_STOCK
+  VENDOR_CANCELLED
+  DAMAGED_INVENTORY
+  FULFILLMENT_ISSUE
+}
+
+enum WebhookStatus {
+  RECEIVED
+  PROCESSING
+  PROCESSED
+  FAILED
+}
+
+enum PayoutStatus {
+  PENDING
+  APPROVED
+  PAID
+  HOLD
+}
+
+model User {
+  id          String             @id @default(cuid())
+  email       String             @unique
+  name        String
+  role        UserRole
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  vendorLinks UserVendorAccess[]
+  assignments AllocationAssignmentHistory[] @relation("assignmentActor")
+}
+
+model Vendor {
+  id                    String                   @id
+  name                  String
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  users                 UserVendorAccess[]
+  originalAllocations   VendorAllocation[]       @relation("originalVendor")
+  assignedAllocations   VendorAllocation[]       @relation("assignedVendor")
+  financeEntries        FinanceLedgerEntry[]
+  assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
+  assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
+}
+
+model UserVendorAccess {
+  id        String   @id @default(cuid())
+  userId    String
+  vendorId  String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, vendorId])
+}
+
+model ShopifyOrder {
+  id                       String                    @id @default(cuid())
+  sourceShopifyOrderId     String                    @unique
+  sourceShopifyOrderNumber String
+  customerName             String?
+  createdAt                DateTime                  @default(now())
+  updatedAt                DateTime                  @updatedAt
+  lineItems                ShopifyOrderLineItem[]
+  allocations              VendorAllocation[]
+  webhookEvents            WebhookEvent[]
+}
+
+model ShopifyOrderLineItem {
+  id                  String       @id @default(cuid())
+  shopifyOrderId      String
+  sourceLineItemId    String
+  sourceVariantId     String?
+  sku                 String?
+  title               String?
+  quantity            Int          @default(1)
+  unitPrice           Decimal?     @db.Decimal(10, 2)
+  originalVendorId    String?
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @updatedAt
+  order               ShopifyOrder @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  allocationLineItems VendorAllocationLineItem[]
+
+  @@unique([shopifyOrderId, sourceLineItemId])
+}
+
+model VendorAllocation {
+  id                       String                         @id @default(cuid())
+  sourceShopifyOrderId     String
+  sourceShopifyOrderNumber String
+  originalVendorId         String
+  assignedVendorId         String
+  allocationStatus         AllocationStatus               @default(ACTIVE)
+  cancellationReason       CancellationReason?
+  reassignmentRequired     Boolean                        @default(false)
+  trackingNumber           String?
+  carrier                  String?
+  createdAt                DateTime                       @default(now())
+  updatedAt                DateTime                       @updatedAt
+  order                    ShopifyOrder                   @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
+  originalVendor           Vendor                         @relation("originalVendor", fields: [originalVendorId], references: [id])
+  assignedVendor           Vendor                         @relation("assignedVendor", fields: [assignedVendorId], references: [id])
+  lineItems                VendorAllocationLineItem[]
+  assignmentHistory        AllocationAssignmentHistory[]
+  fulfillment              Fulfillment?
+  returnRecords            ReturnRecord[]
+  refundRecords            RefundRecord[]
+  financeEntries           FinanceLedgerEntry[]
+}
+
+model VendorAllocationLineItem {
+  id                    String       @id @default(cuid())
+  vendorAllocationId    String
+  shopifyLineItemId     String
+  quantity              Int          @default(1)
+  lineAmount            Decimal?     @db.Decimal(10, 2)
+  createdAt             DateTime     @default(now())
+  updatedAt             DateTime     @updatedAt
+  vendorAllocation      VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  shopifyOrderLineItem  ShopifyOrderLineItem @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorAllocationId, shopifyLineItemId])
+}
+
+model AllocationAssignmentHistory {
+  id                 String            @id @default(cuid())
+  vendorAllocationId String
+  action             String
+  fromVendorId       String?
+  toVendorId         String
+  reason             String?
+  actorUserId        String?
+  createdAt          DateTime          @default(now())
+  vendorAllocation   VendorAllocation  @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  fromVendor         Vendor?           @relation("assignmentFromVendor", fields: [fromVendorId], references: [id])
+  toVendor           Vendor            @relation("assignmentToVendor", fields: [toVendorId], references: [id])
+  actorUser          User?             @relation("assignmentActor", fields: [actorUserId], references: [id])
+}
+
+model Fulfillment {
+  id                 String   @id @default(cuid())
+  vendorAllocationId String   @unique
+  fulfillmentStatus  String
+  trackingNumber     String?
+  carrier            String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  vendorAllocation   VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+}
+
+model ReturnRecord {
+  id                    String   @id @default(cuid())
+  vendorAllocationId    String
+  sourceShopifyOrderId  String
+  sourceShopifyOrderNumber String
+  status                String
+  reason                String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+}
+
+model RefundRecord {
+  id                    String   @id @default(cuid())
+  vendorAllocationId    String
+  sourceShopifyOrderId  String
+  sourceShopifyOrderNumber String
+  sourceShopifyRefundId String
+  amount                Decimal? @db.Decimal(10, 2)
+  status                String
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+}
+
+model FinanceLedgerEntry {
+  id                 String       @id @default(cuid())
+  vendorAllocationId String?
+  vendorId           String
+  entryType          String
+  amount             Decimal      @db.Decimal(10, 2)
+  payoutStatus       PayoutStatus @default(PENDING)
+  description        String?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  vendorAllocation   VendorAllocation? @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  vendor             Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+}
+
+model WebhookEvent {
+  id               String        @id @default(cuid())
+  sourceShopDomain String
+  topic            String
+  webhookId        String
+  payloadHash      String?
+  status           WebhookStatus @default(RECEIVED)
+  receivedAt       DateTime      @default(now())
+  processedAt      DateTime?
+  errorMessage     String?
+  shopifyOrderId   String?
+  shopifyOrder     ShopifyOrder? @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+
+  @@unique([sourceShopDomain, topic, webhookId])
+}
