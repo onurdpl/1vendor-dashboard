@@ -168,6 +168,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - `processedAt`
   - `errorMessage`
   - `duplicate`
+  - `payloadAvailable`
 
 ### GET /admin/diagnostics/webhooks/:webhookEventId
 
@@ -177,8 +178,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Expected success response shape: webhook event metadata plus `payloadHash`, `status`, `errorMessage`, timestamps, and `relatedShopifyOrderId` when inferable.
 - Expected `404` behavior: return `404 Not Found` when the webhook event does not exist.
 - Raw payload note:
-  - raw payload is not currently persisted in the database
-  - `rawPayload` is therefore `null` in this phase
+  - newer webhook events persist `rawPayload` for replay support
+  - older events created before payload retention may still return `rawPayload: null`
+  - response includes `payloadAvailable` so admin tooling can fail clearly before replay
 
 ### GET /admin/diagnostics/sync-events
 
@@ -208,6 +210,52 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - duplicates are not currently stored as separate webhook-event rows
   - duplicate visibility in this phase is response-level and idempotency-key-level, not a separate diagnostics item
 
+### GET /admin/diagnostics/reconciliation
+
+- Purpose: return an admin-only reconciliation view for stuck or failed operational sync state.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: `{ summary, items }`.
+- Summary includes:
+  - `stuckReceived`
+  - `failedWebhooks`
+  - `fulfillmentSyncFailures`
+  - `missingPayload`
+  - `total`
+- Item shape includes:
+  - `id`
+  - `type`
+  - `severity`
+  - `title`
+  - `description`
+  - `relatedWebhookEventId`
+  - `relatedShopifyOrderId`
+  - `relatedAllocationId`
+  - `status`
+  - `createdAt`
+  - `suggestedAction`
+  - `payloadAvailable`
+
+### POST /admin/diagnostics/webhooks/:webhookEventId/replay
+
+- Purpose: explicitly replay a persisted webhook event for operational recovery.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Supported topics:
+  - `orders/create`
+  - `refunds/create`
+- Expected `202` behavior:
+  - returns the same processed or needs-attention semantics as the underlying ingestion service
+  - does not silently succeed
+- Expected `404` behavior:
+  - webhook event not found
+- Expected `409` behavior:
+  - `Webhook payload is not available for replay`
+  - unsupported topic
+- Replay note:
+  - replay uses stored payload content only
+  - older persisted webhook events may not have replayable payloads because raw payload retention was added later
+
 ### POST /webhooks/shopify/orders-create
 
 - Purpose: receive verified Shopify `orders/create` webhook payloads and ingest vendor allocations when seller info can be resolved.
@@ -225,6 +273,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - this phase verifies, de-duplicates, fetches `custom.seller_info`, and creates order allocations
   - seller info fetch uses the documented Shopify Admin metafield query
   - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
+  - future webhook events persist raw payloads for explicit admin replay and reconciliation
 - refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
 
 ### POST /webhooks/shopify/refunds-create
@@ -242,6 +291,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - primary vendor lookup path is `refund_line_items[].line_item.sku`
   - no silent fallback allocation is allowed for missing SKU or unresolved vendor mapping
   - duplicate refund delivery is ignored through the existing webhook idempotency layer
+  - future webhook events persist raw payloads for explicit admin replay and reconciliation
 
 ### POST /fulfillments/:allocationId/tracking
 

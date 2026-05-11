@@ -338,6 +338,35 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - use persisted `Fulfillment` sync state for fulfillment tracking failures
   - consolidate operational failures into an admin-only sync-events feed
 - Current visibility includes:
+
+## Webhook Replay and Reconciliation Tooling (Phase 14-6)
+- Backend now adds explicit admin recovery tooling without introducing queue workers or silent retries.
+- Current recovery endpoints:
+  - `POST /admin/diagnostics/webhooks/:webhookEventId/replay`
+  - `GET /admin/diagnostics/reconciliation`
+- Replay strategy:
+  - admin-only
+  - supported topics only:
+    - `orders/create`
+    - `refunds/create`
+  - replay reuses the stored raw webhook payload and existing ingestion services
+  - missing payload is a hard `409` with:
+    - `Webhook payload is not available for replay`
+  - unsupported topics are rejected explicitly instead of pretending to recover
+- Payload retention:
+  - new `WebhookEvent` rows persist `rawPayload` for future replay
+  - older historical events are not backfilled
+  - diagnostics detail and reconciliation expose payload availability so operators can tell whether replay is possible
+- Reconciliation strategy:
+  - surfaces `RECEIVED` webhook events older than 5 minutes
+  - surfaces failed webhook events
+  - surfaces fulfillment records with `fulfillment_sync_failed`
+  - surfaces events missing replayable payload content
+  - provides a `suggestedAction` per item rather than attempting silent recovery
+- Operational guardrail:
+  - this phase does not change Shopify ingestion assumptions
+  - this phase does not add queue workers
+  - recovery remains operator-driven and explicit
   - processed webhook receipts
   - failed webhook ingestion attempts
   - seller_info retry exhaustion

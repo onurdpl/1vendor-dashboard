@@ -18,6 +18,7 @@ export type AdminWebhookDiagnosticsEvent = {
   processedAt: string | null;
   errorMessage: string | null;
   duplicate: boolean;
+  payloadAvailable: boolean;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -34,7 +35,8 @@ export type AdminWebhookDiagnosticDetail = {
   shopifyWebhookId: string | null;
   idempotencyKey: string | null;
   payloadHash: string | null;
-  rawPayload: null;
+  rawPayload: string | null;
+  payloadAvailable: boolean;
   status: string;
   errorMessage: string | null;
   receivedAt: string;
@@ -61,4 +63,43 @@ export type SyncDiagnosticItem = {
 
 export type SyncDiagnosticsResponse = {
   items: SyncDiagnosticItem[];
+};
+
+export type WebhookReplayResponse = {
+  ok: true;
+  topic: string;
+  action: string;
+  processingStatus: string;
+  shopifyOrderId?: string;
+  allocationCount?: number;
+  refundAllocationCount?: number;
+  message?: string;
+};
+
+export type ReconciliationSummary = {
+  stuckReceived: number;
+  failedWebhooks: number;
+  fulfillmentSyncFailures: number;
+  missingPayload: number;
+  total: number;
+};
+
+export type ReconciliationItem = {
+  id: string;
+  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload';
+  severity: SyncDiagnosticSeverity;
+  title: string;
+  description: string;
+  relatedWebhookEventId: string | null;
+  relatedShopifyOrderId: string | null;
+  relatedAllocationId: string | null;
+  status: string;
+  createdAt: string;
+  suggestedAction: string;
+  payloadAvailable: boolean | null;
+};
+
+export type ReconciliationResponse = {
+  summary: ReconciliationSummary;
+  items: ReconciliationItem[];
 };

@@ -48,6 +48,7 @@ export async function getOrCreateWebhookEvent(
         webhookId: input.webhookId,
         idempotencyKey,
         payloadHash,
+        rawPayload: input.rawBody,
         status: 'RECEIVED',
       },
     });

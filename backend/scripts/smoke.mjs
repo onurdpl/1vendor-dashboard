@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { createHmac } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PrismaClient } from '@prisma/client';
 
 const port = 4010;
 const baseUrl = `http://127.0.0.1:${port}`;
@@ -32,6 +33,16 @@ function resolveEffectiveWebhookSecret() {
 }
 
 const shopifyWebhookSecret = resolveEffectiveWebhookSecret();
+const backendEnv = loadEnvFile(path.join(process.cwd(), '.env'));
+const prisma = backendEnv.DATABASE_URL
+  ? new PrismaClient({
+      datasources: {
+        db: {
+          url: backendEnv.DATABASE_URL,
+        },
+      },
+    })
+  : null;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -493,6 +504,22 @@ async function runSmoke() {
     const vendorToken = vendorLoginJson?.token;
     if (!vendorToken) {
       throw new Error('Vendor login token missing in /auth/login response.');
+    }
+
+    const legacyMissingPayloadEventId = `legacy-missing-payload-${runId}`;
+    if (prisma) {
+      await prisma.webhookEvent.create({
+        data: {
+          id: legacyMissingPayloadEventId,
+          sourceShopDomain: 'demo-shop.myshopify.com',
+          topic: 'orders/create',
+          idempotencyKey: `legacy:orders/create:${runId}`,
+          payloadHash: `legacy-payload-hash-${runId}`,
+          rawPayload: null,
+          status: 'RECEIVED',
+          receivedAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      });
     }
 
     const allowedVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
@@ -1095,9 +1122,14 @@ async function runSmoke() {
     if (!processedWebhookEvent) {
       throw new Error('/admin/diagnostics/webhooks missing processed webhook event.');
     }
-    const failedWebhookEvent = adminWebhookDiagnostics.events.find((event) => event?.status === 'FAILED');
+    const failedWebhookEvent = adminWebhookDiagnostics.events.find(
+      (event) => event?.status === 'FAILED' && event?.payloadAvailable === true,
+    );
     if (!failedWebhookEvent) {
       throw new Error('/admin/diagnostics/webhooks missing failed webhook event.');
+    }
+    if (!adminWebhookDiagnostics.events.some((event) => typeof event?.payloadAvailable === 'boolean')) {
+      throw new Error('/admin/diagnostics/webhooks missing payload availability flag.');
     }
 
     const adminWebhookDiagnosticsDetailResponse = await fetch(
@@ -1116,7 +1148,8 @@ async function runSmoke() {
     const adminWebhookDiagnosticsDetail = await adminWebhookDiagnosticsDetailResponse.json();
     if (
       adminWebhookDiagnosticsDetail?.id !== processedWebhookEvent.id ||
-      typeof adminWebhookDiagnosticsDetail?.payloadHash !== 'string'
+      typeof adminWebhookDiagnosticsDetail?.payloadHash !== 'string' ||
+      typeof adminWebhookDiagnosticsDetail?.payloadAvailable !== 'boolean'
     ) {
       throw new Error('/admin/diagnostics/webhooks/:webhookEventId returned invalid shape.');
     }
@@ -1142,6 +1175,24 @@ async function runSmoke() {
       throw new Error('/admin/diagnostics/sync-events missing expected failure diagnostics item.');
     }
 
+    const adminReconciliationResponse = await fetch(`${baseUrl}/admin/diagnostics/reconciliation`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (!adminReconciliationResponse.ok) {
+      throw new Error(
+        `/admin/diagnostics/reconciliation admin failed with ${adminReconciliationResponse.status}`,
+      );
+    }
+    const adminReconciliation = await adminReconciliationResponse.json();
+    if (!adminReconciliation?.summary || !Array.isArray(adminReconciliation?.items)) {
+      throw new Error('/admin/diagnostics/reconciliation returned invalid shape.');
+    }
+    if (!adminReconciliation.items.some((item) => item?.type === 'missing_payload')) {
+      throw new Error('/admin/diagnostics/reconciliation missing missing_payload recovery item.');
+    }
+
     const vendorWebhookDiagnosticsResponse = await fetch(`${baseUrl}/admin/diagnostics/webhooks`, {
       headers: {
         Authorization: `Bearer ${vendorToken}`,
@@ -1161,6 +1212,93 @@ async function runSmoke() {
     if (vendorSyncEventsResponse.status !== 403) {
       throw new Error(
         `/admin/diagnostics/sync-events vendor forbidden expected 403, got ${vendorSyncEventsResponse.status}`,
+      );
+    }
+
+    const vendorReconciliationResponse = await fetch(`${baseUrl}/admin/diagnostics/reconciliation`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorReconciliationResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/reconciliation vendor forbidden expected 403, got ${vendorReconciliationResponse.status}`,
+      );
+    }
+
+    const missingPayloadReplayResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${legacyMissingPayloadEventId}/replay`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (missingPayloadReplayResponse.status !== 409) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay missing payload expected 409, got ${missingPayloadReplayResponse.status}`,
+      );
+    }
+    const missingPayloadReplayJson = await missingPayloadReplayResponse.json();
+    if (missingPayloadReplayJson?.message !== 'Webhook payload is not available for replay') {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay missing payload returned unexpected message: ${JSON.stringify(missingPayloadReplayJson)}`,
+      );
+    }
+
+    const failedReplayResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${failedWebhookEvent.id}/replay`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (failedReplayResponse.status !== 202) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay failed event expected 202, got ${failedReplayResponse.status}`,
+      );
+    }
+    const failedReplayJson = await failedReplayResponse.json();
+    if (
+      failedReplayJson?.ok !== true ||
+      typeof failedReplayJson?.action !== 'string' ||
+      typeof failedReplayJson?.processingStatus !== 'string'
+    ) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay failed event returned invalid payload: ${JSON.stringify(failedReplayJson)}`,
+      );
+    }
+
+    const vendorReplayResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${failedWebhookEvent.id}/replay`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${vendorToken}`,
+        },
+      },
+    );
+    if (vendorReplayResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay vendor forbidden expected 403, got ${vendorReplayResponse.status}`,
+      );
+    }
+
+    const missingReplayIdResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/does-not-exist/replay`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (missingReplayIdResponse.status !== 404) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/replay missing event expected 404, got ${missingReplayIdResponse.status}`,
       );
     }
 
@@ -1209,6 +1347,9 @@ async function runSmoke() {
       new Promise((resolve) => child.once('exit', resolve)),
       sleep(5000),
     ]);
+    if (prisma) {
+      await prisma.$disconnect();
+    }
   }
 
   if (child.exitCode && child.exitCode !== 0) {

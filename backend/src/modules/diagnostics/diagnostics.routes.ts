@@ -4,8 +4,10 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import {
   getWebhookDiagnosticById,
+  getReconciliationDiagnostics,
   listSyncDiagnostics,
   listWebhookDiagnostics,
+  replayWebhookEvent,
 } from './diagnostics.service.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
@@ -56,6 +58,39 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return listSyncDiagnostics();
+    },
+  );
+
+  app.get(
+    '/admin/diagnostics/reconciliation',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return getReconciliationDiagnostics();
+    },
+  );
+
+  app.post<{ Params: { webhookEventId: string } }>(
+    '/admin/diagnostics/webhooks/:webhookEventId/replay',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const result = await replayWebhookEvent(env, request.params.webhookEventId);
+      if (!result.ok) {
+        return reply.code(result.statusCode).send({ message: result.message });
+      }
+
+      return reply.code(202).send(result.response);
     },
   );
 }

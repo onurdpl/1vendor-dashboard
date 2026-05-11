@@ -267,6 +267,7 @@ model WebhookEvent {
   webhookId        String?
   idempotencyKey   String?       @unique
   payloadHash      String?
+  rawPayload       String?
   status           WebhookStatus @default(RECEIVED)
   receivedAt       DateTime      @default(now())
   processedAt      DateTime?
