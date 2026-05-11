@@ -1076,6 +1076,44 @@ async function runSmoke() {
       throw new Error(`/finance vendor forbidden expected 403, got ${vendorFinanceForbiddenResponse.status}`);
     }
 
+    const adminAutomationYaliResponse = await fetch(`${baseUrl}/automation`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!adminAutomationYaliResponse.ok) {
+      throw new Error(`/automation admin yalispor failed with ${adminAutomationYaliResponse.status}`);
+    }
+    const adminAutomationYali = await adminAutomationYaliResponse.json();
+    if (!Array.isArray(adminAutomationYali?.alerts) || !Array.isArray(adminAutomationYali?.suggestions)) {
+      throw new Error('/automation admin yalispor returned invalid shape.');
+    }
+
+    const vendorAutomationYaliResponse = await fetch(`${baseUrl}/automation`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!vendorAutomationYaliResponse.ok) {
+      throw new Error(`/automation vendor yalispor failed with ${vendorAutomationYaliResponse.status}`);
+    }
+    const vendorAutomationYali = await vendorAutomationYaliResponse.json();
+    if (!Array.isArray(vendorAutomationYali?.alerts) || !Array.isArray(vendorAutomationYali?.suggestions)) {
+      throw new Error('/automation vendor yalispor returned invalid shape.');
+    }
+
+    const vendorAutomationForbiddenResponse = await fetch(`${baseUrl}/automation`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (vendorAutomationForbiddenResponse.status !== 403) {
+      throw new Error(`/automation vendor forbidden expected 403, got ${vendorAutomationForbiddenResponse.status}`);
+    }
+
     const adminOperationsResponse = await fetch(`${baseUrl}/admin/operations`, {
       headers: {
         Authorization: `Bearer ${adminToken}`,

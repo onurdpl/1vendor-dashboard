@@ -11,6 +11,7 @@ import { registerOrdersRoutes } from './modules/orders/orders.routes.js';
 import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
 import { registerOperationsRoutes } from './modules/operations/operations.routes.js';
+import { registerAutomationRoutes } from './modules/automation/automation.routes.js';
 import { registerFulfillmentRoutes } from './modules/fulfillments/fulfillment.routes.js';
 import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.service.js';
 import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.js';
@@ -94,6 +95,7 @@ export function createApp() {
   registerReturnsRoutes(app, env);
   registerFinanceRoutes(app, env);
   registerOperationsRoutes(app, env);
+  registerAutomationRoutes(app, env);
   registerFulfillmentRoutes(app, env);
   registerDiagnosticsRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);

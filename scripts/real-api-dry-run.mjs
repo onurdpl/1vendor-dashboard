@@ -110,6 +110,16 @@ async function run() {
   assert(isObject(financeJson?.summary), '/finance missing summary object');
   assert(Array.isArray(financeJson?.records), '/finance missing records array');
 
+  const { response: automationResponse, json: automationJson } = await requestJson(
+    `${DEFAULT_BASE_URL}/automation`,
+    {
+      headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+    },
+  );
+  assert(automationResponse.ok, `/automation returned ${automationResponse.status}`);
+  assert(Array.isArray(automationJson?.alerts), '/automation missing alerts array');
+  assert(Array.isArray(automationJson?.suggestions), '/automation missing suggestions array');
+
   const { response: operationsResponse, json: operationsJson } = await requestJson(
     `${DEFAULT_BASE_URL}/admin/operations`,
     {

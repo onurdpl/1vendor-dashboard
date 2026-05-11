@@ -405,6 +405,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Required auth: yes.
 - Vendor scoping rule: automation signals must be isolated to the authenticated vendor scope.
 - Expected success response shape: `AutomationDashboard`.
+- Current implementation note: this route is read-only and intended to power real-mode operational visibility. It does not execute automation actions, and current frontend action buttons remain non-mutating until a future write contract exists.
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access automation data.
 - Expected `404` behavior: not typically used for this collection-like response, unless the backend intentionally obscures access.

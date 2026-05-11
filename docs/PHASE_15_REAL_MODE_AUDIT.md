@@ -49,7 +49,7 @@
 - Real-mode orders, returns, and finance queries are live.
 - Overview copy and workspace framing are intentionally real-mode placeholders, not a backend-native dashboard model.
 - Recent activity is currently empty in real mode.
-- Dashboard still queries automation signals, which are not backed by a real endpoint.
+- Dashboard automation signals are now backed by the real `GET /automation` endpoint.
 - Result:
   - usable as a landing page
   - not a complete operational dashboard yet
@@ -83,14 +83,9 @@
 
 ## Mock-Backed Pages
 
-### Automation
-- Still frontend-mapped to `GET /automation`.
-- Backend does not expose `/automation`.
-- In real mode this route is not supported by the backend contract.
-
 ### Dashboard Supporting Signals
 - Dashboard overview composition is still local/hybrid.
-- Dashboard automation signals depend on the same missing `/automation` path.
+- Dashboard automation signals now load from the backend, but the surrounding overview composition is still local/hybrid.
 
 ### Mock-Only Action Flows Still Present in Real Mode
 - Order detail fulfillment buttons
@@ -101,17 +96,18 @@
 ## Broken Pages or Broken Real-Mode Behaviors
 
 ### Automation Page
-- Broken in real mode.
-- Exact backend/API issue:
-  - `GET /automation` returns `404`
+- Read path is now backend-backed in real mode through `GET /automation`.
+- Alerts and suggestions load from vendor-scoped backend operational state.
+- Action buttons are still non-mutating/local UX only.
 - Impact:
-  - automation page cannot be considered real-mode ready
+  - page is usable for read visibility
+  - action execution is not production-ready yet
 
 ### Dashboard Automation Dependency
-- Dashboard is not fully broken, but it remains coupled to automation data that is not backed by a real endpoint.
+- Dashboard is not fully broken, but it remains coupled to a hybrid overview model instead of a backend-native dashboard aggregate.
 - Impact:
-  - likely noisy failed request behavior in real mode
-  - reduced operator confidence
+  - less operational depth than the rest of the real-mode shell
+  - reduced operator confidence compared with fully backend-backed pages
 
 ## Backend-Backed vs Mock-Backed Summary
 
@@ -122,6 +118,7 @@
 - returns list
 - return detail data
 - finance
+- automation read surface
 - admin operations
 - admin Shopify order breakdown
 - admin diagnostics
@@ -133,13 +130,11 @@
 - admin order breakdown action area
 
 ### Mock-Backed Today
-- automation page
 - dashboard recent/mock overview composition
 - fulfillment/tracking action buttons in frontend
 - admin reassignment action buttons
 
 ## Runtime/API Gaps Identified
-- No backend `GET /automation` endpoint exists.
 - No backend dashboard aggregate endpoint exists; frontend dashboard is composing a partial placeholder instead.
 - No frontend wiring yet for the real fulfillment tracking mutation:
   - backend exists: `POST /fulfillments/:allocationId/tracking`
@@ -169,10 +164,9 @@
 - Real-mode session model supports backend vendor slugs correctly.
 
 ## Console Errors / API 404s
-- Confirmed real backend `404`:
-  - `GET /automation`
+- The previously confirmed real backend `404` for `GET /automation` is fixed in current source and verification coverage.
 - Authenticated browser console could not be fully captured in this audit because local login automation remains limited in the in-app browser.
-- Based on route wiring, `/automation` is the primary known real-mode API miss today.
+- Based on route wiring, the clearest remaining real-mode gaps are hybrid dashboard composition and mock-only action areas rather than a missing automation route.
 
 ## Admin Flow Assessment
 - Login: backend-supported, previously verified in real mode, not re-driven end-to-end in browser during this audit due local input limitation.
@@ -185,7 +179,7 @@
 - Admin operations: working.
 - Admin order breakdown for live order `7613246112081`: working for read path, partial for action path.
 - Admin diagnostics: working.
-- Automation: broken in real mode.
+- Automation: working for read path, partial for action path.
 
 ## Vendor Flow Assessment
 - Login: backend-supported, not re-driven end-to-end in browser during this audit due local input limitation.
@@ -197,6 +191,7 @@
 - Fulfillment/tracking action visibility:
   - visibility is meaningful
   - action execution is still mock-only in the frontend
+- Automation: working for read path, partial for action path.
 - Admin nav hidden:
   - confirmed in code
 - Admin routes denied:
@@ -205,7 +200,6 @@
 ## Priority Order for Phase 15 Fixes
 
 ### Priority 1
-- Remove real-mode dependence on nonexistent `/automation` or replace it with an intentional real-mode placeholder strategy.
 - Wire frontend fulfillment/tracking actions to the real backend mutation.
 - Finish real-mode dashboard strategy so it no longer depends on mock-only operational signals.
 
