@@ -191,7 +191,7 @@ export function createShopifyAdminService(env: AppEnv) {
     }
 
     const response = await fetch(
-      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/fulfillment_orders.json?order_id=${encodeURIComponent(shopifyOrderId)}`,
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/orders/${encodeURIComponent(shopifyOrderId)}/fulfillment_orders.json`,
       {
         headers: {
           'content-type': 'application/json',

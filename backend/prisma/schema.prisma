@@ -93,6 +93,7 @@ model ShopifyOrder {
   lineItems                ShopifyOrderLineItem[]
   allocations              VendorAllocation[]
   webhookEvents            WebhookEvent[]
+  refunds                  ShopifyRefund[]
 }
 
 model ShopifyOrderLineItem {
@@ -109,6 +110,7 @@ model ShopifyOrderLineItem {
   updatedAt           DateTime     @updatedAt
   order               ShopifyOrder @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
   allocationLineItems VendorAllocationLineItem[]
+  refundLineItems     ShopifyRefundLineItem[]
 
   @@unique([shopifyOrderId, sourceLineItemId])
 }
@@ -190,6 +192,7 @@ model ReturnRecord {
   vendorAllocationId    String
   sourceShopifyOrderId  String
   sourceShopifyOrderNumber String
+  sourceShopifyRefundId String?
   status                String
   reason                String?
   createdAt             DateTime @default(now())
@@ -208,6 +211,39 @@ model RefundRecord {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  lineItems             ShopifyRefundLineItem[]
+}
+
+model ShopifyRefund {
+  id                      String                 @id @default(cuid())
+  shopifyOrderId          String
+  sourceShopifyOrderId    String
+  sourceShopifyOrderNumber String
+  sourceShopifyRefundId   String                 @unique
+  createdAt               DateTime               @default(now())
+  updatedAt               DateTime               @updatedAt
+  order                   ShopifyOrder           @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  lineItems               ShopifyRefundLineItem[]
+}
+
+model ShopifyRefundLineItem {
+  id                     String               @id @default(cuid())
+  shopifyRefundId        String
+  refundRecordId         String?
+  shopifyOrderLineItemId String
+  sourceRefundLineItemId String
+  sourceLineItemId       String
+  sku                    String?
+  title                  String?
+  quantity               Int                  @default(1)
+  subtotal               Decimal?             @db.Decimal(10, 2)
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  shopifyRefund          ShopifyRefund        @relation(fields: [shopifyRefundId], references: [id], onDelete: Cascade)
+  refundRecord           RefundRecord?        @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
+  shopifyOrderLineItem   ShopifyOrderLineItem @relation(fields: [shopifyOrderLineItemId], references: [id], onDelete: Cascade)
+
+  @@unique([shopifyRefundId, sourceRefundLineItemId])
 }
 
 model FinanceLedgerEntry {

@@ -573,6 +573,152 @@ async function runSmoke() {
       throw new Error('/orders admin sporjinal returned empty or invalid payload.');
     }
 
+    const refundWebhookPayload = JSON.stringify({
+      id: `rf-${runId}`,
+      order_id: 9001,
+      created_at: '2026-05-11T12:30:00.000Z',
+      note: 'Customer requested refund',
+      refund_line_items: [
+        {
+          id: `rli-a-${runId}`,
+          line_item_id: `li-a-${runId}`,
+          quantity: 1,
+          subtotal: '120.00',
+          line_item: {
+            id: `li-a-${runId}`,
+            sku: 'DH2987-100-41',
+            title: 'Nike Dunk Low',
+            variant_title: '41',
+          },
+        },
+        {
+          id: `rli-b-${runId}`,
+          line_item_id: `li-b-${runId}`,
+          quantity: 1,
+          subtotal: '135.00',
+          line_item: {
+            id: `li-b-${runId}`,
+            sku: 'DH2987-100-40,5',
+            title: 'Nike Dunk Low',
+            variant_title: '40,5',
+          },
+        },
+      ],
+    });
+    const refundWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(refundWebhookPayload, 'utf8')
+      .digest('base64');
+    const refundWebhookHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': refundWebhookHmac,
+      'x-shopify-topic': 'refunds/create',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+    };
+    const refundWebhookId = `smoke-refund-${runId}`;
+
+    const validRefundWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/refunds-create`, {
+      method: 'POST',
+      headers: {
+        ...refundWebhookHeaders,
+        'x-shopify-webhook-id': refundWebhookId,
+      },
+      body: refundWebhookPayload,
+    });
+    if (validRefundWebhookResponse.status !== 202) {
+      throw new Error(`/webhooks/shopify/refunds-create valid signature expected 202, got ${validRefundWebhookResponse.status}`);
+    }
+    const validRefundWebhookJson = await validRefundWebhookResponse.json();
+    if (
+      validRefundWebhookJson?.duplicate !== false ||
+      validRefundWebhookJson?.action !== 'accepted' ||
+      validRefundWebhookJson?.processingStatus !== 'processed' ||
+      validRefundWebhookJson?.refundAllocationCount !== 2
+    ) {
+      throw new Error(`/webhooks/shopify/refunds-create first delivery payload invalid: ${JSON.stringify(validRefundWebhookJson)}`);
+    }
+
+    const duplicateRefundWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/refunds-create`, {
+      method: 'POST',
+      headers: {
+        ...refundWebhookHeaders,
+        'x-shopify-webhook-id': refundWebhookId,
+      },
+      body: refundWebhookPayload,
+    });
+    if (duplicateRefundWebhookResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/refunds-create duplicate webhook id expected 202, got ${duplicateRefundWebhookResponse.status}`,
+      );
+    }
+    const duplicateRefundWebhookJson = await duplicateRefundWebhookResponse.json();
+    if (duplicateRefundWebhookJson?.duplicate !== true || duplicateRefundWebhookJson?.action !== 'duplicate_ignored') {
+      throw new Error(
+        `/webhooks/shopify/refunds-create duplicate webhook id payload invalid: ${JSON.stringify(duplicateRefundWebhookJson)}`,
+      );
+    }
+
+    const unresolvedRefundWebhookPayload = JSON.stringify({
+      id: `rf-fail-${runId}`,
+      order_id: 9001,
+      refund_line_items: [
+        {
+          id: `rli-fail-${runId}`,
+          line_item_id: `li-fail-${runId}`,
+          quantity: 1,
+          subtotal: '50.00',
+          line_item: {
+            id: `li-fail-${runId}`,
+            sku: 'UNKNOWN-REFUND-SKU',
+            title: 'Unknown Product',
+          },
+        },
+      ],
+    });
+    const unresolvedRefundWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(unresolvedRefundWebhookPayload, 'utf8')
+      .digest('base64');
+    const unresolvedRefundWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/refunds-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': unresolvedRefundWebhookHmac,
+        'x-shopify-topic': 'refunds/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-refund-fail-${runId}`,
+      },
+      body: unresolvedRefundWebhookPayload,
+    });
+    if (unresolvedRefundWebhookResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/refunds-create unresolved refund SKU expected 202, got ${unresolvedRefundWebhookResponse.status}`,
+      );
+    }
+    const unresolvedRefundWebhookJson = await unresolvedRefundWebhookResponse.json();
+    if (
+      unresolvedRefundWebhookJson?.duplicate !== false ||
+      unresolvedRefundWebhookJson?.action !== 'received_needs_attention' ||
+      unresolvedRefundWebhookJson?.processingStatus !== 'needs_attention'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/refunds-create unresolved refund SKU payload invalid: ${JSON.stringify(unresolvedRefundWebhookJson)}`,
+      );
+    }
+
+    const invalidRefundWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/refunds-create`, {
+      method: 'POST',
+      headers: {
+        ...refundWebhookHeaders,
+        'x-shopify-hmac-sha256': 'invalid-signature',
+        'x-shopify-webhook-id': `smoke-refund-invalid-${runId}`,
+      },
+      body: refundWebhookPayload,
+    });
+    if (invalidRefundWebhookResponse.status !== 401) {
+      throw new Error(
+        `/webhooks/shopify/refunds-create invalid signature expected 401, got ${invalidRefundWebhookResponse.status}`,
+      );
+    }
+
     const vendorCrossTrackingResponse = await fetch(
       `${baseUrl}/fulfillments/${ingestedSporjinalAllocation.id}/tracking`,
       {
@@ -778,6 +924,9 @@ async function runSmoke() {
     if (!Array.isArray(adminReturnsYali) || adminReturnsYali.length === 0) {
       throw new Error('/returns admin yalispor returned empty or invalid payload.');
     }
+    if (!adminReturnsYali.some((record) => record.sourceShopifyRefundId === `rf-${runId}`)) {
+      throw new Error('/returns admin yalispor did not include ingested Shopify refund allocation.');
+    }
 
     const adminReturnsSporjinalResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
@@ -791,6 +940,9 @@ async function runSmoke() {
     const adminReturnsSporjinal = await adminReturnsSporjinalResponse.json();
     if (!Array.isArray(adminReturnsSporjinal) || adminReturnsSporjinal.length === 0) {
       throw new Error('/returns admin sporjinal returned empty or invalid payload.');
+    }
+    if (!adminReturnsSporjinal.some((record) => record.sourceShopifyRefundId === `rf-${runId}`)) {
+      throw new Error('/returns admin sporjinal did not include ingested Shopify refund allocation.');
     }
 
     const vendorReturnsYaliResponse = await fetch(`${baseUrl}/returns`, {

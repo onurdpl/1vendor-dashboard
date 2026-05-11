@@ -70,6 +70,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 Backend-only integration skeleton endpoints also exist for future Shopify ingestion:
 
 - `POST /webhooks/shopify/orders-create`
+- `POST /webhooks/shopify/refunds-create`
 - `POST /fulfillments/:allocationId/tracking`
 
 ## Endpoint Contracts
@@ -224,7 +225,23 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - this phase verifies, de-duplicates, fetches `custom.seller_info`, and creates order allocations
   - seller info fetch uses the documented Shopify Admin metafield query
   - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
-  - refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
+- refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
+
+### POST /webhooks/shopify/refunds-create
+
+- Purpose: receive verified Shopify `refunds/create` webhook payloads and create vendor-scoped refund allocations from the original order mapping snapshot.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", shopifyOrderId, refundAllocationCount }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+  - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
+- Expected `202` behavior: valid HMAC signature accepted whether refund processing succeeds immediately, is ignored as duplicate, or is parked in needs-attention state.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Processing note:
+  - refund mapping uses the original persisted order allocation snapshot
+  - primary vendor lookup path is `refund_line_items[].line_item.sku`
+  - no silent fallback allocation is allowed for missing SKU or unresolved vendor mapping
+  - duplicate refund delivery is ignored through the existing webhook idempotency layer
 
 ### POST /fulfillments/:allocationId/tracking
 

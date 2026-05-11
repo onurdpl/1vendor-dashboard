@@ -300,6 +300,33 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - run background queue workers
   - switch the frontend to real API mode
 
+## Shopify Refund Ingestion Foundation (Phase 14-5)
+- Backend now exposes:
+  - `POST /webhooks/shopify/refunds-create`
+- Current refund ingestion flow:
+  1. verify Shopify webhook HMAC
+  2. apply webhook idempotency before processing
+  3. parse `refund_line_items`
+  4. resolve the original Shopify order from persisted order ingestion state
+  5. map each refund line item by `refund_line_items[].line_item.sku`
+  6. resolve the original vendor from the persisted order line-item mapping snapshot
+  7. create vendor-scoped refund records and refund line-item snapshots
+- Persisted refund state is intentionally small and incremental:
+  - `ShopifyRefund`
+  - `ShopifyRefundLineItem`
+  - existing vendor-scoped `RefundRecord`
+  - existing vendor-scoped `ReturnRecord`
+- Safe failure behavior:
+  - missing order id -> needs attention
+  - missing refund line items -> needs attention
+  - missing SKU -> needs attention
+  - missing original order mapping -> needs attention
+  - unknown vendor mapping -> needs attention
+  - no silent fallback allocation is allowed
+- Diagnostics visibility:
+  - failed refund ingestions appear through the existing webhook failure and sync diagnostics feeds
+  - duplicate refund deliveries are ignored by existing webhook idempotency
+
 ## Diagnostics and Sync Visibility (Phase 13 Step 19)
 - Admin-only diagnostics APIs now expose persisted webhook and sync state without changing frontend runtime behavior.
 - Current diagnostics endpoints:
