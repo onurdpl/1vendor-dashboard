@@ -70,6 +70,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 Backend-only integration skeleton endpoints also exist for future Shopify ingestion:
 
 - `POST /webhooks/shopify/orders-create`
+- `POST /fulfillments/:allocationId/tracking`
 
 ## Endpoint Contracts
 
@@ -158,6 +159,66 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - seller info fetch uses the documented Shopify Admin metafield query
   - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
   - refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
+
+### POST /fulfillments/:allocationId/tracking
+
+- Purpose: submit vendor-owned shipment tracking and sync fulfillment to Shopify Fulfillment Orders API.
+- Required auth: yes.
+- Vendor scoping rule: route requires backend vendor context validation; vendor users may update only their own assigned allocation and admin may update within the selected vendor context.
+- Expected request body:
+
+```json
+{
+  "trackingNumber": "TRACK123",
+  "carrier": "Yurtiçi Kargo",
+  "trackingUrl": "https://tracking.example/TRACK123",
+  "notifyCustomer": true
+}
+```
+
+- Expected success response shape:
+
+```json
+{
+  "ok": true,
+  "allocationId": "alloc-yalispor-9001",
+  "trackingNumber": "TRACK123",
+  "carrier": "Yurtiçi Kargo",
+  "trackingUrl": "https://tracking.example/TRACK123",
+  "notifyCustomer": true,
+  "fulfillmentStatus": "fulfillment_submitted",
+  "shippingStatus": "shipped",
+  "shopifySyncSource": "mock",
+  "shopifyFulfillmentId": "mock-fulfillment-alloc-yalispor-9001"
+}
+```
+
+- Expected `400` behavior:
+  - missing `trackingNumber`
+  - missing `carrier`
+  - missing Shopify order linkage
+- Expected `403` behavior:
+  - authenticated user attempts mutation outside allowed vendor context
+- Expected `404` behavior:
+  - allocation does not exist
+- Expected `409` behavior:
+  - allocation is blocked/cancelled or otherwise not eligible for fulfillment updates
+- Expected `502` behavior:
+  - Shopify fulfillment-order resolution fails for the allocation
+  - Shopify fulfillment sync fails after validation
+- Fulfillment sync semantics:
+  - route fetches fulfillment orders for the Shopify order
+  - route maps allocation-owned Shopify line items into `line_items_by_fulfillment_order`
+  - route submits tracking with `tracking_info.number`, `tracking_info.company`, and optional `tracking_info.url`
+  - route may set `notify_customer: true`
+- Suggested status transitions:
+  - `awaiting_shipment`
+  - `fulfillment_submitted`
+  - `shipped`
+  - `fulfillment_sync_failed`
+- Failure semantics:
+  - backend must not silently report success if Shopify sync fails
+  - sync failure should be persisted and surfaced to caller
 
 ### GET /returns
 

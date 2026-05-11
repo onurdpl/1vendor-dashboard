@@ -39,6 +39,32 @@ async function runSmoke() {
       'DH2987-100-41': 'yalispor',
     },
   });
+  const mockFulfillmentOrders = JSON.stringify({
+    '9001': [
+      {
+        id: 'fo-9001-yalispor',
+        status: 'open',
+        lineItems: [
+          {
+            id: 'foli-9001-yalispor',
+            lineItemId: `li-a-${runId}`,
+            quantity: 1,
+          },
+        ],
+      },
+      {
+        id: 'fo-9001-sporjinal',
+        status: 'open',
+        lineItems: [
+          {
+            id: 'foli-9001-sporjinal',
+            lineItemId: `li-b-${runId}`,
+            quantity: 1,
+          },
+        ],
+      },
+    ],
+  });
   const child = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: {
@@ -46,6 +72,7 @@ async function runSmoke() {
       PORT: String(port),
       NODE_ENV: 'test',
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
+      SHOPIFY_MOCK_FULFILLMENT_ORDERS: mockFulfillmentOrders,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -453,6 +480,10 @@ async function runSmoke() {
     if (!adminOrdersYali.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'yalispor')) {
       throw new Error('/orders admin yalispor did not include ingested Shopify order 9001 allocation.');
     }
+    const ingestedYalisporAllocation = adminOrdersYali.find((order) => order.sourceShopifyOrderId === '9001');
+    if (!ingestedYalisporAllocation?.id) {
+      throw new Error('Unable to resolve yalispor ingested allocation from /orders payload.');
+    }
 
     const adminOrdersSporjinalResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
@@ -466,6 +497,10 @@ async function runSmoke() {
     const adminOrdersSporjinal = await adminOrdersSporjinalResponse.json();
     if (!Array.isArray(adminOrdersSporjinal) || !adminOrdersSporjinal.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'sporjinal')) {
       throw new Error('/orders admin sporjinal did not include ingested Shopify order 9001 allocation.');
+    }
+    const ingestedSporjinalAllocation = adminOrdersSporjinal.find((order) => order.sourceShopifyOrderId === '9001');
+    if (!ingestedSporjinalAllocation?.id) {
+      throw new Error('Unable to resolve sporjinal ingested allocation from /orders payload.');
     }
 
     const missingFailedOrderResponse = await fetch(`${baseUrl}/admin/orders/9002`, {
@@ -481,6 +516,94 @@ async function runSmoke() {
       throw new Error('/orders admin sporjinal returned empty or invalid payload.');
     }
 
+    const vendorCrossTrackingResponse = await fetch(
+      `${baseUrl}/fulfillments/${ingestedSporjinalAllocation.id}/tracking`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${vendorToken}`,
+          'X-Vendor-Id': 'yalispor',
+        },
+        body: JSON.stringify({
+          trackingNumber: 'TRACK-CROSS-FAIL',
+          carrier: 'Yurtiçi Kargo',
+        }),
+      },
+    );
+    if (vendorCrossTrackingResponse.status !== 403) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking cross-vendor expected 403, got ${vendorCrossTrackingResponse.status}`,
+      );
+    }
+
+    const adminTrackingUpdateResponse = await fetch(
+      `${baseUrl}/fulfillments/${ingestedSporjinalAllocation.id}/tracking`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${adminToken}`,
+          'X-Vendor-Id': 'sporjinal',
+        },
+        body: JSON.stringify({
+          trackingNumber: 'TRACK-SPORJINAL-9001',
+          carrier: 'MNG Kargo',
+          notifyCustomer: true,
+        }),
+      },
+    );
+    if (!adminTrackingUpdateResponse.ok) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking admin update failed with ${adminTrackingUpdateResponse.status}`,
+      );
+    }
+    const adminTrackingUpdateJson = await adminTrackingUpdateResponse.json();
+    if (
+      adminTrackingUpdateJson?.trackingNumber !== 'TRACK-SPORJINAL-9001' ||
+      adminTrackingUpdateJson?.carrier !== 'MNG Kargo'
+    ) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking admin response invalid: ${JSON.stringify(adminTrackingUpdateJson)}`,
+      );
+    }
+
+    const invalidTrackingResponse = await fetch(`${baseUrl}/fulfillments/${ingestedYalisporAllocation.id}/tracking`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+      body: JSON.stringify({
+        trackingNumber: '',
+        carrier: 'Yurtiçi Kargo',
+      }),
+    });
+    if (invalidTrackingResponse.status !== 400) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking missing tracking number expected 400, got ${invalidTrackingResponse.status}`,
+      );
+    }
+
+    const blockedAllocationTrackingResponse = await fetch(`${baseUrl}/fulfillments/alloc-yalispor-1001/tracking`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+      body: JSON.stringify({
+        trackingNumber: 'TRACK-BLOCKED-1001',
+        carrier: 'Yurtiçi Kargo',
+      }),
+    });
+    if (blockedAllocationTrackingResponse.status !== 409) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking blocked allocation expected 409, got ${blockedAllocationTrackingResponse.status}`,
+      );
+    }
+
     const vendorOrdersYaliResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
         Authorization: `Bearer ${vendorToken}`,
@@ -493,6 +616,58 @@ async function runSmoke() {
     const vendorOrdersYali = await vendorOrdersYaliResponse.json();
     if (!Array.isArray(vendorOrdersYali) || vendorOrdersYali.length === 0) {
       throw new Error('/orders vendor yalispor returned empty or invalid payload.');
+    }
+
+    const vendorTrackingUpdateResponse = await fetch(
+      `${baseUrl}/fulfillments/${ingestedYalisporAllocation.id}/tracking`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Authorization: `Bearer ${vendorToken}`,
+          'X-Vendor-Id': 'yalispor',
+        },
+        body: JSON.stringify({
+          trackingNumber: 'TRACK-YALI-9001',
+          carrier: 'Yurtiçi Kargo',
+          trackingUrl: 'https://tracking.example/TRACK-YALI-9001',
+          notifyCustomer: true,
+        }),
+      },
+    );
+    if (!vendorTrackingUpdateResponse.ok) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking vendor own update failed with ${vendorTrackingUpdateResponse.status}`,
+      );
+    }
+    const vendorTrackingUpdateJson = await vendorTrackingUpdateResponse.json();
+    if (
+      vendorTrackingUpdateJson?.fulfillmentStatus !== 'fulfillment_submitted' ||
+      vendorTrackingUpdateJson?.shippingStatus !== 'shipped'
+    ) {
+      throw new Error(
+        `/fulfillments/:allocationId/tracking vendor own response invalid: ${JSON.stringify(vendorTrackingUpdateJson)}`,
+      );
+    }
+
+    const updatedVendorOrderResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!updatedVendorOrderResponse.ok) {
+      throw new Error(
+        `/orders/:orderId vendor updated allocation read failed with ${updatedVendorOrderResponse.status}`,
+      );
+    }
+    const updatedVendorOrderJson = await updatedVendorOrderResponse.json();
+    if (
+      updatedVendorOrderJson?.trackingNumber !== 'TRACK-YALI-9001' ||
+      updatedVendorOrderJson?.carrier !== 'Yurtiçi Kargo' ||
+      updatedVendorOrderJson?.fulfillmentStatus !== 'fulfillment_submitted'
+    ) {
+      throw new Error('/orders/:orderId vendor updated allocation did not persist tracking fields.');
     }
 
     const vendorOrdersForbiddenResponse = await fetch(`${baseUrl}/orders`, {

@@ -1,0 +1,7 @@
+ALTER TABLE "Fulfillment"
+  ADD COLUMN IF NOT EXISTS "trackingUrl" TEXT,
+  ADD COLUMN IF NOT EXISTS "notifyCustomer" BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS "shopifyFulfillmentId" TEXT,
+  ADD COLUMN IF NOT EXISTS "shopifyFulfillmentOrderId" TEXT,
+  ADD COLUMN IF NOT EXISTS "syncStatus" TEXT,
+  ADD COLUMN IF NOT EXISTS "errorMessage" TEXT;

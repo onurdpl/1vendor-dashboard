@@ -12,6 +12,8 @@ export type AppEnv = {
   SHOPIFY_API_VERSION: string;
   SHOPIFY_MOCK_SELLER_INFO?: string;
   SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: number;
+  SHOPIFY_MOCK_FULFILLMENT_ORDERS?: string;
+  SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -86,5 +88,8 @@ export function loadEnv(): AppEnv {
       process.env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
       defaultRetryDelayMs,
     ),
+    SHOPIFY_MOCK_FULFILLMENT_ORDERS: process.env.SHOPIFY_MOCK_FULFILLMENT_ORDERS || undefined,
+    SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS:
+      process.env.SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS || undefined,
   };
 }

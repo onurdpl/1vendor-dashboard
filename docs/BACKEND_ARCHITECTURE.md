@@ -126,6 +126,33 @@ Alternative for quick schema sync without migration history:
 
 Frontend will never call Shopify directly or hold Shopify credentials.
 
+## Fulfillment Tracking Mutation Foundation (Phase 13 Step 18)
+- Backend now exposes:
+  - `POST /fulfillments/:allocationId/tracking`
+- Route behavior:
+  - requires auth
+  - requires backend vendor-context validation
+  - vendor users may update only their own assigned allocation
+  - admin may update any allocation within the selected vendor context
+- Shopify sync boundary:
+  - fetch fulfillment orders through Shopify Admin abstraction:
+    - `GET /fulfillment_orders.json?order_id={id}`
+  - create fulfillment tracking through Shopify Admin abstraction:
+    - `POST /fulfillments.json`
+  - use `line_items_by_fulfillment_order` so only allocation-owned line items are fulfilled
+- Mock vs production path:
+  - production uses configured Shopify Admin credentials
+  - development/test can use deterministic mock fulfillment-order data
+  - smoke does not require live Shopify credentials
+- Persistence behavior:
+  - updates `VendorAllocation` tracking fields and status
+  - upserts `Fulfillment` record with sync metadata and optional error state
+- Safe failure behavior:
+  - cross-vendor mutation attempts return `403`
+  - blocked/cancelled allocations return `409`
+  - Shopify sync failures return non-success response and persist `fulfillment_sync_failed`
+  - backend never silently reports success when Shopify sync fails
+
 ## Returns and Refunds Flow (Planned)
 1. Shopify emits return/refund webhook events.
 2. Backend ingests and validates events.
