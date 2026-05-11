@@ -1172,6 +1172,27 @@ h3 {
   background: rgba(37, 99, 235, 0.07);
 }
 
+.tracking-form {
+  display: grid;
+  gap: 12px;
+}
+
+.tracking-form .field {
+  max-width: 520px;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.checkbox-field input {
+  width: 16px;
+  height: 16px;
+}
+
 .vendor-blocked-panel {
   border-color: rgba(239, 68, 68, 0.2);
   background: rgba(239, 68, 68, 0.08);

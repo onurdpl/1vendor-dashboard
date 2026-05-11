@@ -11,3 +11,15 @@ export async function getOrder(orderId: string) {
 export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string) {
   return runtimeServices.orders.adminBreakdown(shopifyOrderId);
 }
+
+export async function submitFulfillmentTracking(
+  allocationId: string,
+  payload: {
+    trackingNumber: string;
+    carrier: string;
+    trackingUrl?: string;
+    notifyCustomer?: boolean;
+  },
+) {
+  return runtimeServices.orders.submitFulfillmentTracking(allocationId, payload);
+}

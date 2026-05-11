@@ -14,6 +14,26 @@ import type {
   VendorAllocationSummary,
 } from '../../lib/api/contracts';
 
+export type SubmitFulfillmentTrackingPayload = {
+  trackingNumber: string;
+  carrier: string;
+  trackingUrl?: string;
+  notifyCustomer?: boolean;
+};
+
+export type SubmitFulfillmentTrackingResult = {
+  ok: true;
+  allocationId: string;
+  trackingNumber: string;
+  carrier: string;
+  trackingUrl?: string | null;
+  notifyCustomer: boolean;
+  fulfillmentStatus: string;
+  shippingStatus: string;
+  shopifySyncSource: string;
+  shopifyFulfillmentId: string;
+};
+
 type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;
@@ -372,4 +392,14 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
       };
     }),
   };
+}
+
+export async function submitFulfillmentTracking(
+  allocationId: string,
+  payload: SubmitFulfillmentTrackingPayload,
+) {
+  return apiClient.post<SubmitFulfillmentTrackingResult>(
+    `/fulfillments/${allocationId}/tracking`,
+    payload,
+  );
 }

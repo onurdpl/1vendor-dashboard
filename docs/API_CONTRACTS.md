@@ -344,6 +344,8 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - route maps allocation-owned Shopify line items into `line_items_by_fulfillment_order`
   - route submits tracking with `tracking_info.number`, `tracking_info.company`, and optional `tracking_info.url`
   - route may set `notify_customer: true`
+- Current frontend real-mode safety note:
+  - the vendor order-detail UI defaults `notifyCustomer` to `false` unless the user explicitly opts in during tracking submission
 - Suggested status transitions:
   - `awaiting_shipment`
   - `fulfillment_submitted`

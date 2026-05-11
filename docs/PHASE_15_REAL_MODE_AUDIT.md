@@ -57,14 +57,14 @@
 ### Order Detail Actions
 - Data load is backend-backed.
 - Action visibility is partially meaningful because it reflects allocation state and assigned-vendor ownership.
-- Action execution is still mock-only:
+- Tracking submission is now wired to the real backend fulfillment mutation in real mode.
+- Remaining mock-only actions:
   - create shipping label
   - mark as shipped
-  - update tracking
   - report fulfillment issue
 - Result:
-  - detail page is operationally informative
-  - action layer is not production-ready in the frontend yet
+  - detail page is operationally useful for vendor tracking submission
+  - the broader action layer is still not fully production-ready in the frontend yet
 
 ### Admin Shopify Order Breakdown
 - Breakdown data is real.
@@ -88,7 +88,7 @@
 - Dashboard automation signals now load from the backend, but the surrounding overview composition is still local/hybrid.
 
 ### Mock-Only Action Flows Still Present in Real Mode
-- Order detail fulfillment buttons
+- Order detail non-tracking fulfillment buttons
 - Order detail issue reporting button
 - Admin reassignment action buttons
 - Finance export feedback action
@@ -136,9 +136,10 @@
 
 ## Runtime/API Gaps Identified
 - No backend dashboard aggregate endpoint exists; frontend dashboard is composing a partial placeholder instead.
-- No frontend wiring yet for the real fulfillment tracking mutation:
+- Remaining order-detail action gap:
   - backend exists: `POST /fulfillments/:allocationId/tracking`
-  - frontend order detail still uses mock actions
+  - frontend now uses it for tracking submission only
+  - other fulfillment actions still remain mock-only
 - No reassignment mutation contract exists for admin order breakdown actions.
 
 ## Frontend Mapping Gaps Identified
@@ -186,11 +187,13 @@
 - Dashboard: partially working / hybrid.
 - Orders: working.
 - Order detail for live Yalı Spor allocation: working for read path, partial for action path.
+  - tracking submission path is real-mode/backend-backed
 - Returns: working.
 - Finance: working.
 - Fulfillment/tracking action visibility:
   - visibility is meaningful
-  - action execution is still mock-only in the frontend
+  - tracking submission is real
+  - other actions are still mock-only in the frontend
 - Automation: working for read path, partial for action path.
 - Admin nav hidden:
   - confirmed in code
@@ -200,8 +203,8 @@
 ## Priority Order for Phase 15 Fixes
 
 ### Priority 1
-- Wire frontend fulfillment/tracking actions to the real backend mutation.
 - Finish real-mode dashboard strategy so it no longer depends on mock-only operational signals.
+- Decide whether to add real equivalents for the remaining non-tracking fulfillment actions or intentionally remove/mock-gate them in real mode.
 
 ### Priority 2
 - Clean up real-mode data mapping for money/currency formatting and operational field labels.

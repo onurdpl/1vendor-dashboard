@@ -12,6 +12,7 @@ import * as realReturns from './real/returns';
 import * as realFinance from './real/finance';
 import * as realOperations from './real/operations';
 import * as realDiagnostics from './real/diagnostics';
+import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
@@ -90,6 +91,28 @@ export const runtimeServices = {
         throw new ApiError('Shopify order not found.', 'server', { status: 404 });
       }
       return breakdown;
+    },
+    async submitFulfillmentTracking(allocationId: string, payload: SubmitFulfillmentTrackingPayload) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.submitFulfillmentTracking(allocationId, payload);
+      }
+
+      await new Promise((resolve) => {
+        globalThis.setTimeout(resolve, 300);
+      });
+
+      return {
+        ok: true as const,
+        allocationId,
+        trackingNumber: payload.trackingNumber,
+        carrier: payload.carrier,
+        trackingUrl: payload.trackingUrl ?? null,
+        notifyCustomer: payload.notifyCustomer ?? false,
+        fulfillmentStatus: 'fulfillment_submitted',
+        shippingStatus: 'shipped',
+        shopifySyncSource: 'mock',
+        shopifyFulfillmentId: `mock-fulfillment-${allocationId}`,
+      };
     },
   },
   returns: {
