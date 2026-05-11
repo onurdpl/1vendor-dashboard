@@ -220,7 +220,8 @@ model WebhookEvent {
   id               String        @id @default(cuid())
   sourceShopDomain String
   topic            String
-  webhookId        String
+  webhookId        String?
+  idempotencyKey   String?       @unique
   payloadHash      String?
   status           WebhookStatus @default(RECEIVED)
   receivedAt       DateTime      @default(now())

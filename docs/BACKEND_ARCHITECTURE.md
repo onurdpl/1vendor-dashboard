@@ -141,12 +141,21 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - payout status
 - Actual payout execution remains manual/admin-controlled.
 
-## Webhook and Idempotency Plan (Next Phases)
-- Persist raw webhook envelope metadata in `WebhookEvent`.
-- Enforce idempotency using unique webhook identifiers:
-  - `sourceShopDomain + topic + webhookId`
-- Keep payload hash and processing state for safe retries/reprocessing.
-- Move webhook processing to async job flow in later phases (Redis/BullMQ not included in this step).
+## Shopify Webhook Idempotency (Phase 13 Step 16)
+- `POST /webhooks/shopify/orders-create` now performs duplicate-delivery protection before any future ingestion logic exists.
+- Idempotency strategy:
+  - primary key: `sourceShopDomain + topic + webhookId`
+  - fallback key: `sourceShopDomain + topic + payloadHash`
+- Duplicate deliveries are accepted with `202` but ignored operationally:
+  - first occurrence -> `action: "accepted"`
+  - duplicate occurrence -> `action: "duplicate_ignored"`
+- Duplicate webhook deliveries do not create a second processing record.
+- This phase still does not:
+  - ingest orders
+  - fetch `seller_info`
+  - create allocations
+  - call Shopify Admin API
+- Payload processing remains deferred to later phases, but webhook envelope persistence is now safe for Shopify retry behavior.
 
 ## Shopify Webhook Verification Skeleton (Phase 13 Step 15)
 - First webhook endpoint exists:
@@ -154,9 +163,10 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 - Current behavior:
   - reads raw request body
   - verifies `X-Shopify-Hmac-Sha256`
+  - computes payload hash and idempotency key
   - returns `202 Accepted` for valid signatures
   - returns `401` for invalid signatures
-  - does not ingest orders into allocations yet
+  - returns duplicate-aware response semantics without ingesting orders yet
 - Secret handling:
   - production requires explicit `SHOPIFY_WEBHOOK_SECRET`
   - development/test use safe local default `dev-shopify-webhook-secret`

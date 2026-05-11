@@ -144,10 +144,13 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 
 - Purpose: receive verified Shopify `orders/create` webhook payloads for future ingestion.
 - Required auth: none; verification is via Shopify HMAC signature.
-- Expected success response shape: `{ accepted: true, topic, processing: "deferred" }`.
-- Expected `202` behavior: valid HMAC signature accepted for deferred processing.
+- Expected success response shape: `{ ok: true, duplicate: boolean, action: "accepted" | "duplicate_ignored" }`.
+- Expected `202` behavior: valid HMAC signature accepted for deferred processing, including duplicate Shopify deliveries that are safely ignored.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
-- Processing note: this phase only verifies and accepts payloads. Order ingestion, allocation creation, and idempotent processing are deferred to later phases.
+- Duplicate webhook response semantics:
+  - first verified delivery -> `{ ok: true, duplicate: false, action: "accepted" }`
+  - repeated verified delivery -> `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+- Processing note: this phase only verifies, de-duplicates, and accepts payloads. Order ingestion, allocation creation, seller_info fetch, and retry/allocation processing are deferred to later phases.
 
 ### GET /returns
 

@@ -29,6 +29,7 @@ async function waitForReady(url, timeoutMs = 15000) {
 }
 
 async function runSmoke() {
+  const runId = Date.now().toString();
   const child = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: {
@@ -126,40 +127,100 @@ async function runSmoke() {
     }
 
     const webhookPayload = JSON.stringify({
-      id: 'shopify-order-1001',
+      id: `shopify-order-1001-${runId}`,
       order_number: 1001,
       line_items: [
         {
-          id: 'li-1',
+          id: `li-${runId}`,
           sku: '394053-103-36,5',
         },
       ],
     });
     const validWebhookHmac = createHmac('sha256', shopifyWebhookSecret).update(webhookPayload, 'utf8').digest('base64');
+    const webhookHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': validWebhookHmac,
+      'x-shopify-topic': 'orders/create',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+    };
+    const uniqueWebhookId = `smoke-valid-${runId}`;
 
     const validWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
-        'x-shopify-hmac-sha256': validWebhookHmac,
-        'x-shopify-topic': 'orders/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
-        'x-shopify-webhook-id': `smoke-valid-${Date.now()}`,
+        ...webhookHeaders,
+        'x-shopify-webhook-id': uniqueWebhookId,
       },
       body: webhookPayload,
     });
     if (validWebhookResponse.status !== 202) {
       throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
     }
+    const validWebhookJson = await validWebhookResponse.json();
+    if (validWebhookJson?.duplicate !== false || validWebhookJson?.action !== 'accepted') {
+      throw new Error(`/webhooks/shopify/orders-create first delivery payload invalid: ${JSON.stringify(validWebhookJson)}`);
+    }
+
+    const duplicateWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        ...webhookHeaders,
+        'x-shopify-webhook-id': uniqueWebhookId,
+      },
+      body: webhookPayload,
+    });
+    if (duplicateWebhookResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/orders-create duplicate webhook id expected 202, got ${duplicateWebhookResponse.status}`,
+      );
+    }
+    const duplicateWebhookJson = await duplicateWebhookResponse.json();
+    if (duplicateWebhookJson?.duplicate !== true || duplicateWebhookJson?.action !== 'duplicate_ignored') {
+      throw new Error(
+        `/webhooks/shopify/orders-create duplicate webhook id payload invalid: ${JSON.stringify(duplicateWebhookJson)}`,
+      );
+    }
+
+    const noWebhookIdFirstResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: webhookHeaders,
+      body: webhookPayload,
+    });
+    if (noWebhookIdFirstResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/orders-create first payload-hash fallback expected 202, got ${noWebhookIdFirstResponse.status}`,
+      );
+    }
+    const noWebhookIdFirstJson = await noWebhookIdFirstResponse.json();
+    if (noWebhookIdFirstJson?.duplicate !== false || noWebhookIdFirstJson?.action !== 'accepted') {
+      throw new Error(
+        `/webhooks/shopify/orders-create first payload-hash fallback invalid: ${JSON.stringify(noWebhookIdFirstJson)}`,
+      );
+    }
+
+    const noWebhookIdDuplicateResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: webhookHeaders,
+      body: webhookPayload,
+    });
+    if (noWebhookIdDuplicateResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/orders-create duplicate payload-hash fallback expected 202, got ${noWebhookIdDuplicateResponse.status}`,
+      );
+    }
+    const noWebhookIdDuplicateJson = await noWebhookIdDuplicateResponse.json();
+    if (noWebhookIdDuplicateJson?.duplicate !== true || noWebhookIdDuplicateJson?.action !== 'duplicate_ignored') {
+      throw new Error(
+        `/webhooks/shopify/orders-create duplicate payload-hash fallback invalid: ${JSON.stringify(noWebhookIdDuplicateJson)}`,
+      );
+    }
 
     const invalidWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
+        ...webhookHeaders,
         'x-shopify-hmac-sha256': 'invalid-signature',
-        'x-shopify-topic': 'orders/create',
-        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
-        'x-shopify-webhook-id': `smoke-invalid-${Date.now()}`,
+        'x-shopify-webhook-id': `smoke-invalid-${runId}`,
       },
       body: webhookPayload,
     });

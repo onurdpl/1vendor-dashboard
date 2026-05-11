@@ -4,7 +4,7 @@ export type ShopifyWebhookHeaders = {
   hmac: string | null;
   topic: string;
   shopDomain: string;
-  webhookId: string;
+  webhookId: string | null;
 };
 
 declare module 'fastify' {
@@ -23,6 +23,6 @@ export function getShopifyWebhookHeaders(request: FastifyRequest): ShopifyWebhoo
     hmac: typeof hmac === 'string' ? hmac : null,
     topic: typeof topic === 'string' && topic ? topic : 'orders/create',
     shopDomain: typeof shopDomain === 'string' && shopDomain ? shopDomain : 'unknown.myshopify.com',
-    webhookId: typeof webhookId === 'string' && webhookId ? webhookId : 'unknown-webhook-id',
+    webhookId: typeof webhookId === 'string' && webhookId ? webhookId : null,
   };
 }
