@@ -108,6 +108,13 @@ export function getMockAutomationDashboard(vendorId?: VendorId): AutomationDashb
   const currentVendorId = resolveVendorId(vendorId);
   const dashboard = automationDashboards[currentVendorId];
 
+  if (!dashboard) {
+    return {
+      alerts: [],
+      suggestions: [],
+    };
+  }
+
   return {
     alerts: dashboard.alerts,
     suggestions: dashboard.suggestions,

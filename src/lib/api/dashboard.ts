@@ -1,4 +1,5 @@
 import { getCurrentVendorContext, type VendorId } from '../auth/vendorContext';
+import { runtimeConfig } from '../../config/runtime';
 import { getMockAutomationDashboard } from './mockAutomation';
 import { getMockFinanceDashboard } from './mockFinance';
 import { listMockOrders } from './mockOrders';
@@ -16,6 +17,23 @@ function formatCount(value: number) {
 export function buildDashboardOverview(vendorId?: VendorId): DashboardOverview {
   const currentVendorId = resolveVendorId(vendorId);
   const currentVendor = getCurrentVendorContext();
+
+  if (runtimeConfig.apiMode === 'real') {
+    return {
+      vendorId: currentVendorId,
+      vendorName: currentVendor.vendorName,
+      title: `${currentVendor.vendorName} command center`,
+      description: `Monitor live backend activity for ${currentVendor.vendorName} from one operational workspace.`,
+      stats: [
+        { label: 'Live orders', value: 'Connected' },
+        { label: 'Returns scope', value: 'Connected' },
+        { label: 'Finance scope', value: 'Connected' },
+      ],
+      recentActivity: [],
+      workspaceStatus: `Live backend mode is active for ${currentVendor.vendorName}. Use orders, returns, finance, and operations views for the current operational state.`,
+    };
+  }
+
   const orders = listMockOrders(currentVendorId);
   const returns = listMockReturns(currentVendorId);
   const finance = getMockFinanceDashboard(currentVendorId);
