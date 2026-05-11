@@ -30,12 +30,22 @@ async function waitForReady(url, timeoutMs = 15000) {
 
 async function runSmoke() {
   const runId = Date.now().toString();
+  const sellerInfoMap = JSON.stringify({
+    '9001': {
+      'DH2987-100-41': 'yalispor',
+      'DH2987-100-40,5': 'sporjinal',
+    },
+    '9002': {
+      'DH2987-100-41': 'yalispor',
+    },
+  });
   const child = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: {
       ...process.env,
       PORT: String(port),
       NODE_ENV: 'test',
+      SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
@@ -127,12 +137,34 @@ async function runSmoke() {
     }
 
     const webhookPayload = JSON.stringify({
-      id: `shopify-order-1001-${runId}`,
-      order_number: 1001,
+      id: 9001,
+      order_number: 9001,
+      name: '#9001',
+      total_price: '255.00',
+      created_at: '2026-05-11T12:00:00.000Z',
+      customer: {
+        email: 'shopify.customer@example.com',
+        first_name: 'Shopify',
+        last_name: 'Customer',
+      },
       line_items: [
         {
-          id: `li-${runId}`,
-          sku: '394053-103-36,5',
+          id: `li-a-${runId}`,
+          variant_id: 501,
+          sku: 'DH2987-100-41',
+          title: 'Nike Dunk Low',
+          variant_title: '41',
+          quantity: 1,
+          price: '120.00',
+        },
+        {
+          id: `li-b-${runId}`,
+          variant_id: 502,
+          sku: 'DH2987-100-40,5',
+          title: 'Nike Dunk Low',
+          variant_title: '40,5',
+          quantity: 1,
+          price: '135.00',
         },
       ],
     });
@@ -157,8 +189,37 @@ async function runSmoke() {
       throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
     }
     const validWebhookJson = await validWebhookResponse.json();
-    if (validWebhookJson?.duplicate !== false || validWebhookJson?.action !== 'accepted') {
+    if (
+      validWebhookJson?.duplicate !== false ||
+      validWebhookJson?.action !== 'accepted' ||
+      validWebhookJson?.processingStatus !== 'processed'
+    ) {
       throw new Error(`/webhooks/shopify/orders-create first delivery payload invalid: ${JSON.stringify(validWebhookJson)}`);
+    }
+
+    const ingestedOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/9001`, {
+      headers: {
+        'content-type': 'application/json',
+        Authorization: `Bearer ${(await (await fetch(`${baseUrl}/auth/login`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            email: 'admin@demo.com',
+            password: 'demo123',
+          }),
+        })).json()).token}`,
+      },
+    });
+    if (!ingestedOrderBreakdownResponse.ok) {
+      throw new Error(`/admin/orders/9001 after ingestion failed with ${ingestedOrderBreakdownResponse.status}`);
+    }
+    const ingestedOrderBreakdownJson = await ingestedOrderBreakdownResponse.json();
+    if (!Array.isArray(ingestedOrderBreakdownJson?.allocations) || ingestedOrderBreakdownJson.allocations.length !== 2) {
+      throw new Error(`/admin/orders/9001 expected two allocations, got ${JSON.stringify(ingestedOrderBreakdownJson)}`);
+    }
+    const allocationVendorIds = new Set(ingestedOrderBreakdownJson.allocations.map((allocation) => allocation.vendorId));
+    if (!allocationVendorIds.has('yalispor') || !allocationVendorIds.has('sporjinal')) {
+      throw new Error(`/admin/orders/9001 missing expected vendor allocations: ${JSON.stringify(ingestedOrderBreakdownJson)}`);
     }
 
     const duplicateWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
@@ -181,10 +242,34 @@ async function runSmoke() {
       );
     }
 
+    const payloadHashWebhookPayload = JSON.stringify({
+      id: 9003,
+      order_number: 9003,
+      name: '#9003',
+      total_price: '120.00',
+      line_items: [
+        {
+          id: `li-fallback-${runId}`,
+          sku: 'UNKNOWN-SKU-FALLBACK',
+          quantity: 1,
+          price: '120.00',
+        },
+      ],
+    });
+    const payloadHashWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(payloadHashWebhookPayload, 'utf8')
+      .digest('base64');
+    const payloadHashHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': payloadHashWebhookHmac,
+      'x-shopify-topic': 'orders/create',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+    };
+
     const noWebhookIdFirstResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
       method: 'POST',
-      headers: webhookHeaders,
-      body: webhookPayload,
+      headers: payloadHashHeaders,
+      body: payloadHashWebhookPayload,
     });
     if (noWebhookIdFirstResponse.status !== 202) {
       throw new Error(
@@ -192,7 +277,11 @@ async function runSmoke() {
       );
     }
     const noWebhookIdFirstJson = await noWebhookIdFirstResponse.json();
-    if (noWebhookIdFirstJson?.duplicate !== false || noWebhookIdFirstJson?.action !== 'accepted') {
+    if (
+      noWebhookIdFirstJson?.duplicate !== false ||
+      noWebhookIdFirstJson?.action !== 'received_needs_attention' ||
+      noWebhookIdFirstJson?.processingStatus !== 'needs_attention'
+    ) {
       throw new Error(
         `/webhooks/shopify/orders-create first payload-hash fallback invalid: ${JSON.stringify(noWebhookIdFirstJson)}`,
       );
@@ -200,8 +289,8 @@ async function runSmoke() {
 
     const noWebhookIdDuplicateResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
       method: 'POST',
-      headers: webhookHeaders,
-      body: webhookPayload,
+      headers: payloadHashHeaders,
+      body: payloadHashWebhookPayload,
     });
     if (noWebhookIdDuplicateResponse.status !== 202) {
       throw new Error(
@@ -212,6 +301,49 @@ async function runSmoke() {
     if (noWebhookIdDuplicateJson?.duplicate !== true || noWebhookIdDuplicateJson?.action !== 'duplicate_ignored') {
       throw new Error(
         `/webhooks/shopify/orders-create duplicate payload-hash fallback invalid: ${JSON.stringify(noWebhookIdDuplicateJson)}`,
+      );
+    }
+
+    const failingWebhookPayload = JSON.stringify({
+      id: 9002,
+      order_number: 9002,
+      name: '#9002',
+      line_items: [
+        {
+          id: `li-fail-${runId}`,
+          sku: 'DH2987-100-40,5',
+          quantity: 1,
+          price: '135.00',
+        },
+      ],
+    });
+    const failingWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(failingWebhookPayload, 'utf8')
+      .digest('base64');
+    const failingWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': failingWebhookHmac,
+        'x-shopify-topic': 'orders/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-fail-${runId}`,
+      },
+      body: failingWebhookPayload,
+    });
+    if (failingWebhookResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/orders-create unresolved seller_info expected 202, got ${failingWebhookResponse.status}`,
+      );
+    }
+    const failingWebhookJson = await failingWebhookResponse.json();
+    if (
+      failingWebhookJson?.duplicate !== false ||
+      failingWebhookJson?.action !== 'received_needs_attention' ||
+      failingWebhookJson?.processingStatus !== 'needs_attention'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/orders-create unresolved seller_info payload invalid: ${JSON.stringify(failingWebhookJson)}`,
       );
     }
 
@@ -318,6 +450,9 @@ async function runSmoke() {
     if (!Array.isArray(adminOrdersYali) || adminOrdersYali.length === 0) {
       throw new Error('/orders admin yalispor returned empty or invalid payload.');
     }
+    if (!adminOrdersYali.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'yalispor')) {
+      throw new Error('/orders admin yalispor did not include ingested Shopify order 9001 allocation.');
+    }
 
     const adminOrdersSporjinalResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
@@ -329,7 +464,20 @@ async function runSmoke() {
       throw new Error(`/orders admin sporjinal failed with ${adminOrdersSporjinalResponse.status}`);
     }
     const adminOrdersSporjinal = await adminOrdersSporjinalResponse.json();
-    if (!Array.isArray(adminOrdersSporjinal) || adminOrdersSporjinal.length === 0) {
+    if (!Array.isArray(adminOrdersSporjinal) || !adminOrdersSporjinal.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'sporjinal')) {
+      throw new Error('/orders admin sporjinal did not include ingested Shopify order 9001 allocation.');
+    }
+
+    const missingFailedOrderResponse = await fetch(`${baseUrl}/admin/orders/9002`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (missingFailedOrderResponse.status !== 404) {
+      throw new Error(`/admin/orders/9002 expected 404 after failed ingestion, got ${missingFailedOrderResponse.status}`);
+    }
+
+    if (adminOrdersSporjinal.length === 0) {
       throw new Error('/orders admin sporjinal returned empty or invalid payload.');
     }
 
@@ -560,8 +708,8 @@ async function runSmoke() {
     if (adminOrderBreakdown.allocations.length < 2) {
       throw new Error('/admin/orders/:shopifyOrderId expected at least two allocations.');
     }
-    const allocationVendorIds = new Set(adminOrderBreakdown.allocations.map((allocation) => allocation.vendorId));
-    if (!allocationVendorIds.has('yalispor') || !allocationVendorIds.has('sporjinal')) {
+    const seededAllocationVendorIds = new Set(adminOrderBreakdown.allocations.map((allocation) => allocation.vendorId));
+    if (!seededAllocationVendorIds.has('yalispor') || !seededAllocationVendorIds.has('sporjinal')) {
       throw new Error('/admin/orders/:shopifyOrderId missing expected yalispor/sporjinal allocations.');
     }
 

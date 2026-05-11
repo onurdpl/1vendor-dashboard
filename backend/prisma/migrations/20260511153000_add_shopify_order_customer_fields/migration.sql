@@ -1,0 +1,3 @@
+ALTER TABLE "ShopifyOrder"
+  ADD COLUMN IF NOT EXISTS "customerEmail" TEXT,
+  ADD COLUMN IF NOT EXISTS "totalPrice" DECIMAL(10,2);

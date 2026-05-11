@@ -86,6 +86,8 @@ model ShopifyOrder {
   sourceShopifyOrderId     String                    @unique
   sourceShopifyOrderNumber String
   customerName             String?
+  customerEmail            String?
+  totalPrice               Decimal?                  @db.Decimal(10, 2)
   createdAt                DateTime                  @default(now())
   updatedAt                DateTime                  @updatedAt
   lineItems                ShopifyOrderLineItem[]

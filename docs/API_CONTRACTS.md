@@ -142,15 +142,22 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 
 ### POST /webhooks/shopify/orders-create
 
-- Purpose: receive verified Shopify `orders/create` webhook payloads for future ingestion.
+- Purpose: receive verified Shopify `orders/create` webhook payloads and ingest vendor allocations when seller info can be resolved.
 - Required auth: none; verification is via Shopify HMAC signature.
-- Expected success response shape: `{ ok: true, duplicate: boolean, action: "accepted" | "duplicate_ignored" }`.
-- Expected `202` behavior: valid HMAC signature accepted for deferred processing, including duplicate Shopify deliveries that are safely ignored.
+- Expected success response shape:
+  - processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", shopifyOrderId, allocationCount }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
+  - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
+- Expected `202` behavior: valid HMAC signature accepted whether processing succeeds immediately, is ignored as duplicate, or is parked in needs-attention state.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Duplicate webhook response semantics:
-  - first verified delivery -> `{ ok: true, duplicate: false, action: "accepted" }`
+  - first verified delivery -> `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed" }`
   - repeated verified delivery -> `{ ok: true, duplicate: true, action: "duplicate_ignored" }`
-- Processing note: this phase only verifies, de-duplicates, and accepts payloads. Order ingestion, allocation creation, seller_info fetch, and retry/allocation processing are deferred to later phases.
+- Processing note:
+  - this phase verifies, de-duplicates, fetches `custom.seller_info`, and creates order allocations
+  - seller info fetch uses the documented Shopify Admin metafield query
+  - unresolved SKU or vendor mapping should return needs-attention semantics instead of silent fallback
+  - refund ingestion, fulfillment mutation, and queue-based async processing are deferred to later phases
 
 ### GET /returns
 

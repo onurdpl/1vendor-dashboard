@@ -157,6 +157,41 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - call Shopify Admin API
 - Payload processing remains deferred to later phases, but webhook envelope persistence is now safe for Shopify retry behavior.
 
+## Shopify Order Ingestion Engine (Phase 13 Step 17)
+- Verified first-time `orders/create` webhooks now run synchronous local ingestion after HMAC verification and idempotency checks.
+- Current ingestion flow:
+  1. receive verified, non-duplicate webhook
+  2. fetch `custom.seller_info` through Shopify Admin abstraction
+  3. retry seller info fetch up to 3 times
+  4. allocate line items by `sellerInfo[lineItem.sku]`
+  5. validate vendor slug exists in local vendor table
+  6. create or update:
+     - `ShopifyOrder`
+     - `ShopifyOrderLineItem`
+     - `VendorAllocation`
+     - `VendorAllocationLineItem`
+     - initial `AllocationAssignmentHistory`
+  7. mark `WebhookEvent` as `PROCESSED` on success or `FAILED` on safe diagnostic failure
+- Seller info fetch behavior:
+  - production expects real Shopify Admin API credentials
+  - development/test can use injected mock seller info keyed by Shopify order id
+  - retry delay is environment-aware so smoke and CI do not block for full production timing
+- Allocation rule:
+  - primary mapping is `sellerInfo[lineItem.sku]`
+  - empty SKU or missing seller info entry fails safely into diagnostics
+  - unknown vendor slug fails safely into diagnostics
+- Idempotent write strategy:
+  - `ShopifyOrder` keyed by `sourceShopifyOrderId`
+  - `ShopifyOrderLineItem` keyed by `(shopifyOrderId, sourceLineItemId)`
+  - `VendorAllocation` keyed by deterministic id `alloc-{vendorId}-{sourceShopifyOrderId}`
+  - initial assignment history keyed deterministically per allocation
+- This phase still does not:
+  - ingest refunds
+  - fetch fulfillment orders
+  - create Shopify fulfillments
+  - run background queue workers
+  - switch the frontend to real API mode
+
 ## Shopify Webhook Verification Skeleton (Phase 13 Step 15)
 - First webhook endpoint exists:
   - `POST /webhooks/shopify/orders-create`
@@ -166,7 +201,9 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - computes payload hash and idempotency key
   - returns `202 Accepted` for valid signatures
   - returns `401` for invalid signatures
-  - returns duplicate-aware response semantics without ingesting orders yet
+  - returns duplicate-aware response semantics
+  - ingests first-time orders synchronously for now
+  - returns needs-attention response when seller info or SKU mapping cannot be resolved
 - Secret handling:
   - production requires explicit `SHOPIFY_WEBHOOK_SECRET`
   - development/test use safe local default `dev-shopify-webhook-secret`

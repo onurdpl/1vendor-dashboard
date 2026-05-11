@@ -52,6 +52,8 @@ const shopifyOrderSeed = {
   sourceShopifyOrderId: '1001',
   sourceShopifyOrderNumber: '#1001',
   customerName: 'Demo Customer',
+  customerEmail: 'demo.customer@example.com',
+  totalPrice: '255.00',
 };
 
 const shopifyLineItemsSeed = [
@@ -125,12 +127,16 @@ async function runSeed() {
     update: {
       sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
       customerName: shopifyOrderSeed.customerName,
+      customerEmail: shopifyOrderSeed.customerEmail,
+      totalPrice: shopifyOrderSeed.totalPrice,
     },
     create: {
       id: shopifyOrderSeed.id,
       sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
       sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
       customerName: shopifyOrderSeed.customerName,
+      customerEmail: shopifyOrderSeed.customerEmail,
+      totalPrice: shopifyOrderSeed.totalPrice,
     },
   });
 
