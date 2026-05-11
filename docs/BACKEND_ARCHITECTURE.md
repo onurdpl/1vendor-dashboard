@@ -42,12 +42,18 @@ Run from repository root:
 3. `npm run backend:typecheck`
 4. `npm run backend:smoke`
 5. `npm run backend:db:generate`
+6. `npm run real-api:dry-run` (requires backend already running on `http://127.0.0.1:4000` by default)
 
 Smoke verifies:
 - backend process starts without a database connection
 - `GET /health` returns `{ "ok": true }`
 - `GET /version` returns service and version metadata
 - process shuts down cleanly after checks
+
+Real API dry-run verifies:
+- backend login succeeds for seeded admin demo credentials
+- DB-backed read endpoints return minimally compatible response shapes for frontend migration planning
+- running the dry-run does not switch the frontend runtime away from mock mode
 
 `DATABASE_URL` is not required for this smoke because DB actions are not wired yet.
 
