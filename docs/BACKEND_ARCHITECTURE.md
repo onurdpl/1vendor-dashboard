@@ -22,6 +22,9 @@
   - `NODE_ENV`
   - `DATABASE_URL` optional for now (required when DB actions are added).
 - Prisma schema drafted for the marketplace domain model.
+- Backend auth foundation endpoints:
+  - `POST /auth/login`
+  - `GET /auth/me`
 
 ## Local Backend Verification
 Run from repository root:
@@ -49,6 +52,8 @@ Environment example (`backend/.env.example`):
 - `PORT=4000`
 - `NODE_ENV=development`
 - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev`
+- `JWT_SECRET=dev-only-jwt-secret-change-in-production`
+- `JWT_EXPIRES_IN=12h`
 
 Common workflow:
 1. `cp backend/.env.example backend/.env`
@@ -149,3 +154,11 @@ Seed credentials are demo/local only:
 
 Frontend note:
 - frontend continues using mock authentication and mock vendor IDs until real API/auth migration is implemented.
+
+## Backend Auth Foundation (Demo Phase)
+- `POST /auth/login` validates seeded demo users (`demo123`) against demo seed hashes.
+- `GET /auth/me` requires `Authorization: Bearer <token>` and returns current user + vendor access.
+- JWT tokens are signed using `JWT_SECRET`.
+- In development/test, a default JWT secret is allowed for local convenience.
+- In production, `JWT_SECRET` must be explicitly set.
+- Password hashing in this phase is demo-only and must be replaced with production-grade hashing before real auth rollout.

@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import { loadEnv } from './config/env.js';
 import { prisma } from './db/prisma.js';
+import { registerAuthRoutes } from './modules/auth/auth.routes.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -42,6 +43,8 @@ export function createApp() {
       };
     }
   });
+
+  registerAuthRoutes(app, env);
 
   return app;
 }
