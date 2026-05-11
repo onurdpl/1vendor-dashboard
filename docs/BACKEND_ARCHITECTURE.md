@@ -115,6 +115,7 @@ Alternative for quick schema sync without migration history:
 - Unknown or empty vendor metafield values resolve safely to `null`.
 - Temporary non-production diagnostic route:
   - `GET /debug/shopify/vendor-mapping?value=Yalı%20Spor`
+- Confirmed Shopify integration discoveries and open implementation questions are documented in [SHOPIFY_DISCOVERIES.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_DISCOVERIES.md) and should be reviewed before Shopify-dependent implementation.
 
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
