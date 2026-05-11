@@ -175,6 +175,27 @@ Alternative for quick schema sync without migration history:
 - Temporary non-production diagnostic route:
   - `GET /debug/shopify/vendor-mapping?value=Yalı%20Spor`
 - Confirmed Shopify integration discoveries and open implementation questions are documented in [SHOPIFY_DISCOVERIES.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_DISCOVERIES.md) and should be reviewed before Shopify-dependent implementation.
+- Live rollout readiness and manual webhook rollout steps are documented in [SHOPIFY_LIVE_ROLLOUT.md](/Users/onur/Documents/New project 4/docs/SHOPIFY_LIVE_ROLLOUT.md).
+
+## Shopify Live Readiness Foundation (Phase 14-1)
+- Live Shopify rollout now has a dedicated readiness command:
+  - `npm run shopify:readiness`
+  - `npm --prefix backend run shopify:readiness`
+- Readiness validates:
+  - `SHOPIFY_SHOP_DOMAIN`
+  - `SHOPIFY_ADMIN_ACCESS_TOKEN`
+  - `SHOPIFY_WEBHOOK_SECRET`
+  - `SHOPIFY_API_VERSION`
+- Safety behavior:
+  - missing variables are reported by name only
+  - secret values are never printed
+  - development placeholder values fail readiness
+  - default behavior is config-only and does not call live Shopify
+- Optional live check:
+  - set `SHOPIFY_READINESS_LIVE_CHECK=true`
+  - runs a lightweight Shopify Admin GraphQL query:
+    - `query { shop { name myshopifyDomain } }`
+- This keeps normal build, smoke, and dry-run flows isolated from live Shopify dependencies until rollout is intentional.
 
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
