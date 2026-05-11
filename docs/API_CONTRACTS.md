@@ -129,6 +129,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
 - Return records are vendor-scoped allocations of Shopify refund activity and must include a vendor-safe internal return id.
+- Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
 
 ### GET /returns/:returnId
 
@@ -140,6 +141,7 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the return does not exist or when the backend hides cross-vendor resources.
 - Detail records should expose `vendorId`, `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `sourceShopifyRefundId`, and vendor-allocated refunded line items so the frontend can show the current vendor slice only.
+- Backend implementation note: in current vendor-scoped query semantics, cross-vendor return ids resolve to `404` after vendor context is validated.
 
 ### GET /finance
 

@@ -28,6 +28,8 @@
 - First DB-backed vendor-scoped read API:
   - `GET /orders`
   - `GET /orders/:orderId`
+  - `GET /returns`
+  - `GET /returns/:returnId`
 
 ## Local Backend Verification
 Run from repository root:
@@ -193,3 +195,15 @@ Frontend note:
 - Order reads are scoped using backend-resolved `request.vendorContext.vendorId`, not raw frontend header trust.
 - Cross-vendor detail access returns `404` under vendor-scoped query semantics.
 - Frontend remains mock-based in this phase; backend routes are prepared for future integration.
+
+## DB-Backed Returns/Refunds Read API (Phase 13 Step 9)
+- Returns/refunds read routes are now backed by PostgreSQL via Prisma:
+  - `GET /returns`
+  - `GET /returns/:returnId`
+- Both routes require:
+  - authenticated user
+  - `requireVendorAccess` middleware
+- Return reads are scoped using backend-resolved `request.vendorContext.vendorId`, not raw frontend header trust.
+- Cross-vendor return detail access returns `404` under vendor-scoped query semantics.
+- Seed data includes a shared Shopify order refund scenario (`#1001`) allocated separately for `yalispor` and `sporjinal`.
+- Frontend remains mock-based in this phase; backend returns routes are prepared for future integration.

@@ -282,6 +282,86 @@ async function runSeed() {
       reason: 'Initial vendor metafield allocation',
     },
   });
+
+  await prisma.returnRecord.upsert({
+    where: { id: 'return-yalispor-1001' },
+    update: {
+      vendorAllocationId: yaliAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      status: 'approved',
+      reason: 'size_issue',
+    },
+    create: {
+      id: 'return-yalispor-1001',
+      vendorAllocationId: yaliAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      status: 'approved',
+      reason: 'size_issue',
+    },
+  });
+
+  await prisma.returnRecord.upsert({
+    where: { id: 'return-sporjinal-1001' },
+    update: {
+      vendorAllocationId: sporjinalAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      status: 'pending',
+      reason: 'damaged_item',
+    },
+    create: {
+      id: 'return-sporjinal-1001',
+      vendorAllocationId: sporjinalAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      status: 'pending',
+      reason: 'damaged_item',
+    },
+  });
+
+  await prisma.refundRecord.upsert({
+    where: { id: 'refund-yalispor-1001' },
+    update: {
+      vendorAllocationId: yaliAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      sourceShopifyRefundId: '1001-rf-a',
+      amount: '120.00',
+      status: 'processed',
+    },
+    create: {
+      id: 'refund-yalispor-1001',
+      vendorAllocationId: yaliAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      sourceShopifyRefundId: '1001-rf-a',
+      amount: '120.00',
+      status: 'processed',
+    },
+  });
+
+  await prisma.refundRecord.upsert({
+    where: { id: 'refund-sporjinal-1001' },
+    update: {
+      vendorAllocationId: sporjinalAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      sourceShopifyRefundId: '1001-rf-b',
+      amount: '135.00',
+      status: 'pending',
+    },
+    create: {
+      id: 'refund-sporjinal-1001',
+      vendorAllocationId: sporjinalAllocation.id,
+      sourceShopifyOrderId: shopifyOrderSeed.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: shopifyOrderSeed.sourceShopifyOrderNumber,
+      sourceShopifyRefundId: '1001-rf-b',
+      amount: '135.00',
+      status: 'pending',
+    },
+  });
 }
 
 runSeed()
