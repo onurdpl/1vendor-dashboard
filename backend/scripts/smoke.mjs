@@ -74,6 +74,17 @@ async function runSmoke() {
     ) {
       throw new Error(`/version payload invalid: ${JSON.stringify(versionJson)}`);
     }
+
+    const dbHealthResponse = await fetch(`${baseUrl}/health/db`);
+    if (!dbHealthResponse.ok) {
+      throw new Error(`/health/db returned ${dbHealthResponse.status}`);
+    }
+
+    const dbHealthJson = await dbHealthResponse.json();
+    const validDbStatuses = new Set(['connected', 'not_configured', 'unavailable']);
+    if (!dbHealthJson || !validDbStatuses.has(dbHealthJson.status)) {
+      throw new Error(`/health/db payload invalid: ${JSON.stringify(dbHealthJson)}`);
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([
@@ -95,4 +106,3 @@ runSmoke().catch((error) => {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);
 });
-

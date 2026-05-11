@@ -12,7 +12,11 @@
     "backend:dev": "npm --prefix backend run dev",
     "backend:build": "npm --prefix backend run build",
     "backend:typecheck": "npm --prefix backend run typecheck",
-    "backend:smoke": "npm --prefix backend run smoke"
+    "backend:smoke": "npm --prefix backend run smoke",
+    "backend:db:generate": "npm --prefix backend run db:generate",
+    "backend:db:migrate": "npm --prefix backend run db:migrate",
+    "backend:db:push": "npm --prefix backend run db:push",
+    "backend:db:studio": "npm --prefix backend run db:studio"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.100.9",

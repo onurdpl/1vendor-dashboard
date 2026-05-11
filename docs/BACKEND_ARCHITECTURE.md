@@ -30,6 +30,7 @@ Run from repository root:
 2. `npm run backend:build`
 3. `npm run backend:typecheck`
 4. `npm run backend:smoke`
+5. `npm run backend:db:generate`
 
 Smoke verifies:
 - backend process starts without a database connection
@@ -38,6 +39,26 @@ Smoke verifies:
 - process shuts down cleanly after checks
 
 `DATABASE_URL` is not required for this smoke because DB actions are not wired yet.
+
+## Local PostgreSQL Setup (Development)
+Recommended local setup:
+- PostgreSQL running on localhost
+- default example credentials for local development only
+
+Environment example (`backend/.env.example`):
+- `PORT=4000`
+- `NODE_ENV=development`
+- `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev`
+
+Common workflow:
+1. `cp backend/.env.example backend/.env`
+2. ensure local PostgreSQL is running
+3. `npm run backend:db:generate`
+4. `npm run backend:db:migrate` (creates/applies local dev migration)
+5. `npm run backend:db:studio` (optional data inspection)
+
+Alternative for quick schema sync without migration history:
+- `npm run backend:db:push`
 
 ## Single Shopify Store Model
 - One Shopify store for the whole platform.
@@ -93,3 +114,14 @@ GitHub Actions CI validates both frontend and backend on push/PR to `main`:
 - frontend install/build/test
 - backend install/build/typecheck
 - backend smoke (`/health` + `/version`)
+
+## Health Endpoints Rationale
+- `GET /health` stays database-independent so process liveness checks never fail due to temporary DB downtime or missing local DB configuration.
+- `GET /health/db` is optional/readiness-oriented:
+  - returns `not_configured` when `DATABASE_URL` is missing
+  - returns `connected` when lightweight DB query succeeds
+  - returns `unavailable` when DB is configured but not reachable
+
+## Migration Expectations
+- Migrations should be created only with a real local PostgreSQL connection.
+- If local PostgreSQL is unavailable, migration generation is intentionally deferred (no fake SQL migration files).
