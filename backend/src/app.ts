@@ -9,6 +9,7 @@ import { registerOrdersRoutes } from './modules/orders/orders.routes.js';
 import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
 import { registerOperationsRoutes } from './modules/operations/operations.routes.js';
+import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.service.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -72,6 +73,18 @@ export function createApp() {
         };
       },
     );
+
+    app.get('/debug/shopify/vendor-mapping', async (request) => {
+      const rawValue = typeof request.query === 'object' && request.query !== null
+        ? Reflect.get(request.query, 'value')
+        : undefined;
+      const value = typeof rawValue === 'string' ? rawValue : null;
+
+      return {
+        value,
+        vendorId: resolveVendorFromMetafield(value),
+      };
+    });
   }
 
   return app;

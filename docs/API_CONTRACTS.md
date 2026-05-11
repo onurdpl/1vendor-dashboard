@@ -233,6 +233,8 @@ The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 - A Shopify store connection belongs to a vendor.
 - Shopify orders must be stored with a `vendorId`.
 - Shopify metafield mapping determines `originalVendorId`.
+- Backend must resolve Shopify variant/vendor metafield values into internal vendor IDs before allocation.
+- Vendor metafield matching should be trim-safe, case-insensitive, and resilient to Turkish character variants where practical.
 - Operational assignment determines `assignedVendorId`.
 - Reassignment from original to assigned vendor is future work; this contract prepares for it.
 - Vendor cancellation/out-of-stock reporting can mark allocations as blocked and pending reassignment.
@@ -256,6 +258,8 @@ The expected production model is a single Shopify store that can contain product
 
 - One Shopify order can contain line items from multiple vendors.
 - Vendor identity comes from variant or product metafield data during ingestion.
+- Inventory, active vendor, and price selection are managed outside this application and synced into Shopify.
+- This application begins from post-order operations, not storefront/catalog management.
 - The backend must allocate Shopify order line items by vendor before exposing them to the frontend.
 - Stored vendor-facing order records must always be scoped by `vendorId`.
 - Vendors must only receive their own allocated line items.

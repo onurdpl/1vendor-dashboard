@@ -86,6 +86,43 @@ async function runSmoke() {
       throw new Error(`/health/db payload invalid: ${JSON.stringify(dbHealthJson)}`);
     }
 
+    const vendorMappingYaliResponse = await fetch(
+      `${baseUrl}/debug/shopify/vendor-mapping?value=${encodeURIComponent('Yalı Spor')}`,
+    );
+    if (!vendorMappingYaliResponse.ok) {
+      throw new Error(`/debug/shopify/vendor-mapping yalispor failed with ${vendorMappingYaliResponse.status}`);
+    }
+    const vendorMappingYaliJson = await vendorMappingYaliResponse.json();
+    if (vendorMappingYaliJson?.vendorId !== 'yalispor') {
+      throw new Error('/debug/shopify/vendor-mapping did not resolve Yalı Spor to yalispor.');
+    }
+
+    const vendorMappingSporjinalResponse = await fetch(
+      `${baseUrl}/debug/shopify/vendor-mapping?value=${encodeURIComponent('Sporjinal')}`,
+    );
+    if (!vendorMappingSporjinalResponse.ok) {
+      throw new Error(
+        `/debug/shopify/vendor-mapping sporjinal failed with ${vendorMappingSporjinalResponse.status}`,
+      );
+    }
+    const vendorMappingSporjinalJson = await vendorMappingSporjinalResponse.json();
+    if (vendorMappingSporjinalJson?.vendorId !== 'sporjinal') {
+      throw new Error('/debug/shopify/vendor-mapping did not resolve Sporjinal to sporjinal.');
+    }
+
+    const vendorMappingUnknownResponse = await fetch(
+      `${baseUrl}/debug/shopify/vendor-mapping?value=${encodeURIComponent('Unknown Vendor')}`,
+    );
+    if (!vendorMappingUnknownResponse.ok) {
+      throw new Error(
+        `/debug/shopify/vendor-mapping unknown failed with ${vendorMappingUnknownResponse.status}`,
+      );
+    }
+    const vendorMappingUnknownJson = await vendorMappingUnknownResponse.json();
+    if (vendorMappingUnknownJson?.vendorId !== null) {
+      throw new Error('/debug/shopify/vendor-mapping unknown vendor should resolve to null.');
+    }
+
     const adminLoginResponse = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },

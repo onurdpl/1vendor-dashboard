@@ -85,10 +85,13 @@ Alternative for quick schema sync without migration history:
 - Vendors do not connect independent stores.
 - Variant-level vendor ownership is derived from Shopify metafield data.
 - A single Shopify order can contain line items allocated to multiple vendors.
+- Active vendor, stock ownership, and pricing are managed by an external source system and synced into Shopify.
+- This application starts from post-order operations after a Shopify order already exists.
 
 ## Vendor Allocation Model
 - Backend persists source Shopify order and line items.
 - Backend creates vendor allocations from line-item vendor mapping.
+- Vendor mapping is resolved from the Shopify variant vendor metafield into internal vendor IDs.
 - Core fields supported:
   - `originalVendorId`
   - `assignedVendorId`
@@ -97,6 +100,21 @@ Alternative for quick schema sync without migration history:
   - `reassignmentRequired`
   - `sourceShopifyOrderId`
   - `sourceShopifyOrderNumber`
+
+## Shopify Vendor Mapping Foundation (Phase 13 Step 14)
+- Backend Shopify vendor mapping service now exists under `backend/src/modules/shopify/`.
+- `resolveVendorFromMetafield(value)` performs:
+  - trim
+  - case-insensitive comparison
+  - Turkish-character-safe normalization where practical
+  - realistic seeded vendor mapping
+- Current seeded mappings include:
+  - `Yalı Spor` / `Yali Spor` -> `yalispor`
+  - `Sporjinal` -> `sporjinal`
+  - `Sporvol` -> `sporvol`
+- Unknown or empty vendor metafield values resolve safely to `null`.
+- Temporary non-production diagnostic route:
+  - `GET /debug/shopify/vendor-mapping?value=Yalı%20Spor`
 
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
