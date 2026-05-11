@@ -141,6 +141,72 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - `awaiting_shipment`: allocation in shipping wait state
   - `refund_attention`: return/refund records requiring review
 
+### GET /admin/diagnostics/webhooks
+
+- Purpose: return admin-only webhook receipt and ingestion visibility for operational debugging.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: `{ summary, events }`.
+- Expected `401` behavior: return `401 Unauthorized`.
+- Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
+- Response semantics:
+  - `summary.total`: total persisted webhook envelopes
+  - `summary.received`: events still in received state
+  - `summary.processed`: events successfully processed
+  - `summary.failed`: events that failed verification-side or ingestion-side processing
+  - `summary.duplicates`: currently `0` in persisted diagnostics because duplicate deliveries are ignored before a second event row is created
+  - `summary.needsAttention`: failed or operationally blocked events that need admin review
+- Event fields include:
+  - `id`
+  - `topic`
+  - `shopDomain`
+  - `shopifyWebhookId`
+  - `idempotencyKey`
+  - `status`
+  - `receivedAt`
+  - `processedAt`
+  - `errorMessage`
+  - `duplicate`
+
+### GET /admin/diagnostics/webhooks/:webhookEventId
+
+- Purpose: return full persisted diagnostics metadata for one webhook event.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: webhook event metadata plus `payloadHash`, `status`, `errorMessage`, timestamps, and `relatedShopifyOrderId` when inferable.
+- Expected `404` behavior: return `404 Not Found` when the webhook event does not exist.
+- Raw payload note:
+  - raw payload is not currently persisted in the database
+  - `rawPayload` is therefore `null` in this phase
+
+### GET /admin/diagnostics/sync-events
+
+- Purpose: return a consolidated admin-only diagnostics feed across webhook ingestion and fulfillment sync state.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: `{ items }`.
+- Expected `401` behavior: return `401 Unauthorized`.
+- Expected `403` behavior: return `403 Forbidden` for authenticated non-admin users.
+- Item shape includes:
+  - `id`
+  - `type`
+  - `severity`
+  - `title`
+  - `description`
+  - `relatedWebhookEventId`
+  - `relatedShopifyOrderId`
+  - `relatedAllocationId`
+  - `status`
+  - `createdAt`
+- Current item sources:
+  - failed webhook ingestion events
+  - seller-info / SKU / vendor resolution failures surfaced through webhook errors
+  - fulfillment sync failures
+- Duplicate delivery note:
+  - duplicate deliveries are accepted with `202 duplicate_ignored`
+  - duplicates are not currently stored as separate webhook-event rows
+  - duplicate visibility in this phase is response-level and idempotency-key-level, not a separate diagnostics item
+
 ### POST /webhooks/shopify/orders-create
 
 - Purpose: receive verified Shopify `orders/create` webhook payloads and ingest vendor allocations when seller info can be resolved.

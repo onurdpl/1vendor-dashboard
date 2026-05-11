@@ -219,6 +219,33 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - run background queue workers
   - switch the frontend to real API mode
 
+## Diagnostics and Sync Visibility (Phase 13 Step 19)
+- Admin-only diagnostics APIs now expose persisted webhook and sync state without changing frontend runtime behavior.
+- Current diagnostics endpoints:
+  - `GET /admin/diagnostics/webhooks`
+  - `GET /admin/diagnostics/webhooks/:webhookEventId`
+  - `GET /admin/diagnostics/sync-events`
+- Observability strategy:
+  - use persisted `WebhookEvent` rows for webhook receipt, processing, and failure visibility
+  - use persisted `Fulfillment` sync state for fulfillment tracking failures
+  - consolidate operational failures into an admin-only sync-events feed
+- Current visibility includes:
+  - processed webhook receipts
+  - failed webhook ingestion attempts
+  - seller_info retry exhaustion
+  - unresolved SKU mapping failures
+  - unknown vendor slug failures
+  - fulfillment sync failures
+- Duplicate-delivery note:
+  - duplicate webhook deliveries are accepted and ignored by idempotency logic before a second processing row is created
+  - duplicates are therefore visible through request/response semantics and idempotency keys, but not yet persisted as standalone duplicate-event rows
+- Raw payload note:
+  - webhook payload hash is persisted
+  - raw webhook body is not currently stored in the database
+- Frontend note:
+  - this phase adds API-level diagnostics only
+  - admin diagnostics UI remains future work
+
 ## Shopify Webhook Verification Skeleton (Phase 13 Step 15)
 - First webhook endpoint exists:
   - `POST /webhooks/shopify/orders-create`

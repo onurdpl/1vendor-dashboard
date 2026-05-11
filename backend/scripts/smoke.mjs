@@ -868,6 +868,93 @@ async function runSmoke() {
       throw new Error(`/admin/operations vendor forbidden expected 403, got ${vendorOperationsResponse.status}`);
     }
 
+    const adminWebhookDiagnosticsResponse = await fetch(`${baseUrl}/admin/diagnostics/webhooks`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (!adminWebhookDiagnosticsResponse.ok) {
+      throw new Error(
+        `/admin/diagnostics/webhooks admin failed with ${adminWebhookDiagnosticsResponse.status}`,
+      );
+    }
+    const adminWebhookDiagnostics = await adminWebhookDiagnosticsResponse.json();
+    if (!adminWebhookDiagnostics?.summary || !Array.isArray(adminWebhookDiagnostics?.events)) {
+      throw new Error('/admin/diagnostics/webhooks returned invalid shape.');
+    }
+    const processedWebhookEvent = adminWebhookDiagnostics.events.find((event) => event?.status === 'PROCESSED');
+    if (!processedWebhookEvent) {
+      throw new Error('/admin/diagnostics/webhooks missing processed webhook event.');
+    }
+    const failedWebhookEvent = adminWebhookDiagnostics.events.find((event) => event?.status === 'FAILED');
+    if (!failedWebhookEvent) {
+      throw new Error('/admin/diagnostics/webhooks missing failed webhook event.');
+    }
+
+    const adminWebhookDiagnosticsDetailResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${processedWebhookEvent.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (!adminWebhookDiagnosticsDetailResponse.ok) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:webhookEventId admin failed with ${adminWebhookDiagnosticsDetailResponse.status}`,
+      );
+    }
+    const adminWebhookDiagnosticsDetail = await adminWebhookDiagnosticsDetailResponse.json();
+    if (
+      adminWebhookDiagnosticsDetail?.id !== processedWebhookEvent.id ||
+      typeof adminWebhookDiagnosticsDetail?.payloadHash !== 'string'
+    ) {
+      throw new Error('/admin/diagnostics/webhooks/:webhookEventId returned invalid shape.');
+    }
+
+    const adminSyncEventsResponse = await fetch(`${baseUrl}/admin/diagnostics/sync-events`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (!adminSyncEventsResponse.ok) {
+      throw new Error(
+        `/admin/diagnostics/sync-events admin failed with ${adminSyncEventsResponse.status}`,
+      );
+    }
+    const adminSyncEvents = await adminSyncEventsResponse.json();
+    if (!Array.isArray(adminSyncEvents?.items)) {
+      throw new Error('/admin/diagnostics/sync-events returned invalid shape.');
+    }
+    const hasFailureSyncEvent = adminSyncEvents.items.some(
+      (item) => item?.type === 'webhook_ingestion_failure' || item?.type === 'fulfillment_sync_failed',
+    );
+    if (!hasFailureSyncEvent) {
+      throw new Error('/admin/diagnostics/sync-events missing expected failure diagnostics item.');
+    }
+
+    const vendorWebhookDiagnosticsResponse = await fetch(`${baseUrl}/admin/diagnostics/webhooks`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorWebhookDiagnosticsResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/webhooks vendor forbidden expected 403, got ${vendorWebhookDiagnosticsResponse.status}`,
+      );
+    }
+
+    const vendorSyncEventsResponse = await fetch(`${baseUrl}/admin/diagnostics/sync-events`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorSyncEventsResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/sync-events vendor forbidden expected 403, got ${vendorSyncEventsResponse.status}`,
+      );
+    }
+
     const adminOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/1001`, {
       headers: {
         Authorization: `Bearer ${adminToken}`,
