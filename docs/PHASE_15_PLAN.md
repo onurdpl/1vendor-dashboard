@@ -4,6 +4,7 @@
 - Establish the Phase 15 roadmap before new runtime behavior is added.
 - Turn the Phase 14 live-verification milestone into a practical hardening plan.
 - Keep implementation aligned with verified Shopify behavior and the current backend/frontend boundaries.
+- The current real-mode frontend gap audit is documented in [PHASE_15_REAL_MODE_AUDIT.md](/Users/onur/Documents/New project 4/docs/PHASE_15_REAL_MODE_AUDIT.md).
 
 ## Phase 15 Goals
 - Improve operational frontend maturity in real mode.
