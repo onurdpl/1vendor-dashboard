@@ -83,6 +83,14 @@
   - stronger operator cues
   - better real-mode UX fit with the rest of the app
 
+### Returns and Refund Detail
+- Data load is backend-backed.
+- Real-mode returns pages now surface Shopify refund identifiers, vendor ownership, refunded SKU visibility, and refund webhook context more clearly.
+- Refund detail now frames refund requested vs. refund processed state more explicitly and points operators to finance linkage instead of placeholder copy.
+- Result:
+  - refund visibility is materially clearer in real mode
+  - deeper finance/refund cross-linking is still informational rather than navigable
+
 ## Mock-Backed Pages
 
 ### Dashboard Supporting Signals
@@ -150,11 +158,7 @@
   - customer text in list views
   - variant title derivation in some cases
 - Return summary/detail still rely on placeholder operational labels such as:
-  - customer
-  - reason
   - condition
-  - refund method
-  - processed by
 - Dashboard real-mode state is intentionally generic instead of reflecting live operational aggregates.
 - Fulfillment state labels are mapped, but frontend copy still assumes mock workflow language in several places.
 
@@ -177,7 +181,7 @@
 - Orders: working.
 - Order detail: working for read path, partial for action path.
 - Returns: working.
-- Return detail: working for read path.
+- Return detail: working for read path with improved live refund clarity.
 - Finance: working.
 - Admin operations: working.
 - Admin order breakdown for live order `7613246112081`: working for read path, partial for action path.
@@ -192,6 +196,7 @@
   - tracking submission path is real-mode/backend-backed
   - readability for live allocation state is improved
 - Returns: working.
+- Return detail readability for live refund records is improved.
 - Finance: working.
 - Fulfillment/tracking action visibility:
   - visibility is meaningful
@@ -211,7 +216,7 @@
 
 ### Priority 2
 - Clean up real-mode data mapping for money/currency formatting and operational field labels.
-- Improve order detail and return detail to use richer backend-backed metadata instead of placeholders.
+- Improve remaining return-detail metadata such as condition and richer refund provenance only when backend sync provides it.
 - Replace admin mock reassignment affordances with clearly disabled/read-only operational messaging until real mutations exist.
 
 ### Priority 3

@@ -4,6 +4,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { listReturns, type ReturnSummary } from '../features/returns/api';
 import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
+import { runtimeConfig } from '../config/runtime';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -17,6 +18,7 @@ export function ReturnsPage() {
   const { data: returns, isLoading, isError, error } = useQueryResource(queryKeys.returns.list(), listReturns);
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
+  const isRealMode = runtimeConfig.apiMode === 'real';
 
   if (isLoading) {
     return (
@@ -56,6 +58,11 @@ export function ReturnsPage() {
               ? 'Selected vendor return allocations with operational refund status and review visibility.'
               : 'Track your vendor refund allocations, review status, and refunded line item impact.'}
           </p>
+          {isRealMode ? (
+            <p className="page-description operational-helper-copy">
+              Refund state is synced from Shopify webhook ingestion. Refund processing actions are not enabled in real mode yet.
+            </p>
+          ) : null}
         </div>
         <div className="queue-health">
           <span className="severity-chip severity-normal">Vendor {currentVendor.vendorName}</span>
@@ -109,16 +116,28 @@ export function ReturnsPage() {
                 </header>
                 <div className="queue-meta">
                   <span>
-                    <strong>Related order:</strong> {item.relatedOrderId}
+                    <strong>Shopify order:</strong> #{item.sourceShopifyOrderNumber}
                   </span>
                   <span>
-                    <strong>Customer:</strong> {item.customer}
+                    <strong>Shopify order ID:</strong> {item.sourceShopifyOrderId}
                   </span>
                   <span>
-                    <strong>Date:</strong> {formatDate(item.date)}
+                    <strong>Refund ID:</strong> {item.sourceShopifyRefundId || 'Pending Shopify refund link'}
                   </span>
                   <span>
-                    <strong>Reason:</strong> {item.reason}
+                    <strong>Created:</strong> {formatDate(item.date)}
+                  </span>
+                  <span>
+                    <strong>Latest update:</strong> {item.updatedAt ? formatDate(item.updatedAt) : formatDate(item.date)}
+                  </span>
+                  <span>
+                    <strong>Vendor owner:</strong> {item.assignedVendorId}
+                  </span>
+                  <span>
+                    <strong>Refunded SKUs:</strong> {item.refundedSkus?.length ? item.refundedSkus.join(', ') : 'Visible in refund detail'}
+                  </span>
+                  <span>
+                    <strong>Refund context:</strong> Shopify webhook allocation
                   </span>
                 </div>
                 <div className="queue-actions">

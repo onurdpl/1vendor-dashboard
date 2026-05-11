@@ -51,6 +51,15 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
     const refundedItemCount = matchingRefundRecords.reduce((sum, refund) => {
       return sum + (refund.lineItems.length > 0 ? refund.lineItems.length : 0);
     }, 0) || record.vendorAllocation.lineItems.length;
+    const refundedSkus = Array.from(
+      new Set(
+        matchingRefundRecords.flatMap((refund) =>
+          refund.lineItems
+            .map((item) => item.sku ?? null)
+            .filter((sku): sku is string => Boolean(sku)),
+        ),
+      ),
+    );
     return {
       id: record.id,
       sourceShopifyOrderId: record.sourceShopifyOrderId,
@@ -61,6 +70,7 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
       status: record.status,
       refundAmount: toAmountString(refundAmount),
       refundedItemCount,
+      refundedSkus,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
@@ -135,6 +145,13 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.lineAmount)),
         }));
+  const refundedSkus = Array.from(
+    new Set(
+      refundedItems
+        .map((item) => item.sku)
+        .filter((sku): sku is string => Boolean(sku)),
+    ),
+  );
 
   return {
     id: record.id,
@@ -146,6 +163,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     status: record.status,
     refundAmount: toAmountString(refundAmount),
     refundedItemCount: refundLineItems.length || record.vendorAllocation.lineItems.length,
+    refundedSkus,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     sourceShopifyInternalOrderId: record.vendorAllocation.sourceShopifyOrderId,

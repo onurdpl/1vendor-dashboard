@@ -147,9 +147,11 @@ export type ReturnSummary = {
   status: ReturnStatus;
   relatedOrderId: string;
   date: string;
+  updatedAt?: string;
   customer: string;
   reason: string;
   amount: string;
+  refundedSkus?: string[];
 };
 
 export type ReturnLineItem = {

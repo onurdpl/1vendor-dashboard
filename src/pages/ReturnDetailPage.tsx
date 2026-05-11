@@ -4,6 +4,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn } from '../features/returns/api';
 import { getCurrentVendorContext } from '../lib/auth';
+import { runtimeConfig } from '../config/runtime';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -15,6 +16,7 @@ function formatDate(value: string) {
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const currentVendor = getCurrentVendorContext();
+  const isRealMode = runtimeConfig.apiMode === 'real';
   const { data: returnRequest, isLoading, isError, error } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
     () => {
@@ -62,6 +64,11 @@ export function ReturnDetailPage() {
           <p className="page-description">
             Shopify order #{returnRequest.sourceShopifyOrderNumber} · Refund {returnRequest.sourceShopifyRefundId}
           </p>
+          {isRealMode ? (
+            <p className="page-description operational-helper-copy">
+              Refund state is synced from Shopify webhook ingestion. Refund processing actions are not enabled in real mode yet.
+            </p>
+          ) : null}
         </div>
         <div className="chip-row">
           <span className={`status-badge status-${returnRequest.status.toLowerCase().replace(/\s+/g, '-')}`}>
@@ -89,15 +96,27 @@ export function ReturnDetailPage() {
             </div>
             <div className="summary-row">
               <span>Related order</span>
-              <strong>{returnRequest.relatedOrderId}</strong>
+              <strong>#{returnRequest.sourceShopifyOrderNumber}</strong>
             </div>
             <div className="summary-row">
-              <span>Reason</span>
-              <strong>{returnRequest.reason}</strong>
+              <span>Shopify order ID</span>
+              <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="summary-row">
-              <span>Date</span>
+              <span>Refund ID</span>
+              <strong>{returnRequest.sourceShopifyRefundId}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Refund source</span>
+              <strong>Shopify refund webhook allocation</strong>
+            </div>
+            <div className="summary-row">
+              <span>Created</span>
               <strong>{formatDate(returnRequest.date)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Latest backend update</span>
+              <strong>{returnRequest.updatedAt ? formatDate(returnRequest.updatedAt) : formatDate(returnRequest.date)}</strong>
             </div>
           </div>
         </article>
@@ -152,12 +171,24 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.vendorId}</strong>
             </div>
             <div className="meta-item">
+              <span>Assigned vendor owner</span>
+              <strong>{returnRequest.assignedVendorId}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Original vendor owner</span>
+              <strong>{returnRequest.originalVendorId}</strong>
+            </div>
+            <div className="meta-item">
               <span>Source Shopify order ID</span>
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="meta-item">
               <span>Source Shopify refund ID</span>
               <strong>{returnRequest.sourceShopifyRefundId}</strong>
+            </div>
+            <div className="meta-item">
+              <span>Refund operational state</span>
+              <strong>{returnRequest.status === 'Refunded' ? 'Refund processed' : 'Refund requested / under review'}</strong>
             </div>
             <div className="meta-item">
               <span>Resolution</span>
@@ -168,12 +199,16 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.refundMethod}</strong>
             </div>
             <div className="meta-item">
-              <span>Processed by</span>
+              <span>Refund-linked finance context</span>
+              <strong>Vendor finance ledger reflects this refund allocation.</strong>
+            </div>
+            <div className="meta-item">
+              <span>Operational sync source</span>
               <strong>{returnRequest.processedBy}</strong>
             </div>
             <div className="meta-item">
-              <span>Customer</span>
-              <strong>{returnRequest.customer}</strong>
+              <span>Refund notes</span>
+              <strong>{returnRequest.reason}</strong>
             </div>
           </div>
         </article>

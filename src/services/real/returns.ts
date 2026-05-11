@@ -11,6 +11,7 @@ type ReturnSummaryDto = {
   status: string;
   refundAmount: string;
   refundedItemCount: number;
+  refundedSkus: string[];
   createdAt: string;
   updatedAt: string;
 };
@@ -68,9 +69,11 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     status: mapStatus(dto.status),
     relatedOrderId: dto.sourceShopifyOrderId,
     date: dto.createdAt,
-    customer: 'Customer details available in return view',
-    reason: 'Refund allocation synced from backend refund records.',
+    updatedAt: dto.updatedAt,
+    customer: 'Shopify customer details stay outside the current refund sync scope.',
+    reason: 'Refund allocation synced from Shopify webhook ingestion.',
     amount: formatMoney(dto.refundAmount),
+    refundedSkus: dto.refundedSkus,
   };
 }
 
@@ -98,13 +101,13 @@ export async function getReturn(returnId: string): Promise<ReturnDetail> {
   return {
     ...summary,
     originalVendorId: response.originalVendorId,
-    resolution: 'Backend-scoped refund allocation.',
-    refundMethod: 'Original payment method',
-    processedBy: 'Backend sync',
+    resolution: response.status === 'Refunded' ? 'Refund processed and allocated to vendor scope.' : 'Refund allocation recorded for operational review.',
+    refundMethod: 'Original payment method (Shopify refund flow)',
+    processedBy: 'Shopify webhook ingestion via backend',
     refundedItems,
     items: refundedItems,
     timeline: [
-      { label: 'Return record created', at: response.createdAt },
+      { label: 'Refund requested', at: response.createdAt },
       { label: 'Latest backend update', at: response.updatedAt },
     ],
   };

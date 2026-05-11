@@ -8,6 +8,7 @@ export type ReturnSummaryDto = {
   status: string;
   refundAmount: string;
   refundedItemCount: number;
+  refundedSkus: string[];
   createdAt: string;
   updatedAt: string;
 };
