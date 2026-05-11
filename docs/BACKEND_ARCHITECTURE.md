@@ -61,6 +61,11 @@ Real API dry-run verifies:
   - `VITE_API_MODE=mock` -> default, existing mock runtime behavior
   - `VITE_API_MODE=real` -> use backend APIs at `VITE_API_BASE_URL`
   - `VITE_API_BASE_URL=http://127.0.0.1:4000` -> recommended local backend target
+- Local browser real-mode requirement:
+  - frontend typically runs on `http://127.0.0.1:5173`
+  - backend typically runs on `http://127.0.0.1:4000`
+  - backend must allow configured browser origins through `CORS_ORIGIN`
+  - preflight `OPTIONS` requests must succeed for login and authenticated API calls
 - Migration design goals:
   - mock mode remains the default and the primary safe fallback
   - backend-offline conditions must fail gracefully without crashing the app
@@ -92,6 +97,7 @@ Environment example (`backend/.env.example`):
 - `PORT=4000`
 - `NODE_ENV=development`
 - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/vendor_dashboard_dev`
+- `CORS_ORIGIN=http://127.0.0.1:5173,http://localhost:5173`
 - `JWT_SECRET=dev-only-jwt-secret-change-in-production`
 - `JWT_EXPIRES_IN=12h`
 
@@ -105,6 +111,33 @@ Common workflow:
 
 Alternative for quick schema sync without migration history:
 - `npm run backend:db:push`
+
+## Backend CORS Support (Phase 13.6)
+- Backend now uses `@fastify/cors` so the Vite frontend can call the local API in browser real mode.
+- `CORS_ORIGIN` accepts a comma-separated list of allowed origins.
+- Development/test default origins:
+  - `http://127.0.0.1:5173`
+  - `http://localhost:5173`
+- Production requires explicit configured origins.
+- Allowed methods:
+  - `GET`
+  - `POST`
+  - `OPTIONS`
+- Allowed headers include:
+  - `Authorization`
+  - `Content-Type`
+  - `X-Vendor-Id`
+  - `X-Shopify-Hmac-Sha256`
+  - `X-Shopify-Shop-Domain`
+  - `X-Shopify-Webhook-Id`
+  - `X-Shopify-Topic`
+- Real-mode browser login depends on successful preflight handling for endpoints such as:
+  - `/auth/login`
+  - `/auth/me`
+  - `/orders`
+  - `/returns`
+  - `/finance`
+  - `/admin/operations`
 
 ## Single Shopify Store Model
 - One Shopify store for the whole platform.

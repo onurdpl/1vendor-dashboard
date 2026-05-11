@@ -4,6 +4,7 @@ export type AppEnv = {
   NODE_ENV: NodeEnv;
   PORT: number;
   DATABASE_URL?: string;
+  CORS_ORIGIN: string[];
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
   SHOPIFY_WEBHOOK_SECRET: string;
@@ -50,6 +51,21 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
   return parsed;
 }
 
+function parseCorsOrigins(value: string | undefined, nodeEnv: NodeEnv) {
+  if (value?.trim()) {
+    return value
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter(Boolean);
+  }
+
+  if (nodeEnv === 'production') {
+    throw new Error('CORS_ORIGIN is required in production.');
+  }
+
+  return ['http://127.0.0.1:5173', 'http://localhost:5173'];
+}
+
 export function loadEnv(): AppEnv {
   const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
   const jwtSecret = process.env.JWT_SECRET || (nodeEnv !== 'production' ? 'dev-only-jwt-secret-change-in-production' : undefined);
@@ -77,6 +93,7 @@ export function loadEnv(): AppEnv {
     NODE_ENV: nodeEnv,
     PORT: parsePort(process.env.PORT),
     DATABASE_URL: process.env.DATABASE_URL || undefined,
+    CORS_ORIGIN: parseCorsOrigins(process.env.CORS_ORIGIN, nodeEnv),
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
     SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,

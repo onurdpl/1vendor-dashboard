@@ -1,4 +1,6 @@
 import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import type { OriginFunction } from '@fastify/cors';
 import { loadEnv } from './config/env.js';
 import { prisma } from './db/prisma.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
@@ -18,6 +20,27 @@ export function createApp() {
   const env = loadEnv();
   const app = Fastify({
     logger: env.NODE_ENV !== 'test',
+  });
+
+  void app.register(cors, {
+    origin: ((origin, callback) => {
+      if (!origin) {
+        callback(null, true);
+        return;
+      }
+
+      callback(null, env.CORS_ORIGIN.includes(origin));
+    }) satisfies OriginFunction,
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: [
+      'Authorization',
+      'Content-Type',
+      'X-Vendor-Id',
+      'X-Shopify-Hmac-Sha256',
+      'X-Shopify-Shop-Domain',
+      'X-Shopify-Webhook-Id',
+      'X-Shopify-Topic',
+    ],
   });
 
   app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {

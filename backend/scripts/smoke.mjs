@@ -126,6 +126,34 @@ async function runSmoke() {
       throw new Error(`/health/db payload invalid: ${JSON.stringify(dbHealthJson)}`);
     }
 
+    const corsPreflightResponse = await fetch(`${baseUrl}/auth/login`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'authorization,content-type,x-vendor-id',
+      },
+    });
+    if (!corsPreflightResponse.ok) {
+      throw new Error(`/auth/login preflight expected success, got ${corsPreflightResponse.status}`);
+    }
+    const allowOrigin = corsPreflightResponse.headers.get('access-control-allow-origin');
+    const allowMethods = corsPreflightResponse.headers.get('access-control-allow-methods') ?? '';
+    const allowHeaders = corsPreflightResponse.headers.get('access-control-allow-headers') ?? '';
+    if (allowOrigin !== 'http://127.0.0.1:5173') {
+      throw new Error(`/auth/login preflight missing allow origin header: ${allowOrigin}`);
+    }
+    if (!allowMethods.toUpperCase().includes('POST') || !allowMethods.toUpperCase().includes('OPTIONS')) {
+      throw new Error(`/auth/login preflight missing allow methods: ${allowMethods}`);
+    }
+    if (
+      !allowHeaders.toLowerCase().includes('authorization') ||
+      !allowHeaders.toLowerCase().includes('content-type') ||
+      !allowHeaders.toLowerCase().includes('x-vendor-id')
+    ) {
+      throw new Error(`/auth/login preflight missing allow headers: ${allowHeaders}`);
+    }
+
     const vendorMappingYaliResponse = await fetch(
       `${baseUrl}/debug/shopify/vendor-mapping?value=${encodeURIComponent('Yalı Spor')}`,
     );
