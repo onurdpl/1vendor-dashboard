@@ -198,6 +198,15 @@ Alternative for quick schema sync without migration history:
     - `query { shop { name myshopifyDomain } }`
 - This keeps normal build, smoke, and dry-run flows isolated from live Shopify dependencies until rollout is intentional.
 
+## Phase 14 Closure Checkpoint
+- The official Phase 14 operational readiness checkpoint is documented in [PHASE_14_CLOSURE.md](/Users/onur/Documents/New project 4/docs/PHASE_14_CLOSURE.md).
+- Use that document as the source of truth for:
+  - live-verified Shopify capabilities
+  - current operational limitations
+  - risk register items
+  - Phase 15 entry criteria
+  - recommended production-readiness steps before real merchant rollout
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.
