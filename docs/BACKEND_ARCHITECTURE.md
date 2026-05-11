@@ -30,6 +30,7 @@
   - `GET /orders/:orderId`
   - `GET /returns`
   - `GET /returns/:returnId`
+  - `GET /finance`
 
 ## Local Backend Verification
 Run from repository root:
@@ -207,3 +208,20 @@ Frontend note:
 - Cross-vendor return detail access returns `404` under vendor-scoped query semantics.
 - Seed data includes a shared Shopify order refund scenario (`#1001`) allocated separately for `yalispor` and `sporjinal`.
 - Frontend remains mock-based in this phase; backend returns routes are prepared for future integration.
+
+## DB-Backed Finance Read API (Phase 13 Step 10)
+- Finance read route is now backed by PostgreSQL via Prisma:
+  - `GET /finance`
+- Route requires:
+  - authenticated user
+  - `requireVendorAccess` middleware
+- Finance reads are scoped using backend-resolved `request.vendorContext.vendorId`, not raw frontend header trust.
+- Response returns:
+  - `summary`: `grossSales`, `refunds`, `netRevenue`, `platformFee`, `payoutEstimate`, `payoutStatus`
+  - `records`: vendor-scoped ledger entries with related order/refund references where available
+- Model remains reporting-only:
+  - no payout provider integration
+  - no money movement execution
+  - deterministic platform fee in this phase (`10%` of net revenue)
+  - payout estimate (`netRevenue - platformFee`)
+- Frontend remains mock-based in this phase; backend finance route is prepared for future integration.

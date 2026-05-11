@@ -362,6 +362,90 @@ async function runSeed() {
       status: 'pending',
     },
   });
+
+  await prisma.financeLedgerEntry.upsert({
+    where: { id: 'fin-yalispor-sale-1001' },
+    update: {
+      vendorAllocationId: yaliAllocation.id,
+      vendorId: 'yalispor',
+      entryType: 'sale',
+      amount: '120.00',
+      payoutStatus: 'PENDING',
+      description: 'Allocated sale for Shopify order #1001',
+    },
+    create: {
+      id: 'fin-yalispor-sale-1001',
+      vendorAllocationId: yaliAllocation.id,
+      vendorId: 'yalispor',
+      entryType: 'sale',
+      amount: '120.00',
+      payoutStatus: 'PENDING',
+      description: 'Allocated sale for Shopify order #1001',
+    },
+  });
+
+  await prisma.financeLedgerEntry.upsert({
+    where: { id: 'fin-yalispor-refund-1001' },
+    update: {
+      vendorAllocationId: yaliAllocation.id,
+      vendorId: 'yalispor',
+      entryType: 'refund',
+      amount: '120.00',
+      payoutStatus: 'HOLD',
+      description: 'Refund allocation for Shopify refund 1001-rf-a',
+    },
+    create: {
+      id: 'fin-yalispor-refund-1001',
+      vendorAllocationId: yaliAllocation.id,
+      vendorId: 'yalispor',
+      entryType: 'refund',
+      amount: '120.00',
+      payoutStatus: 'HOLD',
+      description: 'Refund allocation for Shopify refund 1001-rf-a',
+    },
+  });
+
+  await prisma.financeLedgerEntry.upsert({
+    where: { id: 'fin-sporjinal-sale-1001' },
+    update: {
+      vendorAllocationId: sporjinalAllocation.id,
+      vendorId: 'sporjinal',
+      entryType: 'sale',
+      amount: '135.00',
+      payoutStatus: 'PENDING',
+      description: 'Allocated sale for Shopify order #1001',
+    },
+    create: {
+      id: 'fin-sporjinal-sale-1001',
+      vendorAllocationId: sporjinalAllocation.id,
+      vendorId: 'sporjinal',
+      entryType: 'sale',
+      amount: '135.00',
+      payoutStatus: 'PENDING',
+      description: 'Allocated sale for Shopify order #1001',
+    },
+  });
+
+  await prisma.financeLedgerEntry.upsert({
+    where: { id: 'fin-sporjinal-refund-1001' },
+    update: {
+      vendorAllocationId: sporjinalAllocation.id,
+      vendorId: 'sporjinal',
+      entryType: 'refund',
+      amount: '135.00',
+      payoutStatus: 'HOLD',
+      description: 'Refund allocation for Shopify refund 1001-rf-b',
+    },
+    create: {
+      id: 'fin-sporjinal-refund-1001',
+      vendorAllocationId: sporjinalAllocation.id,
+      vendorId: 'sporjinal',
+      entryType: 'refund',
+      amount: '135.00',
+      payoutStatus: 'HOLD',
+      description: 'Refund allocation for Shopify refund 1001-rf-b',
+    },
+  });
 }
 
 runSeed()

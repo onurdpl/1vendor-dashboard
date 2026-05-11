@@ -320,6 +320,58 @@ async function runSmoke() {
     if (nonOwnedReturnResponse.status !== 404) {
       throw new Error(`/returns/:returnId cross-vendor expected 404, got ${nonOwnedReturnResponse.status}`);
     }
+
+    const adminFinanceYaliResponse = await fetch(`${baseUrl}/finance`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!adminFinanceYaliResponse.ok) {
+      throw new Error(`/finance admin yalispor failed with ${adminFinanceYaliResponse.status}`);
+    }
+    const adminFinanceYali = await adminFinanceYaliResponse.json();
+    if (!adminFinanceYali?.summary || !Array.isArray(adminFinanceYali?.records)) {
+      throw new Error('/finance admin yalispor returned invalid shape.');
+    }
+
+    const adminFinanceSporjinalResponse = await fetch(`${baseUrl}/finance`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (!adminFinanceSporjinalResponse.ok) {
+      throw new Error(`/finance admin sporjinal failed with ${adminFinanceSporjinalResponse.status}`);
+    }
+    const adminFinanceSporjinal = await adminFinanceSporjinalResponse.json();
+    if (!adminFinanceSporjinal?.summary || !Array.isArray(adminFinanceSporjinal?.records)) {
+      throw new Error('/finance admin sporjinal returned invalid shape.');
+    }
+
+    const vendorFinanceYaliResponse = await fetch(`${baseUrl}/finance`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!vendorFinanceYaliResponse.ok) {
+      throw new Error(`/finance vendor yalispor failed with ${vendorFinanceYaliResponse.status}`);
+    }
+    const vendorFinanceYali = await vendorFinanceYaliResponse.json();
+    if (!vendorFinanceYali?.summary || !Array.isArray(vendorFinanceYali?.records)) {
+      throw new Error('/finance vendor yalispor returned invalid shape.');
+    }
+
+    const vendorFinanceForbiddenResponse = await fetch(`${baseUrl}/finance`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (vendorFinanceForbiddenResponse.status !== 403) {
+      throw new Error(`/finance vendor forbidden expected 403, got ${vendorFinanceForbiddenResponse.status}`);
+    }
   } finally {
     child.kill('SIGTERM');
     await Promise.race([

@@ -159,6 +159,11 @@ No write endpoints are currently wired in the frontend, but future write actions
 - Platform fee or commission is an authoritative backend calculation; the current frontend demo uses a deterministic 10% rule.
 - Payout estimate is net revenue minus platform fee.
 - The frontend should receive already vendor-scoped finance data and should not perform financial allocation in production.
+- Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
+- Finance in this phase is reporting-only:
+  - no payout execution
+  - no payout provider integration
+  - deterministic fee model is currently acceptable for seeded/demo data (`platformFee = 10% of netRevenue`, `payoutEstimate = netRevenue - platformFee`)
 
 ### GET /automation
 
