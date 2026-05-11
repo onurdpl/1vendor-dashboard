@@ -2,16 +2,15 @@ import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
-  createMockSession,
-  getDemoUserByCredentials,
   getDemoUsers,
   isAuthenticated,
   setCurrentUser,
   setCurrentVendorId,
   setToken,
-  type CurrentUser,
 } from '../lib/auth';
 import type { VendorId } from '../lib/auth';
+import { runtimeConfig } from '../config/runtime';
+import { runtimeServices } from '../services/runtime-services';
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -19,40 +18,37 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/';
   const demoUsers = getDemoUsers();
+  const realModeDemoUsers = [
+    'admin@demo.com / demo123',
+    'yalispor@demo.com / demo123',
+    'sporjinal@demo.com / demo123',
+    'sporvol@demo.com / demo123',
+  ];
 
   if (isAuthenticated()) {
     return <Navigate to="/" replace />;
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const demoUser = getDemoUserByCredentials(email, password);
+    setIsSubmitting(true);
 
-    if (!demoUser) {
-      setErrorMessage('Invalid credentials. Use one of the demo accounts listed below.');
-      return;
+    try {
+      const { token, user } = await runtimeServices.auth.login(email, password);
+
+      setErrorMessage(null);
+      setToken(token);
+      setCurrentUser(user);
+      setCurrentVendorId(user.defaultVendorId as VendorId);
+      navigate(from, { replace: true });
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Unable to sign in.');
+    } finally {
+      setIsSubmitting(false);
     }
-
-    setErrorMessage(null);
-    setToken(createMockSession());
-    const currentUser: CurrentUser = {
-      email: demoUser.email,
-      name: demoUser.name,
-      role: demoUser.role,
-      vendorAccess: demoUser.vendorAccess,
-      canSwitchVendors: demoUser.canSwitchVendors,
-      defaultVendorId: demoUser.defaultVendorId,
-    };
-
-    setCurrentUser(currentUser);
-
-    if (!demoUser.canSwitchVendors) {
-      setCurrentVendorId(demoUser.defaultVendorId as VendorId);
-    }
-
-    navigate(from, { replace: true });
   }
 
   return (
@@ -101,8 +97,8 @@ export function LoginPage() {
             />
           </label>
 
-          <button type="submit" className="button button-primary">
-            Sign in
+          <button type="submit" className="button button-primary" disabled={isSubmitting}>
+            {isSubmitting ? 'Signing in…' : 'Sign in'}
           </button>
         </form>
 
@@ -111,12 +107,14 @@ export function LoginPage() {
         <div className="demo-credentials">
           <div className="session-label">Demo credentials</div>
           <ul className="demo-credentials-list">
-            {demoUsers.map((user) => (
-              <li key={user.email}>
-                <strong>{user.email}</strong>
-                <span> / demo123</span>
-              </li>
-            ))}
+            {runtimeConfig.apiMode === 'real'
+              ? realModeDemoUsers.map((user) => <li key={user}>{user}</li>)
+              : demoUsers.map((user) => (
+                  <li key={user.email}>
+                    <strong>{user.email}</strong>
+                    <span> / demo123</span>
+                  </li>
+                ))}
           </ul>
         </div>
 

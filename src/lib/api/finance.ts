@@ -1,6 +1,5 @@
-import { request } from './client';
-import type { FinanceDashboard } from './contracts';
+import { runtimeServices } from '../../services/runtime-services';
 
 export function getFinanceDashboard() {
-  return request<FinanceDashboard>('/finance');
+  return runtimeServices.finance.dashboard();
 }

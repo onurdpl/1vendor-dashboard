@@ -1,10 +1,9 @@
-import { request } from './client';
-import type { ReturnDetail, ReturnSummary } from './contracts';
+import { runtimeServices } from '../../services/runtime-services';
 
 export async function listReturns() {
-  return request<ReturnSummary[]>('/returns');
+  return runtimeServices.returns.list();
 }
 
 export async function getReturn(returnId: string) {
-  return request<ReturnDetail>(`/returns/${returnId}`);
+  return runtimeServices.returns.detail(returnId);
 }

@@ -1,17 +1,17 @@
-import { getCurrentUser } from './session';
+import { getCurrentUser, getCurrentUserVendorDetails } from './session';
 
 const VENDOR_STORAGE_KEY = 'vendor-dashboard.current-vendor-id';
 const VENDOR_CHANGE_EVENT = 'vendor-dashboard:vendor-change';
 
-export type VendorId = 'demo-vendor-a' | 'demo-vendor-b';
+export type VendorId = string;
 
 export type VendorContext = {
   vendorId: VendorId;
   vendorName: string;
-  scope: 'demo-multi-vendor';
+  scope: string;
 };
 
-const availableVendors = [
+const defaultVendors = [
   {
     vendorId: 'demo-vendor-a',
     vendorName: 'Demo Vendor A',
@@ -24,10 +24,6 @@ const availableVendors = [
   },
 ] as const satisfies readonly VendorContext[];
 
-function isVendorId(value: string | null): value is VendorId {
-  return value === 'demo-vendor-a' || value === 'demo-vendor-b';
-}
-
 function dispatchVendorChange() {
   if (typeof window === 'undefined') {
     return;
@@ -36,14 +32,33 @@ function dispatchVendorChange() {
   window.dispatchEvent(new Event(VENDOR_CHANGE_EVENT));
 }
 
-function resolveVendorIdForCurrentUser(storedVendorId: string | null) {
-  const currentUser = getCurrentUser();
+function getResolvedAvailableVendors(): readonly VendorContext[] {
+  const vendorDetails = getCurrentUserVendorDetails();
 
-  if (!currentUser) {
-    return isVendorId(storedVendorId) ? storedVendorId : availableVendors[0].vendorId;
+  if (vendorDetails.length === 0) {
+    return defaultVendors;
   }
 
-  const allowedVendorIds = currentUser.vendorAccess.filter(isVendorId);
+  return vendorDetails.map((vendor) => ({
+    vendorId: vendor.vendorId,
+    vendorName: vendor.vendorName,
+    scope: 'runtime-vendor-context',
+  }));
+}
+
+function resolveVendorIdForCurrentUser(storedVendorId: string | null) {
+  const currentUser = getCurrentUser();
+  const availableVendors = getResolvedAvailableVendors();
+
+  if (!currentUser) {
+    return storedVendorId && availableVendors.some((vendor) => vendor.vendorId === storedVendorId)
+      ? storedVendorId
+      : availableVendors[0].vendorId;
+  }
+
+  const allowedVendorIds = currentUser.vendorAccess.filter((vendorId) =>
+    availableVendors.some((vendor) => vendor.vendorId === vendorId),
+  );
 
   if (allowedVendorIds.length === 0) {
     return availableVendors[0].vendorId;
@@ -53,19 +68,19 @@ function resolveVendorIdForCurrentUser(storedVendorId: string | null) {
     return allowedVendorIds[0];
   }
 
-  if (isVendorId(storedVendorId) && allowedVendorIds.includes(storedVendorId)) {
+  if (storedVendorId && allowedVendorIds.includes(storedVendorId)) {
     return storedVendorId;
   }
 
-  if (allowedVendorIds.includes(currentUser.defaultVendorId as VendorId)) {
-    return currentUser.defaultVendorId as VendorId;
+  if (allowedVendorIds.includes(currentUser.defaultVendorId)) {
+    return currentUser.defaultVendorId;
   }
 
   return allowedVendorIds[0];
 }
 
 export function getAvailableVendors() {
-  return availableVendors;
+  return getResolvedAvailableVendors();
 }
 
 export function setCurrentVendorId(vendorId: VendorId) {
@@ -78,6 +93,8 @@ export function setCurrentVendorId(vendorId: VendorId) {
 }
 
 export function getCurrentVendorContext(): VendorContext {
+  const availableVendors = getResolvedAvailableVendors();
+
   if (typeof window === 'undefined') {
     return availableVendors[0];
   }

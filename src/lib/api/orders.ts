@@ -1,14 +1,13 @@
-import { request } from './client';
-import type { OrderDetail, OrderSummary, ShopifyOrderBreakdown } from './contracts';
+import { runtimeServices } from '../../services/runtime-services';
 
 export async function listOrders() {
-  return request<OrderSummary[]>('/orders');
+  return runtimeServices.orders.list();
 }
 
 export async function getOrder(orderId: string) {
-  return request<OrderDetail>(`/orders/${orderId}`);
+  return runtimeServices.orders.detail(orderId);
 }
 
 export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string) {
-  return request<ShopifyOrderBreakdown>(`/admin/orders/${shopifyOrderId}`);
+  return runtimeServices.orders.adminBreakdown(shopifyOrderId);
 }

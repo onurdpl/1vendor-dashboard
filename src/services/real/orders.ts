@@ -1,0 +1,375 @@
+import { apiClient } from '../../lib/api-client';
+import type {
+  AllocationStatus,
+  AssignmentHistoryAction,
+  AssignmentHistoryEntry,
+  FulfillmentActionState,
+  FulfillmentStatus,
+  OrderDetail,
+  OrderLineItem,
+  OrderStatus,
+  OrderSummary,
+  ShippingStatus,
+  ShopifyOrderBreakdown,
+  VendorAllocationSummary,
+} from '../../lib/api/contracts';
+
+type OrderSummaryDto = {
+  id: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyOrderNumber: string;
+  vendorId: string;
+  assignedVendorId: string;
+  originalVendorId: string;
+  allocationStatus: string;
+  fulfillmentStatus: string;
+  shippingStatus: string;
+  totalAmount: string;
+  lineItemCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type OrderDetailDto = OrderSummaryDto & {
+  carrier: string | null;
+  trackingNumber: string | null;
+  reassignmentRequired: boolean;
+  cancellationReason: string | null;
+  lineItems: Array<{
+    id: string;
+    sourceLineItemId: string;
+    sourceVariantId: string | null;
+    sku: string | null;
+    title: string | null;
+    quantity: number;
+    lineAmount: string;
+  }>;
+  assignmentHistory: Array<{
+    id: string;
+    action: string;
+    fromVendorId: string | null;
+    toVendorId: string;
+    reason: string | null;
+    actorUserId: string | null;
+    createdAt: string;
+  }>;
+};
+
+type AdminOrderBreakdownDto = {
+  order: {
+    sourceShopifyOrderId: string;
+    sourceShopifyOrderNumber: string;
+    customerName: string | null;
+    customerEmail: string | null;
+    totalAmount: string;
+    createdAt: string;
+    updatedAt: string;
+  };
+  allocations: Array<{
+    id: string;
+    vendorId: string;
+    vendorName: string;
+    originalVendorId: string;
+    assignedVendorId: string;
+    allocationStatus: string;
+    cancellationReason: string | null;
+    reassignmentRequired: boolean;
+    fulfillmentStatus: string;
+    shippingStatus: string;
+    trackingNumber: string | null;
+    carrier: string | null;
+    totalAmount: string;
+    lineItems: Array<{
+      id: string;
+      sourceLineItemId: string;
+      sourceVariantId: string | null;
+      sku: string | null;
+      title: string | null;
+      quantity: number;
+      lineAmount: string;
+    }>;
+    assignmentHistory: Array<{
+      id: string;
+      action: string;
+      fromVendorId: string | null;
+      toVendorId: string;
+      reason: string | null;
+      actorUserId: string | null;
+      createdAt: string;
+    }>;
+    returnRecords: Array<{
+      id: string;
+      status: string;
+      reason: string | null;
+      createdAt: string;
+    }>;
+    refundRecords: Array<{
+      id: string;
+      sourceShopifyRefundId: string;
+      amount: string;
+      status: string;
+      createdAt: string;
+    }>;
+  }>;
+};
+
+function formatMoney(amount: string) {
+  const value = Number(amount ?? 0);
+  return value.toLocaleString('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function toAllocationStatus(value: string): AllocationStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'vendor_blocked' || normalized === 'pending_reassignment' || normalized === 'reassigned' || normalized === 'fulfilled') {
+    return normalized;
+  }
+  return 'active';
+}
+
+function toFulfillmentStatus(value: string): FulfillmentStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'fulfilled') {
+    return 'Fulfilled';
+  }
+  if (normalized === 'partially fulfilled') {
+    return 'Partially Fulfilled';
+  }
+  if (normalized === 'pending') {
+    return 'Pending';
+  }
+  return 'Processing';
+}
+
+function toShippingStatus(value: string): ShippingStatus {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'delivered') {
+    return 'Delivered';
+  }
+  if (normalized === 'in transit' || normalized === 'shipped') {
+    return 'In Transit';
+  }
+  if (normalized === 'label created' || normalized === 'label_created') {
+    return 'Label Created';
+  }
+  return 'Awaiting Shipment';
+}
+
+function toOrderStatus(allocationStatus: AllocationStatus, fulfillmentStatus: FulfillmentStatus, shippingStatus: ShippingStatus): OrderStatus {
+  if (allocationStatus === 'vendor_blocked' || allocationStatus === 'pending_reassignment') {
+    return 'On Hold';
+  }
+  if (shippingStatus === 'Delivered') {
+    return 'Delivered';
+  }
+  if (shippingStatus === 'In Transit') {
+    return 'Shipped';
+  }
+  if (fulfillmentStatus === 'Pending') {
+    return 'Pending';
+  }
+  return 'Processing';
+}
+
+function toFulfillmentActionState(shippingStatus: ShippingStatus): FulfillmentActionState {
+  if (shippingStatus === 'Delivered') {
+    return 'delivered';
+  }
+  if (shippingStatus === 'In Transit') {
+    return 'shipped';
+  }
+  if (shippingStatus === 'Label Created') {
+    return 'label_created';
+  }
+  return 'awaiting_shipment';
+}
+
+function mapAssignmentHistory(entries: OrderDetailDto['assignmentHistory']): AssignmentHistoryEntry[] {
+  return entries.map((entry) => ({
+    action: (entry.action.trim().toLowerCase() as AssignmentHistoryAction) || 'assigned',
+    fromVendorId: entry.fromVendorId,
+    toVendorId: entry.toVendorId,
+    reason: entry.reason ?? undefined,
+    actorName: entry.actorUserId ? `User ${entry.actorUserId}` : 'System',
+    actorRole: entry.actorUserId ? 'admin' : 'system',
+    createdAt: entry.createdAt,
+  }));
+}
+
+function mapOrderLineItems(
+  items: OrderDetailDto['lineItems'],
+  assignedVendorId: string,
+  originalVendorId: string,
+  allocationStatus: AllocationStatus,
+  shippingStatus: ShippingStatus,
+  fulfillmentStatus: FulfillmentStatus,
+  trackingNumber?: string | null,
+  carrier?: string | null,
+): OrderLineItem[] {
+  const fulfillmentActionState = toFulfillmentActionState(shippingStatus);
+  const fulfillmentActionAvailable = allocationStatus === 'active';
+
+  return items.map((item) => ({
+    id: item.id,
+    originalVendorId,
+    assignedVendorId,
+    vendorId: assignedVendorId,
+    sku: item.sku ?? 'UNKNOWN-SKU',
+    variantTitle: item.sourceVariantId ?? 'Default',
+    name: item.title ?? 'Shopify line item',
+    quantity: item.quantity,
+    price: formatMoney(item.lineAmount),
+    allocationStatus,
+    reassignmentRequired: allocationStatus === 'pending_reassignment',
+    fulfillmentActionState,
+    fulfillmentActionAvailable,
+    fulfillmentStatus,
+    shippingStatus,
+    trackingNumber: trackingNumber ?? undefined,
+    carrier: carrier ?? undefined,
+  }));
+}
+
+function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
+  const allocationStatus = toAllocationStatus(dto.allocationStatus);
+  const fulfillmentStatus = toFulfillmentStatus(dto.fulfillmentStatus);
+  const shippingStatus = toShippingStatus(dto.shippingStatus);
+
+  return {
+    id: dto.id,
+    originalVendorId: dto.originalVendorId,
+    assignedVendorId: dto.assignedVendorId,
+    vendorId: dto.assignedVendorId,
+    sourceShopifyOrderId: dto.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
+    status: toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus),
+    allocationStatus,
+    reassignmentRequired: allocationStatus === 'pending_reassignment',
+    assignmentHistory: [],
+    fulfillmentActionState: toFulfillmentActionState(shippingStatus),
+    fulfillmentActionAvailable: allocationStatus === 'active',
+    fulfillmentStatus,
+    shippingStatus,
+    date: dto.createdAt,
+    customer: 'Customer details available in order view',
+    amount: formatMoney(dto.totalAmount),
+    channel: 'Shopify',
+  };
+}
+
+function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
+  const summary = mapOrderSummary(dto);
+  const history = mapAssignmentHistory(dto.assignmentHistory);
+
+  return {
+    ...summary,
+    trackingNumber: dto.trackingNumber ?? undefined,
+    carrier: dto.carrier ?? undefined,
+    reassignmentRequired: dto.reassignmentRequired,
+    cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
+    assignmentHistory: history,
+    shippingAddress: 'Shopify shipping address available in future detail sync.',
+    notes: 'Loaded from backend operational allocation detail.',
+    lineItems: mapOrderLineItems(
+      dto.lineItems,
+      dto.assignedVendorId,
+      dto.originalVendorId,
+      summary.allocationStatus,
+      summary.shippingStatus,
+      summary.fulfillmentStatus,
+      dto.trackingNumber,
+      dto.carrier,
+    ),
+    items: mapOrderLineItems(
+      dto.lineItems,
+      dto.assignedVendorId,
+      dto.originalVendorId,
+      summary.allocationStatus,
+      summary.shippingStatus,
+      summary.fulfillmentStatus,
+      dto.trackingNumber,
+      dto.carrier,
+    ),
+    timeline: history.map((entry) => ({
+      label: entry.action.replace(/_/g, ' '),
+      at: entry.createdAt,
+    })),
+  };
+}
+
+export async function listOrders() {
+  const response = await apiClient.get<OrderSummaryDto[]>('/orders');
+  return response.map(mapOrderSummary);
+}
+
+export async function getOrder(orderId: string) {
+  const response = await apiClient.get<OrderDetailDto>(`/orders/${orderId}`);
+  return mapOrderDetail(response);
+}
+
+export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Promise<ShopifyOrderBreakdown> {
+  const response = await apiClient.get<AdminOrderBreakdownDto>(`/admin/orders/${shopifyOrderId}`);
+
+  return {
+    sourceShopifyOrderId: response.order.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: response.order.sourceShopifyOrderNumber,
+    customer: response.order.customerName ?? response.order.customerEmail ?? 'Shopify customer',
+    createdAt: response.order.createdAt,
+    allocations: response.allocations.map((allocation): VendorAllocationSummary => {
+      const allocationStatus = toAllocationStatus(allocation.allocationStatus);
+      const shippingStatus = toShippingStatus(allocation.shippingStatus);
+      const fulfillmentStatus = toFulfillmentStatus(allocation.fulfillmentStatus);
+      const refundedItems = allocation.refundRecords.map((refund) => ({
+        id: refund.id,
+        originalVendorId: allocation.originalVendorId,
+        assignedVendorId: allocation.assignedVendorId,
+        vendorId: allocation.assignedVendorId,
+        sku: refund.sourceShopifyRefundId,
+        variantTitle: 'Refund',
+        name: `Refund ${refund.sourceShopifyRefundId}`,
+        quantity: 1,
+        condition: 'Opened' as const,
+        refundAmount: formatMoney(refund.amount),
+      }));
+
+      return {
+        originalVendorId: allocation.originalVendorId,
+        assignedVendorId: allocation.assignedVendorId,
+        vendorId: allocation.vendorId,
+        vendorName: allocation.vendorName,
+        allocationOrderId: allocation.id,
+        status: toOrderStatus(allocationStatus, fulfillmentStatus, shippingStatus),
+        allocationStatus,
+        cancellationReason: (allocation.cancellationReason?.trim().toLowerCase() as VendorAllocationSummary['cancellationReason']) ?? undefined,
+        reassignmentRequired: allocation.reassignmentRequired,
+        reassignmentCandidateVendorIds: [],
+        assignmentHistory: mapAssignmentHistory(allocation.assignmentHistory),
+        fulfillmentActionState: toFulfillmentActionState(shippingStatus),
+        fulfillmentActionAvailable: allocationStatus === 'active',
+        fulfillmentStatus,
+        shippingStatus,
+        trackingNumber: allocation.trackingNumber ?? undefined,
+        carrier: allocation.carrier ?? undefined,
+        allocationTotal: formatMoney(allocation.totalAmount),
+        lineItems: mapOrderLineItems(
+          allocation.lineItems,
+          allocation.assignedVendorId,
+          allocation.originalVendorId,
+          allocationStatus,
+          shippingStatus,
+          fulfillmentStatus,
+          allocation.trackingNumber,
+          allocation.carrier,
+        ),
+        refundedItems,
+        refundTotal: formatMoney(
+          allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
+        ),
+      };
+    }),
+  };
+}

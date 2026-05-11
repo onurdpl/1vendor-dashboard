@@ -1,9 +1,12 @@
 export {
   clearToken,
   clearCurrentUser,
+  createCurrentUserFromVendorAccess,
   createMockSession,
   type CurrentUser,
+  type UserVendorAccess,
   getCurrentUser,
+  getCurrentUserVendorDetails,
   getCurrentUserRole,
   getDemoUserByCredentials,
   getDemoUsers,

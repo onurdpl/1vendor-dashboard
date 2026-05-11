@@ -41,7 +41,7 @@ export function AppShell() {
   }
 
   function handleVendorChange(nextVendorId: string) {
-    if (nextVendorId !== 'demo-vendor-a' && nextVendorId !== 'demo-vendor-b') {
+    if (!visibleVendors.some((vendor) => vendor.vendorId === nextVendorId)) {
       return;
     }
 

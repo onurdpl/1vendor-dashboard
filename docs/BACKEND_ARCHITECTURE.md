@@ -55,6 +55,32 @@ Real API dry-run verifies:
 - DB-backed read endpoints return minimally compatible response shapes for frontend migration planning
 - running the dry-run does not switch the frontend runtime away from mock mode
 
+## Frontend Real API Migration Strategy (Phase 13 Step 20)
+- Frontend runtime now supports safe API-mode switching without removing mock mode.
+- Runtime environment:
+  - `VITE_API_MODE=mock` -> default, existing mock runtime behavior
+  - `VITE_API_MODE=real` -> use backend APIs at `VITE_API_BASE_URL`
+  - `VITE_API_BASE_URL=http://127.0.0.1:4000` -> recommended local backend target
+- Migration design goals:
+  - mock mode remains the default and the primary safe fallback
+  - backend-offline conditions must fail gracefully without crashing the app
+  - migration stays incremental and reversible
+  - no auth-provider rewrite, routing rewrite, or global state rewrite
+- Current frontend real-mode coverage is intentionally partial:
+  - login uses backend `POST /auth/login` in real mode
+  - orders pages use backend-backed runtime services in real mode
+  - returns pages use backend-backed runtime services in real mode
+  - finance page uses backend-backed runtime service in real mode
+  - admin operations queue uses backend-backed runtime service in real mode
+- Current non-migrated areas remain mock-backed by design:
+  - dashboard
+  - automation
+  - any future pages not explicitly switched to runtime services
+- Dry migration note:
+  - real mode is a frontend transport/runtime switch only
+  - frontend still does not call Shopify directly
+  - mock data remains available for local-safe fallback and regression comparison
+
 `DATABASE_URL` is not required for this smoke because DB actions are not wired yet.
 
 ## Local PostgreSQL Setup (Development)

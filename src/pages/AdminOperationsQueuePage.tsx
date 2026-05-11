@@ -1,8 +1,8 @@
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { listAdminOperationsQueue } from '../lib/api/operations';
 import { queryKeys } from '../lib/api/queryKeys';
+import { runtimeServices } from '../services/runtime-services';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -13,7 +13,7 @@ function formatDate(value: string) {
 
 export function AdminOperationsQueuePage() {
   const { data: queue, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.queue(), () =>
-    Promise.resolve(listAdminOperationsQueue()),
+    runtimeServices.operations.list(),
   );
 
   if (isLoading) {

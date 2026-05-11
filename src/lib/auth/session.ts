@@ -1,20 +1,39 @@
 import type { UserRole } from './permissions';
+import type { VendorId } from './vendorContext';
 
 const TOKEN_KEY = 'vendor-dashboard.session-token';
 const CURRENT_USER_KEY = 'vendor-dashboard.current-user';
 const SESSION_RESET_EVENT = 'vendor-dashboard:session-reset';
+
+export type UserVendorAccess = {
+  vendorId: VendorId;
+  vendorName: string;
+};
 
 export type DemoUser = {
   email: string;
   password: string;
   name: string;
   role: UserRole;
+  status?: string;
   vendorAccess: readonly string[];
   canSwitchVendors: boolean;
   defaultVendorId: string;
+  vendorDetails?: readonly UserVendorAccess[];
 };
 
 export type CurrentUser = Omit<DemoUser, 'password'>;
+
+const defaultVendorDirectory: readonly UserVendorAccess[] = [
+  {
+    vendorId: 'demo-vendor-a',
+    vendorName: 'Demo Vendor A',
+  },
+  {
+    vendorId: 'demo-vendor-b',
+    vendorName: 'Demo Vendor B',
+  },
+] as const;
 
 const demoUsers: readonly DemoUser[] = [
   {
@@ -25,6 +44,7 @@ const demoUsers: readonly DemoUser[] = [
     vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
     canSwitchVendors: true,
     defaultVendorId: 'demo-vendor-a',
+    vendorDetails: defaultVendorDirectory,
   },
   {
     email: 'vendor-a@demo.com',
@@ -34,6 +54,7 @@ const demoUsers: readonly DemoUser[] = [
     vendorAccess: ['demo-vendor-a'],
     canSwitchVendors: false,
     defaultVendorId: 'demo-vendor-a',
+    vendorDetails: [defaultVendorDirectory[0]],
   },
   {
     email: 'vendor-b@demo.com',
@@ -43,6 +64,7 @@ const demoUsers: readonly DemoUser[] = [
     vendorAccess: ['demo-vendor-b'],
     canSwitchVendors: false,
     defaultVendorId: 'demo-vendor-b',
+    vendorDetails: [defaultVendorDirectory[1]],
   },
 ] as const;
 
@@ -66,7 +88,16 @@ function isCurrentUser(value: unknown): value is CurrentUser {
     (candidate.role === 'admin' || candidate.role === 'vendor' || candidate.role === 'support' || candidate.role === 'finance') &&
     typeof candidate.canSwitchVendors === 'boolean' &&
     typeof candidate.defaultVendorId === 'string' &&
-    Array.isArray(candidate.vendorAccess)
+    Array.isArray(candidate.vendorAccess) &&
+    (candidate.vendorDetails === undefined ||
+      (Array.isArray(candidate.vendorDetails) &&
+        candidate.vendorDetails.every(
+          (vendor) =>
+            Boolean(vendor) &&
+            typeof vendor === 'object' &&
+            typeof vendor.vendorId === 'string' &&
+            typeof vendor.vendorName === 'string',
+        )))
   );
 }
 
@@ -124,6 +155,42 @@ export function getCurrentUser() {
 
 export function setCurrentUser(user: CurrentUser) {
   window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+}
+
+export function getCurrentUserVendorDetails(): readonly UserVendorAccess[] {
+  const currentUser = getCurrentUser();
+
+  if (currentUser?.vendorDetails?.length) {
+    return currentUser.vendorDetails;
+  }
+
+  return currentUser?.vendorAccess.map((vendorId) => ({
+    vendorId,
+    vendorName: vendorId,
+  })) ?? defaultVendorDirectory;
+}
+
+export function createCurrentUserFromVendorAccess(input: {
+  email: string;
+  name: string;
+  role: UserRole;
+  status?: string;
+  vendorAccess: readonly UserVendorAccess[];
+}) {
+  const vendorDetails = input.vendorAccess.length > 0 ? [...input.vendorAccess] : [...defaultVendorDirectory];
+  const vendorIds = vendorDetails.map((vendor) => vendor.vendorId);
+  const defaultVendorId = vendorIds[0] ?? defaultVendorDirectory[0].vendorId;
+
+  return {
+    email: input.email,
+    name: input.name,
+    role: input.role,
+    status: input.status ?? 'active',
+    vendorAccess: vendorIds,
+    vendorDetails,
+    canSwitchVendors: input.role === 'admin' && vendorIds.length > 1,
+    defaultVendorId,
+  } satisfies CurrentUser;
 }
 
 export function clearCurrentUser() {
