@@ -115,6 +115,12 @@ function toDate(value: string | null) {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function latestDate(values: Array<Date | null>) {
+  return values
+    .filter((value): value is Date => Boolean(value))
+    .sort((left, right) => right.getTime() - left.getTime())[0] ?? null;
+}
+
 function getLatestFulfillmentEvent(fulfillment: ShopifyOrderFulfillment) {
   return [...fulfillment.events]
     .filter((event) => event.status || event.happenedAt)
@@ -256,8 +262,11 @@ export async function ingestFulfillmentWebhook(
         const fulfilledAt = toDate(representativeFulfillment.createdAt);
         const latestEvent = getLatestFulfillmentEvent(representativeFulfillment);
         const shipmentCreatedAt = fulfilledAt;
-        const shipmentUpdatedAt =
-          toDate(latestEvent?.happenedAt ?? null) ?? toDate(representativeFulfillment.updatedAt) ?? fulfilledAt;
+        const shipmentUpdatedAt = latestDate([
+          toDate(latestEvent?.happenedAt ?? null),
+          toDate(representativeFulfillment.updatedAt),
+          fulfilledAt,
+        ]);
 
         await tx.vendorAllocation.update({
           where: { id: allocation.id },

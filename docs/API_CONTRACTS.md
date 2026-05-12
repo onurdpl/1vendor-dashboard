@@ -414,7 +414,7 @@ Webhook processing lifecycle states:
   - fulfillment timestamps are persisted from canonical Shopify fulfillment data:
     - `fulfilledAt` from fulfillment `createdAt`
     - `shipmentCreatedAt` from fulfillment `createdAt`
-    - `shipmentUpdatedAt` from latest fulfillment event `happenedAt` when available, otherwise fulfillment `updatedAt`
+    - `shipmentUpdatedAt` from the latest available canonical fulfillment timestamp, comparing fulfillment `updatedAt` and latest fulfillment event `happenedAt`
   - missing tracking remains null/Not assigned; backend does not invent carrier, tracking number, or tracking URL
 - Secret behavior:
   - fulfillment webhook routes use `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when set
