@@ -3,6 +3,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
+import { toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -181,7 +182,9 @@ export function AdminOperationsQueuePage() {
                     <span className={`severity-chip ${getSeverityClass(item.severity)}`}>{item.severity}</span>
                     <h4>{item.title}</h4>
                   </div>
-                  <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
+                  <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>
+                    {toTitleCaseLabel(item.status)}
+                  </span>
                 </header>
                 <p className="queue-description">{item.description}</p>
                 <div className="queue-meta">

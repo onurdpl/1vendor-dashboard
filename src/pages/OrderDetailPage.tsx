@@ -10,6 +10,7 @@ import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
+import { toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -37,12 +38,6 @@ function getTrackingMutationErrorMessage(error: unknown) {
   }
 
   return 'Unable to submit tracking right now.';
-}
-
-function toTitleCaseLabel(value: string) {
-  return value
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export function OrderDetailPage() {
@@ -184,7 +179,7 @@ export function OrderDetailPage() {
       <article className="panel operational-card">
         <div className="compact-meta-grid">
           <div className="meta-item">
-            <span>Source Shopify order</span>
+            <span>Shopify Order Number</span>
             <strong>{order.sourceShopifyOrderNumber}</strong>
           </div>
           <div className="meta-item">

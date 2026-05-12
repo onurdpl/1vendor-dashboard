@@ -1,5 +1,6 @@
 import { apiClient } from '../../lib/api-client';
 import type { FinanceDashboard, FinanceTransaction } from '../../lib/api/contracts';
+import { formatCurrency } from './formatting';
 
 type FinanceDashboardDto = {
   summary: {
@@ -22,16 +23,6 @@ type FinanceDashboardDto = {
     createdAt: string;
   }>;
 };
-
-function formatMoney(amount: string) {
-  const value = Number(amount ?? 0);
-  return value.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
 
 function mapTransactionCategory(type: string): FinanceTransaction['category'] {
   const normalized = type.trim().toLowerCase();
@@ -63,11 +54,11 @@ function mapTransactionStatus(status: string): FinanceTransaction['status'] {
 
 export async function getFinanceDashboard(): Promise<FinanceDashboard> {
   const response = await apiClient.get<FinanceDashboardDto>('/finance');
-  const grossSales = formatMoney(response.summary.grossSales);
-  const refunds = formatMoney(response.summary.refunds);
-  const netRevenue = formatMoney(response.summary.netRevenue);
-  const platformFee = formatMoney(response.summary.platformFee);
-  const payoutEstimate = formatMoney(response.summary.payoutEstimate);
+  const grossSales = formatCurrency(response.summary.grossSales);
+  const refunds = formatCurrency(response.summary.refunds);
+  const netRevenue = formatCurrency(response.summary.netRevenue);
+  const platformFee = formatCurrency(response.summary.platformFee);
+  const payoutEstimate = formatCurrency(response.summary.payoutEstimate);
 
   return {
     summary: {
@@ -89,7 +80,7 @@ export async function getFinanceDashboard(): Promise<FinanceDashboard> {
         `Backend ${record.type} record${record.relatedOrderId ? ` for order ${record.relatedOrderId}` : ''}`,
       counterparty: record.relatedRefundId ?? record.relatedReturnId ?? record.relatedOrderId ?? 'Platform ledger',
       category: mapTransactionCategory(record.type),
-      amount: formatMoney(record.amount),
+      amount: formatCurrency(record.amount),
       status: mapTransactionStatus(record.status),
     })),
   };

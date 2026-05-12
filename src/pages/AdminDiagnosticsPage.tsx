@@ -8,6 +8,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
+import { toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string | null) {
   if (!value) {
@@ -31,6 +32,13 @@ function getSeverityClass(severity: 'critical' | 'warning' | 'attention' | 'norm
     return 'severity-attention';
   }
   return 'severity-normal';
+}
+
+function formatWebhookTopic(topic: string) {
+  return topic
+    .split('/')
+    .map((part) => toTitleCaseLabel(part))
+    .join(' / ');
 }
 
 export function AdminDiagnosticsPage() {
@@ -204,7 +212,7 @@ export function AdminDiagnosticsPage() {
                       <span className={`severity-chip ${event.status === 'FAILED' ? 'severity-critical' : event.status === 'RECEIVED' ? 'severity-attention' : 'severity-normal'}`}>
                         {event.status}
                       </span>
-                      <h4>{event.topic}</h4>
+                      <h4>{formatWebhookTopic(event.topic)}</h4>
                     </div>
                     <span className={`status-badge status-${event.payloadAvailable ? 'processed' : 'pending'}`}>
                       {event.payloadAvailable ? 'Replayable' : 'No payload'}
@@ -247,7 +255,7 @@ export function AdminDiagnosticsPage() {
               <div className="compact-meta-grid">
                 <div className="meta-item">
                   <span>Topic</span>
-                  <strong>{selectedWebhook.topic}</strong>
+                      <strong>{formatWebhookTopic(selectedWebhook.topic)}</strong>
                 </div>
                 <div className="meta-item">
                   <span>Payload available</span>
@@ -339,7 +347,7 @@ export function AdminDiagnosticsPage() {
                       <strong>Order:</strong> {item.relatedShopifyOrderId ?? 'N/A'}
                     </span>
                     <span>
-                      <strong>Payload:</strong> {item.payloadAvailable === null ? 'N/A' : item.payloadAvailable ? 'Available' : 'Missing'}
+                      <strong>Payload:</strong> {item.payloadAvailable === null ? 'Not applicable' : item.payloadAvailable ? 'Available' : 'Missing'}
                     </span>
                     <span>
                       <strong>Replay:</strong>{' '}

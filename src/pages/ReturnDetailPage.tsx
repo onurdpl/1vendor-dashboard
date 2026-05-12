@@ -64,8 +64,8 @@ export function ReturnDetailPage() {
           <p className="page-description">
             Shopify order #{returnRequest.sourceShopifyOrderNumber} ·{' '}
             {returnRequest.sourceType === 'shopify_return_request'
-              ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Pending'}`
-              : `Refund ${returnRequest.sourceShopifyRefundId}`}
+              ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Not available'}`
+              : `Refund ${returnRequest.sourceShopifyRefundId || 'Not available'}`}
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
@@ -86,8 +86,12 @@ export function ReturnDetailPage() {
           <h3>{returnRequest.sourceType === 'shopify_return_request' ? 'Return request summary' : 'Refund summary'}</h3>
           <div className="allocation-summary-grid refund-summary-grid">
             <div className="summary-row">
-              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Current refund impact' : 'Total refund amount'}</span>
-              <strong className="finance-negative">-{returnRequest.amount}</strong>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Refund amount' : 'Total refund amount'}</span>
+              {returnRequest.sourceType === 'shopify_return_request' ? (
+                <strong className="muted">Not posted yet</strong>
+              ) : (
+                <strong className="finance-negative">-{returnRequest.amount}</strong>
+              )}
             </div>
             <div className="summary-row">
               <span>Refunded item count</span>
@@ -106,11 +110,11 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="summary-row">
-              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Return ID' : 'Refund ID'}</span>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Shopify Return ID' : 'Shopify Refund ID'}</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
-                  ? returnRequest.sourceShopifyReturnId ?? 'Pending Shopify return link'
-                  : returnRequest.sourceShopifyRefundId}
+                  ? returnRequest.sourceShopifyReturnId ?? 'Not available'
+                  : returnRequest.sourceShopifyRefundId || 'Not available'}
               </strong>
             </div>
             <div className="summary-row">
@@ -197,8 +201,8 @@ export function ReturnDetailPage() {
               <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Source Shopify return ID' : 'Source Shopify refund ID'}</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
-                  ? returnRequest.sourceShopifyReturnId ?? 'Pending Shopify return link'
-                  : returnRequest.sourceShopifyRefundId}
+                  ? returnRequest.sourceShopifyReturnId ?? 'Not available'
+                  : returnRequest.sourceShopifyRefundId || 'Not available'}
               </strong>
             </div>
             <div className="meta-item">
@@ -206,7 +210,7 @@ export function ReturnDetailPage() {
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
                   ? 'Return requested / lifecycle pending'
-                  : returnRequest.status === 'Refunded'
+                  : returnRequest.status === 'Processed'
                     ? 'Refund processed'
                     : 'Refund requested / under review'}
               </strong>

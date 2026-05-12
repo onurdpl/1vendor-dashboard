@@ -128,9 +128,9 @@ export function AutomationPage() {
           {automation.alerts.length === 0 ? (
             <div className="queue-empty">
               <p className="eyebrow">Alerts</p>
-              <h3>No alerts</h3>
+              <h3>No automation alerts</h3>
               <p className="page-description">
-                Operational signals will appear here when the system detects exceptions or workflow risks.
+                No active automation attention signals for this vendor scope. New webhook, shipment, or refund risks will appear here.
               </p>
             </div>
           ) : (
@@ -180,12 +180,12 @@ export function AutomationPage() {
           ) : null}
           <div className="automation-actions">
             {automation.suggestions.length === 0 ? (
-              <div className="queue-empty">
-                <p className="eyebrow">Actions</p>
-                <h3>No suggested actions</h3>
-                <p className="page-description">New operational automation opportunities will appear here.</p>
-              </div>
-            ) : (
+            <div className="queue-empty">
+              <p className="eyebrow">Actions</p>
+              <h3>No suggested automation actions</h3>
+              <p className="page-description">No immediate operational automation actions are suggested for this vendor scope.</p>
+            </div>
+          ) : (
               automation.suggestions.map((item) => (
                 <article key={item.title} className="automation-action queue-item">
                   <div className="queue-title-block">

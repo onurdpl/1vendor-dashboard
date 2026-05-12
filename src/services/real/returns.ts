@@ -1,5 +1,6 @@
 import { apiClient } from '../../lib/api-client';
 import type { ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
+import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
   id: string;
@@ -36,44 +37,37 @@ type ReturnDetailDto = ReturnSummaryDto & {
   }>;
 };
 
-function formatMoney(amount: string) {
-  const value = Number(amount ?? 0);
-  return value.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
-function mapStatus(status: string): ReturnSummary['status'] {
+function mapStatus(status: string, sourceType: ReturnSummary['sourceType']): ReturnSummary['status'] {
   const normalized = status.trim().toLowerCase();
-  if (normalized === 'requested') {
-    return 'Pending';
+  if (sourceType === 'shopify_return_request') {
+    if (normalized === 'requested') {
+      return 'Requested';
+    }
+    if (normalized === 'approved') {
+      return 'Approved';
+    }
+    if (normalized === 'declined') {
+      return 'Declined';
+    }
+    if (normalized === 'cancelled') {
+      return 'Cancelled';
+    }
+    if (normalized === 'closed') {
+      return 'Closed';
+    }
+    return toTitleCaseLabel(status) as ReturnSummary['status'];
   }
-  if (normalized === 'approved') {
-    return 'Approved';
+
+  if (normalized === 'processed' || normalized === 'refunded' || normalized === 'approved') {
+    return 'Processed';
   }
-  if (normalized === 'declined' || normalized === 'cancelled') {
-    return 'Rejected';
-  }
-  if (normalized === 'closed') {
-    return 'Refunded';
-  }
-  if (normalized === 'rejected') {
-    return 'Rejected';
-  }
-  if (normalized === 'refunded') {
-    return 'Refunded';
-  }
-  if (normalized === 'in review' || normalized === 'in_review' || normalized === 'needs_review') {
-    return 'In Review';
-  }
-  return 'Pending';
+
+  return toTitleCaseLabel(status) as ReturnSummary['status'];
 }
 
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
-  const sourceType = dto.returnRequestSource === 'shopify_return_request'
+  const sourceType = dto.returnRequestSource === 'shopify_return_request' ? 'shopify_return_request' : 'shopify_refund';
+  const sourceLabel = dto.returnRequestSource === 'shopify_return_request'
     ? 'Shopify return request lifecycle'
     : 'Shopify refund webhook allocation';
   const sourceId = dto.sourceShopifyReturnId
@@ -91,14 +85,14 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
     sourceShopifyRefundId: dto.sourceShopifyRefundId,
     sourceShopifyReturnId: dto.sourceShopifyReturnId,
-    sourceType: dto.returnRequestSource === 'shopify_return_request' ? 'shopify_return_request' : 'shopify_refund',
-    status: mapStatus(dto.status),
+    sourceType,
+    status: mapStatus(dto.status, sourceType),
     relatedOrderId: dto.sourceShopifyOrderId,
     date: dto.createdAt,
     updatedAt: dto.updatedAt,
     customer: 'Shopify customer details stay outside the current refund sync scope.',
-    reason: `${sourceType} · ${sourceId}`,
-    amount: formatMoney(dto.refundAmount),
+    reason: `${sourceLabel} · ${sourceId}`,
+    amount: formatCurrency(dto.refundAmount),
     refundedSkus: dto.refundedSkus,
   };
 }
@@ -121,7 +115,7 @@ export async function getReturn(returnId: string): Promise<ReturnDetail> {
     name: item.title ?? 'Refunded line item',
     quantity: item.quantity,
     condition: 'Opened' as const,
-    refundAmount: formatMoney(item.refundAmount),
+    refundAmount: formatCurrency(item.refundAmount),
   }));
 
   return {
@@ -130,7 +124,7 @@ export async function getReturn(returnId: string): Promise<ReturnDetail> {
     resolution:
       response.returnRequestSource === 'shopify_return_request'
         ? 'Pending return request synced from Shopify return lifecycle.'
-        : response.status === 'Refunded'
+        : summary.status === 'Processed'
           ? 'Refund processed and allocated to vendor scope.'
           : 'Refund allocation recorded for operational review.',
     refundMethod:

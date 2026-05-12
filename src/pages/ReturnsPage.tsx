@@ -43,9 +43,11 @@ export function ReturnsPage() {
   }
 
   const totalReturns = returns.length;
-  const pendingCount = returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
-  const resolvedCount = returns.filter((item) => item.status === 'Approved' || item.status === 'Refunded').length;
-  const totalRefundAmount = returns.reduce((total, item) => total + Number.parseFloat(item.amount.replace(/[^0-9.-]/g, '') || '0'), 0);
+  const pendingCount = returns.filter((item) => item.status === 'Requested' || item.status === 'Pending' || item.status === 'In Review').length;
+  const resolvedCount = returns.filter((item) => item.status === 'Approved' || item.status === 'Closed' || item.status === 'Processed').length;
+  const totalRefundAmount = returns
+    .filter((item) => item.sourceType !== 'shopify_return_request')
+    .reduce((total, item) => total + Number.parseFloat(item.amount.replace(/[^0-9.-]/g, '') || '0'), 0);
 
   return (
     <section className="dashboard returns-dashboard returns-workspace">
@@ -96,9 +98,9 @@ export function ReturnsPage() {
         {returns.length === 0 ? (
           <div className="queue-empty">
             <p className="eyebrow">Refunds</p>
-            <h3>No return allocations</h3>
+            <h3>No return or refund records</h3>
             <p className="page-description">
-              Return records will appear here when refunded line items are allocated to this vendor.
+              Pending return requests and processed refund records will appear here for this vendor scope.
             </p>
           </div>
         ) : (
@@ -126,10 +128,10 @@ export function ReturnsPage() {
                     <strong>Shopify order ID:</strong> {item.sourceShopifyOrderId}
                   </span>
                   <span>
-                    <strong>{item.sourceType === 'shopify_return_request' ? 'Return ID' : 'Refund ID'}:</strong>{' '}
+                    <strong>{item.sourceType === 'shopify_return_request' ? 'Shopify Return ID' : 'Shopify Refund ID'}:</strong>{' '}
                     {item.sourceType === 'shopify_return_request'
-                      ? item.sourceShopifyReturnId || 'Pending Shopify return link'
-                      : item.sourceShopifyRefundId || 'Pending Shopify refund link'}
+                      ? item.sourceShopifyReturnId || 'Not available'
+                      : item.sourceShopifyRefundId || 'Not available'}
                   </span>
                   <span>
                     <strong>Created:</strong> {formatDate(item.date)}
@@ -151,7 +153,11 @@ export function ReturnsPage() {
                   </span>
                 </div>
                 <div className="queue-actions">
-                  <span className="finance-amount finance-negative">-{item.amount}</span>
+                  {item.sourceType === 'shopify_return_request' ? (
+                    <span className="queue-muted-action">Pending return request (no refund posted)</span>
+                  ) : (
+                    <span className="finance-amount finance-negative">-{item.amount}</span>
+                  )}
                   <Link to={`/returns/${item.id}`} className="button button-secondary button-link">
                     View return
                   </Link>

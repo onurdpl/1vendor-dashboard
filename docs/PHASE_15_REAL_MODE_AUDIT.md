@@ -242,7 +242,23 @@
   - clearer source-type labeling
   - clearer pending-return finance wording (no refund ledger until refunds/create)
 
-## Remaining Gaps After Phase 15-7
+## Phase 15-8 Consistency Update
+- Real-mode currency formatting is now normalized across orders, returns, and finance mappings (consistent symbol/precision).
+- Operational lifecycle wording is now more consistent across admin tooling and return pages:
+  - pending return request
+  - processed refund
+  - awaiting shipment
+  - blocked allocation
+  - replay eligibility messaging
+- Shopify metadata labels were normalized for readability:
+  - Shopify Order Number
+  - Shopify Order ID
+  - Shopify Return ID
+  - Shopify Refund ID
+  - consistent fallback: `Not available`
+- Empty-state copy was refined for finance and automation views to reduce ambiguous “blank” states and improve operator clarity.
+
+## Remaining Gaps After Phase 15-8
 - No return approve/decline/close mutation actions in frontend yet.
 - No admin reassignment mutation in real mode yet.
 - No async queue worker architecture in production runtime yet.

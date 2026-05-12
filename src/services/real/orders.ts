@@ -13,6 +13,7 @@ import type {
   ShopifyOrderBreakdown,
   VendorAllocationSummary,
 } from '../../lib/api/contracts';
+import { formatCurrency } from './formatting';
 
 export type SubmitFulfillmentTrackingPayload = {
   trackingNumber: string;
@@ -134,16 +135,6 @@ type AdminOrderBreakdownDto = {
   }>;
 };
 
-function formatMoney(amount: string) {
-  const value = Number(amount ?? 0);
-  return value.toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 function toAllocationStatus(value: string): AllocationStatus {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'vendor_blocked' || normalized === 'pending_reassignment' || normalized === 'reassigned' || normalized === 'fulfilled') {
@@ -244,7 +235,7 @@ function mapOrderLineItems(
     variantTitle: item.sourceVariantId ?? 'Default',
     name: item.title ?? 'Shopify line item',
     quantity: item.quantity,
-    price: formatMoney(item.lineAmount),
+    price: formatCurrency(item.lineAmount),
     allocationStatus,
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     fulfillmentActionState,
@@ -279,7 +270,7 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     shippingStatus,
     date: dto.createdAt,
     customer: 'Customer details available in order view',
-    amount: formatMoney(dto.totalAmount),
+    amount: formatCurrency(dto.totalAmount),
     channel: 'Shopify',
   };
 }
@@ -359,7 +350,7 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
         name: `Refund ${refund.sourceShopifyRefundId}`,
         quantity: 1,
         condition: 'Opened' as const,
-        refundAmount: formatMoney(refund.amount),
+        refundAmount: formatCurrency(refund.amount),
       }));
 
       return {
@@ -380,7 +371,7 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
         shippingStatus,
         trackingNumber: allocation.trackingNumber ?? undefined,
         carrier: allocation.carrier ?? undefined,
-        allocationTotal: formatMoney(allocation.totalAmount),
+        allocationTotal: formatCurrency(allocation.totalAmount),
         lineItems: mapOrderLineItems(
           allocation.lineItems,
           allocation.assignedVendorId,
@@ -392,7 +383,7 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
           allocation.carrier,
         ),
         refundedItems,
-        refundTotal: formatMoney(
+        refundTotal: formatCurrency(
           allocation.refundRecords.reduce((total, refund) => total + Number(refund.amount ?? 0), 0).toFixed(2),
         ),
       };

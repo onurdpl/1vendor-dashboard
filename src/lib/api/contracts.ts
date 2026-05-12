@@ -133,7 +133,17 @@ export type ShopifyOrderBreakdown = {
   allocations: VendorAllocationSummary[];
 };
 
-export type ReturnStatus = 'Pending' | 'Approved' | 'Rejected' | 'Refunded' | 'In Review';
+export type ReturnStatus =
+  | 'Requested'
+  | 'Approved'
+  | 'Declined'
+  | 'Cancelled'
+  | 'Closed'
+  | 'Processed'
+  | 'Refunded'
+  | 'Rejected'
+  | 'Pending'
+  | 'In Review';
 
 export type ReturnSummary = {
   originalVendorId: VendorId;

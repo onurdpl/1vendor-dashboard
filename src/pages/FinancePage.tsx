@@ -122,8 +122,10 @@ export function FinancePage() {
         {finance.transactions.length === 0 ? (
           <div className="queue-empty">
             <p className="eyebrow">Records</p>
-            <h3>No finance records</h3>
-            <p className="page-description">Transactions will appear here as vendor orders and refunds settle.</p>
+            <h3>No finance records yet</h3>
+            <p className="page-description">
+              No ledger activity is recorded for this vendor scope yet. Processed sales, refunds, and fee entries will appear here.
+            </p>
           </div>
         ) : (
           <div className="queue-list">
