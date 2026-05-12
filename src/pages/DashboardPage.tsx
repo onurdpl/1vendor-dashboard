@@ -1,24 +1,24 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { DataStatePanel } from '../components/DataStatePanel';
 import { useActionFeedback } from '../lib/ui';
-import { buildDashboardOverview } from '../lib/api/dashboard';
+import { getDashboardOverview } from '../lib/api/dashboard';
 import { getCurrentUser, getCurrentVendorContext, onVendorChange } from '../lib/auth';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { listOrders } from '../features/orders/api';
-import { listReturns } from '../features/returns/api';
-import { getFinanceDashboard } from '../features/finance/api';
-import { getAutomationDashboard } from '../features/automation/api';
 import { queryKeys } from '../lib/api/queryKeys';
+
+function getPriorityValue(items: { label: string; value: string }[], label: string) {
+  return Number.parseInt(items.find((item) => item.label === label)?.value ?? '0', 10) || 0;
+}
 
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
-  const dashboard = useMemo(() => buildDashboardOverview(vendorId), [vendorId]);
   const { message, tone } = useActionFeedback();
-  const { data: orders = [] } = useQueryResource(queryKeys.orders.list(), listOrders);
-  const { data: returns = [] } = useQueryResource(queryKeys.returns.list(), listReturns);
-  const { data: finance } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
-  const { data: automation } = useQueryResource(queryKeys.automation.alerts(), getAutomationDashboard);
+  const { data: dashboard, isLoading, isError, error } = useQueryResource(
+    queryKeys.dashboard.overview(),
+    () => getDashboardOverview(vendorId),
+  );
 
   useEffect(() => {
     return onVendorChange(() => {
@@ -26,72 +26,69 @@ export function DashboardPage() {
     });
   }, []);
 
-  const ordersList = orders ?? [];
-  const returnsList = returns ?? [];
+  if (isLoading) {
+    return (
+      <DataStatePanel
+        tone="loading"
+        eyebrow="Dashboard"
+        title="Loading operational overview"
+        description="Gathering backend-derived dashboard signals for the current vendor scope."
+      />
+    );
+  }
 
-  const awaitingShipmentCount = ordersList.filter((order) => order.shippingStatus === 'Awaiting Shipment').length;
-  const blockedCount = ordersList.filter(
-    (order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked',
-  ).length;
-  const fulfilledCount = ordersList.filter((order) => order.fulfillmentStatus === 'Fulfilled').length;
-  const activeRefundCount = returnsList.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
-  const unresolvedAlerts = (automation?.alerts ?? []).filter((alert) => alert.status !== 'Resolved').length;
-
-  const priorityWork = [
-    { label: 'Blocked allocations', value: blockedCount, tone: 'severity-warning' },
-    { label: 'Awaiting shipment', value: awaitingShipmentCount, tone: 'severity-attention' },
-    { label: 'Refund attention', value: activeRefundCount, tone: 'severity-warning' },
-    { label: 'Automation signals', value: unresolvedAlerts, tone: 'severity-normal' },
-  ];
+  if (isError || !dashboard) {
+    return (
+      <section className="dashboard dashboard-workspace">
+        <article className="panel operational-card">
+          <p className="eyebrow">Dashboard</p>
+          <h2>Operational overview unavailable</h2>
+          <p className="page-description">{error ?? 'The backend-derived dashboard overview could not be loaded.'}</p>
+        </article>
+        {message ? <ActionFeedback tone={tone} message={message} /> : null}
+      </section>
+    );
+  }
 
   return (
     <section className="dashboard dashboard-workspace">
       <div className="hero-card operational-card dashboard-header">
         <div className="queue-header-copy">
           <p className="eyebrow">Dashboard</p>
-          <h2>{dashboard.vendorName} operational overview</h2>
-          <p className="page-description">
-            {currentUser?.role === 'admin'
-              ? 'Vendor-scoped control view. Cross-vendor escalations are handled in Operations Queue.'
-              : 'Your fulfillment workspace for current vendor operations.'}
-          </p>
+          <h2>{dashboard.title}</h2>
+          <p className="page-description">{dashboard.description}</p>
         </div>
         <div className="queue-health">
           <span className="severity-chip severity-normal">Vendor {dashboard.vendorName}</span>
-          <span className="severity-chip severity-attention">Awaiting shipment {awaitingShipmentCount}</span>
-          <span className="severity-chip severity-warning">Needs attention {blockedCount + activeRefundCount}</span>
+          <span className="severity-chip severity-attention">
+            Awaiting shipment {dashboard.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '0'}
+          </span>
+          <span className="severity-chip severity-warning">
+            Needs attention {getPriorityValue(dashboard.priorityWork, 'Blocked allocations') + getPriorityValue(dashboard.priorityWork, 'Refund attention')}
+          </span>
         </div>
       </div>
 
       <div className="stats-grid queue-stats">
-        <article className="stat-card operational-card">
-          <span>Orders</span>
-          <strong>{ordersList.length}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span>Awaiting shipment</span>
-          <strong>{awaitingShipmentCount}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span>Blocked / needs attention</span>
-          <strong>{blockedCount + activeRefundCount}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span>Payout estimate</span>
-          <strong>{finance?.summary.payoutEstimate ?? '—'}</strong>
-        </article>
+        {dashboard.stats.map((stat) => (
+          <article key={stat.label} className="stat-card operational-card">
+            <span>{stat.label}</span>
+            <strong>{stat.value}</strong>
+          </article>
+        ))}
       </div>
 
       <div className="content-grid dashboard-grid">
         <article className="panel operational-card">
           <h3>Priority work</h3>
           <div className="queue-list">
-            {priorityWork.map((item) => (
+            {dashboard.priorityWork.map((item) => (
               <article key={item.label} className="queue-item queue-medium">
                 <header className="queue-item-top">
                   <h4>{item.label}</h4>
                   <span className={`severity-chip ${item.tone}`}>{item.value}</span>
                 </header>
+                {item.description ? <p className="queue-description">{item.description}</p> : null}
               </article>
             ))}
           </div>
@@ -102,19 +99,19 @@ export function DashboardPage() {
           <div className="allocation-summary-grid">
             <div className="summary-row">
               <span>Gross sales</span>
-              <strong>{finance?.summary.grossSales ?? '—'}</strong>
+              <strong>{dashboard.financeSnapshot?.grossSales ?? '—'}</strong>
             </div>
             <div className="summary-row">
               <span>Refunds</span>
-              <strong>{finance?.summary.refunds ?? '—'}</strong>
+              <strong>{dashboard.financeSnapshot?.refunds ?? '—'}</strong>
             </div>
             <div className="summary-row">
               <span>Net revenue</span>
-              <strong>{finance?.summary.netRevenue ?? '—'}</strong>
+              <strong>{dashboard.financeSnapshot?.netRevenue ?? '—'}</strong>
             </div>
             <div className="summary-row">
               <span>Payout estimate</span>
-              <strong>{finance?.summary.payoutEstimate ?? '—'}</strong>
+              <strong>{dashboard.financeSnapshot?.payoutEstimate ?? '—'}</strong>
             </div>
           </div>
         </article>
@@ -135,33 +132,58 @@ export function DashboardPage() {
             </ul>
           )}
         </article>
-        <article className="panel operational-card">
-          <h3>Operational signals</h3>
-          {(automation?.alerts ?? []).length === 0 ? (
-            <div className="queue-empty">
-              <p className="page-description">No active automation signals right now.</p>
-            </div>
-          ) : (
+        {currentUser?.role === 'admin' ? (
+          <article className="panel operational-card">
+            <h3>Diagnostics summary</h3>
+            {dashboard.diagnosticsSummary ? (
+              <div className="allocation-summary-grid">
+                <div className="summary-row">
+                  <span>Failed webhooks</span>
+                  <strong>{dashboard.diagnosticsSummary.failedWebhooks}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Stuck received</span>
+                  <strong>{dashboard.diagnosticsSummary.stuckReceived}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Fulfillment sync failures</span>
+                  <strong>{dashboard.diagnosticsSummary.fulfillmentSyncFailures}</strong>
+                </div>
+              </div>
+            ) : (
+              <div className="queue-empty">
+                <p className="page-description">Diagnostics summary is unavailable for the current scope.</p>
+              </div>
+            )}
+          </article>
+        ) : (
+          <article className="panel operational-card">
+            <h3>Operational signals</h3>
             <div className="queue-list">
-              {(automation?.alerts ?? []).slice(0, 4).map((alert) => (
-                <article key={alert.id} className="queue-item queue-low">
+              {dashboard.priorityWork.map((item) => (
+                <article key={item.label} className="queue-item queue-low">
                   <header className="queue-item-top">
-                    <h4>{alert.source}</h4>
-                    <span className={`status-badge status-${alert.status.toLowerCase().replace(/\s+/g, '-')}`}>
-                      {alert.status}
-                    </span>
+                    <h4>{item.label}</h4>
+                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
                   </header>
-                  <p className="queue-description">{alert.message}</p>
+                  {item.description ? <p className="queue-description">{item.description}</p> : null}
                 </article>
               ))}
             </div>
-          )}
-        </article>
+          </article>
+        )}
       </div>
 
       <article className="panel operational-card">
         <h3>Workspace status</h3>
         <p>{dashboard.workspaceStatus}</p>
+        {dashboard.partialDataWarnings?.length ? (
+          <ul className="list">
+            {dashboard.partialDataWarnings.map((warning) => (
+              <li key={warning}>{warning}</li>
+            ))}
+          </ul>
+        ) : null}
       </article>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}

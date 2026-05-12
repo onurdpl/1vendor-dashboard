@@ -45,14 +45,12 @@
 ## Partially Working Pages
 
 ### Dashboard
-- Page loads from a hybrid data model.
-- Real-mode orders, returns, and finance queries are live.
-- Overview copy and workspace framing are intentionally real-mode placeholders, not a backend-native dashboard model.
-- Recent activity is currently empty in real mode.
-- Dashboard automation signals are now backed by the real `GET /automation` endpoint.
+- Real mode now derives its overview from backend-backed orders, returns, finance, automation, admin operations, and diagnostics services.
+- KPI cards, priority work, finance snapshot, recent activity, and admin diagnostics summary are built from live backend data when available.
+- Partial backend failures now degrade gracefully into warning notes instead of crashing the entire dashboard.
 - Result:
-  - usable as a landing page
-  - not a complete operational dashboard yet
+  - no longer a placeholder/hybrid landing view in real mode
+  - still not a dedicated backend-native aggregate contract, but operationally meaningful today
 
 ### Order Detail Actions
 - Data load is backend-backed.
@@ -94,8 +92,8 @@
 ## Mock-Backed Pages
 
 ### Dashboard Supporting Signals
-- Dashboard overview composition is still local/hybrid.
-- Dashboard automation signals now load from the backend, but the surrounding overview composition is still local/hybrid.
+- Mock mode still uses the local/dashboard composition path.
+- Real mode now uses a frontend-derived aggregation layer over backend services rather than a dedicated dashboard backend route.
 
 ### Mock-Only Action Flows Still Present in Real Mode
 - Order detail non-tracking fulfillment buttons
@@ -135,7 +133,6 @@
 - webhook/reconciliation/replay surfaces
 
 ### Hybrid Today
-- dashboard
 - order detail action area
 - admin order breakdown action area
 
@@ -145,7 +142,7 @@
 - admin reassignment action buttons
 
 ## Runtime/API Gaps Identified
-- No backend dashboard aggregate endpoint exists; frontend dashboard is composing a partial placeholder instead.
+- No backend dashboard aggregate endpoint exists; real mode currently composes its dashboard from multiple backend service calls on the frontend.
 - Remaining order-detail action gap:
   - backend exists: `POST /fulfillments/:allocationId/tracking`
   - frontend now uses it for tracking submission only
@@ -160,6 +157,7 @@
 - Return summary/detail still rely on placeholder operational labels such as:
   - condition
 - Dashboard real-mode state is intentionally generic instead of reflecting live operational aggregates.
+- Dashboard real-mode state is now backend-derived, but still assembled client-side rather than provided by a dedicated dashboard contract.
 - Fulfillment state labels are mapped, but frontend copy still assumes mock workflow language in several places.
 
 ## Auth / Vendor Context Findings
@@ -178,6 +176,7 @@
 ## Admin Flow Assessment
 - Login: backend-supported, previously verified in real mode, not re-driven end-to-end in browser during this audit due local input limitation.
 - Dashboard: partially working / hybrid.
+- Dashboard: backend-derived and operationally meaningful.
 - Orders: working.
 - Order detail: working for read path, partial for action path.
 - Returns: working.
@@ -191,6 +190,7 @@
 ## Vendor Flow Assessment
 - Login: backend-supported, not re-driven end-to-end in browser during this audit due local input limitation.
 - Dashboard: partially working / hybrid.
+- Dashboard: backend-derived and operationally meaningful for the current vendor scope.
 - Orders: working.
 - Order detail for live Yalı Spor allocation: working for read path, partial for action path.
   - tracking submission path is real-mode/backend-backed
@@ -211,7 +211,7 @@
 ## Priority Order for Phase 15 Fixes
 
 ### Priority 1
-- Finish real-mode dashboard strategy so it no longer depends on mock-only operational signals.
+- Decide whether to keep the frontend-derived dashboard aggregation approach or replace it with a dedicated backend dashboard contract later.
 - Decide whether to add real equivalents for the remaining non-tracking fulfillment actions or intentionally remove/mock-gate them in real mode.
 
 ### Priority 2

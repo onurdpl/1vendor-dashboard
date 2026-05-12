@@ -234,6 +234,26 @@ export type DashboardStat = {
   value: string;
 };
 
+export type DashboardPriorityItem = {
+  label: string;
+  value: string;
+  tone: 'severity-normal' | 'severity-attention' | 'severity-warning' | 'severity-critical';
+  description?: string;
+};
+
+export type DashboardFinanceSnapshot = {
+  grossSales: string;
+  refunds: string;
+  netRevenue: string;
+  payoutEstimate: string;
+};
+
+export type DashboardDiagnosticsSummary = {
+  failedWebhooks: number;
+  stuckReceived: number;
+  fulfillmentSyncFailures: number;
+};
+
 export type DashboardOverview = {
   vendorId: string;
   vendorName: string;
@@ -242,6 +262,10 @@ export type DashboardOverview = {
   stats: DashboardStat[];
   recentActivity: string[];
   workspaceStatus: string;
+  priorityWork: DashboardPriorityItem[];
+  financeSnapshot?: DashboardFinanceSnapshot;
+  diagnosticsSummary?: DashboardDiagnosticsSummary;
+  partialDataWarnings?: string[];
 };
 
 export type OperationsQueueItemType = 'pending_reassignment' | 'vendor_blocked' | 'awaiting_shipment' | 'refund_attention';

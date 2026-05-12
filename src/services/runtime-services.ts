@@ -3,6 +3,7 @@ import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser,
 import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
 import { getMockFinanceDashboard } from '../lib/api/mockFinance';
+import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
 import { listAdminOperationsQueue as listMockAdminOperationsQueue } from '../lib/api/operations';
@@ -10,6 +11,7 @@ import * as backendAuth from './backend-auth';
 import * as realOrders from './real/orders';
 import * as realReturns from './real/returns';
 import * as realFinance from './real/finance';
+import * as realAutomation from './real/automation';
 import * as realOperations from './real/operations';
 import * as realDiagnostics from './real/diagnostics';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
@@ -134,6 +136,12 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceDashboard()
         : Promise.resolve(getMockFinanceDashboard(getCurrentVendorId())),
+  },
+  automation: {
+    dashboard: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realAutomation.getAutomationDashboard()
+        : Promise.resolve(getMockAutomationDashboard(getCurrentVendorId())),
   },
   operations: {
     list: () =>
