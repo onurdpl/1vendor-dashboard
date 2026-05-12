@@ -104,6 +104,10 @@ export type ReplayWebhookResponse = {
   message?: string;
 };
 
+export type RecoverWebhookResponse = ReplayWebhookResponse & {
+  recoveryStatus: 'recovered' | 'failed' | 'not_recoverable';
+};
+
 export async function listWebhookDiagnostics() {
   return apiClient.get<WebhooksResponseDto>('/admin/diagnostics/webhooks');
 }
@@ -122,4 +126,8 @@ export async function getReconciliationDiagnostics() {
 
 export async function replayWebhook(webhookEventId: string) {
   return apiClient.post<ReplayWebhookResponse>(`/admin/diagnostics/webhooks/${webhookEventId}/replay`);
+}
+
+export async function recoverWebhook(webhookEventId: string) {
+  return apiClient.post<RecoverWebhookResponse>(`/admin/diagnostics/webhooks/${webhookEventId}/recover`);
 }

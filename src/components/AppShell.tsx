@@ -64,8 +64,8 @@ export function AppShell() {
             VD
           </div>
           <div>
-            <div className="brand-name">Vendor Dashboard</div>
-            <div className="brand-subtitle">Operations shell</div>
+            <div className="brand-name">VendorOps</div>
+            <div className="brand-subtitle">Shopify control center</div>
           </div>
         </div>
 
@@ -152,8 +152,8 @@ export function AppShell() {
 
       <div className="app-content">
         <PageHeader
-          title="Operations"
-          description="Core workspace for admin, vendor, support, and finance activity."
+          title="Operational control center"
+          description="Multi-vendor Shopify operations, finance, diagnostics, and recovery workspace."
         />
         <div className="shell-context-bar">
           <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>

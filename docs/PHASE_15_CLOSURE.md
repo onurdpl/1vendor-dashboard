@@ -54,6 +54,17 @@
 - Improve payout/reconciliation operational depth after async foundation stabilizes.
 - Continue incremental UX refinement without destabilizing vendor isolation or live webhook safety.
 
+## Phase 16 Control-Center Redesign Update
+- Phase 16 moved the frontend visual direction from a basic dashboard presentation toward an operational control-center model.
+- Returns, finance, diagnostics, and operations queue now use denser table-led layouts with KPI rows, compact metadata, stronger status semantics, and right-side detail panels where useful.
+- The redesign preserves:
+  - backend behavior
+  - routing
+  - real-mode API integrations
+  - vendor isolation
+  - mock mode compatibility
+- The new UX direction should be treated as the frontend baseline for future operational work.
+
 ## Closure Summary
 - Phase 15 substantially improved real-mode operational usability and clarity.
 - The system is stronger for live operations and manual recovery under the current synchronous model.

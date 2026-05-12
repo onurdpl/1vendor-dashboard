@@ -287,6 +287,29 @@
 - No admin reassignment mutation in real mode yet.
 - No async queue worker architecture in production runtime yet.
 
+## Phase 16 Operational Control-Center Redesign
+- Returns now use a control-center layout with:
+  - KPI summary row
+  - search/status toolbar
+  - dense operational table
+  - right-side detail panel
+  - clear pending-return vs processed-refund semantics
+- Finance now uses a denser ledger table with Shopify order/refund metadata and a focused detail panel.
+- Admin diagnostics now reads like an event/recovery stream with:
+  - webhook lifecycle status
+  - payload availability
+  - recoverability labels
+  - replay and recover action hierarchy
+  - reconciliation and sync event panels
+- Admin operations queue now uses a denser queue table with source, lifecycle, urgency, and action context.
+- App shell styling was tightened toward the operational control-center baseline while preserving existing routes and session/vendor behavior.
+- Remaining future direction:
+  - async workers for webhook/recovery execution
+  - operational analytics and alerting
+  - payout/reconciliation expansion
+  - advanced automation tooling
+  - admin reassignment and return lifecycle mutation workflows
+
 ## Recommended Immediate Phase 15 Focus
 - Treat automation and dashboard real-mode behavior as the first frontend operationalization target.
 - Treat fulfillment action wiring as the first meaningful vendor write-path completion target.

@@ -2,6 +2,16 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
+import {
+  EmptyStatePanel,
+  KPISummaryCard,
+  MetadataRow,
+  OperationalActionGroup,
+  OperationalTable,
+  SideDetailPanel,
+  StatusBadge,
+  TimelineBlock,
+} from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -16,22 +26,38 @@ function formatDate(value: string | null) {
   }
 
   return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
-function getSeverityClass(severity: 'critical' | 'warning' | 'attention' | 'normal') {
+function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'normal') {
   if (severity === 'critical') {
-    return 'severity-critical';
+    return 'danger' as const;
   }
   if (severity === 'warning') {
-    return 'severity-warning';
+    return 'warning' as const;
   }
   if (severity === 'attention') {
-    return 'severity-attention';
+    return 'attention' as const;
   }
-  return 'severity-normal';
+  return 'neutral' as const;
+}
+
+function getStatusTone(status: string) {
+  if (status === 'FAILED') {
+    return 'danger' as const;
+  }
+  if (status === 'PROCESSED') {
+    return 'success' as const;
+  }
+  if (status === 'PROCESSING') {
+    return 'info' as const;
+  }
+  return 'attention' as const;
 }
 
 function formatWebhookTopic(topic: string) {
@@ -43,13 +69,16 @@ function formatWebhookTopic(topic: string) {
 
 function formatRecoverability(payloadAvailable: boolean, status: string) {
   if (!payloadAvailable) {
-    return 'Unavailable (payload missing)';
+    return 'Manual recovery required';
+  }
+  if (status === 'RECEIVED' || status === 'FAILED') {
+    return 'Recover eligible';
+  }
+  if (status === 'PROCESSING') {
+    return 'Monitor processing';
   }
   if (status === 'PROCESSED') {
-    return 'Not recommended (already processed)';
-  }
-  if (status === 'FAILED' || status === 'RECEIVED' || status === 'PROCESSING') {
-    return 'Replay/recover candidate';
+    return 'Replay only with care';
   }
   return 'Review required';
 }
@@ -87,38 +116,42 @@ export function AdminDiagnosticsPage() {
     },
   );
 
+  const invalidateDiagnostics = [
+    queryKeys.admin.diagnostics.webhooks(),
+    queryKeys.admin.diagnostics.syncEvents(),
+    queryKeys.admin.diagnostics.reconciliation(),
+    ...(latestWebhookEventId ? [queryKeys.admin.diagnostics.webhookDetail(latestWebhookEventId)] : []),
+  ];
+
   const replayMutation = useMutationAction(
     async (webhookEventId: string) => runtimeServices.diagnostics.replay(webhookEventId),
     {
-      invalidateQueryKeys: [
-        queryKeys.admin.diagnostics.webhooks(),
-        queryKeys.admin.diagnostics.syncEvents(),
-        queryKeys.admin.diagnostics.reconciliation(),
-        ...(latestWebhookEventId ? [queryKeys.admin.diagnostics.webhookDetail(latestWebhookEventId)] : []),
-      ],
+      invalidateQueryKeys: invalidateDiagnostics,
       onSuccess: (result) => {
-        const messageText =
-          result.processingStatus === 'processed'
-            ? `Replay completed for ${result.topic}.`
-            : result.message ?? `Replay finished with ${result.processingStatus}.`;
-        showFeedback(messageText, result.processingStatus === 'processed' ? 'success' : 'info');
+        showFeedback(result.message ?? `Replay finished with ${result.processingStatus}.`, 'info');
       },
-      onError: (error) => {
-        const messageText = error instanceof Error ? error.message : 'Replay request failed.';
-        showFeedback(messageText, 'error');
+      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Replay request failed.', 'error'),
+    },
+  );
+
+  const recoverMutation = useMutationAction(
+    async (webhookEventId: string) => runtimeServices.diagnostics.recover(webhookEventId),
+    {
+      invalidateQueryKeys: invalidateDiagnostics,
+      onSuccess: (result) => {
+        showFeedback(result.message ?? `Recover finished with ${result.recoveryStatus}.`, result.recoveryStatus === 'recovered' ? 'success' : 'info');
       },
+      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Recover request failed.', 'error'),
     },
   );
 
   const selectedWebhook = webhookDetailQuery.data;
-  const visibleWebhooks = webhooksQuery.data?.events.slice(0, 8) ?? [];
+  const visibleWebhooks = webhooksQuery.data?.events.slice(0, 12) ?? [];
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
   const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
 
   const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? webhookDetailQuery.error;
-
-  const replayAvailable = selectedWebhook?.payloadAvailable === true;
 
   const combinedCounts = useMemo(() => {
     return {
@@ -162,274 +195,203 @@ export function AdminDiagnosticsPage() {
     );
   }
 
+  const canRecover = selectedWebhook?.payloadAvailable === true && ['RECEIVED', 'FAILED'].includes(selectedWebhook.status);
+  const canReplay = selectedWebhook?.payloadAvailable === true;
+
   return (
-    <section className="dashboard diagnostics-workspace">
-      <div className="hero-card operational-card">
+    <section className="op-page diagnostics-control-center">
+      <div className="op-page-heading">
         <div>
           <p className="eyebrow">Admin diagnostics</p>
-          <h2>Webhook & reconciliation workspace</h2>
+          <h2>Webhook recovery command center</h2>
           <p className="page-description">
-            Live operational visibility for Shopify webhook ingestion, replay readiness, and backend recovery actions.
+            Monitor Shopify event ingestion, reconciliation backlog, payload availability, and operator-triggered recovery.
           </p>
         </div>
-        <div className="queue-health">
-          <span className="severity-chip severity-critical">Failed {webhooksQuery.data.summary.failed}</span>
-          <span className="severity-chip severity-warning">Stuck {combinedCounts.stuck}</span>
-          <span className="severity-chip severity-attention">Missing payload {combinedCounts.missingPayload}</span>
-          <span className="severity-chip severity-normal">Processed {webhooksQuery.data.summary.processed}</span>
+        <div className="op-heading-meta">
+          <StatusBadge tone="danger">Failed {webhooksQuery.data.summary.failed}</StatusBadge>
+          <StatusBadge tone="attention">Stuck {combinedCounts.stuck}</StatusBadge>
+          <StatusBadge tone="success">Processed {webhooksQuery.data.summary.processed}</StatusBadge>
         </div>
       </div>
 
-      <div className="stats-grid queue-stats">
-        <article className="stat-card operational-card">
-          <span className="stat-label">Webhook events</span>
-          <strong>{webhooksQuery.data.summary.total}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Needs attention</span>
-          <strong>{webhooksQuery.data.summary.needsAttention}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Reconciliation items</span>
-          <strong>{reconciliationQuery.data.summary.total}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Fulfillment sync failures</span>
-          <strong>{combinedCounts.fulfillmentFailures}</strong>
-        </article>
+      <div className="op-kpi-row">
+        <KPISummaryCard label="Webhook events" value={webhooksQuery.data.summary.total} detail="Persisted envelopes" tone="info" />
+        <KPISummaryCard label="Needs attention" value={webhooksQuery.data.summary.needsAttention} detail="Failed or blocked" tone="danger" />
+        <KPISummaryCard label="Reconciliation" value={reconciliationQuery.data.summary.total} detail="Operator candidates" tone="attention" />
+        <KPISummaryCard label="Missing payload" value={combinedCounts.missingPayload} detail="Manual recovery required" tone="warning" />
+        <KPISummaryCard label="Fulfillment failures" value={combinedCounts.fulfillmentFailures} detail="Sync failure signals" tone="danger" />
       </div>
 
-      <div className="diagnostics-layout">
-        <article className="panel operational-card diagnostics-panel">
-          <div className="queue-list-header">
-            <h3>Webhook summary</h3>
-            <p className="page-description">Recent Shopify webhook envelopes with payload replay visibility.</p>
-          </div>
+      <div className="op-control-layout diagnostics-layout-redesign">
+        <div className="op-main-column">
           {visibleWebhooks.length === 0 ? (
-            <div className="queue-empty">
-              <p className="eyebrow">Diagnostics state</p>
-              <h3>No webhook events recorded</h3>
-              <p className="page-description">Live backend diagnostics will appear here once Shopify deliveries reach the backend.</p>
-            </div>
+            <EmptyStatePanel
+              title="No webhook events recorded"
+              description="Live backend diagnostics will appear here once Shopify deliveries reach the backend."
+            />
           ) : (
-            <div className="diagnostics-list">
+            <OperationalTable
+              columns={['Status', 'Topic', 'Payload', 'Recoverability', 'Shopify order', 'Received', 'Action']}
+              className="diagnostics-op-table"
+            >
               {visibleWebhooks.map((event) => (
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   key={event.id}
-                  type="button"
-                  className={`diagnostics-item ${latestWebhookEventId === event.id ? 'diagnostics-item-selected' : ''}`}
+                  className={`op-table-row ${latestWebhookEventId === event.id ? 'op-row-selected' : ''}`}
                   onClick={() => setSelectedWebhookEventId(event.id)}
+                  onKeyDown={(keyboardEvent) => {
+                    if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
+                      setSelectedWebhookEventId(event.id);
+                    }
+                  }}
                 >
-                  <div className="diagnostics-item-top">
-                    <div className="queue-title-block">
-                      <span className={`severity-chip ${event.status === 'FAILED' ? 'severity-critical' : event.status === 'RECEIVED' ? 'severity-attention' : 'severity-normal'}`}>
-                        {event.status}
-                      </span>
-                      <h4>{formatWebhookTopic(event.topic)}</h4>
-                    </div>
-                    <span className={`status-badge status-${event.payloadAvailable ? 'processed' : 'pending'}`}>
-                      {event.payloadAvailable ? 'Replayable' : 'Payload missing'}
-                    </span>
-                  </div>
-                  <p className="queue-description">{event.errorMessage ?? 'Webhook stored successfully.'}</p>
-                  <div className="queue-meta">
-                    <span>
-                      <strong>Shop:</strong> {event.shopDomain}
-                    </span>
-                    <span>
-                      <strong>Received:</strong> {formatDate(event.receivedAt)}
-                    </span>
-                    <span>
-                      <strong>Webhook ID:</strong> {event.shopifyWebhookId ?? 'Not provided'}
-                    </span>
-                    <span>
-                      <strong>Recoverability:</strong> {formatRecoverability(event.payloadAvailable, event.status)}
-                    </span>
-                  </div>
-                </button>
+                  <StatusBadge tone={getStatusTone(event.status)}>{event.status}</StatusBadge>
+                  <span>
+                    <strong>{formatWebhookTopic(event.topic)}</strong>
+                    <small>{event.shopDomain}</small>
+                  </span>
+                  <StatusBadge tone={event.payloadAvailable ? 'success' : 'warning'}>
+                    {event.payloadAvailable ? 'Available' : 'Missing'}
+                  </StatusBadge>
+                  <span>
+                    <strong>{formatRecoverability(event.payloadAvailable, event.status)}</strong>
+                    <small>{event.errorMessage ?? 'No error recorded'}</small>
+                  </span>
+                  <span>{event.shopifyWebhookId ?? 'Not provided'}</span>
+                  <span>{formatDate(event.receivedAt)}</span>
+                  <OperationalActionGroup>
+                    <span className="queue-muted-action">Inspect</span>
+                  </OperationalActionGroup>
+                </div>
               ))}
-            </div>
+            </OperationalTable>
           )}
-        </article>
 
-        <article className="panel operational-card diagnostics-panel">
-          <div className="queue-list-header">
-            <h3>Webhook detail</h3>
-            <p className="page-description">Inspect payload availability, related order context, and replay/recovery readiness.</p>
+          <div className="op-secondary-grid">
+            <section className="op-panel-block">
+              <div className="op-section-heading">
+                <h3>Reconciliation queue</h3>
+                <p>Stuck events, missing payloads, and suggested recovery actions.</p>
+              </div>
+              {visibleReconciliationItems.length === 0 ? (
+                <EmptyStatePanel title="No active reconciliation work" description="No stuck webhook events or sync failures are currently waiting for admin recovery." />
+              ) : (
+                <div className="op-event-list">
+                  {visibleReconciliationItems.map((item) => (
+                    <article key={item.id} className="op-event-row">
+                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.description}</p>
+                        <small>{item.suggestedAction}</small>
+                      </div>
+                      <span>{item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}</span>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            <section className="op-panel-block">
+              <div className="op-section-heading">
+                <h3>Sync event stream</h3>
+                <p>Latest backend ingestion and fulfillment failure signals.</p>
+              </div>
+              {visibleSyncEvents.length === 0 ? (
+                <EmptyStatePanel title="No sync failures recorded" description="Webhook ingestion and fulfillment sync are currently clear." />
+              ) : (
+                <div className="op-event-list">
+                  {visibleSyncEvents.map((item) => (
+                    <article key={item.id} className="op-event-row">
+                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                      <div>
+                        <strong>{item.title}</strong>
+                        <p>{item.description}</p>
+                        <small>{item.type}</small>
+                      </div>
+                      <span>{formatDate(item.createdAt)}</span>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
           </div>
-          {!selectedWebhook ? (
-            <div className="queue-empty">
-              <p className="eyebrow">Selection</p>
-              <h3>Select a webhook event</h3>
-              <p className="page-description">Choose a recent webhook to inspect replay readiness and error detail.</p>
-            </div>
-          ) : (
-            <div className="diagnostics-detail">
-              <div className="compact-meta-grid">
-                <div className="meta-item">
-                  <span>Topic</span>
-                      <strong>{formatWebhookTopic(selectedWebhook.topic)}</strong>
-                </div>
-                <div className="meta-item">
-                  <span>Payload available</span>
-                  <strong>{selectedWebhook.payloadAvailable ? 'Yes' : 'No'}</strong>
-                </div>
-                <div className="meta-item">
-                  <span>Recoverability</span>
-                  <strong>{formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)}</strong>
-                </div>
-                <div className="meta-item">
-                  <span>Related Shopify order</span>
-                  <strong className={selectedWebhook.relatedShopifyOrderId ? '' : 'muted'}>
-                    {selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'}
-                  </strong>
-                </div>
-                <div className="meta-item">
-                  <span>Processed</span>
-                  <strong>{formatDate(selectedWebhook.processedAt)}</strong>
-                </div>
+        </div>
+
+        <SideDetailPanel
+          eyebrow="Webhook detail"
+          title={selectedWebhook ? formatWebhookTopic(selectedWebhook.topic) : 'No event selected'}
+          action={
+            selectedWebhook?.relatedShopifyOrderId ? (
+              <Link className="button button-secondary" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
+                Shopify order
+              </Link>
+            ) : null
+          }
+        >
+          {selectedWebhook ? (
+            <>
+              <div className="op-detail-status-row">
+                <StatusBadge tone={getStatusTone(selectedWebhook.status)}>{selectedWebhook.status}</StatusBadge>
+                <StatusBadge tone={selectedWebhook.payloadAvailable ? 'success' : 'warning'}>
+                  {selectedWebhook.payloadAvailable ? 'Payload available' : 'Payload missing'}
+                </StatusBadge>
               </div>
-              <div className="diagnostics-detail-stack">
-                <div className="summary-row">
-                  <span>Idempotency key</span>
-                  <strong className="diagnostics-wrap">{selectedWebhook.idempotencyKey ?? 'Not recorded'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Payload hash</span>
-                  <strong className="diagnostics-wrap">{selectedWebhook.payloadHash ?? 'Not recorded'}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Error</span>
-                  <strong className={selectedWebhook.errorMessage ? '' : 'muted'}>
-                    {selectedWebhook.errorMessage ?? 'No error recorded'}
-                  </strong>
-                </div>
+              <div className="op-meta-grid">
+                <MetadataRow label="Recoverability" value={formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)} />
+                <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
+                <MetadataRow label="Webhook ID" value={selectedWebhook.shopifyWebhookId ?? 'Not provided'} />
+                <MetadataRow label="Shopify Order ID" value={selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'} />
+                <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
+                <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </div>
-              <div className="diagnostics-actions">
-                {replayAvailable ? (
+              <div className="op-panel-section">
+                <h4>Recovery actions</h4>
+                <OperationalActionGroup>
                   <button
                     type="button"
                     className="button button-primary"
-                    disabled={replayMutation.isPending}
+                    disabled={!canRecover || recoverMutation.isPending}
+                    onClick={() => recoverMutation.mutate(selectedWebhook.id)}
+                  >
+                    {recoverMutation.isPending ? 'Recovering...' : 'Recover'}
+                  </button>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={!canReplay || replayMutation.isPending}
                     onClick={() => replayMutation.mutate(selectedWebhook.id)}
                   >
-                    {replayMutation.isPending ? 'Replaying...' : 'Replay webhook event'}
+                    {replayMutation.isPending ? 'Replaying...' : 'Replay'}
                   </button>
-                ) : (
-                  <span className="queue-muted-action">
-                    Replay unavailable because payload is not stored for this event. Use reconciliation suggested actions for manual recovery.
-                  </span>
-                )}
-                {selectedWebhook.relatedShopifyOrderId ? (
-                  <Link className="button button-secondary" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
-                    View Shopify order
-                  </Link>
-                ) : null}
+                </OperationalActionGroup>
+                <p className="page-description">
+                  Recover is intended for stuck or failed events with stored payloads. Replay is available when payload exists and should be used deliberately.
+                </p>
               </div>
-              {selectedWebhook.rawPayload ? (
-                <pre className="diagnostics-payload-preview">{selectedWebhook.rawPayload}</pre>
-              ) : null}
-            </div>
-          )}
-        </article>
-      </div>
-
-      <div className="diagnostics-layout">
-        <article className="panel operational-card diagnostics-panel">
-          <div className="queue-list-header">
-            <h3>Reconciliation summary</h3>
-            <p className="page-description">Recovery candidates that still need operator attention.</p>
-          </div>
-          {visibleReconciliationItems.length === 0 ? (
-            <div className="queue-empty">
-              <p className="eyebrow">Reconciliation</p>
-              <h3>No active reconciliation work</h3>
-              <p className="page-description">No stuck webhook events or sync failures are currently waiting for admin recovery.</p>
-            </div>
+              <div className="op-panel-section">
+                <h4>Timeline</h4>
+                <TimelineBlock
+                  items={[
+                    { label: 'Received', at: formatDate(selectedWebhook.receivedAt) },
+                    { label: selectedWebhook.status, at: formatDate(selectedWebhook.processedAt) },
+                    { label: selectedWebhook.errorMessage ? 'Error recorded' : 'No error recorded', detail: selectedWebhook.errorMessage ?? 'Clear' },
+                  ]}
+                />
+              </div>
+              <div className="op-panel-section">
+                <h4>Payload diagnostics</h4>
+                <MetadataRow label="Payload hash" value={selectedWebhook.payloadHash ?? 'Not recorded'} />
+                <MetadataRow label="Idempotency key" value={selectedWebhook.idempotencyKey ?? 'Not recorded'} />
+              </div>
+            </>
           ) : (
-            <div className="diagnostics-list">
-              {visibleReconciliationItems.map((item) => (
-                <article key={item.id} className="diagnostics-entry">
-                  <div className="diagnostics-item-top">
-                    <div className="queue-title-block">
-                      <span className={`severity-chip ${getSeverityClass(item.severity)}`}>{item.severity}</span>
-                      <h4>{item.title}</h4>
-                    </div>
-                    <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
-                  </div>
-                  <p className="queue-description">{item.description}</p>
-                  <div className="queue-meta">
-                    <span>
-                      <strong>Suggested action:</strong> {item.suggestedAction}
-                    </span>
-                    <span>
-                      <strong>Order:</strong> {item.relatedShopifyOrderId ?? 'N/A'}
-                    </span>
-                    <span>
-                      <strong>Payload:</strong> {item.payloadAvailable === null ? 'Not applicable' : item.payloadAvailable ? 'Available' : 'Missing'}
-                    </span>
-                    <span>
-                      <strong>Replay:</strong>{' '}
-                      {item.relatedWebhookEventId && item.payloadAvailable === true
-                        ? 'Eligible from webhook detail'
-                        : item.relatedWebhookEventId && item.payloadAvailable === false
-                          ? 'Not eligible (payload missing)'
-                          : 'Not applicable'}
-                    </span>
-                    <span>
-                      <strong>Recoverability:</strong>{' '}
-                      {item.type === 'stuck_webhook' || item.type === 'failed_webhook'
-                        ? item.payloadAvailable
-                          ? 'Replay/recover candidate'
-                          : 'Manual recovery required'
-                        : 'Investigate and monitor'}
-                    </span>
-                  </div>
-                </article>
-              ))}
-            </div>
+            <EmptyStatePanel title="Select a webhook event" description="Choose an event from the stream to inspect payload and recovery readiness." />
           )}
-        </article>
-
-        <article className="panel operational-card diagnostics-panel">
-          <div className="queue-list-header">
-            <h3>Sync failures</h3>
-            <p className="page-description">Latest consolidated backend failure feed across ingestion and fulfillment sync.</p>
-          </div>
-          {visibleSyncEvents.length === 0 ? (
-            <div className="queue-empty">
-              <p className="eyebrow">Sync health</p>
-              <h3>No sync failures recorded</h3>
-              <p className="page-description">Webhook ingestion and fulfillment sync are currently clear.</p>
-            </div>
-          ) : (
-            <div className="diagnostics-list">
-              {visibleSyncEvents.map((item) => (
-                <article key={item.id} className="diagnostics-entry">
-                  <div className="diagnostics-item-top">
-                    <div className="queue-title-block">
-                      <span className={`severity-chip ${getSeverityClass(item.severity)}`}>{item.severity}</span>
-                      <h4>{item.title}</h4>
-                    </div>
-                    <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
-                  </div>
-                  <p className="queue-description">{item.description}</p>
-                  <div className="queue-meta">
-                    <span>
-                      <strong>Type:</strong> {item.type}
-                    </span>
-                    <span>
-                      <strong>Shopify order:</strong> {item.relatedShopifyOrderId ?? 'N/A'}
-                    </span>
-                    <span>
-                      <strong>Created:</strong> {formatDate(item.createdAt)}
-                    </span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </article>
+        </SideDetailPanel>
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}

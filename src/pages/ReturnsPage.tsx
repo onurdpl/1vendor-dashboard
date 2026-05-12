@@ -1,5 +1,17 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import {
+  EmptyStatePanel,
+  KPISummaryCard,
+  MetadataRow,
+  OperationalActionGroup,
+  OperationalTable,
+  ShopifyEntityDisplay,
+  SideDetailPanel,
+  StatusBadge,
+  TimelineBlock,
+} from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { listReturns, type ReturnSummary } from '../features/returns/api';
@@ -11,38 +23,79 @@ function formatDate(value: string) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
-function getLifecycleLabel(item: ReturnSummary) {
-  if (item.sourceType === 'shopify_return_request') {
-    return 'Pending return lifecycle';
-  }
-
-  return 'Processed refund lifecycle';
+function parseAmount(value: string) {
+  return Number.parseFloat(value.replace(/[^0-9.-]/g, '') || '0');
 }
 
-function getShopifyEntityLabel(item: ReturnSummary) {
-  if (item.sourceType === 'shopify_return_request') {
-    return 'Shopify Return ID';
-  }
-
-  return 'Shopify Refund ID';
+function getReturnKind(item: ReturnSummary) {
+  return item.sourceType === 'shopify_return_request' ? 'Pending return request' : 'Processed refund';
 }
 
-function getShopifyEntityValue(item: ReturnSummary) {
-  if (item.sourceType === 'shopify_return_request') {
-    return item.sourceShopifyReturnId || 'Not available';
-  }
+function getEntityLabel(item: ReturnSummary) {
+  return item.sourceType === 'shopify_return_request' ? 'Shopify Return ID' : 'Shopify Refund ID';
+}
 
-  return item.sourceShopifyRefundId || 'Not available';
+function getEntityValue(item: ReturnSummary) {
+  return item.sourceType === 'shopify_return_request'
+    ? item.sourceShopifyReturnId || 'Not available'
+    : item.sourceShopifyRefundId || 'Not available';
+}
+
+function getStatusTone(item: ReturnSummary) {
+  const normalized = item.status.toLowerCase();
+  if (item.sourceType === 'shopify_return_request' && normalized === 'requested') {
+    return 'attention' as const;
+  }
+  if (normalized === 'approved' || normalized === 'processed' || normalized === 'closed') {
+    return 'success' as const;
+  }
+  if (normalized === 'declined' || normalized === 'cancelled' || normalized === 'rejected') {
+    return 'danger' as const;
+  }
+  return 'info' as const;
 }
 
 export function ReturnsPage() {
   const { data: returns, isLoading, isError, error } = useQueryResource(queryKeys.returns.list(), listReturns);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const isRealMode = runtimeConfig.apiMode === 'real';
+
+  const selectedReturn = useMemo(() => {
+    if (!returns?.length) {
+      return null;
+    }
+    return returns.find((item) => item.id === selectedReturnId) ?? returns[0];
+  }, [returns, selectedReturnId]);
+
+  const filteredReturns = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return (returns ?? []).filter((item) => {
+      const matchesQuery =
+        query.length === 0 ||
+        [
+          item.id,
+          String(item.sourceShopifyOrderNumber),
+          item.sourceShopifyOrderId,
+          item.sourceShopifyRefundId,
+          item.sourceShopifyReturnId ?? '',
+          item.refundedSkus?.join(' ') ?? '',
+        ]
+          .join(' ')
+          .toLowerCase()
+          .includes(query);
+      const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
+      return matchesQuery && matchesStatus;
+    });
+  }, [returns, searchTerm, statusFilter]);
 
   if (isLoading) {
     return (
@@ -67,127 +120,185 @@ export function ReturnsPage() {
   }
 
   const totalReturns = returns.length;
-  const pendingCount = returns.filter((item) => item.status === 'Requested' || item.status === 'Pending' || item.status === 'In Review').length;
-  const resolvedCount = returns.filter((item) => item.status === 'Approved' || item.status === 'Closed' || item.status === 'Processed').length;
+  const pendingCount = returns.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
+  const approvedCount = returns.filter((item) => item.status === 'Approved').length;
+  const processedCount = returns.filter((item) => item.sourceType !== 'shopify_return_request').length;
   const totalRefundAmount = returns
     .filter((item) => item.sourceType !== 'shopify_return_request')
-    .reduce((total, item) => total + Number.parseFloat(item.amount.replace(/[^0-9.-]/g, '') || '0'), 0);
+    .reduce((total, item) => total + parseAmount(item.amount), 0);
+  const statuses = Array.from(new Set(returns.map((item) => item.status)));
 
   return (
-    <section className="dashboard returns-dashboard returns-workspace">
-      <div className="hero-card operational-card queue-header">
-        <div className="queue-header-copy">
+    <section className="op-page returns-control-center">
+      <div className="op-page-heading">
+        <div>
           <p className="eyebrow">Returns</p>
-          <h2>{currentVendor.vendorName} returns operations queue</h2>
+          <h2>{currentVendor.vendorName} returns control center</h2>
           <p className="page-description">
             {currentUser?.role === 'admin'
-              ? 'Selected vendor return allocations with operational refund status and review visibility.'
-              : 'Track your vendor pending returns and processed refunds with clear operational lifecycle visibility.'}
+              ? 'Inspect vendor-scoped return requests and refund allocations from Shopify operations.'
+              : 'Track pending return requests and processed refunds for your vendor scope.'}
           </p>
-          {isRealMode ? (
-            <p className="page-description operational-helper-copy">
-              Pending return requests and processed refunds are shown as separate lifecycle states. Refund processing actions are not enabled in real mode yet.
-            </p>
-          ) : null}
         </div>
-        <div className="queue-health">
-          <span className="severity-chip severity-normal">Vendor {currentVendor.vendorName}</span>
-          <span className="severity-chip severity-attention">Pending lifecycle {pendingCount}</span>
+        <div className="op-heading-meta">
+          <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
+          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
         </div>
       </div>
 
-      <div className="finance-summary-grid returns-summary-grid">
-        <article className="finance-summary-card operational-card">
-          <span>Total returns</span>
-          <strong>{totalReturns}</strong>
-        </article>
-        <article className="finance-summary-card operational-card deduction-card">
-          <span>Processed refund amount</span>
-          <strong>-${totalRefundAmount.toFixed(2)}</strong>
-        </article>
-        <article className="finance-summary-card operational-card">
-          <span>Pending / needs review</span>
-          <strong>{pendingCount}</strong>
-        </article>
-        <article className="finance-summary-card operational-card">
-          <span>Completed / resolved</span>
-          <strong>{resolvedCount}</strong>
-        </article>
+      <div className="op-kpi-row">
+        <KPISummaryCard label="Pending requests" value={pendingCount} detail="Shopify return lifecycle" tone="attention" />
+        <KPISummaryCard label="Approved" value={approvedCount} detail="Awaiting next lifecycle step" tone="success" />
+        <KPISummaryCard label="Processed refunds" value={processedCount} detail={`${totalReturns} total return records`} tone="info" />
+        <KPISummaryCard label="Total refunded" value={`TRY ${totalRefundAmount.toFixed(2)}`} detail="Posted refund webhook records" tone="danger" />
       </div>
 
-      <article className="panel operational-card">
-        <div className="queue-list-header">
-          <h3>Returns and refund records</h3>
+      <div className="op-control-layout">
+        <div className="op-main-column">
+          <div className="op-toolbar">
+            <input
+              type="search"
+              placeholder="Search order, return, refund, SKU..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <option value="all">All statuses</option>
+              {statuses.map((status) => (
+                <option key={status} value={status}>
+                  {status}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => {
+                setSearchTerm('');
+                setStatusFilter('all');
+              }}
+            >
+              Reset
+            </button>
+          </div>
+
+          {filteredReturns.length === 0 ? (
+            <EmptyStatePanel
+              title="No returns match this view"
+              description="Adjust the search or status filter to inspect pending return requests and processed refunds."
+            />
+          ) : (
+            <OperationalTable
+              columns={['Status', 'Shopify order', 'Return / refund', 'SKU / Items', 'Amount', 'Last update', 'Actions']}
+              className="returns-op-table"
+            >
+              {filteredReturns.map((item) => (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  key={item.id}
+                  className={`op-table-row ${selectedReturn?.id === item.id ? 'op-row-selected' : ''}`}
+                  onClick={() => setSelectedReturnId(item.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      setSelectedReturnId(item.id);
+                    }
+                  }}
+                >
+                  <span>
+                    <StatusBadge tone={getStatusTone(item)}>{item.status}</StatusBadge>
+                    <small>{getReturnKind(item)}</small>
+                  </span>
+                  <ShopifyEntityDisplay
+                    label="Shopify Order"
+                    primary={`#${item.sourceShopifyOrderNumber}`}
+                    secondary={`ID ${item.sourceShopifyOrderId}`}
+                  />
+                  <ShopifyEntityDisplay
+                    label={getEntityLabel(item)}
+                    primary={getEntityValue(item)}
+                    secondary={item.sourceType === 'shopify_return_request' ? 'Return lifecycle' : 'Refund webhook'}
+                  />
+                  <span>
+                    <strong>{item.refundedSkus?.length ?? 0} SKU</strong>
+                    <small>{item.refundedSkus?.slice(0, 2).join(', ') || 'Item detail available'}</small>
+                  </span>
+                  <strong className={item.sourceType === 'shopify_return_request' ? 'muted' : 'finance-negative'}>
+                    {item.sourceType === 'shopify_return_request' ? 'Not posted' : `-${item.amount}`}
+                  </strong>
+                  <span>
+                    <strong>{formatDate(item.updatedAt ?? item.date)}</strong>
+                    <small>Created {formatDate(item.date)}</small>
+                  </span>
+                  <OperationalActionGroup>
+                    <Link to={`/returns/${item.id}`} className="button button-secondary button-link">
+                      Open
+                    </Link>
+                  </OperationalActionGroup>
+                </div>
+              ))}
+            </OperationalTable>
+          )}
         </div>
-        {returns.length === 0 ? (
-          <div className="queue-empty">
-            <p className="eyebrow">Refunds</p>
-            <h3>No return or refund records</h3>
-            <p className="page-description">
-              Pending return requests and processed refund records will appear here for this vendor scope.
-            </p>
-          </div>
-        ) : (
-          <div className="queue-list">
-            {returns.map((item: ReturnSummary) => (
-              <article key={item.id} className="queue-item queue-medium refund-record">
-                <header className="queue-item-top">
-                  <div className="queue-title-block">
-                    <h4>{item.id}</h4>
-                    <span className="queue-description">
-                      Shopify Order #{item.sourceShopifyOrderNumber} · {item.sourceType === 'shopify_return_request' ? `Return ${item.sourceShopifyReturnId ?? 'Pending'}` : `Refund ${item.sourceShopifyRefundId}`}
-                    </span>
-                  </div>
-                  <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
-                </header>
-                <div className="queue-meta">
-                  <span>
-                    <strong>Lifecycle:</strong> {getLifecycleLabel(item)}
-                  </span>
-                  <span>
-                    <strong>Shopify Order Number:</strong> #{item.sourceShopifyOrderNumber}
-                  </span>
-                  <span>
-                    <strong>Shopify Order ID:</strong> {item.sourceShopifyOrderId}
-                  </span>
-                  <span>
-                    <strong>{getShopifyEntityLabel(item)}:</strong> {getShopifyEntityValue(item)}
-                  </span>
-                  <span>
-                    <strong>Created At:</strong> {formatDate(item.date)}
-                  </span>
-                  <span>
-                    <strong>Updated At:</strong> {item.updatedAt ? formatDate(item.updatedAt) : formatDate(item.date)}
-                  </span>
-                  <span>
-                    <strong>Vendor Owner:</strong> {item.assignedVendorId}
-                  </span>
-                  <span>
-                    <strong>{item.sourceType === 'shopify_return_request' ? 'Requested SKUs' : 'Refunded SKUs'}:</strong>{' '}
-                    {item.refundedSkus?.length ? item.refundedSkus.join(', ') : 'Visible in return detail'}
-                  </span>
-                  <span>
-                    <strong>Operational Source:</strong>{' '}
-                    {item.sourceType === 'shopify_return_request'
-                      ? 'Shopify return lifecycle request'
-                      : 'Shopify webhook allocation'}
-                  </span>
-                </div>
-                <div className="queue-actions">
-                  {item.sourceType === 'shopify_return_request' ? (
-                    <span className="queue-muted-action">Pending return request (no refund posted)</span>
-                  ) : (
-                    <span className="finance-amount finance-negative">-{item.amount}</span>
-                  )}
-                  <Link to={`/returns/${item.id}`} className="button button-secondary button-link">
-                    View return
-                  </Link>
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </article>
+
+        <SideDetailPanel
+          eyebrow="Selected record"
+          title={selectedReturn ? getReturnKind(selectedReturn) : 'No return selected'}
+          action={
+            selectedReturn ? (
+              <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
+                Full detail
+              </Link>
+            ) : null
+          }
+        >
+          {selectedReturn ? (
+            <>
+              <div className="op-detail-status-row">
+                <StatusBadge tone={getStatusTone(selectedReturn)}>{selectedReturn.status}</StatusBadge>
+                <span>{selectedReturn.id}</span>
+              </div>
+
+              <div className="op-meta-grid">
+                <MetadataRow label="Shopify Order Number" value={`#${selectedReturn.sourceShopifyOrderNumber}`} />
+                <MetadataRow label="Shopify Order ID" value={selectedReturn.sourceShopifyOrderId} />
+                <MetadataRow label={getEntityLabel(selectedReturn)} value={getEntityValue(selectedReturn)} />
+                <MetadataRow label="Vendor owner" value={selectedReturn.assignedVendorId} />
+                <MetadataRow
+                  label={selectedReturn.sourceType === 'shopify_return_request' ? 'Requested SKUs' : 'Refunded SKUs'}
+                  value={selectedReturn.refundedSkus?.join(', ') || 'Visible in detail'}
+                />
+                <MetadataRow label="Amount" value={selectedReturn.sourceType === 'shopify_return_request' ? 'No refund posted' : selectedReturn.amount} />
+              </div>
+
+              <div className="op-panel-section">
+                <h4>Lifecycle timeline</h4>
+                <TimelineBlock
+                  items={[
+                    { label: selectedReturn.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refund received', at: formatDate(selectedReturn.date) },
+                    { label: selectedReturn.status, at: formatDate(selectedReturn.updatedAt ?? selectedReturn.date) },
+                    {
+                      label: selectedReturn.sourceType === 'shopify_return_request' ? 'Refund posted' : 'Finance linked',
+                      detail: selectedReturn.sourceType === 'shopify_return_request' ? 'Waiting for refunds/create' : 'Processed',
+                    },
+                  ]}
+                />
+              </div>
+
+              <div className="op-panel-section">
+                <h4>Operational notes</h4>
+                <p className="page-description">
+                  {selectedReturn.sourceType === 'shopify_return_request'
+                    ? 'This is a pending Shopify return lifecycle record. It should not be treated as refunded money until a refunds/create webhook is ingested.'
+                    : 'This refund was ingested from Shopify and allocated to the selected vendor context.'}
+                </p>
+              </div>
+            </>
+          ) : (
+            <EmptyStatePanel title="Select a return" description="Choose a record from the table to inspect lifecycle and Shopify metadata." />
+          )}
+        </SideDetailPanel>
+      </div>
     </section>
   );
 }

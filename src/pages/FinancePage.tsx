@@ -1,5 +1,16 @@
+import { useMemo, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
+import {
+  EmptyStatePanel,
+  KPISummaryCard,
+  MetadataRow,
+  OperationalActionGroup,
+  OperationalTable,
+  ShopifyEntityDisplay,
+  SideDetailPanel,
+  StatusBadge,
+} from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
@@ -11,14 +22,56 @@ function formatDate(value: string) {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
+}
+
+function getStatusTone(status: string) {
+  if (status === 'Completed' || status === 'Reconciled') {
+    return 'success' as const;
+  }
+  if (status === 'Failed') {
+    return 'danger' as const;
+  }
+  return 'attention' as const;
 }
 
 export function FinancePage() {
   const { data: finance, isLoading, isError, error } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
   const { message, tone, showFeedback } = useActionFeedback();
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
+
+  const filteredRecords = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return (finance?.transactions ?? []).filter((record) => {
+      if (!query) {
+        return true;
+      }
+      return [
+        record.id,
+        record.description,
+        record.category,
+        record.status,
+        record.shopifyOrderNumber ?? '',
+        record.shopifyOrderId ?? '',
+        record.shopifyRefundId ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(query);
+    });
+  }, [finance, searchTerm]);
+
+  const selectedRecord = useMemo(() => {
+    if (!finance?.transactions.length) {
+      return null;
+    }
+    return finance.transactions.find((record) => record.id === selectedRecordId) ?? finance.transactions[0];
+  }, [finance, selectedRecordId]);
 
   if (isLoading) {
     return (
@@ -43,148 +96,135 @@ export function FinancePage() {
   }
 
   return (
-    <section className="dashboard finance-dashboard finance-workspace">
-      <div className="hero-card operational-card queue-header">
-        <div className="queue-header-copy">
+    <section className="op-page finance-control-center">
+      <div className="op-page-heading">
+        <div>
           <p className="eyebrow">Finance</p>
-          <h2>{currentVendor.vendorName} payout workspace</h2>
+          <h2>{currentVendor.vendorName} finance control center</h2>
           <p className="page-description">
-            {currentUser?.role === 'admin'
-              ? 'Vendor-scoped payout and deduction view for the selected vendor.'
-              : 'Your vendor payout, deductions, and finance records in one workspace.'}
+            Vendor-scoped ledger visibility for sales, refund deductions, platform fees, and payout estimates.
           </p>
         </div>
-        <div className="queue-health">
-          <span className="severity-chip severity-normal">Vendor {currentVendor.vendorName}</span>
-          <span className="severity-chip severity-attention">Refunds {finance.summary.refunds}</span>
+        <div className="op-heading-meta">
+          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+          <StatusBadge tone={currentUser?.role === 'admin' ? 'success' : 'neutral'}>{currentUser?.role ?? 'user'}</StatusBadge>
         </div>
       </div>
 
-      <div className="finance-summary-grid finance-kpi-grid">
-        <article className="finance-summary-card operational-card">
-          <span>Gross sales</span>
-          <strong>{finance.summary.grossSales}</strong>
-        </article>
-        <article className="finance-summary-card operational-card deduction-card">
-          <span>Refunds</span>
-          <strong>-{finance.summary.refunds}</strong>
-        </article>
-        <article className="finance-summary-card operational-card">
-          <span>Net revenue</span>
-          <strong>{finance.summary.netRevenue}</strong>
-        </article>
-        <article className="finance-summary-card operational-card deduction-card">
-          <span>Platform fee</span>
-          <strong>-{finance.summary.platformFee}</strong>
-        </article>
-        <article className="finance-summary-card operational-card payout-card">
-          <span>Payout estimate</span>
-          <strong>{finance.summary.payoutEstimate}</strong>
-        </article>
+      <div className="op-kpi-row">
+        <KPISummaryCard label="Gross sales" value={finance.summary.grossSales} detail="Vendor allocation sales" tone="success" />
+        <KPISummaryCard label="Refunds" value={`-${finance.summary.refunds}`} detail="Processed refunds only" tone="danger" />
+        <KPISummaryCard label="Net revenue" value={finance.summary.netRevenue} detail="After refund impact" tone="info" />
+        <KPISummaryCard label="Platform fee" value={`-${finance.summary.platformFee}`} detail="Reporting model" tone="warning" />
+        <KPISummaryCard label="Payout estimate" value={finance.summary.payoutEstimate} detail="No payout execution yet" tone="neutral" />
       </div>
 
-      <article className="panel operational-card">
-        <h3>Payout summary</h3>
-        <div className="allocation-summary-grid finance-formula-grid">
-          <div className="summary-row">
-            <span>Gross sales</span>
-            <strong>{finance.summary.grossSales}</strong>
-          </div>
-          <div className="summary-row">
-            <span>Refund deductions</span>
-            <strong className="finance-negative">-{finance.summary.refunds}</strong>
-          </div>
-          <div className="summary-row">
-            <span>Platform fee</span>
-            <strong className="finance-negative">-{finance.summary.platformFee}</strong>
-          </div>
-          <div className="summary-row">
-            <span>Payout estimate</span>
-            <strong>{finance.summary.payoutEstimate}</strong>
-          </div>
-        </div>
-        <p className="page-description finance-formula-note">
-          Gross sales - refunds - platform fee = payout estimate
-        </p>
-      </article>
-
-      <article className="panel operational-card">
-        <div className="queue-list-header">
-          <h3>Finance records</h3>
-          {currentUser?.role === 'admin' ? (
+      <div className="op-control-layout finance-layout">
+        <div className="op-main-column">
+          <div className="op-toolbar">
+            <input
+              type="search"
+              placeholder="Search record, order, refund..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+            <button type="button" className="button button-secondary" onClick={() => setSearchTerm('')}>
+              Reset
+            </button>
             <button
               type="button"
-              className="button button-secondary"
+              className="button button-primary"
               onClick={() => showFeedback('Finance snapshot exported for review.', 'success')}
             >
               Export snapshot
             </button>
-          ) : (
-            <span className="queue-muted-action">Export actions are not enabled for vendors in real mode.</span>
-          )}
-        </div>
-        {finance.transactions.length === 0 ? (
-          <div className="queue-empty">
-            <p className="eyebrow">Records</p>
-            <h3>No finance records yet</h3>
-            <p className="page-description">
-              No ledger activity is recorded for this vendor scope yet. Sales, refund, fee, and payout records will appear here when synced.
-            </p>
           </div>
-        ) : (
-          <div className="queue-list">
-            {finance.transactions.map((record) => (
-              <article key={record.id} className="queue-item queue-low finance-record">
-                <header className="queue-item-top">
-                  <div className="queue-title-block">
-                    <h4>{record.category}</h4>
-                    <span className="queue-description">{record.description}</span>
-                  </div>
-                  <span className={`status-badge status-${record.status.toLowerCase().replace(/\s+/g, '-')}`}>
-                    {record.status}
-                  </span>
-                </header>
-                <div className="queue-meta">
+
+          {filteredRecords.length === 0 ? (
+            <EmptyStatePanel
+              title="No finance records in this view"
+              description="Ledger activity for sales, refunds, fees, and payout estimates will appear here when synced."
+            />
+          ) : (
+            <OperationalTable
+              columns={['Type', 'Record', 'Shopify order', 'Refund', 'Amount', 'Status', 'Date']}
+              className="finance-op-table"
+            >
+              {filteredRecords.map((record) => (
+                <div
+                  key={record.id}
+                  role="button"
+                  tabIndex={0}
+                  className={`op-table-row ${selectedRecord?.id === record.id ? 'op-row-selected' : ''}`}
+                  onClick={() => setSelectedRecordId(record.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      setSelectedRecordId(record.id);
+                    }
+                  }}
+                >
                   <span>
-                    <strong>Ledger Record:</strong> {record.id}
+                    <strong>{record.category}</strong>
+                    <small>{record.description}</small>
                   </span>
-                  <span>
-                    <strong>Lifecycle status:</strong> {record.status}
-                  </span>
-                  <span>
-                    <strong>Counterparty:</strong> {record.counterparty}
-                  </span>
-                  <span>
-                    <strong>Created At:</strong> {formatDate(record.date)}
-                  </span>
-                  <span>
-                    <strong>Type:</strong> {record.category}
-                  </span>
-                  <span>
-                    <strong>Shopify Order Number:</strong> {record.shopifyOrderNumber ?? 'Not available'}
-                  </span>
-                  <span>
-                    <strong>Shopify Order ID:</strong> {record.shopifyOrderId ?? 'Not available'}
-                  </span>
-                  <span>
-                    <strong>Shopify Refund ID:</strong> {record.shopifyRefundId ?? 'Not available'}
-                  </span>
-                </div>
-                <div className="queue-actions">
-                  <span
-                    className={`finance-amount ${
-                      record.category === 'Refund' || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'
-                    }`}
-                  >
+                  <ShopifyEntityDisplay label="Ledger" primary={record.id} secondary={record.counterparty} />
+                  <ShopifyEntityDisplay
+                    label="Shopify Order"
+                    primary={record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : 'Not available'}
+                    secondary={record.shopifyOrderId ? `ID ${record.shopifyOrderId}` : undefined}
+                  />
+                  <ShopifyEntityDisplay label="Shopify Refund" primary={record.shopifyRefundId ?? 'Not available'} />
+                  <strong className={record.category === 'Refund' || record.category === 'Adjustment' ? 'finance-negative' : 'finance-positive'}>
                     {record.category === 'Refund' || record.category === 'Adjustment' ? '-' : ''}
                     {record.amount}
+                  </strong>
+                  <StatusBadge tone={getStatusTone(record.status)}>{record.status}</StatusBadge>
+                  <span>
+                    <strong>{formatDate(record.date)}</strong>
+                    <small>Created</small>
                   </span>
                 </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </article>
+              ))}
+            </OperationalTable>
+          )}
+        </div>
+
+        <SideDetailPanel eyebrow="Ledger detail" title={selectedRecord?.category ?? 'No record selected'}>
+          {selectedRecord ? (
+            <>
+              <div className="op-detail-status-row">
+                <StatusBadge tone={getStatusTone(selectedRecord.status)}>{selectedRecord.status}</StatusBadge>
+                <strong
+                  className={
+                    selectedRecord.category === 'Refund' || selectedRecord.category === 'Adjustment'
+                      ? 'finance-negative'
+                      : 'finance-positive'
+                  }
+                >
+                  {selectedRecord.category === 'Refund' || selectedRecord.category === 'Adjustment' ? '-' : ''}
+                  {selectedRecord.amount}
+                </strong>
+              </div>
+              <div className="op-meta-grid">
+                <MetadataRow label="Ledger Record" value={selectedRecord.id} />
+                <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not available'} />
+                <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not available'} />
+                <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not available'} />
+                <MetadataRow label="Counterparty" value={selectedRecord.counterparty} />
+                <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
+              </div>
+              <div className="op-panel-section">
+                <h4>Operational source</h4>
+                <p className="page-description">
+                  Finance remains reporting-only in this phase. Records are derived from backend ledger state and related Shopify order/refund metadata where available.
+                </p>
+              </div>
+            </>
+          ) : (
+            <EmptyStatePanel title="Select a finance record" description="Choose a ledger record to inspect Shopify metadata and payout context." />
+          )}
+        </SideDetailPanel>
+      </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>

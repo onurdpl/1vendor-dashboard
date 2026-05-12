@@ -1,22 +1,33 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
+import {
+  EmptyStatePanel,
+  KPISummaryCard,
+  MetadataRow,
+  OperationalActionGroup,
+  OperationalTable,
+  SideDetailPanel,
+  StatusBadge,
+  TimelineBlock,
+} from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import { toTitleCaseLabel } from '../services/real/formatting';
+import type { OperationsQueueItem } from '../lib/api/contracts';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   }).format(new Date(value));
 }
 
-function classifyOperationalSource(item: {
-  type: string;
-  title: string;
-  description: string;
-}) {
+function classifyOperationalSource(item: OperationsQueueItem) {
   const haystack = `${item.type} ${item.title} ${item.description}`.toLowerCase();
 
   if (item.type === 'awaiting_shipment') {
@@ -29,17 +40,11 @@ function classifyOperationalSource(item: {
     return 'Pending reassignment';
   }
   if (item.type === 'refund_attention') {
-    if (haystack.includes('return request') || haystack.includes('returns/request')) {
-      return 'Pending return request';
-    }
-    return 'Refund attention';
+    return haystack.includes('return request') || haystack.includes('returns/request')
+      ? 'Pending return request'
+      : 'Refund attention';
   }
-  if (
-    haystack.includes('webhook') ||
-    haystack.includes('reconciliation') ||
-    haystack.includes('sync failed') ||
-    haystack.includes('needs attention')
-  ) {
+  if (haystack.includes('webhook') || haystack.includes('reconciliation') || haystack.includes('sync failed')) {
     return 'Webhook/reconciliation issue';
   }
 
@@ -59,10 +64,41 @@ function getLifecycleLabel(type: string) {
   return 'Operational lifecycle';
 }
 
+function getSeverityTone(severity: OperationsQueueItem['severity']) {
+  if (severity === 'critical') {
+    return 'danger' as const;
+  }
+  if (severity === 'high') {
+    return 'warning' as const;
+  }
+  if (severity === 'medium') {
+    return 'attention' as const;
+  }
+  return 'neutral' as const;
+}
+
+function getActionLabel(type: string, fallback?: string) {
+  if (type === 'pending_reassignment' || type === 'vendor_blocked') {
+    return 'Review allocation';
+  }
+  if (type === 'awaiting_shipment' || type === 'refund_attention') {
+    return 'View Shopify order';
+  }
+  return fallback ?? 'View details';
+}
+
 export function AdminOperationsQueuePage() {
   const { data: queue, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.queue(), () =>
     runtimeServices.operations.list(),
   );
+  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
+
+  const selectedItem = useMemo(() => {
+    if (!queue?.length) {
+      return null;
+    }
+    return queue.find((item) => item.id === selectedItemId) ?? queue[0];
+  }, [queue, selectedItemId]);
 
   if (isLoading) {
     return (
@@ -107,139 +143,128 @@ export function AdminOperationsQueuePage() {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
-  function getSeverityClass(severity: string) {
-    if (severity === 'critical') {
-      return 'severity-critical';
-    }
-    if (severity === 'high') {
-      return 'severity-warning';
-    }
-    if (severity === 'medium') {
-      return 'severity-attention';
-    }
-    return 'severity-normal';
-  }
-
-  function getActionLabel(type: string, fallback?: string) {
-    if (type === 'pending_reassignment') {
-      return 'Review Allocation';
-    }
-    if (type === 'vendor_blocked') {
-      return 'Review Allocation';
-    }
-    if (type === 'awaiting_shipment') {
-      return 'View Shopify Order';
-    }
-    if (type === 'refund_attention') {
-      return 'View Shopify Order';
-    }
-    return fallback ?? 'View details';
-  }
-
   return (
-    <section className="dashboard operations-workspace">
-      <div className="hero-card operational-card queue-header">
-        <div className="queue-header-copy">
+    <section className="op-page operations-control-center">
+      <div className="op-page-heading">
+        <div>
           <p className="eyebrow">Admin operations</p>
-          <h2>Operations Queue</h2>
+          <h2>Operations queue</h2>
           <p className="page-description">
-            Unified control center for reassignment risk, shipping progress, blocked allocations, and refund review.
+            Prioritized control center for shipment progress, reassignment risk, blocked allocations, and return/refund attention.
           </p>
         </div>
-        <div className="queue-health">
-          <span className="severity-chip severity-critical">Critical {criticalCount}</span>
-          <span className="severity-chip severity-warning">Warning {warningCount}</span>
-          <span className="severity-chip severity-attention">Attention {attentionCount}</span>
-          <span className="severity-chip severity-normal">Total {sortedQueue.length}</span>
+        <div className="op-heading-meta">
+          <StatusBadge tone="danger">Critical {criticalCount}</StatusBadge>
+          <StatusBadge tone="warning">Warning {warningCount}</StatusBadge>
+          <StatusBadge tone="attention">Attention {attentionCount}</StatusBadge>
         </div>
       </div>
 
-      <div className="stats-grid queue-stats">
-        <article className="stat-card operational-card">
-          <span className="stat-label">Pending reassignment</span>
-          <strong>{summary.pending_reassignment ?? 0}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Awaiting shipment</span>
-          <strong>{summary.awaiting_shipment ?? 0}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Vendor blocked</span>
-          <strong>{summary.vendor_blocked ?? 0}</strong>
-        </article>
-        <article className="stat-card operational-card">
-          <span className="stat-label">Refund attention</span>
-          <strong>{summary.refund_attention ?? 0}</strong>
-        </article>
+      <div className="op-kpi-row">
+        <KPISummaryCard label="Pending reassignment" value={summary.pending_reassignment ?? 0} detail="Allocation lifecycle" tone="warning" />
+        <KPISummaryCard label="Awaiting shipment" value={summary.awaiting_shipment ?? 0} detail="Fulfillment lifecycle" tone="attention" />
+        <KPISummaryCard label="Vendor blocked" value={summary.vendor_blocked ?? 0} detail="Vendor action required" tone="danger" />
+        <KPISummaryCard label="Refund attention" value={summary.refund_attention ?? 0} detail="Return/refund lifecycle" tone="info" />
       </div>
 
-      <article className="panel operational-card">
-        <div className="queue-list-header">
-          <h3>Operational tasks</h3>
-          <p className="page-description">Prioritized admin tasks derived from current vendor allocation workflows.</p>
+      <div className="op-control-layout operations-layout">
+        <div className="op-main-column">
+          {sortedQueue.length === 0 ? (
+            <EmptyStatePanel
+              title="No active operational issues"
+              description="Reassignment, blocked allocation, shipment, and refund queues are currently clear."
+            />
+          ) : (
+            <OperationalTable
+              columns={['Urgency', 'Source', 'Vendor', 'Lifecycle', 'Shopify order', 'Status', 'Created', 'Action']}
+              className="operations-op-table"
+            >
+              {sortedQueue.map((item) => (
+                <div
+                  role="button"
+                  tabIndex={0}
+                  key={item.id}
+                  className={`op-table-row ${selectedItem?.id === item.id ? 'op-row-selected' : ''}`}
+                  onClick={() => setSelectedItemId(item.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      setSelectedItemId(item.id);
+                    }
+                  }}
+                >
+                  <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                  <span>
+                    <strong>{classifyOperationalSource(item)}</strong>
+                    <small>{item.title}</small>
+                  </span>
+                  <span>
+                    <strong>{item.vendorName ?? item.vendorId}</strong>
+                    <small>{item.vendorId}</small>
+                  </span>
+                  <span>
+                    <strong>{getLifecycleLabel(item.type)}</strong>
+                    <small>{toTitleCaseLabel(item.type)}</small>
+                  </span>
+                  <span>{item.relatedShopifyOrderId ?? 'Not available'}</span>
+                  <StatusBadge tone="info">{toTitleCaseLabel(item.status)}</StatusBadge>
+                  <span>{formatDate(item.createdAt)}</span>
+                  <OperationalActionGroup>
+                    {item.actionTo ? (
+                      <Link className="button button-secondary button-link" to={item.actionTo}>
+                        {getActionLabel(item.type, item.actionLabel)}
+                      </Link>
+                    ) : (
+                      <span className="queue-muted-action">No action</span>
+                    )}
+                  </OperationalActionGroup>
+                </div>
+              ))}
+            </OperationalTable>
+          )}
         </div>
-        {sortedQueue.length === 0 ? (
-          <div className="queue-empty">
-            <p className="eyebrow">Queue health</p>
-            <h3>No active operational issues</h3>
-            <p className="page-description">
-              Reassignment, blocked allocation, shipment, and refund queues are currently clear.
-            </p>
-          </div>
-        ) : (
-          <div className="queue-list">
-            {sortedQueue.map((item) => (
-              <article key={item.id} className={`queue-item queue-${item.severity}`}>
-                <header className="queue-item-top">
-                  <div className="queue-title-block">
-                    <span className={`severity-chip ${getSeverityClass(item.severity)}`}>{item.severity}</span>
-                    <h4>{item.title}</h4>
-                  </div>
-                  <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>
-                    {toTitleCaseLabel(item.status)}
-                  </span>
-                </header>
-                <p className="queue-description">{item.description}</p>
-                <div className="queue-meta">
-                  <span>
-                    <strong>Source:</strong> {classifyOperationalSource(item)}
-                  </span>
-                  <span>
-                    <strong>Lifecycle:</strong> {getLifecycleLabel(item.type)}
-                  </span>
-                  <span>
-                    <strong>Queue type:</strong> {toTitleCaseLabel(item.type)}
-                  </span>
-                  <span>
-                    <strong>Vendor:</strong> {item.vendorName ?? item.vendorId}
-                  </span>
-                  <span>
-                    <strong>Allocation ID:</strong> {item.relatedOrderId ?? 'Not available'}
-                  </span>
-                  <span>
-                    <strong>Shopify Order ID:</strong> {item.relatedShopifyOrderId ?? 'Not available'}
-                  </span>
-                  <span>
-                    <strong>Created At:</strong> {formatDate(item.createdAt)}
-                  </span>
-                </div>
-                <div className="queue-actions">
-                  {item.actionTo ? (
-                    <Link
-                      className={item.type === 'pending_reassignment' || item.type === 'vendor_blocked' ? 'button button-primary' : 'button button-secondary'}
-                      to={item.actionTo}
-                    >
-                      {getActionLabel(item.type, item.actionLabel)}
-                    </Link>
-                  ) : (
-                    <span className="queue-muted-action">{item.actionLabel ?? 'No action available'}</span>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </article>
+
+        <SideDetailPanel
+          eyebrow="Selected task"
+          title={selectedItem ? classifyOperationalSource(selectedItem) : 'No task selected'}
+          action={
+            selectedItem?.actionTo ? (
+              <Link className="button button-primary button-link" to={selectedItem.actionTo}>
+                Open
+              </Link>
+            ) : null
+          }
+        >
+          {selectedItem ? (
+            <>
+              <div className="op-detail-status-row">
+                <StatusBadge tone={getSeverityTone(selectedItem.severity)}>{selectedItem.severity}</StatusBadge>
+                <StatusBadge tone="info">{toTitleCaseLabel(selectedItem.status)}</StatusBadge>
+              </div>
+              <p className="page-description">{selectedItem.description}</p>
+              <div className="op-meta-grid">
+                <MetadataRow label="Lifecycle" value={getLifecycleLabel(selectedItem.type)} />
+                <MetadataRow label="Queue type" value={toTitleCaseLabel(selectedItem.type)} />
+                <MetadataRow label="Vendor" value={selectedItem.vendorName ?? selectedItem.vendorId} />
+                <MetadataRow label="Allocation ID" value={selectedItem.relatedOrderId ?? 'Not available'} />
+                <MetadataRow label="Shopify Order ID" value={selectedItem.relatedShopifyOrderId ?? 'Not available'} />
+                <MetadataRow label="Created At" value={formatDate(selectedItem.createdAt)} />
+              </div>
+              <div className="op-panel-section">
+                <h4>Operational path</h4>
+                <TimelineBlock
+                  items={[
+                    { label: 'Created', at: formatDate(selectedItem.createdAt) },
+                    { label: classifyOperationalSource(selectedItem), detail: getLifecycleLabel(selectedItem.type) },
+                    { label: selectedItem.actionLabel ?? 'Review', detail: selectedItem.actionTo ? 'Linked action available' : 'No direct action available' },
+                  ]}
+                />
+              </div>
+            </>
+          ) : (
+            <EmptyStatePanel title="Select a queue item" description="Choose a task to inspect source, severity, and recommended action." />
+          )}
+        </SideDetailPanel>
+      </div>
     </section>
   );
 }

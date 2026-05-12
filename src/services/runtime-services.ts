@@ -213,5 +213,16 @@ export const runtimeServices = {
             processingStatus: 'mock_only',
             message: `Replay is not available in mock mode for ${webhookEventId}.`,
           }),
+    recover: (webhookEventId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.recoverWebhook(webhookEventId)
+        : Promise.resolve({
+            ok: true as const,
+            topic: 'mock',
+            action: 'mock_only',
+            processingStatus: 'mock_only',
+            recoveryStatus: 'not_recoverable' as const,
+            message: `Recover is not available in mock mode for ${webhookEventId}.`,
+          }),
   },
 } as const;
