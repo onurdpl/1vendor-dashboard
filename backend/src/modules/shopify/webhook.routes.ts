@@ -18,6 +18,11 @@ import type {
   ReturnLifecycleTopic,
   ReturnLifecycleWebhookPayload,
 } from './return-lifecycle-ingestion.types.js';
+import { ingestFulfillmentWebhook } from './fulfillment-ingestion.service.js';
+import type {
+  FulfillmentWebhookPayload,
+  FulfillmentWebhookTopic,
+} from './fulfillment-ingestion.types.js';
 import { prisma } from '../../db/prisma.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
@@ -176,6 +181,102 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         shopifyReturnGid: ingestionResult.shopifyReturnGid,
         affectedRecordCount: ingestionResult.affectedRecordCount,
         topic,
+      });
+    });
+  };
+
+  const registerFulfillmentLifecycleRoute = (
+    path: string,
+    topic: FulfillmentWebhookTopic,
+  ) => {
+    app.post(path, async (request, reply) => {
+      const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
+      const rawBody = rawBodyBuffer.toString('utf8');
+      const headers = getShopifyWebhookHeaders(request);
+      const isValid = verifyShopifyWebhookHmac(
+        rawBodyBuffer,
+        headers.hmac,
+        resolveWebhookSecret(topic),
+      );
+
+      if (!isValid) {
+        logWebhookVerificationFailure({
+          path,
+          topic,
+          contentType: request.headers['content-type'] as string | undefined,
+          rawBodyBuffer,
+          hasHmacHeader: !!headers.hmac,
+        });
+
+        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      }
+
+      if (!env.DATABASE_URL) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'accepted',
+          processingStatus: 'deferred',
+          topic,
+        });
+      }
+
+      const idempotencyResult = await getOrCreateWebhookEvent({
+        topic,
+        shopDomain: headers.shopDomain,
+        webhookId: headers.webhookId,
+        rawBody,
+      });
+
+      if (idempotencyResult.isDuplicate) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'duplicate_ignored',
+          topic,
+        });
+      }
+
+      let ingestionResult;
+      try {
+        await markWebhookProcessing(idempotencyResult.event.id);
+        ingestionResult = await ingestFulfillmentWebhook(env, {
+          event: idempotencyResult.event,
+          payload: (request.body ?? {}) as FulfillmentWebhookPayload,
+          topic,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Shopify ${topic} fulfillment sync failed.`;
+        await markWebhookFailed(idempotencyResult.event.id, message);
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          topic,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message,
+        });
+      }
+
+      if (!ingestionResult.ok) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        });
+      }
+
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        topic,
+        action: ingestionResult.action,
+        processingStatus: ingestionResult.processingStatus,
+        shopifyOrderId: ingestionResult.shopifyOrderId,
+        affectedAllocationCount: ingestionResult.affectedAllocationCount,
       });
     });
   };
@@ -391,4 +492,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-decline', 'returns/decline');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-close', 'returns/close');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-cancel', 'returns/cancel');
+  registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillments-create', 'fulfillments/create');
+  registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillments-update', 'fulfillments/update');
+  registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillment-events-create', 'fulfillment_events/create');
 }

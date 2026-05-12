@@ -74,6 +74,7 @@ export type WebhookReplayResponse = {
   allocationCount?: number;
   refundAllocationCount?: number;
   affectedRecordCount?: number;
+  affectedAllocationCount?: number;
   message?: string;
 };
 

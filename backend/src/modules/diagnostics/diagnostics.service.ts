@@ -9,9 +9,11 @@ import {
   applyReturnLifecycleStatusWebhook,
   ingestReturnRequestWebhook,
 } from '../shopify/return-lifecycle-ingestion.service.js';
+import { ingestFulfillmentWebhook } from '../shopify/fulfillment-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type { ShopifyRefundsCreateWebhookPayload } from '../shopify/refund-ingestion.types.js';
 import type { ReturnLifecycleWebhookPayload } from '../shopify/return-lifecycle-ingestion.types.js';
+import type { FulfillmentWebhookPayload, FulfillmentWebhookTopic } from '../shopify/fulfillment-ingestion.types.js';
 import type {
   AdminWebhookDiagnosticDetail,
   AdminWebhookDiagnosticsEvent,
@@ -429,6 +431,35 @@ async function processWebhookEvent(
         };
   }
 
+  if (
+    event.topic === 'fulfillments/create' ||
+    event.topic === 'fulfillments/update' ||
+    event.topic === 'fulfillment_events/create'
+  ) {
+    const ingestionResult = await ingestFulfillmentWebhook(env, {
+      event,
+      payload: payload as FulfillmentWebhookPayload,
+      topic: event.topic as FulfillmentWebhookTopic,
+    });
+
+    return ingestionResult.ok
+      ? {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          shopifyOrderId: ingestionResult.shopifyOrderId,
+          affectedAllocationCount: ingestionResult.affectedAllocationCount,
+        }
+      : {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        };
+  }
+
   return {
     ok: true,
     topic: event.topic,
@@ -459,7 +490,13 @@ export async function replayWebhookEvent(
     };
   }
 
-  if (event.topic !== 'orders/create' && event.topic !== 'refunds/create') {
+  if (
+    event.topic !== 'orders/create' &&
+    event.topic !== 'refunds/create' &&
+    event.topic !== 'fulfillments/create' &&
+    event.topic !== 'fulfillments/update' &&
+    event.topic !== 'fulfillment_events/create'
+  ) {
     return {
       ok: false,
       statusCode: 409,
@@ -661,6 +698,9 @@ export async function recoverWebhookEvent(
     'returns/decline',
     'returns/close',
     'returns/cancel',
+    'fulfillments/create',
+    'fulfillments/update',
+    'fulfillment_events/create',
   ]);
 
   if (!supportedTopics.has(event.topic)) {

@@ -37,7 +37,10 @@ const shopifyReturnWebhookSecret =
   process.env.SHOPIFY_RETURN_WEBHOOK_SECRET ||
   loadEnvFile(path.join(process.cwd(), '.env')).SHOPIFY_RETURN_WEBHOOK_SECRET ||
   shopifyWebhookSecret;
-const backendEnv = loadEnvFile(path.join(process.cwd(), '.env'));
+const backendEnv = {
+  ...loadEnvFile(path.join(process.cwd(), '.env')),
+  ...process.env,
+};
 const prisma = backendEnv.DATABASE_URL
   ? new PrismaClient({
       datasources: {
@@ -73,8 +76,9 @@ async function waitForReady(url, timeoutMs = 15000) {
 
 async function runSmoke() {
   const runId = Date.now().toString();
+  const smokeOrderId = String(9000000000 + Number(runId.slice(-6)));
   const sellerInfoMap = JSON.stringify({
-    '9001': {
+    [smokeOrderId]: {
       'DH2987-100-41': 'yalispor',
       'YALI-NOT-RETURNED-42': 'yalispor',
       'DH2987-100-40,5': 'sporjinal',
@@ -85,7 +89,7 @@ async function runSmoke() {
   });
   const mockReturnDetails = JSON.stringify({
     'gid://shopify/Return/777001': {
-      orderGid: 'gid://shopify/Order/9001',
+      orderGid: `gid://shopify/Order/${smokeOrderId}`,
       lineItems: [
         {
           returnLineItemGid: `gid://shopify/ReturnLineItem/rli-a-${runId}`,
@@ -103,7 +107,7 @@ async function runSmoke() {
     },
   });
   const mockFulfillmentOrders = JSON.stringify({
-    '9001': [
+    [smokeOrderId]: [
       {
         id: 'fo-9001-yalispor',
         status: 'open',
@@ -128,6 +132,36 @@ async function runSmoke() {
       },
     ],
   });
+  const mockOrderFulfillmentState = JSON.stringify({
+    [smokeOrderId]: {
+      orderName: `#${smokeOrderId}`,
+      displayFulfillmentStatus: 'PARTIALLY_FULFILLED',
+      fulfillments: [
+        {
+          id: `gid://shopify/Fulfillment/fulfillment-${runId}`,
+          sourceFulfillmentId: `fulfillment-${runId}`,
+          status: 'SUCCESS',
+          createdAt: '2026-05-11T12:45:00.000Z',
+          updatedAt: '2026-05-11T12:46:00.000Z',
+          trackingInfo: [],
+          lineItems: [
+            {
+              lineItemGid: `gid://shopify/LineItem/li-a-${runId}`,
+              sourceLineItemId: `li-a-${runId}`,
+              sku: 'DH2987-100-41',
+              quantity: 1,
+            },
+            {
+              lineItemGid: `gid://shopify/LineItem/li-b-${runId}`,
+              sourceLineItemId: `li-b-${runId}`,
+              sku: 'DH2987-100-40,5',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    },
+  });
   const child = spawn(process.execPath, ['dist/server.js'], {
     cwd: process.cwd(),
     env: {
@@ -138,6 +172,7 @@ async function runSmoke() {
       SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
       SHOPIFY_MOCK_RETURN_DETAILS: mockReturnDetails,
+      SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE: mockOrderFulfillmentState,
       SHOPIFY_MOCK_FULFILLMENT_ORDERS: mockFulfillmentOrders,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -258,9 +293,9 @@ async function runSmoke() {
     }
 
     const webhookPayload = JSON.stringify({
-      id: 9001,
-      order_number: 9001,
-      name: '#9001',
+      id: smokeOrderId,
+      order_number: Number(smokeOrderId),
+      name: `#${smokeOrderId}`,
       total_price: '255.00',
       created_at: '2026-05-11T12:00:00.000Z',
       customer: {
@@ -327,7 +362,7 @@ async function runSmoke() {
       throw new Error(`/webhooks/shopify/orders-create first delivery payload invalid: ${JSON.stringify(validWebhookJson)}`);
     }
 
-    const ingestedOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/9001`, {
+    const ingestedOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/${smokeOrderId}`, {
       headers: {
         'content-type': 'application/json',
         Authorization: `Bearer ${(await (await fetch(`${baseUrl}/auth/login`, {
@@ -341,15 +376,15 @@ async function runSmoke() {
       },
     });
     if (!ingestedOrderBreakdownResponse.ok) {
-      throw new Error(`/admin/orders/9001 after ingestion failed with ${ingestedOrderBreakdownResponse.status}`);
+      throw new Error(`/admin/orders/${smokeOrderId} after ingestion failed with ${ingestedOrderBreakdownResponse.status}`);
     }
     const ingestedOrderBreakdownJson = await ingestedOrderBreakdownResponse.json();
     if (!Array.isArray(ingestedOrderBreakdownJson?.allocations) || ingestedOrderBreakdownJson.allocations.length !== 2) {
-      throw new Error(`/admin/orders/9001 expected two allocations, got ${JSON.stringify(ingestedOrderBreakdownJson)}`);
+      throw new Error(`/admin/orders/${smokeOrderId} expected two allocations, got ${JSON.stringify(ingestedOrderBreakdownJson)}`);
     }
     const allocationVendorIds = new Set(ingestedOrderBreakdownJson.allocations.map((allocation) => allocation.vendorId));
     if (!allocationVendorIds.has('yalispor') || !allocationVendorIds.has('sporjinal')) {
-      throw new Error(`/admin/orders/9001 missing expected vendor allocations: ${JSON.stringify(ingestedOrderBreakdownJson)}`);
+      throw new Error(`/admin/orders/${smokeOrderId} missing expected vendor allocations: ${JSON.stringify(ingestedOrderBreakdownJson)}`);
     }
 
     const duplicateWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
@@ -497,8 +532,8 @@ async function runSmoke() {
       admin_graphql_api_id: 'gid://shopify/Return/777001',
       status: 'requested',
       order: {
-        id: 9001,
-        admin_graphql_api_id: 'gid://shopify/Order/9001',
+        id: smokeOrderId,
+        admin_graphql_api_id: `gid://shopify/Order/${smokeOrderId}`,
       },
     });
     const returnLifecycleHmac = createHmac('sha256', shopifyReturnWebhookSecret)
@@ -723,10 +758,10 @@ async function runSmoke() {
     if (!Array.isArray(adminOrdersYali) || adminOrdersYali.length === 0) {
       throw new Error('/orders admin yalispor returned empty or invalid payload.');
     }
-    if (!adminOrdersYali.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'yalispor')) {
-      throw new Error('/orders admin yalispor did not include ingested Shopify order 9001 allocation.');
+    if (!adminOrdersYali.some((order) => order.sourceShopifyOrderId === smokeOrderId && order.vendorId === 'yalispor')) {
+      throw new Error(`/orders admin yalispor did not include ingested Shopify order ${smokeOrderId} allocation.`);
     }
-    const ingestedYalisporAllocation = adminOrdersYali.find((order) => order.sourceShopifyOrderId === '9001');
+    const ingestedYalisporAllocation = adminOrdersYali.find((order) => order.sourceShopifyOrderId === smokeOrderId);
     if (!ingestedYalisporAllocation?.id) {
       throw new Error('Unable to resolve yalispor ingested allocation from /orders payload.');
     }
@@ -741,10 +776,10 @@ async function runSmoke() {
       throw new Error(`/orders admin sporjinal failed with ${adminOrdersSporjinalResponse.status}`);
     }
     const adminOrdersSporjinal = await adminOrdersSporjinalResponse.json();
-    if (!Array.isArray(adminOrdersSporjinal) || !adminOrdersSporjinal.some((order) => order.sourceShopifyOrderId === '9001' && order.vendorId === 'sporjinal')) {
-      throw new Error('/orders admin sporjinal did not include ingested Shopify order 9001 allocation.');
+    if (!Array.isArray(adminOrdersSporjinal) || !adminOrdersSporjinal.some((order) => order.sourceShopifyOrderId === smokeOrderId && order.vendorId === 'sporjinal')) {
+      throw new Error(`/orders admin sporjinal did not include ingested Shopify order ${smokeOrderId} allocation.`);
     }
-    const ingestedSporjinalAllocation = adminOrdersSporjinal.find((order) => order.sourceShopifyOrderId === '9001');
+    const ingestedSporjinalAllocation = adminOrdersSporjinal.find((order) => order.sourceShopifyOrderId === smokeOrderId);
     if (!ingestedSporjinalAllocation?.id) {
       throw new Error('Unable to resolve sporjinal ingested allocation from /orders payload.');
     }
@@ -764,7 +799,7 @@ async function runSmoke() {
 
     const refundWebhookPayload = JSON.stringify({
       id: `rf-${runId}`,
-      order_id: 9001,
+      order_id: smokeOrderId,
       created_at: '2026-05-11T12:30:00.000Z',
       note: 'Customer requested refund',
       refund_line_items: [
@@ -848,7 +883,7 @@ async function runSmoke() {
 
     const unresolvedRefundWebhookPayload = JSON.stringify({
       id: `rf-fail-${runId}`,
-      order_id: 9001,
+      order_id: smokeOrderId,
       refund_line_items: [
         {
           id: `rli-fail-${runId}`,
@@ -905,6 +940,165 @@ async function runSmoke() {
     if (invalidRefundWebhookResponse.status !== 401) {
       throw new Error(
         `/webhooks/shopify/refunds-create invalid signature expected 401, got ${invalidRefundWebhookResponse.status}`,
+      );
+    }
+
+    const fulfillmentWebhookPayload = JSON.stringify({
+      id: `fulfillment-${runId}`,
+      order_id: smokeOrderId,
+      status: 'success',
+    });
+    const fulfillmentWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(fulfillmentWebhookPayload, 'utf8')
+      .digest('base64');
+    const fulfillmentWebhookHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': fulfillmentWebhookHmac,
+      'x-shopify-topic': 'fulfillments/create',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-webhook-id': `smoke-fulfillment-${runId}`,
+    };
+    const validFulfillmentWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillments-create`, {
+      method: 'POST',
+      headers: fulfillmentWebhookHeaders,
+      body: fulfillmentWebhookPayload,
+    });
+    if (validFulfillmentWebhookResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/fulfillments-create valid signature expected 202, got ${validFulfillmentWebhookResponse.status}`,
+      );
+    }
+    const validFulfillmentWebhookJson = await validFulfillmentWebhookResponse.json();
+    if (
+      validFulfillmentWebhookJson?.duplicate !== false ||
+      validFulfillmentWebhookJson?.action !== 'accepted' ||
+      validFulfillmentWebhookJson?.processingStatus !== 'processed' ||
+      validFulfillmentWebhookJson?.affectedAllocationCount !== 2
+    ) {
+      throw new Error(
+        `/webhooks/shopify/fulfillments-create payload invalid: ${JSON.stringify(validFulfillmentWebhookJson)}`,
+      );
+    }
+
+    const fulfillmentDuplicateResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillments-create`, {
+      method: 'POST',
+      headers: fulfillmentWebhookHeaders,
+      body: fulfillmentWebhookPayload,
+    });
+    if (fulfillmentDuplicateResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/fulfillments-create duplicate expected 202, got ${fulfillmentDuplicateResponse.status}`,
+      );
+    }
+    const fulfillmentDuplicateJson = await fulfillmentDuplicateResponse.json();
+    if (fulfillmentDuplicateJson?.duplicate !== true || fulfillmentDuplicateJson?.action !== 'duplicate_ignored') {
+      throw new Error(
+        `/webhooks/shopify/fulfillments-create duplicate payload invalid: ${JSON.stringify(fulfillmentDuplicateJson)}`,
+      );
+    }
+
+    const yalisporAfterInboundResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!yalisporAfterInboundResponse.ok) {
+      throw new Error(`/orders/:orderId yalispor after inbound fulfillment failed with ${yalisporAfterInboundResponse.status}`);
+    }
+    const yalisporAfterInbound = await yalisporAfterInboundResponse.json();
+    if (
+      yalisporAfterInbound.fulfillmentStatus !== 'partially_fulfilled' ||
+      yalisporAfterInbound.shippingStatus !== 'partially_shipped' ||
+      yalisporAfterInbound.trackingNumber !== null ||
+      yalisporAfterInbound.carrier !== null
+    ) {
+      throw new Error(
+        `/orders/:orderId yalispor inbound fulfillment should be partial without tracking: ${JSON.stringify(yalisporAfterInbound)}`,
+      );
+    }
+
+    const sporjinalAfterInboundResponse = await fetch(`${baseUrl}/orders/${ingestedSporjinalAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (!sporjinalAfterInboundResponse.ok) {
+      throw new Error(`/orders/:orderId sporjinal after inbound fulfillment failed with ${sporjinalAfterInboundResponse.status}`);
+    }
+    const sporjinalAfterInbound = await sporjinalAfterInboundResponse.json();
+    if (
+      sporjinalAfterInbound.fulfillmentStatus !== 'fulfilled' ||
+      sporjinalAfterInbound.shippingStatus !== 'shipped'
+    ) {
+      throw new Error(
+        `/orders/:orderId sporjinal inbound fulfillment should be fulfilled: ${JSON.stringify(sporjinalAfterInbound)}`,
+      );
+    }
+
+    const fulfillmentEventPayload = JSON.stringify({
+      id: `fulfillment-event-${runId}`,
+      order_id: smokeOrderId,
+      fulfillment_id: `fulfillment-${runId}`,
+      status: 'delivered',
+    });
+    const fulfillmentEventHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(fulfillmentEventPayload, 'utf8')
+      .digest('base64');
+    const fulfillmentEventResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillment-events-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': fulfillmentEventHmac,
+        'x-shopify-topic': 'fulfillment_events/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-fulfillment-event-${runId}`,
+      },
+      body: fulfillmentEventPayload,
+    });
+    if (fulfillmentEventResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-events-create valid signature expected 202, got ${fulfillmentEventResponse.status}`,
+      );
+    }
+    const fulfillmentEventJson = await fulfillmentEventResponse.json();
+    if (
+      fulfillmentEventJson?.duplicate !== false ||
+      fulfillmentEventJson?.action !== 'accepted' ||
+      fulfillmentEventJson?.processingStatus !== 'processed'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-events-create payload invalid: ${JSON.stringify(fulfillmentEventJson)}`,
+      );
+    }
+
+    const sporjinalDeliveredResponse = await fetch(`${baseUrl}/orders/${ingestedSporjinalAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    const sporjinalDelivered = await sporjinalDeliveredResponse.json();
+    if (sporjinalDelivered?.shippingStatus !== 'delivered') {
+      throw new Error(
+        `/orders/:orderId fulfillment event should map sporjinal shippingStatus delivered: ${JSON.stringify(sporjinalDelivered)}`,
+      );
+    }
+
+    const invalidFulfillmentWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillments-update`, {
+      method: 'POST',
+      headers: {
+        ...fulfillmentWebhookHeaders,
+        'x-shopify-topic': 'fulfillments/update',
+        'x-shopify-hmac-sha256': 'invalid-signature',
+        'x-shopify-webhook-id': `smoke-fulfillment-invalid-${runId}`,
+      },
+      body: fulfillmentWebhookPayload,
+    });
+    if (invalidFulfillmentWebhookResponse.status !== 401) {
+      throw new Error(
+        `/webhooks/shopify/fulfillments-update invalid signature expected 401, got ${invalidFulfillmentWebhookResponse.status}`,
       );
     }
 

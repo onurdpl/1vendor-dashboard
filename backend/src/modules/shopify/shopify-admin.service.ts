@@ -8,6 +8,7 @@ import type {
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
+  ShopifyOrderFulfillmentState,
   ShopifyReturnLineItem,
 } from './shopify-admin.types.js';
 
@@ -61,8 +62,43 @@ type ShopifyReturnQueryResponse = {
   } | null;
 };
 
+type ShopifyOrderFulfillmentStateQueryResponse = {
+  order: {
+    id: string;
+    name: string | null;
+    displayFulfillmentStatus: string | null;
+    fulfillments: Array<{
+      id: string;
+      status: string | null;
+      createdAt: string | null;
+      updatedAt: string | null;
+      trackingInfo: Array<{
+        company: string | null;
+        number: string | null;
+        url: string | null;
+      }>;
+      fulfillmentLineItems: {
+        edges: Array<{
+          node: {
+            quantity: number | null;
+            lineItem: {
+              id: string;
+              sku: string | null;
+            } | null;
+          };
+        }>;
+      };
+    }>;
+  } | null;
+};
+
 function toShopifyOrderGid(orderId: string) {
   return `gid://shopify/Order/${orderId}`;
+}
+
+function extractShopifyGidTail(gid: string) {
+  const tail = gid.split('/').at(-1)?.trim() ?? '';
+  return tail || null;
 }
 
 function parseSellerInfoValue(value: string | null): SellerInfoMap | null {
@@ -205,9 +241,87 @@ function parseMockReturnDetailsByReturnGid(
   }, {});
 }
 
+function parseMockOrderFulfillmentStateByOrderId(
+  rawValue: string | undefined,
+): Record<string, ShopifyOrderFulfillmentState> {
+  if (!rawValue) {
+    return {};
+  }
+
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE must be a JSON object keyed by Shopify order id.');
+  }
+
+  return Object.entries(parsed).reduce<Record<string, ShopifyOrderFulfillmentState>>((acc, [orderId, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return acc;
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    const fulfillments = Array.isArray(objectValue.fulfillments) ? objectValue.fulfillments : [];
+
+    acc[orderId] = {
+      orderGid: typeof objectValue.orderGid === 'string' ? objectValue.orderGid : toShopifyOrderGid(orderId),
+      sourceShopifyOrderId: orderId,
+      orderName: typeof objectValue.orderName === 'string' ? objectValue.orderName : null,
+      displayFulfillmentStatus:
+        typeof objectValue.displayFulfillmentStatus === 'string' ? objectValue.displayFulfillmentStatus : null,
+      fulfillments: fulfillments
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => {
+          const fulfillment = entry as Record<string, unknown>;
+          const lineItems = Array.isArray(fulfillment.lineItems) ? fulfillment.lineItems : [];
+          const trackingInfo = Array.isArray(fulfillment.trackingInfo) ? fulfillment.trackingInfo : [];
+
+          return {
+            id: String(fulfillment.id ?? ''),
+            sourceFulfillmentId: String(fulfillment.sourceFulfillmentId ?? fulfillment.id ?? ''),
+            status: typeof fulfillment.status === 'string' ? fulfillment.status : 'SUCCESS',
+            createdAt: typeof fulfillment.createdAt === 'string' ? fulfillment.createdAt : null,
+            updatedAt: typeof fulfillment.updatedAt === 'string' ? fulfillment.updatedAt : null,
+            trackingInfo: trackingInfo
+              .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+              .map((item) => {
+                const tracking = item as Record<string, unknown>;
+                return {
+                  company: tracking.company === null || tracking.company === undefined ? null : String(tracking.company),
+                  number: tracking.number === null || tracking.number === undefined ? null : String(tracking.number),
+                  url: tracking.url === null || tracking.url === undefined ? null : String(tracking.url),
+                };
+              }),
+            lineItems: lineItems
+              .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+              .map((item) => {
+                const lineItem = item as Record<string, unknown>;
+                const lineItemGid = String(lineItem.lineItemGid ?? '');
+                return {
+                  lineItemGid,
+                  sourceLineItemId: String(lineItem.sourceLineItemId ?? extractShopifyGidTail(lineItemGid) ?? lineItemGid),
+                  sku: lineItem.sku === null || lineItem.sku === undefined ? null : String(lineItem.sku),
+                  quantity:
+                    typeof lineItem.quantity === 'number' && Number.isFinite(lineItem.quantity)
+                      ? lineItem.quantity
+                      : 1,
+                };
+              })
+              .filter((item) => item.sourceLineItemId || item.lineItemGid),
+          };
+        })
+        .filter((entry) => entry.id),
+      source: 'mock',
+    };
+
+    return acc;
+  }, {});
+}
+
 export function createShopifyAdminService(env: AppEnv) {
   const mockSellerInfoByOrderId = parseMockSellerInfoByOrderId(env.SHOPIFY_MOCK_SELLER_INFO);
   const mockReturnDetailsByReturnGid = parseMockReturnDetailsByReturnGid(env.SHOPIFY_MOCK_RETURN_DETAILS);
+  const mockOrderFulfillmentStateByOrderId = parseMockOrderFulfillmentStateByOrderId(
+    env.SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE,
+  );
   const mockFulfillmentOrdersByOrderId = parseMockFulfillmentOrdersByOrderId(env.SHOPIFY_MOCK_FULFILLMENT_ORDERS);
   const mockFailAllocationIds = new Set(
     (env.SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS || '')
@@ -436,6 +550,110 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function fetchOrderFulfillmentState(shopifyOrderId: string): Promise<ShopifyOrderFulfillmentState> {
+    if (mockOrderFulfillmentStateByOrderId[shopifyOrderId]) {
+      return mockOrderFulfillmentStateByOrderId[shopifyOrderId];
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify order fulfillment state sync is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query OrderFulfillmentState($id: ID!) {
+              order(id: $id) {
+                id
+                name
+                displayFulfillmentStatus
+                fulfillments(first: 20) {
+                  id
+                  status
+                  createdAt
+                  updatedAt
+                  trackingInfo {
+                    company
+                    number
+                    url
+                  }
+                  fulfillmentLineItems(first: 50) {
+                    edges {
+                      node {
+                        quantity
+                        lineItem {
+                          id
+                          sku
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            id: toShopifyOrderGid(shopifyOrderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify order fulfillment state fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyOrderFulfillmentStateQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify order fulfillment state fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      throw new Error(`Shopify order fulfillment state was not found for order ${shopifyOrderId}.`);
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: extractShopifyGidTail(order.id) ?? shopifyOrderId,
+      orderName: order.name,
+      displayFulfillmentStatus: order.displayFulfillmentStatus,
+      fulfillments: (order.fulfillments || []).map((fulfillment) => ({
+        id: fulfillment.id,
+        sourceFulfillmentId: extractShopifyGidTail(fulfillment.id) ?? fulfillment.id,
+        status: fulfillment.status ?? 'UNKNOWN',
+        createdAt: fulfillment.createdAt,
+        updatedAt: fulfillment.updatedAt,
+        trackingInfo: (fulfillment.trackingInfo || []).map((tracking) => ({
+          company: tracking.company,
+          number: tracking.number,
+          url: tracking.url,
+        })),
+        lineItems: (fulfillment.fulfillmentLineItems.edges || [])
+          .map((edge) => {
+            const lineItemGid = edge.node.lineItem?.id ?? '';
+            return {
+              lineItemGid,
+              sourceLineItemId: extractShopifyGidTail(lineItemGid) ?? lineItemGid,
+              sku: edge.node.lineItem?.sku ?? null,
+              quantity: edge.node.quantity ?? 1,
+            };
+          })
+          .filter((lineItem) => lineItem.sourceLineItemId || lineItem.lineItemGid),
+      })),
+      source: 'shopify_admin',
+    };
+  }
+
   async function createFulfillmentTracking(
     input: CreateFulfillmentTrackingInput,
   ): Promise<CreateFulfillmentTrackingResult> {
@@ -504,6 +722,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchOrderSellerInfo,
     fetchReturnDetails,
     fetchFulfillmentOrders,
+    fetchOrderFulfillmentState,
     createFulfillmentTracking,
   };
 }

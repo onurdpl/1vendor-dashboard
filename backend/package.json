@@ -15,7 +15,8 @@
     "db:seed": "prisma db seed",
     "smoke": "node scripts/smoke.mjs",
     "shopify:readiness": "node scripts/shopify-readiness.mjs",
-    "shopify:return-webhooks:register": "node scripts/shopify-register-return-webhooks.mjs"
+    "shopify:return-webhooks:register": "node scripts/shopify-register-return-webhooks.mjs",
+    "shopify:fulfillment-webhooks:register": "node scripts/shopify-register-fulfillment-webhooks.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

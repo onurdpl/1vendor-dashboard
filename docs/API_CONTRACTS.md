@@ -76,6 +76,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - `POST /webhooks/shopify/returns-decline` (lifecycle status update)
 - `POST /webhooks/shopify/returns-close` (lifecycle status update)
 - `POST /webhooks/shopify/returns-cancel` (lifecycle status update)
+- `POST /webhooks/shopify/fulfillments-create` (inbound fulfillment sync)
+- `POST /webhooks/shopify/fulfillments-update` (inbound fulfillment sync)
+- `POST /webhooks/shopify/fulfillment-events-create` (inbound delivery/event sync)
 - `POST /fulfillments/:allocationId/tracking`
 
 Webhook processing lifecycle states:
@@ -392,6 +395,40 @@ Webhook processing lifecycle states:
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/cancel" }`
 - Expected `202` behavior: verified payload updates existing vendor-scoped pending return records to lifecycle status `cancelled`.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+
+### POST /webhooks/shopify/fulfillments-create
+
+- Purpose: receive verified Shopify `FULFILLMENTS_CREATE` webhook envelopes and sync canonical Shopify fulfillment state into vendor allocations.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "fulfillments/create", shopifyOrderId, affectedAllocationCount }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "fulfillments/create" }`
+  - needs attention: `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
+- Expected `202` behavior: valid HMAC signature accepted whether processing succeeds, is ignored as duplicate, or is parked in needs-attention state.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Sync semantics:
+  - webhook payload is treated as a trigger/envelope
+  - backend fetches canonical order fulfillment state through Shopify Admin GraphQL
+  - allocations are updated only when their exact Shopify line item ids appear in fulfilled line items
+  - tracking fields are persisted only when Shopify provides `trackingInfo`
+
+### POST /webhooks/shopify/fulfillments-update
+
+- Purpose: receive verified Shopify `FULFILLMENTS_UPDATE` webhook envelopes and refresh canonical fulfillment/tracking state.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Response semantics match `POST /webhooks/shopify/fulfillments-create`, with topic `fulfillments/update`.
+- Operational note: updates remain line-item scoped so a fulfillment change for one vendor allocation cannot mark another vendor allocation as fulfilled.
+
+### POST /webhooks/shopify/fulfillment-events-create
+
+- Purpose: receive verified Shopify `FULFILLMENT_EVENTS_CREATE` webhook envelopes and map known delivery event states into allocation shipping status.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Response semantics match `POST /webhooks/shopify/fulfillments-create`, with topic `fulfillment_events/create`.
+- Event mapping:
+  - `delivered` -> `shippingStatus: "delivered"`
+  - `in_transit`, `out_for_delivery`, or `confirmed` -> `shippingStatus: "in_transit"`
+  - `failure`, `failed`, or `attempted_delivery` -> `shippingStatus: "fulfillment_event_attention"`
+  - unknown event statuses do not invent delivery state; canonical fulfillment still syncs as shipped/partially shipped when fulfillment line items match
 
 ### POST /fulfillments/:allocationId/tracking
 

@@ -64,3 +64,33 @@ export type CreateFulfillmentTrackingResult = {
   status: 'submitted' | 'mock_submitted';
   source: 'mock' | 'shopify_admin';
 };
+
+export type ShopifyOrderFulfillmentLineItem = {
+  lineItemGid: string;
+  sourceLineItemId: string;
+  sku: string | null;
+  quantity: number;
+};
+
+export type ShopifyOrderFulfillment = {
+  id: string;
+  sourceFulfillmentId: string;
+  status: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  trackingInfo: Array<{
+    company: string | null;
+    number: string | null;
+    url: string | null;
+  }>;
+  lineItems: ShopifyOrderFulfillmentLineItem[];
+};
+
+export type ShopifyOrderFulfillmentState = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  orderName: string | null;
+  displayFulfillmentStatus: string | null;
+  fulfillments: ShopifyOrderFulfillment[];
+  source: 'mock' | 'shopify_admin';
+};

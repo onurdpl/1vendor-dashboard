@@ -256,6 +256,34 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - Shopify sync failures return non-success response and persist `fulfillment_sync_failed`
   - backend never silently reports success when Shopify sync fails
 
+## Inbound Fulfillment Status Sync (Phase 16-3C)
+- Backend now supports Shopify inbound fulfillment/status webhook topics:
+  - `POST /webhooks/shopify/fulfillments-create`
+  - `POST /webhooks/shopify/fulfillments-update`
+  - `POST /webhooks/shopify/fulfillment-events-create`
+- Supported Shopify subscription topics:
+  - `FULFILLMENTS_CREATE`
+  - `FULFILLMENTS_UPDATE`
+  - `FULFILLMENT_EVENTS_CREATE`
+- Registration is opt-in through:
+  - `npm run shopify:fulfillment-webhooks:register`
+  - requires `SHOPIFY_REGISTER_FULFILLMENT_WEBHOOKS=true`
+  - requires `SHOPIFY_FULFILLMENT_WEBHOOK_BASE_URL`
+- Sync boundary:
+  - webhook payloads are treated as trigger/envelope metadata only
+  - backend fetches canonical order fulfillment state through Shopify Admin GraphQL
+  - allocation updates are scoped by exact Shopify line item ids
+  - partial multi-vendor fulfillments update only the matching vendor allocation
+  - absent Shopify tracking info is not invented
+- Status behavior:
+  - matched allocation line items set `fulfillmentStatus` to `fulfilled` when all allocation items are fulfilled
+  - partial allocation matches set `fulfillmentStatus` to `partially_fulfilled`
+  - fulfillment without a delivery event maps shipping to `shipped` or `partially_shipped`
+  - `FULFILLMENT_EVENTS_CREATE` can map confirmed delivered/in-transit/failure statuses into shipping status
+- Diagnostics behavior:
+  - inbound fulfillment webhooks use the same HMAC verification, idempotency, `WebhookEvent`, replay, recover, and reconciliation boundaries as other Shopify webhooks
+  - canonical fetch or line-item mapping failures mark the webhook `FAILED` with an operator-visible error message
+
 ## Returns and Refunds Flow (Planned)
 1. Shopify emits return/refund webhook events.
 2. Backend ingests and validates events.
@@ -399,6 +427,9 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - supported topics only:
     - `orders/create`
     - `refunds/create`
+    - `fulfillments/create`
+    - `fulfillments/update`
+    - `fulfillment_events/create`
   - replay reuses the stored raw webhook payload and existing ingestion services
   - missing payload is a hard `409` with:
     - `Webhook payload is not available for replay`

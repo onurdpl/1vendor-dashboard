@@ -310,6 +310,17 @@
   - advanced automation tooling
   - admin reassignment and return lifecycle mutation workflows
 
+## Phase 16-3C Inbound Fulfillment Sync
+- Backend now supports inbound Shopify fulfillment status refresh for:
+  - `FULFILLMENTS_CREATE`
+  - `FULFILLMENTS_UPDATE`
+  - `FULFILLMENT_EVENTS_CREATE`
+- Fulfillment webhook payloads are treated as trigger/envelope metadata; backend fetches canonical Shopify fulfillment state before updating allocations.
+- Allocation status updates are line-item scoped so partial multi-vendor fulfillment cannot mark unrelated vendor allocations fulfilled.
+- Tracking metadata is shown only when Shopify provides tracking info.
+- Remaining verification gap:
+  - live registration and a production Shopify Admin fulfillment/delivery event should be tested to confirm this store emits the expected fulfillment event sequence.
+
 ## Recommended Immediate Phase 15 Focus
 - Treat automation and dashboard real-mode behavior as the first frontend operationalization target.
 - Treat fulfillment action wiring as the first meaningful vendor write-path completion target.

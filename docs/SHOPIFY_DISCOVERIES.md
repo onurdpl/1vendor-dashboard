@@ -250,6 +250,23 @@ POST /fulfillments.json
 
 - Use `line_items_by_fulfillment_order` to fulfill only the vendor-owned line items.
 - A multi-vendor order can have separate fulfillments and separate tracking data per vendor.
+- Inbound fulfillment status synchronization should use webhook topics as trigger/envelope data and fetch canonical state before mutating allocation status.
+- Confirmed relevant inbound topics for fulfillment status work:
+  - `FULFILLMENTS_CREATE`
+  - `FULFILLMENTS_UPDATE`
+  - `FULFILLMENT_EVENTS_CREATE`
+- Required app scope for fulfillment webhook topics: `read_fulfillments` (or the documented marketplace/order alternatives where applicable).
+- Canonical order fulfillment refresh should read:
+  - Shopify order id
+  - `displayFulfillmentStatus`
+  - fulfillments
+  - fulfillment status
+  - fulfillment line items
+  - linked Shopify line item ids
+  - tracking info when present
+- Vendor allocation updates must be scoped by exact Shopify line item ids. Do not mark a vendor allocation fulfilled because another vendor line item in the same Shopify order was fulfilled.
+- If Shopify tracking info is absent, do not invent carrier, tracking number, or tracking URL.
+- `FULFILLMENT_EVENTS_CREATE` may indicate delivery progression, but unknown event status values should go to diagnostics instead of false delivery state.
 
 ## Customer Notifications
 - `tracking_info.number` stores tracking number.
@@ -298,6 +315,8 @@ POST /fulfillments.json
 - Whether return shipping or tracking data is included directly or must be fetched separately.
 - Whether all stores emit `RETURNS_CANCEL`, `RETURNS_REOPEN`, `RETURNS_UPDATE`, and `RETURNS_PROCESS` consistently.
 - Whether `RETURNS_CANCEL` payload clearly differentiates customer cancellation vs. merchant cancellation.
+- Whether this store emits `FULFILLMENT_EVENTS_CREATE` for every manual Shopify Admin delivered-state change.
+- Whether `FULFILLMENTS_UPDATE` is sufficient for tracking edits after fulfillment creation or whether an order-level fallback should be tested later.
 
 ## Implementation Guardrails
 - Before coding Shopify-dependent behavior, read this document.

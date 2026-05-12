@@ -20,6 +20,7 @@
     "backend:db:seed": "npm --prefix backend run db:seed",
     "shopify:readiness": "npm --prefix backend run shopify:readiness",
     "shopify:return-webhooks:register": "npm --prefix backend run shopify:return-webhooks:register",
+    "shopify:fulfillment-webhooks:register": "npm --prefix backend run shopify:fulfillment-webhooks:register",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"
   },
   "dependencies": {
