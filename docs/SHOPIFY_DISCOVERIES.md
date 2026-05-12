@@ -100,14 +100,20 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 
 ### Return Lifecycle Webhook Topics
 - Confirmed return lifecycle topics to support:
-  - `RETURNS_REQUEST` (customer initiated return request)
-  - `RETURNS_APPROVE` (return approved)
-  - `RETURNS_DECLINE` (return declined)
-  - `RETURNS_CLOSE` (return completed or closed)
+  - `RETURNS_REQUEST` (fires first when customer starts self-serve return request)
+  - `RETURNS_APPROVE` (fires after merchant approval)
+  - `RETURNS_DECLINE` (fires after decline)
+  - `RETURNS_CLOSE` (fires when return is completed or closed)
+- Additional lifecycle topics exist and may be useful in later phases:
+  - `RETURNS_CANCEL`
+  - `RETURNS_REOPEN`
+  - `RETURNS_UPDATE`
+  - `RETURNS_PROCESS`
 - These topics should be registered through GraphQL `webhookSubscriptionCreate`, not assumed to be available only through the manual Shopify Admin webhook UI.
 - Existing custom app can register these webhooks.
 - Required app scope: `read_returns`.
 - After adding `read_returns`, the custom app must be reinstalled and a fresh Admin API token must be copied into local `backend/.env`.
+- Shopify does not require a specific callback path format; any HTTPS callback path is acceptable.
 
 ### Proposed Callback Endpoints
 - Planned backend callback endpoints for return lifecycle ingestion:
@@ -120,9 +126,11 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - Do not rely on raw return webhook payload for detailed line-item vendor mapping.
 - Treat return lifecycle webhook payload as trigger or envelope metadata.
 - Use `payload.id` (Return GID) as the primary key to fetch canonical return details through Shopify GraphQL.
+- Return lifecycle webhook payload includes `payload.id` in `gid://shopify/Return/...` format.
+- Treat `payload.id` as the canonical Return GID input to GraphQL `return(id: $id)`.
 
 ### Confirmed GraphQL Return Fetch Strategy
-- Query shape:
+- Candidate query shape:
 
 ```graphql
 query GetReturn($id: ID!) {
@@ -135,11 +143,32 @@ query GetReturn($id: ID!) {
       edges {
         node {
           id
-          fulfillmentLineItem {
-            id
-            lineItem {
+          ... on ReturnLineItem {
+            fulfillmentLineItem {
               id
-              sku
+              lineItem {
+                id
+                sku
+              }
+            }
+          }
+        }
+      }
+    }
+    reverseFulfillmentOrders(first: 20) {
+      edges {
+        node {
+          lineItems(first: 20) {
+            edges {
+              node {
+                fulfillmentLineItem {
+                  id
+                  lineItem {
+                    id
+                    sku
+                  }
+                }
+              }
             }
           }
         }
@@ -149,6 +178,8 @@ query GetReturn($id: ID!) {
 }
 ```
 
+- `returnLineItems[].fulfillmentLineItem` may require inline fragment usage on `ReturnLineItem`.
+- `reverseFulfillmentOrders` can be used as a fallback path when the direct return line-item path is insufficient.
 - GraphQL return query can provide `fulfillmentLineItem.lineItem.sku`.
 - GraphQL return query can provide `fulfillmentLineItem.lineItem.id`.
 - `fulfillmentLineItem.lineItem.id` matches the same Shopify LineItem GID used by order line items.
@@ -168,14 +199,20 @@ query GetReturn($id: ID!) {
 - `seller_info[sku]` remains the vendor attribution mechanism.
 - SKU is reached indirectly through GraphQL return detail.
 - If SKU is missing or `sellerInfo[sku]` is missing, do not silently assign vendor; mark needs attention.
+- A single return request can contain multiple SKUs across multiple vendors.
+- Implementation must attribute each return line item separately using `SKU -> sellerInfo[sku]`.
+- Backend and UI should support vendor-split pending return records.
 
 ### Live Verification Requirement (Before Production Return Lifecycle Ingestion)
 - Verify `RETURNS_REQUEST` fires when a customer opens a return request.
 - Verify `payload.id` contains Return GID.
 - Verify GraphQL `GetReturn` works with that Return GID.
-- Verify `returnLineItems[].fulfillmentLineItem.lineItem.sku` is populated.
+- Verify whether the inline-fragment `returnLineItems` path or `reverseFulfillmentOrders` fallback path is needed for this store/API version.
+- Verify `returnLineItems[].fulfillmentLineItem.lineItem.sku` is populated (or confirm fallback source path).
 - Verify `sellerInfo[sku]` maps to expected vendor.
 - Verify `RETURNS_APPROVE`, `RETURNS_DECLINE`, and `RETURNS_CLOSE` arrive in expected sequence.
+- Log and store enough diagnostics to explain which GraphQL extraction path worked.
+- Do not implement production vendor attribution based only on unverified raw payload shapes.
 
 - `refunds/create` webhook contains `refund_line_items[].line_item.sku`.
 - Refund mapping can use the original order `seller_info` mapping:
@@ -249,6 +286,8 @@ POST /fulfillments.json
 - Whether `returnLineItems` can span multiple vendors in a single return request and how UI should present that.
 - Whether return request cancellation exists as a separate event or topic.
 - Whether return shipping or tracking data is included directly or must be fetched separately.
+- Whether all stores emit `RETURNS_CANCEL`, `RETURNS_REOPEN`, `RETURNS_UPDATE`, and `RETURNS_PROCESS` consistently.
+- Whether `RETURNS_CANCEL` payload clearly differentiates customer cancellation vs. merchant cancellation.
 
 ## Implementation Guardrails
 - Before coding Shopify-dependent behavior, read this document.
