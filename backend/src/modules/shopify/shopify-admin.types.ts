@@ -5,6 +5,20 @@ export type FetchOrderSellerInfoResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifyReturnLineItem = {
+  returnLineItemGid: string;
+  fulfillmentLineItemGid: string | null;
+  lineItemGid: string | null;
+  sku: string | null;
+};
+
+export type FetchShopifyReturnDetailsResult = {
+  returnGid: string;
+  orderGid: string;
+  lineItems: ShopifyReturnLineItem[];
+  source: 'mock' | 'shopify_admin';
+};
+
 export type ShopifyGraphqlResponse<T> = {
   data?: T;
   errors?: Array<{

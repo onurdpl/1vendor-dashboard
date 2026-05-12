@@ -262,6 +262,24 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 3. Backend maps returned/refunded line items to vendor allocations.
 4. Vendor reads only their scoped records; admin can inspect full impact.
 
+## Pending Return Request Ingestion (Phase 15-6B)
+- Return lifecycle webhooks now support pending return request ingestion:
+  - `returns/request` creates vendor-scoped pending return records.
+  - `returns/approve`, `returns/decline`, `returns/close`, `returns/cancel` apply minimal lifecycle status updates to existing pending records.
+- Attribution path:
+  - resolve Return GID (`admin_graphql_api_id` preferred, fallback from numeric `id`)
+  - fetch Shopify GraphQL `return(id:)` details
+  - extract `fulfillmentLineItem.lineItem.sku`
+  - resolve vendor via order `custom.seller_info` (`sellerInfo[sku]`)
+- Multi-vendor handling:
+  - one Shopify return request can split into multiple internal vendor-scoped records
+  - each vendor sees only their own pending return records
+- Safety rules:
+  - unresolved SKU/seller mapping/order mapping fails into diagnostics needs-attention state
+  - no silent vendor assignment
+  - no refund-ledger entry is created from pending return requests
+  - refund lifecycle remains sourced from `refunds/create`
+
 ## Finance Model (Phase 13 Initial)
 - Reporting-only vendor finance in first backend phase:
   - gross sales

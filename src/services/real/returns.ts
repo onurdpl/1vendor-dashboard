@@ -6,6 +6,10 @@ type ReturnSummaryDto = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;
   sourceShopifyRefundId: string;
+  sourceShopifyReturnId: string | null;
+  sourceShopifyReturnGid: string | null;
+  returnLifecycleStatus: string | null;
+  returnRequestSource: string | null;
   vendorId: string;
   assignedVendorId: string;
   status: string;
@@ -19,6 +23,8 @@ type ReturnSummaryDto = {
 type ReturnDetailDto = ReturnSummaryDto & {
   sourceShopifyInternalOrderId: string;
   originalVendorId: string;
+  requestCreatedAt: string | null;
+  requestUpdatedAt: string | null;
   refundedItems: Array<{
     id: string;
     sourceLineItemId: string;
@@ -42,8 +48,17 @@ function formatMoney(amount: string) {
 
 function mapStatus(status: string): ReturnSummary['status'] {
   const normalized = status.trim().toLowerCase();
+  if (normalized === 'requested') {
+    return 'Pending';
+  }
   if (normalized === 'approved') {
     return 'Approved';
+  }
+  if (normalized === 'declined' || normalized === 'cancelled') {
+    return 'Rejected';
+  }
+  if (normalized === 'closed') {
+    return 'Refunded';
   }
   if (normalized === 'rejected') {
     return 'Rejected';
@@ -58,6 +73,15 @@ function mapStatus(status: string): ReturnSummary['status'] {
 }
 
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
+  const sourceType = dto.returnRequestSource === 'shopify_return_request'
+    ? 'Shopify return request lifecycle'
+    : 'Shopify refund webhook allocation';
+  const sourceId = dto.sourceShopifyReturnId
+    ? `Return ${dto.sourceShopifyReturnId}`
+    : dto.sourceShopifyRefundId
+      ? `Refund ${dto.sourceShopifyRefundId}`
+      : 'Pending Shopify source link';
+
   return {
     id: dto.id,
     originalVendorId: dto.assignedVendorId,
@@ -66,12 +90,14 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     sourceShopifyOrderId: dto.sourceShopifyOrderId,
     sourceShopifyOrderNumber: dto.sourceShopifyOrderNumber,
     sourceShopifyRefundId: dto.sourceShopifyRefundId,
+    sourceShopifyReturnId: dto.sourceShopifyReturnId,
+    sourceType: dto.returnRequestSource === 'shopify_return_request' ? 'shopify_return_request' : 'shopify_refund',
     status: mapStatus(dto.status),
     relatedOrderId: dto.sourceShopifyOrderId,
     date: dto.createdAt,
     updatedAt: dto.updatedAt,
     customer: 'Shopify customer details stay outside the current refund sync scope.',
-    reason: 'Refund allocation synced from Shopify webhook ingestion.',
+    reason: `${sourceType} · ${sourceId}`,
     amount: formatMoney(dto.refundAmount),
     refundedSkus: dto.refundedSkus,
   };
@@ -101,13 +127,27 @@ export async function getReturn(returnId: string): Promise<ReturnDetail> {
   return {
     ...summary,
     originalVendorId: response.originalVendorId,
-    resolution: response.status === 'Refunded' ? 'Refund processed and allocated to vendor scope.' : 'Refund allocation recorded for operational review.',
-    refundMethod: 'Original payment method (Shopify refund flow)',
-    processedBy: 'Shopify webhook ingestion via backend',
+    resolution:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request synced from Shopify return lifecycle.'
+        : response.status === 'Refunded'
+          ? 'Refund processed and allocated to vendor scope.'
+          : 'Refund allocation recorded for operational review.',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Original payment method (Shopify refund flow)',
+    processedBy:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Shopify return lifecycle webhook ingestion via backend'
+        : 'Shopify webhook ingestion via backend',
     refundedItems,
     items: refundedItems,
     timeline: [
-      { label: 'Refund requested', at: response.createdAt },
+      {
+        label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',
+        at: response.requestCreatedAt ?? response.createdAt,
+      },
       { label: 'Latest backend update', at: response.updatedAt },
     ],
   };

@@ -75,6 +75,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - `POST /webhooks/shopify/returns-approve` (skeleton; ingestion deferred)
 - `POST /webhooks/shopify/returns-decline` (skeleton; ingestion deferred)
 - `POST /webhooks/shopify/returns-close` (skeleton; ingestion deferred)
+- `POST /webhooks/shopify/returns-cancel` (lifecycle status update)
 - `POST /fulfillments/:allocationId/tracking`
 
 ## Endpoint Contracts
@@ -302,10 +303,12 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Purpose: receive verified Shopify `RETURNS_REQUEST` lifecycle webhook envelopes.
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
-  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/request" }`
+  - first delivery processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "returns/request", shopifyReturnGid, affectedRecordCount }`
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/request" }`
-- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return request ingestion is intentionally deferred.
+- Expected `202` behavior: verified payload is accepted, idempotency-checked, and ingested into vendor-scoped pending return records when mapping succeeds.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Expected needs-attention response:
+  - `{ ok: true, duplicate: false, action: "received_needs_attention", processingStatus: "needs_attention", message }`
 - Operational note:
   - verification uses raw request bytes
   - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
@@ -315,9 +318,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Purpose: receive verified Shopify `RETURNS_APPROVE` lifecycle webhook envelopes.
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
-  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/approve" }`
+  - first delivery processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "returns/approve", shopifyReturnGid, affectedRecordCount }`
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/approve" }`
-- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `202` behavior: verified payload updates existing vendor-scoped pending return records to lifecycle status `approved`.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Operational note:
   - verification uses raw request bytes
@@ -328,9 +331,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Purpose: receive verified Shopify `RETURNS_DECLINE` lifecycle webhook envelopes.
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
-  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/decline" }`
+  - first delivery processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "returns/decline", shopifyReturnGid, affectedRecordCount }`
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/decline" }`
-- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `202` behavior: verified payload updates existing vendor-scoped pending return records to lifecycle status `declined`.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Operational note:
   - verification uses raw request bytes
@@ -341,13 +344,23 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Purpose: receive verified Shopify `RETURNS_CLOSE` lifecycle webhook envelopes.
 - Required auth: none; verification is via Shopify HMAC signature.
 - Expected success response shape:
-  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/close" }`
+  - first delivery processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "returns/close", shopifyReturnGid, affectedRecordCount }`
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/close" }`
-- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `202` behavior: verified payload updates existing vendor-scoped pending return records to lifecycle status `closed`.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
 - Operational note:
   - verification uses raw request bytes
   - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
+
+### POST /webhooks/shopify/returns-cancel
+
+- Purpose: receive verified Shopify `RETURNS_CANCEL` lifecycle webhook envelopes and mark existing pending return records as cancelled.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - first delivery processed: `{ ok: true, duplicate: false, action: "accepted", processingStatus: "processed", topic: "returns/cancel", shopifyReturnGid, affectedRecordCount }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/cancel" }`
+- Expected `202` behavior: verified payload updates existing vendor-scoped pending return records to lifecycle status `cancelled`.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
 
 ### POST /fulfillments/:allocationId/tracking
 
@@ -420,7 +433,10 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: not typically used for collection requests, unless the backend intentionally obscures access.
-- Return records are vendor-scoped allocations of Shopify refund activity and must include a vendor-safe internal return id.
+- Return records are vendor-scoped allocations of both:
+  - Shopify refund activity (`refunds/create`)
+  - Shopify pending return lifecycle events (`returns/*`)
+- Return records should expose lifecycle/source metadata so pending return requests and processed refunds stay distinguishable.
 - Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
 
 ### GET /returns/:returnId
@@ -432,7 +448,10 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Expected `401` behavior: return `401 Unauthorized`.
 - Expected `403` behavior: return `403 Forbidden` if the user is authenticated but not allowed to access the vendor scope.
 - Expected `404` behavior: return `404 Not Found` when the return does not exist or when the backend hides cross-vendor resources.
-- Detail records should expose `vendorId`, `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, `sourceShopifyRefundId`, and vendor-allocated refunded line items so the frontend can show the current vendor slice only.
+- Detail records should expose `vendorId`, `sourceShopifyOrderId`, `sourceShopifyOrderNumber`, and source identifiers (`sourceShopifyRefundId`, `sourceShopifyReturnId`, `sourceShopifyReturnGid`) plus lifecycle/source fields (`returnLifecycleStatus`, `returnRequestSource`).
+- Return-request and refund lifecycles are intentionally separate:
+  - pending return requests do not create refund-ledger entries
+  - refund records continue to be created only from `refunds/create`
 - Backend implementation note: in current vendor-scoped query semantics, cross-vendor return ids resolve to `404` after vendor context is validated.
 
 ### GET /finance

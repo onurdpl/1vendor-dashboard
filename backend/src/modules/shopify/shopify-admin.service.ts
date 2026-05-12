@@ -2,11 +2,13 @@ import type { AppEnv } from '../../config/env.js';
 import type {
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
+  FetchShopifyReturnDetailsResult,
   FetchOrderSellerInfoResult,
   SellerInfoMap,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
+  ShopifyReturnLineItem,
 } from './shopify-admin.types.js';
 
 type OrderSellerInfoQueryResponse = {
@@ -14,6 +16,48 @@ type OrderSellerInfoQueryResponse = {
     metafield: {
       value: string | null;
     } | null;
+  } | null;
+};
+
+type ShopifyReturnQueryResponse = {
+  return: {
+    id: string;
+    order: {
+      id: string;
+    } | null;
+    returnLineItems: {
+      edges: Array<{
+        node: {
+          id: string;
+          fulfillmentLineItem?: {
+            id: string;
+            lineItem: {
+              id: string;
+              sku: string | null;
+            } | null;
+          } | null;
+        };
+      }>;
+    };
+    reverseFulfillmentOrders: {
+      edges: Array<{
+        node: {
+          lineItems: {
+            edges: Array<{
+              node: {
+                fulfillmentLineItem?: {
+                  id: string;
+                  lineItem: {
+                    id: string;
+                    sku: string | null;
+                  } | null;
+                } | null;
+              };
+            }>;
+          };
+        };
+      }>;
+    };
   } | null;
 };
 
@@ -110,8 +154,60 @@ function parseMockFulfillmentOrdersByOrderId(rawValue: string | undefined): Reco
   }, {});
 }
 
+function parseMockReturnDetailsByReturnGid(
+  rawValue: string | undefined,
+): Record<string, FetchShopifyReturnDetailsResult> {
+  if (!rawValue) {
+    return {};
+  }
+
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SHOPIFY_MOCK_RETURN_DETAILS must be a JSON object keyed by Shopify return gid.');
+  }
+
+  return Object.entries(parsed).reduce<Record<string, FetchShopifyReturnDetailsResult>>((acc, [returnGid, value]) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return acc;
+    }
+
+    const objectValue = value as Record<string, unknown>;
+    const orderGid = typeof objectValue.orderGid === 'string' ? objectValue.orderGid : '';
+    const lineItems = Array.isArray(objectValue.lineItems) ? objectValue.lineItems : [];
+
+    if (!returnGid || !orderGid) {
+      return acc;
+    }
+
+    acc[returnGid] = {
+      returnGid,
+      orderGid,
+      source: 'mock',
+      lineItems: lineItems
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => {
+          const item = entry as Record<string, unknown>;
+          return {
+            returnLineItemGid: String(item.returnLineItemGid ?? ''),
+            fulfillmentLineItemGid:
+              item.fulfillmentLineItemGid === null || item.fulfillmentLineItemGid === undefined
+                ? null
+                : String(item.fulfillmentLineItemGid),
+            lineItemGid:
+              item.lineItemGid === null || item.lineItemGid === undefined ? null : String(item.lineItemGid),
+            sku: item.sku === null || item.sku === undefined ? null : String(item.sku),
+          };
+        })
+        .filter((item) => item.returnLineItemGid),
+    };
+
+    return acc;
+  }, {});
+}
+
 export function createShopifyAdminService(env: AppEnv) {
   const mockSellerInfoByOrderId = parseMockSellerInfoByOrderId(env.SHOPIFY_MOCK_SELLER_INFO);
+  const mockReturnDetailsByReturnGid = parseMockReturnDetailsByReturnGid(env.SHOPIFY_MOCK_RETURN_DETAILS);
   const mockFulfillmentOrdersByOrderId = parseMockFulfillmentOrdersByOrderId(env.SHOPIFY_MOCK_FULFILLMENT_ORDERS);
   const mockFailAllocationIds = new Set(
     (env.SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS || '')
@@ -171,6 +267,116 @@ export function createShopifyAdminService(env: AppEnv) {
 
     return {
       sellerInfo: parseSellerInfoValue(json.data?.order?.metafield?.value ?? null),
+      source: 'shopify_admin',
+    };
+  }
+
+  async function fetchReturnDetails(returnGid: string): Promise<FetchShopifyReturnDetailsResult> {
+    if (mockReturnDetailsByReturnGid[returnGid]) {
+      return mockReturnDetailsByReturnGid[returnGid];
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return details sync is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query GetReturn($id: ID!) {
+              return(id: $id) {
+                id
+                order { id }
+                returnLineItems(first: 20) {
+                  edges {
+                    node {
+                      id
+                      ... on ReturnLineItem {
+                        fulfillmentLineItem {
+                          id
+                          lineItem {
+                            id
+                            sku
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                reverseFulfillmentOrders(first: 20) {
+                  edges {
+                    node {
+                      lineItems(first: 20) {
+                        edges {
+                          node {
+                            fulfillmentLineItem {
+                              id
+                              lineItem {
+                                id
+                                sku
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { id: returnGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return detail fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReturnQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return detail fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const returnNode = json.data?.return;
+    if (!returnNode?.id || !returnNode.order?.id) {
+      throw new Error('Shopify return detail response did not include return.id and order.id.');
+    }
+
+    const inlineLineItems = (returnNode.returnLineItems.edges || [])
+      .map<ShopifyReturnLineItem>((edge) => ({
+        returnLineItemGid: edge.node.id,
+        fulfillmentLineItemGid: edge.node.fulfillmentLineItem?.id ?? null,
+        lineItemGid: edge.node.fulfillmentLineItem?.lineItem?.id ?? null,
+        sku: edge.node.fulfillmentLineItem?.lineItem?.sku ?? null,
+      }))
+      .filter((item) => item.returnLineItemGid);
+
+    const fallbackLineItems = (returnNode.reverseFulfillmentOrders.edges || []).flatMap((edge) =>
+      (edge.node.lineItems.edges || [])
+        .map<ShopifyReturnLineItem>((lineItemEdge) => ({
+          returnLineItemGid: `fallback:${lineItemEdge.node.fulfillmentLineItem?.id ?? 'unknown'}`,
+          fulfillmentLineItemGid: lineItemEdge.node.fulfillmentLineItem?.id ?? null,
+          lineItemGid: lineItemEdge.node.fulfillmentLineItem?.lineItem?.id ?? null,
+          sku: lineItemEdge.node.fulfillmentLineItem?.lineItem?.sku ?? null,
+        }))
+        .filter((item) => item.fulfillmentLineItemGid || item.lineItemGid || item.sku),
+    );
+
+    return {
+      returnGid: returnNode.id,
+      orderGid: returnNode.order.id,
+      lineItems: inlineLineItems.length > 0 ? inlineLineItems : fallbackLineItems,
       source: 'shopify_admin',
     };
   }
@@ -296,6 +502,7 @@ export function createShopifyAdminService(env: AppEnv) {
 
   return {
     fetchOrderSellerInfo,
+    fetchReturnDetails,
     fetchFulfillmentOrders,
     createFulfillmentTracking,
   };

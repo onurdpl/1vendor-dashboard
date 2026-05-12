@@ -144,6 +144,8 @@ export type ReturnSummary = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string | number;
   sourceShopifyRefundId: string;
+  sourceShopifyReturnId?: string | null;
+  sourceType?: 'shopify_refund' | 'shopify_return_request';
   status: ReturnStatus;
   relatedOrderId: string;
   date: string;

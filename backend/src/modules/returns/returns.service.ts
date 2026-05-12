@@ -10,6 +10,21 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function getRefundSourceId(record: {
+  sourceShopifyRefundId: string | null;
+  vendorAllocation: {
+    refundRecords: Array<{
+      sourceShopifyRefundId: string;
+    }>;
+  };
+}) {
+  return record.sourceShopifyRefundId ?? record.vendorAllocation.refundRecords[0]?.sourceShopifyRefundId ?? '';
+}
+
+function getLifecycleStatus(status: string, lifecycleStatus: string | null) {
+  return lifecycleStatus || status;
+}
+
 export async function listVendorReturns(vendorId: string): Promise<ReturnSummaryDto[]> {
   const records = await prisma.returnRecord.findMany({
     where: {
@@ -47,7 +62,7 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
       (sum, refund) => sum + toNumber(refund.amount),
       0,
     );
-    const sourceRefundId = record.sourceShopifyRefundId ?? matchingRefundRecords[0]?.sourceShopifyRefundId ?? '';
+    const sourceRefundId = getRefundSourceId(record);
     const refundedItemCount = matchingRefundRecords.reduce((sum, refund) => {
       return sum + (refund.lineItems.length > 0 ? refund.lineItems.length : 0);
     }, 0) || record.vendorAllocation.lineItems.length;
@@ -65,9 +80,13 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
       sourceShopifyOrderId: record.sourceShopifyOrderId,
       sourceShopifyOrderNumber: record.sourceShopifyOrderNumber,
       sourceShopifyRefundId: sourceRefundId,
+      sourceShopifyReturnId: record.sourceShopifyReturnId,
+      sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+      returnLifecycleStatus: record.returnLifecycleStatus,
+      returnRequestSource: record.returnRequestSource,
       vendorId: record.vendorAllocation.assignedVendorId,
       assignedVendorId: record.vendorAllocation.assignedVendorId,
-      status: record.status,
+      status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
       refundAmount: toAmountString(refundAmount),
       refundedItemCount,
       refundedSkus,
@@ -123,7 +142,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     (sum, refund) => sum + toNumber(refund.amount),
     0,
   );
-  const sourceRefundId = record.sourceShopifyRefundId ?? matchingRefundRecords[0]?.sourceShopifyRefundId ?? '';
+  const sourceRefundId = getRefundSourceId(record);
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
   const refundedItems =
     refundLineItems.length > 0
@@ -158,9 +177,13 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     sourceShopifyOrderId: record.sourceShopifyOrderId,
     sourceShopifyOrderNumber: record.sourceShopifyOrderNumber,
     sourceShopifyRefundId: sourceRefundId,
+    sourceShopifyReturnId: record.sourceShopifyReturnId,
+    sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+    returnLifecycleStatus: record.returnLifecycleStatus,
+    returnRequestSource: record.returnRequestSource,
     vendorId: record.vendorAllocation.assignedVendorId,
     assignedVendorId: record.vendorAllocation.assignedVendorId,
-    status: record.status,
+    status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
     refundAmount: toAmountString(refundAmount),
     refundedItemCount: refundLineItems.length || record.vendorAllocation.lineItems.length,
     refundedSkus,
@@ -168,6 +191,8 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     updatedAt: record.updatedAt.toISOString(),
     sourceShopifyInternalOrderId: record.vendorAllocation.sourceShopifyOrderId,
     originalVendorId: record.vendorAllocation.originalVendorId,
+    requestCreatedAt: record.requestCreatedAt ? record.requestCreatedAt.toISOString() : null,
+    requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
     refundedItems,
   };
 }

@@ -10,6 +10,14 @@ import { createShopifyAdminService } from './shopify-admin.service.js';
 import { verifyShopifyWebhookHmac } from './webhook.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from './order-ingestion.types.js';
 import type { ShopifyRefundsCreateWebhookPayload } from './refund-ingestion.types.js';
+import {
+  applyReturnLifecycleStatusWebhook,
+  ingestReturnRequestWebhook,
+} from './return-lifecycle-ingestion.service.js';
+import type {
+  ReturnLifecycleTopic,
+  ReturnLifecycleWebhookPayload,
+} from './return-lifecycle-ingestion.types.js';
 import { prisma } from '../../db/prisma.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
@@ -53,7 +61,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
 
   const registerSkeletonReturnLifecycleRoute = (
     path: string,
-    topic: 'returns/request' | 'returns/approve' | 'returns/decline' | 'returns/close',
+    topic: ReturnLifecycleTopic,
   ) => {
     app.post(path, async (request, reply) => {
       const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
@@ -102,10 +110,36 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      const payload = (request.body ?? {}) as ReturnLifecycleWebhookPayload;
+      const ingestionResult =
+        topic === 'returns/request'
+          ? await ingestReturnRequestWebhook(env, {
+              event: idempotencyResult.event,
+              payload,
+            })
+          : await applyReturnLifecycleStatusWebhook(topic, {
+              event: idempotencyResult.event,
+              payload,
+            });
+
+      if (!ingestionResult.ok) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        });
+      }
+
       return reply.code(202).send({
         ok: true,
         duplicate: false,
-        action: 'received_pending_implementation',
+        action: ingestionResult.action,
+        processingStatus: ingestionResult.processingStatus,
+        shopifyReturnGid: ingestionResult.shopifyReturnGid,
+        affectedRecordCount: ingestionResult.affectedRecordCount,
         topic,
       });
     });
@@ -307,4 +341,5 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-approve', 'returns/approve');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-decline', 'returns/decline');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-close', 'returns/close');
+  registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-cancel', 'returns/cancel');
 }

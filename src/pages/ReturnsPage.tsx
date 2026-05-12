@@ -108,10 +108,10 @@ export function ReturnsPage() {
                 <header className="queue-item-top">
                   <div className="queue-title-block">
                     <h4>{item.id}</h4>
-                    <span className="queue-description">
-                      Shopify order #{item.sourceShopifyOrderNumber} · Refund {item.sourceShopifyRefundId}
-                    </span>
-                  </div>
+                  <span className="queue-description">
+                      Shopify order #{item.sourceShopifyOrderNumber} · {item.sourceType === 'shopify_return_request' ? `Return ${item.sourceShopifyReturnId ?? 'Pending'}` : `Refund ${item.sourceShopifyRefundId}`}
+                  </span>
+                </div>
                   <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
                 </header>
                 <div className="queue-meta">
@@ -122,7 +122,10 @@ export function ReturnsPage() {
                     <strong>Shopify order ID:</strong> {item.sourceShopifyOrderId}
                   </span>
                   <span>
-                    <strong>Refund ID:</strong> {item.sourceShopifyRefundId || 'Pending Shopify refund link'}
+                    <strong>{item.sourceType === 'shopify_return_request' ? 'Return ID' : 'Refund ID'}:</strong>{' '}
+                    {item.sourceType === 'shopify_return_request'
+                      ? item.sourceShopifyReturnId || 'Pending Shopify return link'
+                      : item.sourceShopifyRefundId || 'Pending Shopify refund link'}
                   </span>
                   <span>
                     <strong>Created:</strong> {formatDate(item.date)}
@@ -137,7 +140,10 @@ export function ReturnsPage() {
                     <strong>Refunded SKUs:</strong> {item.refundedSkus?.length ? item.refundedSkus.join(', ') : 'Visible in refund detail'}
                   </span>
                   <span>
-                    <strong>Refund context:</strong> Shopify webhook allocation
+                    <strong>Refund context:</strong>{' '}
+                    {item.sourceType === 'shopify_return_request'
+                      ? 'Shopify return lifecycle request'
+                      : 'Shopify webhook allocation'}
                   </span>
                 </div>
                 <div className="queue-actions">

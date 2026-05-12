@@ -148,7 +148,7 @@
   - frontend now uses it for tracking submission only
   - other fulfillment actions still remain mock-only
 - No reassignment mutation contract exists for admin order breakdown actions.
-- Return lifecycle webhooks (`returns/request`, `returns/approve`, `returns/decline`, `returns/close`) now have backend verification/idempotency skeleton routes, but pending-return business ingestion and frontend pending-return visibility are still not implemented.
+- Return lifecycle webhooks now support backend pending return ingestion and minimal frontend visibility in real mode; deeper operational UX and actions remain pending.
 
 ## Frontend Mapping Gaps Identified
 - Money formatting in real-mode services currently uses USD-style formatting while live Shopify/backend operational data is TRY-based.

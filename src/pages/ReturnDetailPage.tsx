@@ -62,7 +62,10 @@ export function ReturnDetailPage() {
           <p className="eyebrow">Refund allocation</p>
           <h2>{returnRequest.id}</h2>
           <p className="page-description">
-            Shopify order #{returnRequest.sourceShopifyOrderNumber} · Refund {returnRequest.sourceShopifyRefundId}
+            Shopify order #{returnRequest.sourceShopifyOrderNumber} ·{' '}
+            {returnRequest.sourceType === 'shopify_return_request'
+              ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Pending'}`
+              : `Refund ${returnRequest.sourceShopifyRefundId}`}
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
@@ -103,12 +106,20 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="summary-row">
-              <span>Refund ID</span>
-              <strong>{returnRequest.sourceShopifyRefundId}</strong>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Return ID' : 'Refund ID'}</span>
+              <strong>
+                {returnRequest.sourceType === 'shopify_return_request'
+                  ? returnRequest.sourceShopifyReturnId ?? 'Pending Shopify return link'
+                  : returnRequest.sourceShopifyRefundId}
+              </strong>
             </div>
             <div className="summary-row">
               <span>Refund source</span>
-              <strong>Shopify refund webhook allocation</strong>
+              <strong>
+                {returnRequest.sourceType === 'shopify_return_request'
+                  ? 'Shopify return lifecycle request'
+                  : 'Shopify refund webhook allocation'}
+              </strong>
             </div>
             <div className="summary-row">
               <span>Created</span>
@@ -183,12 +194,22 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="meta-item">
-              <span>Source Shopify refund ID</span>
-              <strong>{returnRequest.sourceShopifyRefundId}</strong>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Source Shopify return ID' : 'Source Shopify refund ID'}</span>
+              <strong>
+                {returnRequest.sourceType === 'shopify_return_request'
+                  ? returnRequest.sourceShopifyReturnId ?? 'Pending Shopify return link'
+                  : returnRequest.sourceShopifyRefundId}
+              </strong>
             </div>
             <div className="meta-item">
               <span>Refund operational state</span>
-              <strong>{returnRequest.status === 'Refunded' ? 'Refund processed' : 'Refund requested / under review'}</strong>
+              <strong>
+                {returnRequest.sourceType === 'shopify_return_request'
+                  ? 'Return requested / lifecycle pending'
+                  : returnRequest.status === 'Refunded'
+                    ? 'Refund processed'
+                    : 'Refund requested / under review'}
+              </strong>
             </div>
             <div className="meta-item">
               <span>Resolution</span>

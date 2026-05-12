@@ -33,6 +33,10 @@ function resolveEffectiveWebhookSecret() {
 }
 
 const shopifyWebhookSecret = resolveEffectiveWebhookSecret();
+const shopifyReturnWebhookSecret =
+  process.env.SHOPIFY_RETURN_WEBHOOK_SECRET ||
+  loadEnvFile(path.join(process.cwd(), '.env')).SHOPIFY_RETURN_WEBHOOK_SECRET ||
+  shopifyWebhookSecret;
 const backendEnv = loadEnvFile(path.join(process.cwd(), '.env'));
 const prisma = backendEnv.DATABASE_URL
   ? new PrismaClient({
@@ -78,6 +82,19 @@ async function runSmoke() {
       'DH2987-100-41': 'yalispor',
     },
   });
+  const mockReturnDetails = JSON.stringify({
+    'gid://shopify/Return/777001': {
+      orderGid: 'gid://shopify/Order/9001',
+      lineItems: [
+        {
+          returnLineItemGid: `gid://shopify/ReturnLineItem/rli-a-${runId}`,
+          fulfillmentLineItemGid: `gid://shopify/FulfillmentLineItem/fli-a-${runId}`,
+          lineItemGid: `gid://shopify/LineItem/li-a-${runId}`,
+          sku: 'DH2987-100-41',
+        },
+      ],
+    },
+  });
   const mockFulfillmentOrders = JSON.stringify({
     '9001': [
       {
@@ -111,7 +128,9 @@ async function runSmoke() {
       PORT: String(port),
       NODE_ENV: 'test',
       SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
+      SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
+      SHOPIFY_MOCK_RETURN_DETAILS: mockReturnDetails,
       SHOPIFY_MOCK_FULFILLMENT_ORDERS: mockFulfillmentOrders,
     },
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -458,11 +477,15 @@ async function runSmoke() {
     }
 
     const returnLifecyclePayload = JSON.stringify({
-      id: `gid://shopify/Return/${runId}`,
-      admin_graphql_api_id: `gid://shopify/Return/${runId}`,
-      order_id: 9001,
+      id: 777001,
+      admin_graphql_api_id: 'gid://shopify/Return/777001',
+      status: 'requested',
+      order: {
+        id: 9001,
+        admin_graphql_api_id: 'gid://shopify/Order/9001',
+      },
     });
-    const returnLifecycleHmac = createHmac('sha256', shopifyWebhookSecret)
+    const returnLifecycleHmac = createHmac('sha256', shopifyReturnWebhookSecret)
       .update(returnLifecyclePayload, 'utf8')
       .digest('base64');
     const returnLifecycleHeaders = {
@@ -486,7 +509,8 @@ async function runSmoke() {
     const validReturnLifecycleJson = await validReturnLifecycleResponse.json();
     if (
       validReturnLifecycleJson?.duplicate !== false ||
-      validReturnLifecycleJson?.action !== 'received_pending_implementation' ||
+      validReturnLifecycleJson?.action !== 'accepted' ||
+      validReturnLifecycleJson?.processingStatus !== 'processed' ||
       validReturnLifecycleJson?.topic !== 'returns/request'
     ) {
       throw new Error(
@@ -512,6 +536,42 @@ async function runSmoke() {
     ) {
       throw new Error(
         `/webhooks/shopify/returns-request duplicate payload invalid: ${JSON.stringify(duplicateReturnLifecycleJson)}`,
+      );
+    }
+
+    const returnApprovePayload = JSON.stringify({
+      id: 777001,
+      admin_graphql_api_id: 'gid://shopify/Return/777001',
+      status: 'approved',
+    });
+    const returnApproveSignature = createHmac('sha256', shopifyReturnWebhookSecret)
+      .update(returnApprovePayload, 'utf8')
+      .digest('base64');
+    const returnApproveResponse = await fetch(`${baseUrl}/webhooks/shopify/returns-approve`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': returnApproveSignature,
+        'x-shopify-topic': 'returns/approve',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-returns-approve-${runId}`,
+      },
+      body: returnApprovePayload,
+    });
+    if (returnApproveResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/returns-approve valid signature expected 202, got ${returnApproveResponse.status}`,
+      );
+    }
+    const returnApproveJson = await returnApproveResponse.json();
+    if (
+      returnApproveJson?.duplicate !== false ||
+      returnApproveJson?.action !== 'accepted' ||
+      returnApproveJson?.processingStatus !== 'processed' ||
+      returnApproveJson?.topic !== 'returns/approve'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/returns-approve payload invalid: ${JSON.stringify(returnApproveJson)}`,
       );
     }
 

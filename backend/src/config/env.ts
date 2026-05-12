@@ -13,6 +13,7 @@ export type AppEnv = {
   SHOPIFY_ADMIN_ACCESS_TOKEN?: string;
   SHOPIFY_API_VERSION: string;
   SHOPIFY_MOCK_SELLER_INFO?: string;
+  SHOPIFY_MOCK_RETURN_DETAILS?: string;
   SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: number;
   SHOPIFY_MOCK_FULFILLMENT_ORDERS?: string;
   SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS?: string;
@@ -104,6 +105,7 @@ export function loadEnv(): AppEnv {
     SHOPIFY_ADMIN_ACCESS_TOKEN: shopifyAdminAccessToken,
     SHOPIFY_API_VERSION: shopifyApiVersion,
     SHOPIFY_MOCK_SELLER_INFO: process.env.SHOPIFY_MOCK_SELLER_INFO || undefined,
+    SHOPIFY_MOCK_RETURN_DETAILS: process.env.SHOPIFY_MOCK_RETURN_DETAILS || undefined,
     SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: parsePositiveInteger(
       process.env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
       defaultRetryDelayMs,

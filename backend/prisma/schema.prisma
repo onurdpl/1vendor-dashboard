@@ -193,11 +193,21 @@ model ReturnRecord {
   sourceShopifyOrderId  String
   sourceShopifyOrderNumber String
   sourceShopifyRefundId String?
+  sourceShopifyReturnId String?
+  sourceShopifyReturnGid String?
+  sourceShopifyLineItemId String?
+  returnLifecycleStatus String?
+  returnRequestSource   String?
+  requestCreatedAt      DateTime?
+  requestUpdatedAt      DateTime?
   status                String
   reason                String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
   vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+
+  @@index([sourceShopifyReturnGid])
+  @@index([sourceShopifyReturnId])
 }
 
 model RefundRecord {
