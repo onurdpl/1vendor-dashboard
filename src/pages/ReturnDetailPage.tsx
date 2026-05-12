@@ -69,7 +69,7 @@ export function ReturnDetailPage() {
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
-              Refund state is synced from Shopify webhook ingestion. Refund processing actions are not enabled in real mode yet.
+              Return lifecycle state is synced from Shopify webhook ingestion. Refund/return processing actions are not enabled in real mode yet.
             </p>
           ) : null}
         </div>
@@ -83,10 +83,10 @@ export function ReturnDetailPage() {
 
       <div className="detail-grid">
         <article className="panel operational-card">
-          <h3>Refund summary</h3>
+          <h3>{returnRequest.sourceType === 'shopify_return_request' ? 'Return request summary' : 'Refund summary'}</h3>
           <div className="allocation-summary-grid refund-summary-grid">
             <div className="summary-row">
-              <span>Total refund amount</span>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Current refund impact' : 'Total refund amount'}</span>
               <strong className="finance-negative">-{returnRequest.amount}</strong>
             </div>
             <div className="summary-row">
@@ -114,7 +114,7 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="summary-row">
-              <span>Refund source</span>
+              <span>Source type</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
                   ? 'Shopify return lifecycle request'
@@ -221,7 +221,11 @@ export function ReturnDetailPage() {
             </div>
             <div className="meta-item">
               <span>Refund-linked finance context</span>
-              <strong>Vendor finance ledger reflects this refund allocation.</strong>
+              <strong>
+                {returnRequest.sourceType === 'shopify_return_request'
+                  ? 'No refund ledger entry is created until refunds/create is ingested.'
+                  : 'Vendor finance ledger reflects this refund allocation.'}
+              </strong>
             </div>
             <div className="meta-item">
               <span>Operational sync source</span>

@@ -225,6 +225,28 @@
 - Improve real-mode loading, error, and backend-unavailable states across the remaining hybrid pages.
 - Expand real-mode browser verification coverage once the login/input automation limitation is no longer blocking local audit work.
 
+## Phase 15-7 Admin Tooling Polish Update
+- Admin operations queue real-mode readability improved with clearer source labeling for:
+  - awaiting shipment
+  - blocked allocation
+  - pending reassignment
+  - refund attention
+  - pending return request (when identifiable from queue context)
+  - webhook/reconciliation issue context
+- Admin diagnostics and reconciliation real-mode UX improved with:
+  - explicit replay eligibility cues
+  - clearer payload-availability messaging
+  - clearer suggested-action/replay relationship
+- Returns admin real-mode clarity improved with:
+  - distinct lifecycle framing for pending return requests vs processed refunds
+  - clearer source-type labeling
+  - clearer pending-return finance wording (no refund ledger until refunds/create)
+
+## Remaining Gaps After Phase 15-7
+- No return approve/decline/close mutation actions in frontend yet.
+- No admin reassignment mutation in real mode yet.
+- No async queue worker architecture in production runtime yet.
+
 ## Recommended Immediate Phase 15 Focus
 - Treat automation and dashboard real-mode behavior as the first frontend operationalization target.
 - Treat fulfillment action wiring as the first meaningful vendor write-path completion target.

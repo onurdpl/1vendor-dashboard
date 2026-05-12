@@ -60,7 +60,7 @@ export function ReturnsPage() {
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
-              Refund state is synced from Shopify webhook ingestion. Refund processing actions are not enabled in real mode yet.
+              Pending return requests and processed refunds are shown as separate lifecycle states. Refund processing actions are not enabled in real mode yet.
             </p>
           ) : null}
         </div>
@@ -91,7 +91,7 @@ export function ReturnsPage() {
 
       <article className="panel operational-card">
         <div className="queue-list-header">
-          <h3>Refund allocations</h3>
+          <h3>Return & refund records</h3>
         </div>
         {returns.length === 0 ? (
           <div className="queue-empty">
@@ -108,13 +108,17 @@ export function ReturnsPage() {
                 <header className="queue-item-top">
                   <div className="queue-title-block">
                     <h4>{item.id}</h4>
-                  <span className="queue-description">
+                    <span className="queue-description">
                       Shopify order #{item.sourceShopifyOrderNumber} · {item.sourceType === 'shopify_return_request' ? `Return ${item.sourceShopifyReturnId ?? 'Pending'}` : `Refund ${item.sourceShopifyRefundId}`}
-                  </span>
-                </div>
+                    </span>
+                  </div>
                   <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
                 </header>
                 <div className="queue-meta">
+                  <span>
+                    <strong>Lifecycle type:</strong>{' '}
+                    {item.sourceType === 'shopify_return_request' ? 'Pending return request' : 'Processed refund'}
+                  </span>
                   <span>
                     <strong>Shopify order:</strong> #{item.sourceShopifyOrderNumber}
                   </span>

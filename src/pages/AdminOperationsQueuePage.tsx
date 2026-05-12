@@ -11,6 +11,40 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function classifyOperationalSource(item: {
+  type: string;
+  title: string;
+  description: string;
+}) {
+  const haystack = `${item.type} ${item.title} ${item.description}`.toLowerCase();
+
+  if (item.type === 'awaiting_shipment') {
+    return 'Awaiting shipment';
+  }
+  if (item.type === 'vendor_blocked') {
+    return 'Blocked allocation';
+  }
+  if (item.type === 'pending_reassignment') {
+    return 'Pending reassignment';
+  }
+  if (item.type === 'refund_attention') {
+    if (haystack.includes('return request') || haystack.includes('returns/request')) {
+      return 'Pending return request';
+    }
+    return 'Refund attention';
+  }
+  if (
+    haystack.includes('webhook') ||
+    haystack.includes('reconciliation') ||
+    haystack.includes('sync failed') ||
+    haystack.includes('needs attention')
+  ) {
+    return 'Webhook/reconciliation issue';
+  }
+
+  return 'Operational issue';
+}
+
 export function AdminOperationsQueuePage() {
   const { data: queue, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.queue(), () =>
     runtimeServices.operations.list(),
@@ -151,6 +185,9 @@ export function AdminOperationsQueuePage() {
                 </header>
                 <p className="queue-description">{item.description}</p>
                 <div className="queue-meta">
+                  <span>
+                    <strong>Source:</strong> {classifyOperationalSource(item)}
+                  </span>
                   <span>
                     <strong>Type:</strong> {item.type}
                   </span>

@@ -221,6 +221,9 @@ export function AdminDiagnosticsPage() {
                     <span>
                       <strong>Webhook ID:</strong> {event.shopifyWebhookId ?? 'Not provided'}
                     </span>
+                    <span>
+                      <strong>Replay eligibility:</strong> {event.payloadAvailable ? 'Eligible' : 'Not eligible (payload missing)'}
+                    </span>
                   </div>
                 </button>
               ))}
@@ -288,7 +291,7 @@ export function AdminDiagnosticsPage() {
                     {replayMutation.isPending ? 'Replaying...' : 'Replay webhook'}
                   </button>
                 ) : (
-                  <span className="queue-muted-action">Replay unavailable: payload not stored for this event.</span>
+                  <span className="queue-muted-action">Replay unavailable: payload not stored for this event. Use reconciliation suggested action instead.</span>
                 )}
                 {selectedWebhook.relatedShopifyOrderId ? (
                   <Link className="button button-secondary" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
@@ -337,6 +340,14 @@ export function AdminDiagnosticsPage() {
                     </span>
                     <span>
                       <strong>Payload:</strong> {item.payloadAvailable === null ? 'N/A' : item.payloadAvailable ? 'Available' : 'Missing'}
+                    </span>
+                    <span>
+                      <strong>Replay:</strong>{' '}
+                      {item.relatedWebhookEventId && item.payloadAvailable === true
+                        ? 'Eligible from webhook detail'
+                        : item.relatedWebhookEventId && item.payloadAvailable === false
+                          ? 'Not eligible (payload missing)'
+                          : 'Not applicable'}
                     </span>
                   </div>
                 </article>
