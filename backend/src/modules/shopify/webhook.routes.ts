@@ -32,6 +32,10 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       return env.SHOPIFY_RETURN_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
     }
 
+    if (topic.startsWith('fulfillments/') || topic.startsWith('fulfillment_events/')) {
+      return env.SHOPIFY_FULFILLMENT_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
+    }
+
     return env.SHOPIFY_WEBHOOK_SECRET;
   };
 

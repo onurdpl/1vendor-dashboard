@@ -411,6 +411,10 @@ Webhook processing lifecycle states:
   - backend fetches canonical order fulfillment state through Shopify Admin GraphQL
   - allocations are updated only when their exact Shopify line item ids appear in fulfilled line items
   - tracking fields are persisted only when Shopify provides `trackingInfo`
+- Secret behavior:
+  - fulfillment webhook routes use `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when set
+  - otherwise they fall back to `SHOPIFY_WEBHOOK_SECRET`
+  - orders/refunds continue to use `SHOPIFY_WEBHOOK_SECRET`; return lifecycle routes keep their `SHOPIFY_RETURN_WEBHOOK_SECRET` fallback behavior
 
 ### POST /webhooks/shopify/fulfillments-update
 

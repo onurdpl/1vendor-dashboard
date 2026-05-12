@@ -37,6 +37,10 @@ const shopifyReturnWebhookSecret =
   process.env.SHOPIFY_RETURN_WEBHOOK_SECRET ||
   loadEnvFile(path.join(process.cwd(), '.env')).SHOPIFY_RETURN_WEBHOOK_SECRET ||
   shopifyWebhookSecret;
+const shopifyFulfillmentWebhookSecret =
+  process.env.SHOPIFY_FULFILLMENT_WEBHOOK_SECRET ||
+  loadEnvFile(path.join(process.cwd(), '.env')).SHOPIFY_FULFILLMENT_WEBHOOK_SECRET ||
+  'smoke-fulfillment-webhook-secret';
 const backendEnv = {
   ...loadEnvFile(path.join(process.cwd(), '.env')),
   ...process.env,
@@ -170,6 +174,7 @@ async function runSmoke() {
       NODE_ENV: 'test',
       SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
       SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
+      SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,
       SHOPIFY_MOCK_SELLER_INFO: sellerInfoMap,
       SHOPIFY_MOCK_RETURN_DETAILS: mockReturnDetails,
       SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE: mockOrderFulfillmentState,
@@ -948,7 +953,7 @@ async function runSmoke() {
       order_id: smokeOrderId,
       status: 'success',
     });
-    const fulfillmentWebhookHmac = createHmac('sha256', shopifyWebhookSecret)
+    const fulfillmentWebhookHmac = createHmac('sha256', shopifyFulfillmentWebhookSecret)
       .update(fulfillmentWebhookPayload, 'utf8')
       .digest('base64');
     const fulfillmentWebhookHeaders = {
@@ -1043,7 +1048,7 @@ async function runSmoke() {
       fulfillment_id: `fulfillment-${runId}`,
       status: 'delivered',
     });
-    const fulfillmentEventHmac = createHmac('sha256', shopifyWebhookSecret)
+    const fulfillmentEventHmac = createHmac('sha256', shopifyFulfillmentWebhookSecret)
       .update(fulfillmentEventPayload, 'utf8')
       .digest('base64');
     const fulfillmentEventResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillment-events-create`, {

@@ -191,6 +191,10 @@ Alternative for quick schema sync without migration history:
   - `SHOPIFY_RETURN_WEBHOOK_SECRET`
   - when set, return lifecycle webhook routes use this secret instead of the default webhook secret
   - this is useful when return lifecycle subscriptions are created through a different Shopify app secret than orders/refunds routes
+- Optional fulfillment webhook-secret override:
+  - `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET`
+  - when set, fulfillment lifecycle webhook routes use this secret instead of the default webhook secret
+  - this is useful when GraphQL-created fulfillment webhook subscriptions are signed with a different app secret than orders/refunds routes
 - Safety behavior:
   - missing variables are reported by name only
   - secret values are never printed
@@ -282,6 +286,7 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - `FULFILLMENT_EVENTS_CREATE` can map confirmed delivered/in-transit/failure statuses into shipping status
 - Diagnostics behavior:
   - inbound fulfillment webhooks use the same HMAC verification, idempotency, `WebhookEvent`, replay, recover, and reconciliation boundaries as other Shopify webhooks
+  - HMAC verification uses `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when configured, otherwise `SHOPIFY_WEBHOOK_SECRET`
   - canonical fetch or line-item mapping failures mark the webhook `FAILED` with an operator-visible error message
 
 ## Returns and Refunds Flow (Planned)
