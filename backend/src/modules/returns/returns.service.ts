@@ -25,6 +25,30 @@ function getLifecycleStatus(status: string, lifecycleStatus: string | null) {
   return lifecycleStatus || status;
 }
 
+function isReturnRequestRecord(record: { returnRequestSource: string | null }) {
+  return record.returnRequestSource === 'shopify_return_request';
+}
+
+function filterReturnRequestAllocationLineItems<
+  T extends {
+    shopifyOrderLineItem: {
+      sourceLineItemId: string;
+    };
+  },
+>(record: { returnRequestSource: string | null; sourceShopifyLineItemId: string | null }, lineItems: T[]) {
+  if (!isReturnRequestRecord(record)) {
+    return lineItems;
+  }
+
+  if (!record.sourceShopifyLineItemId) {
+    return [];
+  }
+
+  return lineItems.filter(
+    (item) => item.shopifyOrderLineItem.sourceLineItemId === record.sourceShopifyLineItemId,
+  );
+}
+
 export async function listVendorReturns(vendorId: string): Promise<ReturnSummaryDto[]> {
   const records = await prisma.returnRecord.findMany({
     where: {
@@ -43,7 +67,11 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
               createdAt: 'asc',
             },
           },
-          lineItems: true,
+          lineItems: {
+            include: {
+              shopifyOrderLineItem: true,
+            },
+          },
         },
       },
     },
@@ -53,28 +81,42 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
   });
 
   return records.map((record) => {
-    const matchingRefundRecords = record.sourceShopifyRefundId
-      ? record.vendorAllocation.refundRecords.filter(
-          (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
-        )
-      : record.vendorAllocation.refundRecords;
+    const matchingRefundRecords = isReturnRequestRecord(record)
+      ? []
+      : record.sourceShopifyRefundId
+        ? record.vendorAllocation.refundRecords.filter(
+            (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
+          )
+        : record.vendorAllocation.refundRecords;
     const refundAmount = matchingRefundRecords.reduce(
       (sum, refund) => sum + toNumber(refund.amount),
       0,
     );
-    const sourceRefundId = getRefundSourceId(record);
-    const refundedItemCount = matchingRefundRecords.reduce((sum, refund) => {
+    const sourceRefundId = isReturnRequestRecord(record) ? '' : getRefundSourceId(record);
+    const returnRequestLineItems = filterReturnRequestAllocationLineItems(record, record.vendorAllocation.lineItems);
+    const refundLineItemCount = matchingRefundRecords.reduce((sum, refund) => {
       return sum + (refund.lineItems.length > 0 ? refund.lineItems.length : 0);
-    }, 0) || record.vendorAllocation.lineItems.length;
-    const refundedSkus = Array.from(
-      new Set(
-        matchingRefundRecords.flatMap((refund) =>
-          refund.lineItems
-            .map((item) => item.sku ?? null)
-            .filter((sku): sku is string => Boolean(sku)),
-        ),
-      ),
-    );
+    }, 0);
+    const refundedItemCount = isReturnRequestRecord(record)
+      ? returnRequestLineItems.length
+      : refundLineItemCount || record.vendorAllocation.lineItems.length;
+    const refundedSkus = isReturnRequestRecord(record)
+      ? Array.from(
+          new Set(
+            returnRequestLineItems
+              .map((item) => item.shopifyOrderLineItem.sku ?? null)
+              .filter((sku): sku is string => Boolean(sku)),
+          ),
+        )
+      : Array.from(
+          new Set(
+            matchingRefundRecords.flatMap((refund) =>
+              refund.lineItems
+                .map((item) => item.sku ?? null)
+                .filter((sku): sku is string => Boolean(sku)),
+            ),
+          ),
+        );
     return {
       id: record.id,
       sourceShopifyOrderId: record.sourceShopifyOrderId,
@@ -133,19 +175,32 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     return null;
   }
 
-  const matchingRefundRecords = record.sourceShopifyRefundId
-    ? record.vendorAllocation.refundRecords.filter(
-        (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
-      )
-    : record.vendorAllocation.refundRecords;
+  const matchingRefundRecords = isReturnRequestRecord(record)
+    ? []
+    : record.sourceShopifyRefundId
+      ? record.vendorAllocation.refundRecords.filter(
+          (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
+        )
+      : record.vendorAllocation.refundRecords;
   const refundAmount = matchingRefundRecords.reduce(
     (sum, refund) => sum + toNumber(refund.amount),
     0,
   );
-  const sourceRefundId = getRefundSourceId(record);
+  const sourceRefundId = isReturnRequestRecord(record) ? '' : getRefundSourceId(record);
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
+  const returnRequestLineItems = filterReturnRequestAllocationLineItems(record, record.vendorAllocation.lineItems);
   const refundedItems =
-    refundLineItems.length > 0
+    isReturnRequestRecord(record)
+      ? returnRequestLineItems.map((item) => ({
+          id: item.id,
+          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
+          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+          sku: item.shopifyOrderLineItem.sku,
+          title: item.shopifyOrderLineItem.title,
+          quantity: item.quantity,
+          refundAmount: toAmountString(toNumber(item.lineAmount)),
+        }))
+      : refundLineItems.length > 0
       ? refundLineItems.map((item) => ({
           id: item.id,
           sourceLineItemId: item.sourceLineItemId,
@@ -185,7 +240,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     assignedVendorId: record.vendorAllocation.assignedVendorId,
     status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
     refundAmount: toAmountString(refundAmount),
-    refundedItemCount: refundLineItems.length || record.vendorAllocation.lineItems.length,
+    refundedItemCount: refundedItems.length,
     refundedSkus,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),

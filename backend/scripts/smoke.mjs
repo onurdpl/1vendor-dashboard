@@ -76,6 +76,7 @@ async function runSmoke() {
   const sellerInfoMap = JSON.stringify({
     '9001': {
       'DH2987-100-41': 'yalispor',
+      'YALI-NOT-RETURNED-42': 'yalispor',
       'DH2987-100-40,5': 'sporjinal',
     },
     '9002': {
@@ -91,6 +92,12 @@ async function runSmoke() {
           fulfillmentLineItemGid: `gid://shopify/FulfillmentLineItem/fli-a-${runId}`,
           lineItemGid: `gid://shopify/LineItem/li-a-${runId}`,
           sku: 'DH2987-100-41',
+        },
+        {
+          returnLineItemGid: `gid://shopify/ReturnLineItem/rli-b-${runId}`,
+          fulfillmentLineItemGid: `gid://shopify/FulfillmentLineItem/fli-b-${runId}`,
+          lineItemGid: `gid://shopify/LineItem/li-b-${runId}`,
+          sku: 'DH2987-100-40,5',
         },
       ],
     },
@@ -270,6 +277,15 @@ async function runSmoke() {
           variant_title: '41',
           quantity: 1,
           price: '120.00',
+        },
+        {
+          id: `li-yali-extra-${runId}`,
+          variant_id: 503,
+          sku: 'YALI-NOT-RETURNED-42',
+          title: 'Yali Extra Shoe',
+          variant_title: '42',
+          quantity: 1,
+          price: '90.00',
         },
         {
           id: `li-b-${runId}`,
@@ -1131,6 +1147,22 @@ async function runSmoke() {
     if (!Array.isArray(vendorReturnsYali) || vendorReturnsYali.length === 0) {
       throw new Error('/returns vendor yalispor returned empty or invalid payload.');
     }
+    const yalisporReturnRequest = vendorReturnsYali.find(
+      (record) => record.sourceShopifyReturnId === '777001' && record.returnRequestSource === 'shopify_return_request',
+    );
+    if (!yalisporReturnRequest?.id) {
+      throw new Error('/returns vendor yalispor did not include pending Shopify return request 777001.');
+    }
+    if (
+      yalisporReturnRequest.refundedItemCount !== 1 ||
+      !Array.isArray(yalisporReturnRequest.refundedSkus) ||
+      yalisporReturnRequest.refundedSkus.length !== 1 ||
+      yalisporReturnRequest.refundedSkus[0] !== 'DH2987-100-41'
+    ) {
+      throw new Error(
+        `/returns vendor yalispor return request should expose exactly one returned SKU, got ${JSON.stringify(yalisporReturnRequest)}`,
+      );
+    }
 
     const vendorReturnsForbiddenResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
@@ -1154,6 +1186,72 @@ async function runSmoke() {
     });
     if (!ownReturnResponse.ok) {
       throw new Error(`/returns/:returnId vendor own access failed with ${ownReturnResponse.status}`);
+    }
+    const yalisporReturnRequestDetailResponse = await fetch(`${baseUrl}/returns/${yalisporReturnRequest.id}`, {
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    if (!yalisporReturnRequestDetailResponse.ok) {
+      throw new Error(
+        `/returns/:returnId yalispor return request detail failed with ${yalisporReturnRequestDetailResponse.status}`,
+      );
+    }
+    const yalisporReturnRequestDetail = await yalisporReturnRequestDetailResponse.json();
+    if (
+      !Array.isArray(yalisporReturnRequestDetail.refundedItems) ||
+      yalisporReturnRequestDetail.refundedItems.length !== 1 ||
+      yalisporReturnRequestDetail.refundedItems[0]?.sku !== 'DH2987-100-41'
+    ) {
+      throw new Error(
+        `/returns/:returnId yalispor request detail should include exactly one returned line item, got ${JSON.stringify(yalisporReturnRequestDetail)}`,
+      );
+    }
+    if (
+      yalisporReturnRequestDetail.refundedItems.some((item) => item.sku === 'YALI-NOT-RETURNED-42')
+    ) {
+      throw new Error('/returns/:returnId yalispor request detail leaked a non-returned same-vendor line item.');
+    }
+
+    const sporjinalReturnRequest = adminReturnsSporjinal.find(
+      (record) => record.sourceShopifyReturnId === '777001' && record.returnRequestSource === 'shopify_return_request',
+    );
+    if (!sporjinalReturnRequest?.id) {
+      throw new Error('/returns admin sporjinal did not include pending Shopify return request 777001.');
+    }
+    const sporjinalReturnRequestDetailResponse = await fetch(`${baseUrl}/returns/${sporjinalReturnRequest.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (!sporjinalReturnRequestDetailResponse.ok) {
+      throw new Error(
+        `/returns/:returnId sporjinal return request detail failed with ${sporjinalReturnRequestDetailResponse.status}`,
+      );
+    }
+    const sporjinalReturnRequestDetail = await sporjinalReturnRequestDetailResponse.json();
+    if (
+      !Array.isArray(sporjinalReturnRequestDetail.refundedItems) ||
+      sporjinalReturnRequestDetail.refundedItems.length !== 1 ||
+      sporjinalReturnRequestDetail.refundedItems[0]?.sku !== 'DH2987-100-40,5'
+    ) {
+      throw new Error(
+        `/returns/:returnId sporjinal request detail should include exactly one returned line item, got ${JSON.stringify(sporjinalReturnRequestDetail)}`,
+      );
+    }
+
+    const wrongVendorReturnRequestResponse = await fetch(`${baseUrl}/returns/${yalisporReturnRequest.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    if (wrongVendorReturnRequestResponse.status !== 404) {
+      throw new Error(
+        `/returns/:returnId wrong vendor return request expected 404, got ${wrongVendorReturnRequestResponse.status}`,
+      );
     }
 
     const nonOwnedReturnId = adminReturnsSporjinal[0]?.id;
