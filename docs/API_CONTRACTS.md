@@ -411,6 +411,11 @@ Webhook processing lifecycle states:
   - backend fetches canonical order fulfillment state through Shopify Admin GraphQL
   - allocations are updated only when their exact Shopify line item ids appear in fulfilled line items
   - tracking fields are persisted only when Shopify provides `trackingInfo`
+  - fulfillment timestamps are persisted from canonical Shopify fulfillment data:
+    - `fulfilledAt` from fulfillment `createdAt`
+    - `shipmentCreatedAt` from fulfillment `createdAt`
+    - `shipmentUpdatedAt` from latest fulfillment event `happenedAt` when available, otherwise fulfillment `updatedAt`
+  - missing tracking remains null/Not assigned; backend does not invent carrier, tracking number, or tracking URL
 - Secret behavior:
   - fulfillment webhook routes use `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when set
   - otherwise they fall back to `SHOPIFY_WEBHOOK_SECRET`
@@ -433,6 +438,7 @@ Webhook processing lifecycle states:
   - `in_transit`, `out_for_delivery`, or `confirmed` -> `shippingStatus: "in_transit"`
   - `failure`, `failed`, or `attempted_delivery` -> `shippingStatus: "fulfillment_event_attention"`
   - unknown event statuses do not invent delivery state; canonical fulfillment still syncs as shipped/partially shipped when fulfillment line items match
+  - raw fulfillment event status is applied only to the matching Shopify fulfillment id to prevent cross-vendor status leakage
 
 ### POST /fulfillments/:allocationId/tracking
 
@@ -463,7 +469,10 @@ Webhook processing lifecycle states:
   "fulfillmentStatus": "fulfillment_submitted",
   "shippingStatus": "shipped",
   "shopifySyncSource": "mock",
-  "shopifyFulfillmentId": "mock-fulfillment-alloc-yalispor-9001"
+  "shopifyFulfillmentId": "mock-fulfillment-alloc-yalispor-9001",
+  "fulfilledAt": "2026-05-12T13:22:52.000Z",
+  "shipmentCreatedAt": "2026-05-12T13:22:52.000Z",
+  "shipmentUpdatedAt": "2026-05-12T13:22:59.000Z"
 }
 ```
 

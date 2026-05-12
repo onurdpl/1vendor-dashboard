@@ -261,12 +261,16 @@ POST /fulfillments.json
   - `displayFulfillmentStatus`
   - fulfillments
   - fulfillment status
+  - fulfillment `createdAt` / `updatedAt`
   - fulfillment line items
   - linked Shopify line item ids
   - tracking info when present
+  - fulfillment events when available
 - Vendor allocation updates must be scoped by exact Shopify line item ids. Do not mark a vendor allocation fulfilled because another vendor line item in the same Shopify order was fulfilled.
 - If Shopify tracking info is absent, do not invent carrier, tracking number, or tracking URL.
+- Shopify can report a fulfillment as complete while `trackingInfo` is empty; the app should still persist fulfillment/shipment timestamps from canonical fulfillment data but keep carrier/tracking fields unassigned.
 - `FULFILLMENT_EVENTS_CREATE` may indicate delivery progression, but unknown event status values should go to diagnostics instead of false delivery state.
+- Delivery/in-transit/failure event status must be scoped to the matching Shopify fulfillment id before updating vendor allocation shipping status.
 
 ## Customer Notifications
 - `tracking_info.number` stores tracking number.

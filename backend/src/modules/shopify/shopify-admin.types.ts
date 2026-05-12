@@ -78,6 +78,10 @@ export type ShopifyOrderFulfillment = {
   status: string;
   createdAt: string | null;
   updatedAt: string | null;
+  events: Array<{
+    status: string | null;
+    happenedAt: string | null;
+  }>;
   trackingInfo: Array<{
     company: string | null;
     number: string | null;

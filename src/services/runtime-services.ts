@@ -103,6 +103,8 @@ export const runtimeServices = {
         globalThis.setTimeout(resolve, 300);
       });
 
+      const submittedAt = new Date().toISOString();
+
       return {
         ok: true as const,
         allocationId,
@@ -114,6 +116,9 @@ export const runtimeServices = {
         shippingStatus: 'shipped',
         shopifySyncSource: 'mock',
         shopifyFulfillmentId: `mock-fulfillment-${allocationId}`,
+        fulfilledAt: submittedAt,
+        shipmentCreatedAt: submittedAt,
+        shipmentUpdatedAt: submittedAt,
       };
     },
   },

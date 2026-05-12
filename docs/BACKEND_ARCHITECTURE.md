@@ -279,11 +279,13 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - allocation updates are scoped by exact Shopify line item ids
   - partial multi-vendor fulfillments update only the matching vendor allocation
   - absent Shopify tracking info is not invented
+  - tracking number, carrier, tracking URL, fulfilled timestamp, shipment-created timestamp, and shipment-updated timestamp are persisted only from canonical Shopify fulfillment data
 - Status behavior:
   - matched allocation line items set `fulfillmentStatus` to `fulfilled` when all allocation items are fulfilled
   - partial allocation matches set `fulfillmentStatus` to `partially_fulfilled`
   - fulfillment without a delivery event maps shipping to `shipped` or `partially_shipped`
   - `FULFILLMENT_EVENTS_CREATE` can map confirmed delivered/in-transit/failure statuses into shipping status
+  - delivery/in-transit/failure events are applied only to allocations linked to the matching Shopify fulfillment id
 - Diagnostics behavior:
   - inbound fulfillment webhooks use the same HMAC verification, idempotency, `WebhookEvent`, replay, recover, and reconciliation boundaries as other Shopify webhooks
   - HMAC verification uses `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when configured, otherwise `SHOPIFY_WEBHOOK_SECRET`

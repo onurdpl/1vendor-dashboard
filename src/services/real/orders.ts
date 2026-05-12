@@ -33,6 +33,9 @@ export type SubmitFulfillmentTrackingResult = {
   shippingStatus: string;
   shopifySyncSource: string;
   shopifyFulfillmentId: string;
+  fulfilledAt: string;
+  shipmentCreatedAt: string;
+  shipmentUpdatedAt: string;
 };
 
 type OrderSummaryDto = {
@@ -55,6 +58,9 @@ type OrderDetailDto = OrderSummaryDto & {
   carrier: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
+  fulfilledAt: string | null;
+  shipmentCreatedAt: string | null;
+  shipmentUpdatedAt: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   lineItems: Array<{
@@ -100,6 +106,10 @@ type AdminOrderBreakdownDto = {
     shippingStatus: string;
     trackingNumber: string | null;
     carrier: string | null;
+    trackingUrl: string | null;
+    fulfilledAt: string | null;
+    shipmentCreatedAt: string | null;
+    shipmentUpdatedAt: string | null;
     totalAmount: string;
     lineItems: Array<{
       id: string;
@@ -148,7 +158,7 @@ function toFulfillmentStatus(value: string): FulfillmentStatus {
   if (normalized === 'fulfilled') {
     return 'Fulfilled';
   }
-  if (normalized === 'partially fulfilled') {
+  if (normalized === 'partially fulfilled' || normalized === 'partially_fulfilled') {
     return 'Partially Fulfilled';
   }
   if (normalized === 'pending') {
@@ -162,7 +172,7 @@ function toShippingStatus(value: string): ShippingStatus {
   if (normalized === 'delivered') {
     return 'Delivered';
   }
-  if (normalized === 'in transit' || normalized === 'shipped') {
+  if (normalized === 'in transit' || normalized === 'in_transit' || normalized === 'shipped' || normalized === 'partially_shipped') {
     return 'In Transit';
   }
   if (normalized === 'label created' || normalized === 'label_created') {
@@ -222,6 +232,9 @@ function mapOrderLineItems(
   trackingNumber?: string | null,
   carrier?: string | null,
   trackingUrl?: string | null,
+  fulfilledAt?: string | null,
+  shipmentCreatedAt?: string | null,
+  shipmentUpdatedAt?: string | null,
 ): OrderLineItem[] {
   const fulfillmentActionState = toFulfillmentActionState(shippingStatus);
   const fulfillmentActionAvailable = allocationStatus === 'active';
@@ -245,6 +258,10 @@ function mapOrderLineItems(
     trackingNumber: trackingNumber ?? undefined,
     carrier: carrier ?? undefined,
     trackingUrl: trackingUrl ?? undefined,
+    fulfilledAt: fulfilledAt ?? undefined,
+    fulfilledByVendorId: fulfilledAt ? assignedVendorId : undefined,
+    shipmentCreatedAt: shipmentCreatedAt ?? undefined,
+    shipmentUpdatedAt: shipmentUpdatedAt ?? undefined,
   }));
 }
 
@@ -284,6 +301,10 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     trackingNumber: dto.trackingNumber ?? undefined,
     carrier: dto.carrier ?? undefined,
     trackingUrl: dto.trackingUrl ?? undefined,
+    fulfilledAt: dto.fulfilledAt ?? undefined,
+    fulfilledByVendorId: dto.fulfilledAt ? dto.assignedVendorId : undefined,
+    shipmentCreatedAt: dto.shipmentCreatedAt ?? undefined,
+    shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
@@ -299,6 +320,9 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       dto.trackingNumber,
       dto.carrier,
       dto.trackingUrl,
+      dto.fulfilledAt,
+      dto.shipmentCreatedAt,
+      dto.shipmentUpdatedAt,
     ),
     items: mapOrderLineItems(
       dto.lineItems,
@@ -310,6 +334,9 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
       dto.trackingNumber,
       dto.carrier,
       dto.trackingUrl,
+      dto.fulfilledAt,
+      dto.shipmentCreatedAt,
+      dto.shipmentUpdatedAt,
     ),
     timeline: history.map((entry) => ({
       label: entry.action.replace(/_/g, ' '),
@@ -371,6 +398,11 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
         shippingStatus,
         trackingNumber: allocation.trackingNumber ?? undefined,
         carrier: allocation.carrier ?? undefined,
+        trackingUrl: allocation.trackingUrl ?? undefined,
+        fulfilledAt: allocation.fulfilledAt ?? undefined,
+        fulfilledByVendorId: allocation.fulfilledAt ? allocation.assignedVendorId : undefined,
+        shipmentCreatedAt: allocation.shipmentCreatedAt ?? undefined,
+        shipmentUpdatedAt: allocation.shipmentUpdatedAt ?? undefined,
         allocationTotal: formatCurrency(allocation.totalAmount),
         lineItems: mapOrderLineItems(
           allocation.lineItems,
@@ -381,6 +413,10 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Pro
           fulfillmentStatus,
           allocation.trackingNumber,
           allocation.carrier,
+          allocation.trackingUrl,
+          allocation.fulfilledAt,
+          allocation.shipmentCreatedAt,
+          allocation.shipmentUpdatedAt,
         ),
         refundedItems,
         refundTotal: formatCurrency(

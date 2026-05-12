@@ -170,6 +170,34 @@ export function AdminShopifyOrderPage() {
                 {allocation.trackingNumber ?? 'Not assigned'}
               </strong>
             </div>
+            <div className="meta-item">
+              <span>Tracking URL</span>
+              {allocation.trackingUrl ? (
+                <a className="inline-link" href={allocation.trackingUrl} target="_blank" rel="noreferrer">
+                  Open tracking
+                </a>
+              ) : (
+                <strong className="muted">Not available</strong>
+              )}
+            </div>
+            <div className="meta-item">
+              <span>Fulfilled at</span>
+              <strong className={allocation.fulfilledAt ? '' : 'muted'}>
+                {allocation.fulfilledAt ? formatDate(allocation.fulfilledAt) : 'Not fulfilled'}
+              </strong>
+            </div>
+            <div className="meta-item">
+              <span>Shipment created</span>
+              <strong className={allocation.shipmentCreatedAt ? '' : 'muted'}>
+                {allocation.shipmentCreatedAt ? formatDate(allocation.shipmentCreatedAt) : 'Not created'}
+              </strong>
+            </div>
+            <div className="meta-item">
+              <span>Shipment updated</span>
+              <strong className={allocation.shipmentUpdatedAt ? '' : 'muted'}>
+                {allocation.shipmentUpdatedAt ? formatDate(allocation.shipmentUpdatedAt) : 'Not updated'}
+              </strong>
+            </div>
           </section>
 
           {allocation.reassignmentRequired ? (

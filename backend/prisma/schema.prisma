@@ -180,6 +180,9 @@ model Fulfillment {
   notifyCustomer     Boolean  @default(true)
   shopifyFulfillmentId String?
   shopifyFulfillmentOrderId String?
+  fulfilledAt        DateTime?
+  shipmentCreatedAt  DateTime?
+  shipmentUpdatedAt  DateTime?
   syncStatus         String?
   errorMessage       String?
   createdAt          DateTime @default(now())

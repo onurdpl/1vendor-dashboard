@@ -21,6 +21,10 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function toIsoString(value: Date | null | undefined) {
+  return value ? value.toISOString() : null;
+}
+
 export async function listVendorOrders(vendorId: string): Promise<OrderSummaryDto[]> {
   const allocations = await prisma.vendorAllocation.findMany({
     where: {
@@ -100,6 +104,9 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     carrier: allocation.carrier,
     trackingNumber: allocation.trackingNumber,
     trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
+    fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
+    shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt),
+    shipmentUpdatedAt: toIsoString(allocation.fulfillment?.shipmentUpdatedAt),
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,
     lineItems: allocation.lineItems.map((item) => ({
@@ -134,6 +141,7 @@ export async function getAdminShopifyOrderBreakdown(
       allocations: {
         include: {
           assignedVendor: true,
+          fulfillment: true,
           lineItems: {
             include: {
               shopifyOrderLineItem: true,
@@ -202,6 +210,10 @@ export async function getAdminShopifyOrderBreakdown(
         shippingStatus: allocation.shippingStatus,
         trackingNumber: allocation.trackingNumber,
         carrier: allocation.carrier,
+        trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
+        fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
+        shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt),
+        shipmentUpdatedAt: toIsoString(allocation.fulfillment?.shipmentUpdatedAt),
         totalAmount: toAmountString(allocationTotal),
         lineItems: allocation.lineItems.map((lineItem) => ({
           id: lineItem.id,

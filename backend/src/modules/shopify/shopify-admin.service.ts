@@ -77,6 +77,14 @@ type ShopifyOrderFulfillmentStateQueryResponse = {
         number: string | null;
         url: string | null;
       }>;
+      events: {
+        edges: Array<{
+          node: {
+            status: string | null;
+            happenedAt: string | null;
+          };
+        }>;
+      };
       fulfillmentLineItems: {
         edges: Array<{
           node: {
@@ -273,6 +281,7 @@ function parseMockOrderFulfillmentStateByOrderId(
           const fulfillment = entry as Record<string, unknown>;
           const lineItems = Array.isArray(fulfillment.lineItems) ? fulfillment.lineItems : [];
           const trackingInfo = Array.isArray(fulfillment.trackingInfo) ? fulfillment.trackingInfo : [];
+          const events = Array.isArray(fulfillment.events) ? fulfillment.events : [];
 
           return {
             id: String(fulfillment.id ?? ''),
@@ -280,6 +289,15 @@ function parseMockOrderFulfillmentStateByOrderId(
             status: typeof fulfillment.status === 'string' ? fulfillment.status : 'SUCCESS',
             createdAt: typeof fulfillment.createdAt === 'string' ? fulfillment.createdAt : null,
             updatedAt: typeof fulfillment.updatedAt === 'string' ? fulfillment.updatedAt : null,
+            events: events
+              .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
+              .map((item) => {
+                const event = item as Record<string, unknown>;
+                return {
+                  status: event.status === null || event.status === undefined ? null : String(event.status),
+                  happenedAt: event.happenedAt === null || event.happenedAt === undefined ? null : String(event.happenedAt),
+                };
+              }),
             trackingInfo: trackingInfo
               .filter((item) => item && typeof item === 'object' && !Array.isArray(item))
               .map((item) => {
@@ -584,6 +602,14 @@ export function createShopifyAdminService(env: AppEnv) {
                     number
                     url
                   }
+                  events(first: 20) {
+                    edges {
+                      node {
+                        status
+                        happenedAt
+                      }
+                    }
+                  }
                   fulfillmentLineItems(first: 50) {
                     edges {
                       node {
@@ -633,6 +659,10 @@ export function createShopifyAdminService(env: AppEnv) {
         status: fulfillment.status ?? 'UNKNOWN',
         createdAt: fulfillment.createdAt,
         updatedAt: fulfillment.updatedAt,
+        events: (fulfillment.events?.edges || []).map((edge) => ({
+          status: edge.node.status,
+          happenedAt: edge.node.happenedAt,
+        })),
         trackingInfo: (fulfillment.trackingInfo || []).map((tracking) => ({
           company: tracking.company,
           number: tracking.number,

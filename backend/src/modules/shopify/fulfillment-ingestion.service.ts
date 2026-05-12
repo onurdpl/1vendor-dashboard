@@ -65,6 +65,10 @@ function resolveShopifyOrderId(payload: Record<string, unknown>) {
 
 function resolveFulfillmentEventStatus(payload: Record<string, unknown>) {
   const status = (toIdString(payload.status) ?? toIdString(payload.shipment_status) ?? '').toLowerCase();
+  return normalizeFulfillmentEventStatus(status);
+}
+
+function normalizeFulfillmentEventStatus(status: string) {
   if (status === 'delivered') {
     return 'delivered';
   }
@@ -80,12 +84,50 @@ function resolveFulfillmentEventStatus(payload: Record<string, unknown>) {
   return null;
 }
 
+function resolveShopifyFulfillmentId(payload: Record<string, unknown>) {
+  const directFulfillmentId = findNestedId(payload, ['fulfillment_id']);
+  if (directFulfillmentId) {
+    return extractShopifyGidTail(directFulfillmentId) ?? directFulfillmentId;
+  }
+
+  const fulfillmentGid = findNestedId(payload, ['fulfillment_admin_graphql_api_id', 'fulfillmentGid']);
+  if (fulfillmentGid?.startsWith('gid://shopify/Fulfillment/')) {
+    return extractShopifyGidTail(fulfillmentGid);
+  }
+
+  return null;
+}
+
 function normalizeLineItemId(value: string) {
   return extractShopifyGidTail(value) ?? value;
 }
 
 function getTrackingInfo(fulfillment: ShopifyOrderFulfillment) {
   return fulfillment.trackingInfo.find((tracking) => tracking.number || tracking.company || tracking.url) ?? null;
+}
+
+function toDate(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLatestFulfillmentEvent(fulfillment: ShopifyOrderFulfillment) {
+  return [...fulfillment.events]
+    .filter((event) => event.status || event.happenedAt)
+    .sort((a, b) => {
+      const left = a.happenedAt ? new Date(a.happenedAt).getTime() : 0;
+      const right = b.happenedAt ? new Date(b.happenedAt).getTime() : 0;
+      return right - left;
+    })[0] ?? null;
+}
+
+function getCanonicalEventStatus(fulfillment: ShopifyOrderFulfillment) {
+  const latestEvent = getLatestFulfillmentEvent(fulfillment);
+  return normalizeFulfillmentEventStatus((latestEvent?.status ?? '').toLowerCase());
 }
 
 async function failWebhook(eventId: string, errorMessage: string): Promise<FulfillmentIngestionResult> {
@@ -172,6 +214,8 @@ export async function ingestFulfillmentWebhook(
 
       const deliveryEventStatus =
         input.topic === 'fulfillment_events/create' ? resolveFulfillmentEventStatus(input.payload) : null;
+      const eventFulfillmentId =
+        input.topic === 'fulfillment_events/create' ? resolveShopifyFulfillmentId(input.payload) : null;
 
       let affectedAllocationCount = 0;
 
@@ -192,25 +236,36 @@ export async function ingestFulfillmentWebhook(
         }
 
         const tracking = getTrackingInfo(representativeFulfillment);
+        const canonicalEventStatus = getCanonicalEventStatus(representativeFulfillment);
+        const eventAppliesToFulfillment =
+          Boolean(deliveryEventStatus) &&
+          Boolean(eventFulfillmentId) &&
+          eventFulfillmentId === representativeFulfillment.sourceFulfillmentId;
+        const effectiveDeliveryStatus = eventAppliesToFulfillment ? deliveryEventStatus : canonicalEventStatus;
         const fulfillmentStatus = allAllocationItemsFulfilled ? 'fulfilled' : 'partially_fulfilled';
         const shippingStatus =
-          deliveryEventStatus === 'delivered'
+          effectiveDeliveryStatus === 'delivered'
             ? 'delivered'
-            : deliveryEventStatus === 'in_transit'
+            : effectiveDeliveryStatus === 'in_transit'
               ? 'in_transit'
-              : deliveryEventStatus === 'failure'
+              : effectiveDeliveryStatus === 'failure'
                 ? 'fulfillment_event_attention'
                 : allAllocationItemsFulfilled
                   ? 'shipped'
                   : 'partially_shipped';
+        const fulfilledAt = toDate(representativeFulfillment.createdAt);
+        const latestEvent = getLatestFulfillmentEvent(representativeFulfillment);
+        const shipmentCreatedAt = fulfilledAt;
+        const shipmentUpdatedAt =
+          toDate(latestEvent?.happenedAt ?? null) ?? toDate(representativeFulfillment.updatedAt) ?? fulfilledAt;
 
         await tx.vendorAllocation.update({
           where: { id: allocation.id },
           data: {
             fulfillmentStatus,
             shippingStatus,
-            ...(tracking?.number ? { trackingNumber: tracking.number } : {}),
-            ...(tracking?.company ? { carrier: tracking.company } : {}),
+            trackingNumber: tracking?.number ?? null,
+            carrier: tracking?.company ?? null,
           },
         });
 
@@ -218,10 +273,13 @@ export async function ingestFulfillmentWebhook(
           where: { vendorAllocationId: allocation.id },
           update: {
             fulfillmentStatus,
-            trackingNumber: tracking?.number ?? allocation.fulfillment?.trackingNumber ?? null,
-            carrier: tracking?.company ?? allocation.fulfillment?.carrier ?? null,
-            trackingUrl: tracking?.url ?? allocation.fulfillment?.trackingUrl ?? null,
+            trackingNumber: tracking?.number ?? null,
+            carrier: tracking?.company ?? null,
+            trackingUrl: tracking?.url ?? null,
             shopifyFulfillmentId: representativeFulfillment.sourceFulfillmentId,
+            fulfilledAt,
+            shipmentCreatedAt,
+            shipmentUpdatedAt,
             syncStatus: 'shopify_inbound_synced',
             errorMessage: null,
           },
@@ -233,6 +291,9 @@ export async function ingestFulfillmentWebhook(
             trackingUrl: tracking?.url ?? null,
             notifyCustomer: false,
             shopifyFulfillmentId: representativeFulfillment.sourceFulfillmentId,
+            fulfilledAt,
+            shipmentCreatedAt,
+            shipmentUpdatedAt,
             syncStatus: 'shopify_inbound_synced',
             errorMessage: null,
           },

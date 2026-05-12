@@ -321,6 +321,19 @@
 - Remaining verification gap:
   - live registration and a production Shopify Admin fulfillment/delivery event should be tested to confirm this store emits the expected fulfillment event sequence.
 
+## Phase 16-3E Fulfillment Tracking Stabilization
+- Inbound fulfillment sync now hydrates canonical Shopify fulfillment tracking and shipment timestamps into vendor order detail:
+  - carrier
+  - tracking number
+  - tracking URL
+  - fulfilled at
+  - shipment created at
+  - shipment updated at
+- Fulfillment event status is scoped to the matching Shopify fulfillment id before shipping status updates are applied.
+- If Shopify does not provide `trackingInfo`, the UI keeps carrier/tracking fields unassigned while still showing fulfillment timestamps when Shopify provides them.
+- Remaining verification gap:
+  - production Phase 16-3F should confirm Render receives a fresh fulfillment update and the live panel/API shows tracking and timestamps for the affected allocation.
+
 ## Recommended Immediate Phase 15 Focus
 - Treat automation and dashboard real-mode behavior as the first frontend operationalization target.
 - Treat fulfillment action wiring as the first meaningful vendor write-path completion target.

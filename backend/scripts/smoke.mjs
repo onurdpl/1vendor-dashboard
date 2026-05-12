@@ -142,11 +142,12 @@ async function runSmoke() {
       displayFulfillmentStatus: 'PARTIALLY_FULFILLED',
       fulfillments: [
         {
-          id: `gid://shopify/Fulfillment/fulfillment-${runId}`,
-          sourceFulfillmentId: `fulfillment-${runId}`,
+          id: `gid://shopify/Fulfillment/fulfillment-yali-${runId}`,
+          sourceFulfillmentId: `fulfillment-yali-${runId}`,
           status: 'SUCCESS',
           createdAt: '2026-05-11T12:45:00.000Z',
           updatedAt: '2026-05-11T12:46:00.000Z',
+          events: [],
           trackingInfo: [],
           lineItems: [
             {
@@ -155,6 +156,28 @@ async function runSmoke() {
               sku: 'DH2987-100-41',
               quantity: 1,
             },
+          ],
+        },
+        {
+          id: `gid://shopify/Fulfillment/fulfillment-spor-${runId}`,
+          sourceFulfillmentId: `fulfillment-spor-${runId}`,
+          status: 'SUCCESS',
+          createdAt: '2026-05-11T12:50:00.000Z',
+          updatedAt: '2026-05-11T12:55:00.000Z',
+          events: [
+            {
+              status: 'IN_TRANSIT',
+              happenedAt: '2026-05-11T12:56:00.000Z',
+            },
+          ],
+          trackingInfo: [
+            {
+              company: 'MNG Kargo',
+              number: `TRACK-INBOUND-${runId}`,
+              url: `https://tracking.example/TRACK-INBOUND-${runId}`,
+            },
+          ],
+          lineItems: [
             {
               lineItemGid: `gid://shopify/LineItem/li-b-${runId}`,
               sourceLineItemId: `li-b-${runId}`,
@@ -1016,7 +1039,11 @@ async function runSmoke() {
       yalisporAfterInbound.fulfillmentStatus !== 'partially_fulfilled' ||
       yalisporAfterInbound.shippingStatus !== 'partially_shipped' ||
       yalisporAfterInbound.trackingNumber !== null ||
-      yalisporAfterInbound.carrier !== null
+      yalisporAfterInbound.carrier !== null ||
+      yalisporAfterInbound.trackingUrl !== null ||
+      typeof yalisporAfterInbound.fulfilledAt !== 'string' ||
+      typeof yalisporAfterInbound.shipmentCreatedAt !== 'string' ||
+      typeof yalisporAfterInbound.shipmentUpdatedAt !== 'string'
     ) {
       throw new Error(
         `/orders/:orderId yalispor inbound fulfillment should be partial without tracking: ${JSON.stringify(yalisporAfterInbound)}`,
@@ -1035,17 +1062,23 @@ async function runSmoke() {
     const sporjinalAfterInbound = await sporjinalAfterInboundResponse.json();
     if (
       sporjinalAfterInbound.fulfillmentStatus !== 'fulfilled' ||
-      sporjinalAfterInbound.shippingStatus !== 'shipped'
+      sporjinalAfterInbound.shippingStatus !== 'in_transit' ||
+      sporjinalAfterInbound.trackingNumber !== `TRACK-INBOUND-${runId}` ||
+      sporjinalAfterInbound.carrier !== 'MNG Kargo' ||
+      sporjinalAfterInbound.trackingUrl !== `https://tracking.example/TRACK-INBOUND-${runId}` ||
+      sporjinalAfterInbound.fulfilledAt !== '2026-05-11T12:50:00.000Z' ||
+      sporjinalAfterInbound.shipmentCreatedAt !== '2026-05-11T12:50:00.000Z' ||
+      sporjinalAfterInbound.shipmentUpdatedAt !== '2026-05-11T12:56:00.000Z'
     ) {
       throw new Error(
-        `/orders/:orderId sporjinal inbound fulfillment should be fulfilled: ${JSON.stringify(sporjinalAfterInbound)}`,
+        `/orders/:orderId sporjinal inbound fulfillment should include tracking and timestamps: ${JSON.stringify(sporjinalAfterInbound)}`,
       );
     }
 
     const fulfillmentEventPayload = JSON.stringify({
       id: `fulfillment-event-${runId}`,
       order_id: smokeOrderId,
-      fulfillment_id: `fulfillment-${runId}`,
+      fulfillment_id: `fulfillment-spor-${runId}`,
       status: 'delivered',
     });
     const fulfillmentEventHmac = createHmac('sha256', shopifyFulfillmentWebhookSecret)
@@ -1088,6 +1121,18 @@ async function runSmoke() {
     if (sporjinalDelivered?.shippingStatus !== 'delivered') {
       throw new Error(
         `/orders/:orderId fulfillment event should map sporjinal shippingStatus delivered: ${JSON.stringify(sporjinalDelivered)}`,
+      );
+    }
+    const yalisporAfterDeliveredEventResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    const yalisporAfterDeliveredEvent = await yalisporAfterDeliveredEventResponse.json();
+    if (yalisporAfterDeliveredEvent?.shippingStatus === 'delivered') {
+      throw new Error(
+        `/orders/:orderId fulfillment event leaked delivered status to unrelated yalispor fulfillment: ${JSON.stringify(yalisporAfterDeliveredEvent)}`,
       );
     }
 

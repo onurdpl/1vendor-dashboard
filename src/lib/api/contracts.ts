@@ -118,6 +118,7 @@ export type VendorAllocationSummary = {
   shippingStatus: ShippingStatus;
   trackingNumber?: string;
   carrier?: string;
+  trackingUrl?: string;
   estimatedDelivery?: string;
   allocationTotal: string;
   lineItems: OrderLineItem[];

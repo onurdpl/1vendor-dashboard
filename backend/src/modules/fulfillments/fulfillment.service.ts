@@ -166,6 +166,7 @@ export function createFulfillmentService(env: AppEnv) {
       });
 
       const primaryFulfillmentOrderId = matchedFulfillmentOrders[0]?.fulfillmentOrderId ?? null;
+      const submittedAt = new Date();
 
       await prisma.$transaction(async (tx) => {
         await tx.fulfillment.upsert({
@@ -180,6 +181,9 @@ export function createFulfillmentService(env: AppEnv) {
             notifyCustomer,
             shopifyFulfillmentId: fulfillmentResult.fulfillmentId,
             shopifyFulfillmentOrderId: primaryFulfillmentOrderId,
+            fulfilledAt: submittedAt,
+            shipmentCreatedAt: submittedAt,
+            shipmentUpdatedAt: submittedAt,
             syncStatus: fulfillmentResult.status,
             errorMessage: null,
           },
@@ -192,6 +196,9 @@ export function createFulfillmentService(env: AppEnv) {
             notifyCustomer,
             shopifyFulfillmentId: fulfillmentResult.fulfillmentId,
             shopifyFulfillmentOrderId: primaryFulfillmentOrderId,
+            fulfilledAt: submittedAt,
+            shipmentCreatedAt: submittedAt,
+            shipmentUpdatedAt: submittedAt,
             syncStatus: fulfillmentResult.status,
           },
         });
@@ -218,6 +225,9 @@ export function createFulfillmentService(env: AppEnv) {
         shippingStatus: 'shipped',
         shopifySyncSource: fulfillmentResult.source,
         shopifyFulfillmentId: fulfillmentResult.fulfillmentId,
+        fulfilledAt: submittedAt.toISOString(),
+        shipmentCreatedAt: submittedAt.toISOString(),
+        shipmentUpdatedAt: submittedAt.toISOString(),
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify fulfillment sync failed.';
