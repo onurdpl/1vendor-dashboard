@@ -126,8 +126,12 @@ GET /admin/api/2024-01/orders/{order_id}/metafields.json?namespace=custom&key=se
 - Do not rely on raw return webhook payload for detailed line-item vendor mapping.
 - Treat return lifecycle webhook payload as trigger or envelope metadata.
 - Use `payload.id` (Return GID) as the primary key to fetch canonical return details through Shopify GraphQL.
-- Return lifecycle webhook payload includes `payload.id` in `gid://shopify/Return/...` format.
-- Treat `payload.id` as the canonical Return GID input to GraphQL `return(id: $id)`.
+- Live verification update (May 12, 2026):
+  - `RETURNS_REQUEST` raw payload used numeric `id` (for example `23117529425`), not GID string.
+  - Return GID was present as `admin_graphql_api_id` (for example `gid://shopify/Return/23117529425`).
+  - Safe canonical rule for GraphQL fetch:
+    - prefer `admin_graphql_api_id` when present
+    - otherwise construct `gid://shopify/Return/{id}` from numeric id
 
 ### Confirmed GraphQL Return Fetch Strategy
 - Candidate query shape:
@@ -184,6 +188,12 @@ query GetReturn($id: ID!) {
 - GraphQL return query can provide `fulfillmentLineItem.lineItem.id`.
 - `fulfillmentLineItem.lineItem.id` matches the same Shopify LineItem GID used by order line items.
 - There is no standalone root query for `fulfillmentLineItem`; access it through the parent return query.
+- Live verification update (May 12, 2026):
+  - Inline-fragment `returnLineItems` path worked and returned:
+    - `fulfillmentLineItem.id`
+    - `fulfillmentLineItem.lineItem.id`
+    - `fulfillmentLineItem.lineItem.sku`
+  - `reverseFulfillmentOrders` fallback was not needed for the verified return sample.
 
 ### Vendor Attribution for Return Requests
 - Preferred mapping path:
