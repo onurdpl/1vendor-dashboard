@@ -13,6 +13,52 @@ import { prisma } from '../../db/prisma.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
+  const registerSkeletonReturnLifecycleRoute = (
+    path: string,
+    topic: 'returns/request' | 'returns/approve' | 'returns/decline' | 'returns/close',
+  ) => {
+    app.post(path, async (request, reply) => {
+      const rawBody = request.rawBody ?? '';
+      const headers = getShopifyWebhookHeaders(request);
+      const isValid = verifyShopifyWebhookHmac(rawBody, headers.hmac, env.SHOPIFY_WEBHOOK_SECRET);
+
+      if (!isValid) {
+        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      }
+
+      if (!env.DATABASE_URL) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'received_pending_implementation',
+          topic,
+        });
+      }
+
+      const idempotencyResult = await getOrCreateWebhookEvent({
+        topic,
+        shopDomain: headers.shopDomain,
+        webhookId: headers.webhookId,
+        rawBody,
+      });
+
+      if (idempotencyResult.isDuplicate) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'duplicate_ignored',
+          topic,
+        });
+      }
+
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'received_pending_implementation',
+        topic,
+      });
+    });
+  };
 
   app.post('/webhooks/shopify/orders-create', async (request, reply) => {
     const rawBody = request.rawBody ?? '';
@@ -179,4 +225,9 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       refundAllocationCount: ingestionResult.refundAllocationCount,
     });
   });
+
+  registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-request', 'returns/request');
+  registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-approve', 'returns/approve');
+  registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-decline', 'returns/decline');
+  registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-close', 'returns/close');
 }

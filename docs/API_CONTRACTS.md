@@ -71,6 +71,10 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 
 - `POST /webhooks/shopify/orders-create`
 - `POST /webhooks/shopify/refunds-create`
+- `POST /webhooks/shopify/returns-request` (skeleton; ingestion deferred)
+- `POST /webhooks/shopify/returns-approve` (skeleton; ingestion deferred)
+- `POST /webhooks/shopify/returns-decline` (skeleton; ingestion deferred)
+- `POST /webhooks/shopify/returns-close` (skeleton; ingestion deferred)
 - `POST /fulfillments/:allocationId/tracking`
 
 ## Endpoint Contracts
@@ -290,8 +294,48 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - refund mapping uses the original persisted order allocation snapshot
   - primary vendor lookup path is `refund_line_items[].line_item.sku`
   - no silent fallback allocation is allowed for missing SKU or unresolved vendor mapping
-  - duplicate refund delivery is ignored through the existing webhook idempotency layer
-  - future webhook events persist raw payloads for explicit admin replay and reconciliation
+- duplicate refund delivery is ignored through the existing webhook idempotency layer
+- future webhook events persist raw payloads for explicit admin replay and reconciliation
+
+### POST /webhooks/shopify/returns-request
+
+- Purpose: receive verified Shopify `RETURNS_REQUEST` lifecycle webhook envelopes.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/request" }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/request" }`
+- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return request ingestion is intentionally deferred.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+
+### POST /webhooks/shopify/returns-approve
+
+- Purpose: receive verified Shopify `RETURNS_APPROVE` lifecycle webhook envelopes.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/approve" }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/approve" }`
+- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+
+### POST /webhooks/shopify/returns-decline
+
+- Purpose: receive verified Shopify `RETURNS_DECLINE` lifecycle webhook envelopes.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/decline" }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/decline" }`
+- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
+
+### POST /webhooks/shopify/returns-close
+
+- Purpose: receive verified Shopify `RETURNS_CLOSE` lifecycle webhook envelopes.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Expected success response shape:
+  - first delivery: `{ ok: true, duplicate: false, action: "received_pending_implementation", topic: "returns/close" }`
+  - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/close" }`
+- Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
+- Expected `401` behavior: invalid or missing Shopify HMAC signature.
 
 ### POST /fulfillments/:allocationId/tracking
 

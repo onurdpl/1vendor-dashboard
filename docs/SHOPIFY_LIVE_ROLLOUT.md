@@ -12,12 +12,16 @@ Set these in `backend/.env` or the runtime environment before live rollout:
 - `SHOPIFY_ADMIN_ACCESS_TOKEN`
 - `SHOPIFY_WEBHOOK_SECRET`
 - `SHOPIFY_API_VERSION`
+- `SHOPIFY_RETURN_WEBHOOK_BASE_URL` (required only when registering return lifecycle webhooks)
 
 Optional:
 
 - `SHOPIFY_READINESS_LIVE_CHECK=true`
   - enables one lightweight live Shopify GraphQL check
   - remains off by default so local and CI checks do not call live Shopify
+- `SHOPIFY_REGISTER_RETURN_WEBHOOKS=true`
+  - opt-in flag required to register return lifecycle webhooks
+  - script exits safely without mutating Shopify when this flag is not set to `true`
 
 ## Readiness Check
 From the repository root:
@@ -50,6 +54,38 @@ Local defaults:
 - backend: `http://127.0.0.1:4000`
 - frontend real mode: `http://127.0.0.1:5173`
 
+## Return Lifecycle Webhook Registration (Opt-In)
+Return lifecycle subscriptions are registered through Shopify GraphQL (`webhookSubscriptionCreate`) and require custom app scope `read_returns`.
+
+Important:
+- after adding `read_returns`, reinstall the custom app
+- copy the refreshed Admin API token into `backend/.env`
+
+Registration command from repository root:
+
+```bash
+npm run shopify:return-webhooks:register
+```
+
+Or directly inside backend:
+
+```bash
+npm --prefix backend run shopify:return-webhooks:register
+```
+
+Required env for registration:
+- `SHOPIFY_REGISTER_RETURN_WEBHOOKS=true`
+- `SHOPIFY_SHOP_DOMAIN`
+- `SHOPIFY_ADMIN_ACCESS_TOKEN`
+- `SHOPIFY_API_VERSION`
+- `SHOPIFY_RETURN_WEBHOOK_BASE_URL`
+
+Registered topics and callbacks:
+- `RETURNS_REQUEST` -> `${SHOPIFY_RETURN_WEBHOOK_BASE_URL}/webhooks/shopify/returns-request`
+- `RETURNS_APPROVE` -> `${SHOPIFY_RETURN_WEBHOOK_BASE_URL}/webhooks/shopify/returns-approve`
+- `RETURNS_DECLINE` -> `${SHOPIFY_RETURN_WEBHOOK_BASE_URL}/webhooks/shopify/returns-decline`
+- `RETURNS_CLOSE` -> `${SHOPIFY_RETURN_WEBHOOK_BASE_URL}/webhooks/shopify/returns-close`
+
 ## Public Tunnel Requirement
 Shopify must reach a public HTTPS URL.
 
@@ -77,8 +113,12 @@ https://<public-domain>/webhooks/shopify/orders-create
 5. Expose the backend through a public HTTPS tunnel or deployed domain.
 6. Confirm the webhook target URL:
    - `https://<public-domain>/webhooks/shopify/orders-create`
+   - `https://<public-domain>/webhooks/shopify/returns-request`
+   - `https://<public-domain>/webhooks/shopify/returns-approve`
+   - `https://<public-domain>/webhooks/shopify/returns-decline`
+   - `https://<public-domain>/webhooks/shopify/returns-close`
 7. Confirm the configured Shopify webhook secret matches backend configuration.
-8. Register or update the live webhook manually.
+8. Register or update the live webhook manually (or run the return-webhook registration script with explicit opt-in flag).
 9. Observe webhook verification, ingestion, and diagnostics endpoints during the first live deliveries.
 
 ## Guardrails

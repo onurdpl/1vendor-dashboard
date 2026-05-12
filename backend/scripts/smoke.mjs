@@ -457,6 +457,78 @@ async function runSmoke() {
       );
     }
 
+    const returnLifecyclePayload = JSON.stringify({
+      id: `gid://shopify/Return/${runId}`,
+      admin_graphql_api_id: `gid://shopify/Return/${runId}`,
+      order_id: 9001,
+    });
+    const returnLifecycleHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(returnLifecyclePayload, 'utf8')
+      .digest('base64');
+    const returnLifecycleHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': returnLifecycleHmac,
+      'x-shopify-topic': 'returns/request',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-webhook-id': `smoke-returns-request-${runId}`,
+    };
+
+    const validReturnLifecycleResponse = await fetch(`${baseUrl}/webhooks/shopify/returns-request`, {
+      method: 'POST',
+      headers: returnLifecycleHeaders,
+      body: returnLifecyclePayload,
+    });
+    if (validReturnLifecycleResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/returns-request valid signature expected 202, got ${validReturnLifecycleResponse.status}`,
+      );
+    }
+    const validReturnLifecycleJson = await validReturnLifecycleResponse.json();
+    if (
+      validReturnLifecycleJson?.duplicate !== false ||
+      validReturnLifecycleJson?.action !== 'received_pending_implementation' ||
+      validReturnLifecycleJson?.topic !== 'returns/request'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/returns-request first delivery payload invalid: ${JSON.stringify(validReturnLifecycleJson)}`,
+      );
+    }
+
+    const duplicateReturnLifecycleResponse = await fetch(`${baseUrl}/webhooks/shopify/returns-request`, {
+      method: 'POST',
+      headers: returnLifecycleHeaders,
+      body: returnLifecyclePayload,
+    });
+    if (duplicateReturnLifecycleResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/returns-request duplicate expected 202, got ${duplicateReturnLifecycleResponse.status}`,
+      );
+    }
+    const duplicateReturnLifecycleJson = await duplicateReturnLifecycleResponse.json();
+    if (
+      duplicateReturnLifecycleJson?.duplicate !== true ||
+      duplicateReturnLifecycleJson?.action !== 'duplicate_ignored' ||
+      duplicateReturnLifecycleJson?.topic !== 'returns/request'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/returns-request duplicate payload invalid: ${JSON.stringify(duplicateReturnLifecycleJson)}`,
+      );
+    }
+
+    const invalidReturnLifecycleResponse = await fetch(`${baseUrl}/webhooks/shopify/returns-request`, {
+      method: 'POST',
+      headers: {
+        ...returnLifecycleHeaders,
+        'x-shopify-hmac-sha256': 'invalid-signature',
+      },
+      body: returnLifecyclePayload,
+    });
+    if (invalidReturnLifecycleResponse.status !== 401) {
+      throw new Error(
+        `/webhooks/shopify/returns-request invalid signature expected 401, got ${invalidReturnLifecycleResponse.status}`,
+      );
+    }
+
     const adminLoginResponse = await fetch(`${baseUrl}/auth/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
