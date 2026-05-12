@@ -10,6 +10,7 @@ export type ShopifyWebhookHeaders = {
 declare module 'fastify' {
   interface FastifyRequest {
     rawBody?: string;
+    rawBodyBuffer?: Buffer;
   }
 }
 

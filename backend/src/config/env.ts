@@ -8,6 +8,7 @@ export type AppEnv = {
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
   SHOPIFY_WEBHOOK_SECRET: string;
+  SHOPIFY_RETURN_WEBHOOK_SECRET?: string;
   SHOPIFY_SHOP_DOMAIN?: string;
   SHOPIFY_ADMIN_ACCESS_TOKEN?: string;
   SHOPIFY_API_VERSION: string;
@@ -72,6 +73,7 @@ export function loadEnv(): AppEnv {
   const shopifyWebhookSecret =
     process.env.SHOPIFY_WEBHOOK_SECRET ||
     (nodeEnv !== 'production' ? 'dev-shopify-webhook-secret' : undefined);
+  const shopifyReturnWebhookSecret = process.env.SHOPIFY_RETURN_WEBHOOK_SECRET || undefined;
   const shopifyShopDomain = process.env.SHOPIFY_SHOP_DOMAIN || undefined;
   const shopifyAdminAccessToken = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || undefined;
   const shopifyApiVersion = process.env.SHOPIFY_API_VERSION || '2024-01';
@@ -97,6 +99,7 @@ export function loadEnv(): AppEnv {
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
     SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
+    SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
     SHOPIFY_SHOP_DOMAIN: shopifyShopDomain,
     SHOPIFY_ADMIN_ACCESS_TOKEN: shopifyAdminAccessToken,
     SHOPIFY_API_VERSION: shopifyApiVersion,

@@ -8,12 +8,16 @@ function toBase64Buffer(value: string) {
   }
 }
 
-export function verifyShopifyWebhookHmac(rawBody: string, hmacHeader: string | null, secret: string): boolean {
+export function verifyShopifyWebhookHmac(
+  rawBody: string | Buffer,
+  hmacHeader: string | null,
+  secret: string,
+): boolean {
   if (!hmacHeader) {
     return false;
   }
 
-  const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('base64');
+  const expected = createHmac('sha256', secret).update(rawBody).digest('base64');
   const expectedBuffer = toBase64Buffer(expected);
   const actualBuffer = toBase64Buffer(hmacHeader);
 

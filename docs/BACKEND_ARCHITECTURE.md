@@ -187,6 +187,10 @@ Alternative for quick schema sync without migration history:
   - `SHOPIFY_ADMIN_ACCESS_TOKEN`
   - `SHOPIFY_WEBHOOK_SECRET`
   - `SHOPIFY_API_VERSION`
+- Optional webhook-secret override:
+  - `SHOPIFY_RETURN_WEBHOOK_SECRET`
+  - when set, return lifecycle webhook routes use this secret instead of the default webhook secret
+  - this is useful when return lifecycle subscriptions are created through a different Shopify app secret than orders/refunds routes
 - Safety behavior:
   - missing variables are reported by name only
   - secret values are never printed
@@ -269,6 +273,10 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 
 ## Shopify Webhook Idempotency (Phase 13 Step 16)
 - `POST /webhooks/shopify/orders-create` now performs duplicate-delivery protection before any future ingestion logic exists.
+- Shopify webhook verification note:
+  - signature verification uses exact raw request bytes
+  - failed verification logs route/topic/headers-presence/body-byte-length/payload-hash only
+  - secrets and full payloads are not logged by default
 - Idempotency strategy:
   - primary key: `sourceShopDomain + topic + webhookId`
   - fallback key: `sourceShopDomain + topic + payloadHash`

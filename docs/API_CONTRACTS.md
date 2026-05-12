@@ -306,6 +306,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/request" }`
 - Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return request ingestion is intentionally deferred.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Operational note:
+  - verification uses raw request bytes
+  - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
 
 ### POST /webhooks/shopify/returns-approve
 
@@ -316,6 +319,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/approve" }`
 - Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Operational note:
+  - verification uses raw request bytes
+  - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
 
 ### POST /webhooks/shopify/returns-decline
 
@@ -326,6 +332,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/decline" }`
 - Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Operational note:
+  - verification uses raw request bytes
+  - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
 
 ### POST /webhooks/shopify/returns-close
 
@@ -336,6 +345,9 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
   - duplicate: `{ ok: true, duplicate: true, action: "duplicate_ignored", topic: "returns/close" }`
 - Expected `202` behavior: verified payload is persisted for diagnostics and future ingestion, but business-level return lifecycle ingestion is intentionally deferred.
 - Expected `401` behavior: invalid or missing Shopify HMAC signature.
+- Operational note:
+  - verification uses raw request bytes
+  - route can use `SHOPIFY_RETURN_WEBHOOK_SECRET` when return lifecycle webhooks are signed by a different Shopify app secret
 
 ### POST /fulfillments/:allocationId/tracking
 

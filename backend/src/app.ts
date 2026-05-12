@@ -44,8 +44,10 @@ export function createApp() {
     ],
   });
 
-  app.addContentTypeParser('application/json', { parseAs: 'string' }, (request, body, done) => {
-    const rawBody = typeof body === 'string' ? body : body.toString('utf8');
+  app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
+    const rawBodyBuffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
+    const rawBody = rawBodyBuffer.toString('utf8');
+    request.rawBodyBuffer = rawBodyBuffer;
     request.rawBody = rawBody;
 
     try {
