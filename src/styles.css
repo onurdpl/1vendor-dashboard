@@ -275,7 +275,7 @@ a:focus-visible {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.78);
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .diagnostics-item {
@@ -670,6 +670,10 @@ h3 {
   gap: 14px;
 }
 
+.returns-workspace .queue-item {
+  gap: 8px;
+}
+
 .returns-summary-grid {
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
@@ -828,6 +832,29 @@ h3 {
   color: #166534;
   background: rgba(34, 197, 94, 0.12);
   border-color: rgba(34, 197, 94, 0.18);
+}
+
+.status-requested,
+.status-received {
+  color: #92400e;
+  background: rgba(245, 158, 11, 0.14);
+  border-color: rgba(245, 158, 11, 0.24);
+}
+
+.status-closed,
+.status-processed,
+.status-success {
+  color: #166534;
+  background: rgba(34, 197, 94, 0.12);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+.status-failed,
+.status-declined,
+.status-cancelled {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(239, 68, 68, 0.18);
 }
 
 .status-rejected {
@@ -1316,6 +1343,10 @@ h3 {
 
 .finance-record {
   gap: 12px;
+}
+
+.finance-workspace .queue-item {
+  gap: 8px;
 }
 
 .finance-amount {

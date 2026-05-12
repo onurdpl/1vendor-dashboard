@@ -111,20 +111,24 @@ export function FinancePage() {
       <article className="panel operational-card">
         <div className="queue-list-header">
           <h3>Finance records</h3>
-          <button
-            type="button"
-            className="button button-secondary"
-            onClick={() => showFeedback('Finance snapshot exported for review.', 'success')}
-          >
-            Export snapshot
-          </button>
+          {currentUser?.role === 'admin' ? (
+            <button
+              type="button"
+              className="button button-secondary"
+              onClick={() => showFeedback('Finance snapshot exported for review.', 'success')}
+            >
+              Export snapshot
+            </button>
+          ) : (
+            <span className="queue-muted-action">Export actions are not enabled for vendors in real mode.</span>
+          )}
         </div>
         {finance.transactions.length === 0 ? (
           <div className="queue-empty">
             <p className="eyebrow">Records</p>
             <h3>No finance records yet</h3>
             <p className="page-description">
-              No ledger activity is recorded for this vendor scope yet. Processed sales, refunds, and fee entries will appear here.
+              No ledger activity is recorded for this vendor scope yet. Sales, refund, fee, and payout records will appear here when synced.
             </p>
           </div>
         ) : (
@@ -142,16 +146,28 @@ export function FinancePage() {
                 </header>
                 <div className="queue-meta">
                   <span>
-                    <strong>Record:</strong> {record.id}
+                    <strong>Ledger Record:</strong> {record.id}
+                  </span>
+                  <span>
+                    <strong>Lifecycle status:</strong> {record.status}
                   </span>
                   <span>
                     <strong>Counterparty:</strong> {record.counterparty}
                   </span>
                   <span>
-                    <strong>Date:</strong> {formatDate(record.date)}
+                    <strong>Created At:</strong> {formatDate(record.date)}
                   </span>
                   <span>
                     <strong>Type:</strong> {record.category}
+                  </span>
+                  <span>
+                    <strong>Shopify Order Number:</strong> {record.shopifyOrderNumber ?? 'Not available'}
+                  </span>
+                  <span>
+                    <strong>Shopify Order ID:</strong> {record.shopifyOrderId ?? 'Not available'}
+                  </span>
+                  <span>
+                    <strong>Shopify Refund ID:</strong> {record.shopifyRefundId ?? 'Not available'}
                   </span>
                 </div>
                 <div className="queue-actions">

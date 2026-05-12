@@ -258,6 +258,21 @@
   - consistent fallback: `Not available`
 - Empty-state copy was refined for finance and automation views to reduce ambiguous “blank” states and improve operator clarity.
 
+## Phase 15-10 Operational UX Cleanup Update
+- Returns workspace readability improved with denser record cards, clearer lifecycle language, and clearer Shopify entity labeling.
+- Pending return requests are now visually and semantically distinct from processed refund records in both list and detail views.
+- Return detail now separates lifecycle framing and metadata to reduce confusion between return-request state and refund state.
+- Finance workspace now surfaces Shopify metadata with consistent labels:
+  - Shopify Order Number
+  - Shopify Order ID
+  - Shopify Refund ID
+- Diagnostics workspace now makes replay/recovery eligibility clearer with payload-availability and recoverability cues.
+- Operations queue now surfaces clearer lifecycle/source labeling for faster triage scanning.
+- Remaining known gaps:
+  - no async queue worker yet
+  - no return approve/decline frontend mutation actions yet
+  - no admin reassignment mutation yet
+
 ## Phase 15-9 Backend Recovery Lifecycle Prep
 - Webhook processing lifecycle boundaries are now explicit and consistently used:
   - `RECEIVED` -> `PROCESSING` -> `PROCESSED` / `FAILED`

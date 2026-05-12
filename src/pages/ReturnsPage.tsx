@@ -14,6 +14,30 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function getLifecycleLabel(item: ReturnSummary) {
+  if (item.sourceType === 'shopify_return_request') {
+    return 'Pending return lifecycle';
+  }
+
+  return 'Processed refund lifecycle';
+}
+
+function getShopifyEntityLabel(item: ReturnSummary) {
+  if (item.sourceType === 'shopify_return_request') {
+    return 'Shopify Return ID';
+  }
+
+  return 'Shopify Refund ID';
+}
+
+function getShopifyEntityValue(item: ReturnSummary) {
+  if (item.sourceType === 'shopify_return_request') {
+    return item.sourceShopifyReturnId || 'Not available';
+  }
+
+  return item.sourceShopifyRefundId || 'Not available';
+}
+
 export function ReturnsPage() {
   const { data: returns, isLoading, isError, error } = useQueryResource(queryKeys.returns.list(), listReturns);
   const currentUser = getCurrentUser();
@@ -54,11 +78,11 @@ export function ReturnsPage() {
       <div className="hero-card operational-card queue-header">
         <div className="queue-header-copy">
           <p className="eyebrow">Returns</p>
-          <h2>{currentVendor.vendorName} refund allocation queue</h2>
+          <h2>{currentVendor.vendorName} returns operations queue</h2>
           <p className="page-description">
             {currentUser?.role === 'admin'
               ? 'Selected vendor return allocations with operational refund status and review visibility.'
-              : 'Track your vendor refund allocations, review status, and refunded line item impact.'}
+              : 'Track your vendor pending returns and processed refunds with clear operational lifecycle visibility.'}
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
@@ -68,7 +92,7 @@ export function ReturnsPage() {
         </div>
         <div className="queue-health">
           <span className="severity-chip severity-normal">Vendor {currentVendor.vendorName}</span>
-          <span className="severity-chip severity-attention">Pending review {pendingCount}</span>
+          <span className="severity-chip severity-attention">Pending lifecycle {pendingCount}</span>
         </div>
       </div>
 
@@ -78,7 +102,7 @@ export function ReturnsPage() {
           <strong>{totalReturns}</strong>
         </article>
         <article className="finance-summary-card operational-card deduction-card">
-          <span>Refund amount</span>
+          <span>Processed refund amount</span>
           <strong>-${totalRefundAmount.toFixed(2)}</strong>
         </article>
         <article className="finance-summary-card operational-card">
@@ -93,7 +117,7 @@ export function ReturnsPage() {
 
       <article className="panel operational-card">
         <div className="queue-list-header">
-          <h3>Return & refund records</h3>
+          <h3>Returns and refund records</h3>
         </div>
         {returns.length === 0 ? (
           <div className="queue-empty">
@@ -111,42 +135,39 @@ export function ReturnsPage() {
                   <div className="queue-title-block">
                     <h4>{item.id}</h4>
                     <span className="queue-description">
-                      Shopify order #{item.sourceShopifyOrderNumber} · {item.sourceType === 'shopify_return_request' ? `Return ${item.sourceShopifyReturnId ?? 'Pending'}` : `Refund ${item.sourceShopifyRefundId}`}
+                      Shopify Order #{item.sourceShopifyOrderNumber} · {item.sourceType === 'shopify_return_request' ? `Return ${item.sourceShopifyReturnId ?? 'Pending'}` : `Refund ${item.sourceShopifyRefundId}`}
                     </span>
                   </div>
                   <span className={`status-badge status-${item.status.toLowerCase().replace(/\s+/g, '-')}`}>{item.status}</span>
                 </header>
                 <div className="queue-meta">
                   <span>
-                    <strong>Lifecycle type:</strong>{' '}
-                    {item.sourceType === 'shopify_return_request' ? 'Pending return request' : 'Processed refund'}
+                    <strong>Lifecycle:</strong> {getLifecycleLabel(item)}
                   </span>
                   <span>
-                    <strong>Shopify order:</strong> #{item.sourceShopifyOrderNumber}
+                    <strong>Shopify Order Number:</strong> #{item.sourceShopifyOrderNumber}
                   </span>
                   <span>
-                    <strong>Shopify order ID:</strong> {item.sourceShopifyOrderId}
+                    <strong>Shopify Order ID:</strong> {item.sourceShopifyOrderId}
                   </span>
                   <span>
-                    <strong>{item.sourceType === 'shopify_return_request' ? 'Shopify Return ID' : 'Shopify Refund ID'}:</strong>{' '}
-                    {item.sourceType === 'shopify_return_request'
-                      ? item.sourceShopifyReturnId || 'Not available'
-                      : item.sourceShopifyRefundId || 'Not available'}
+                    <strong>{getShopifyEntityLabel(item)}:</strong> {getShopifyEntityValue(item)}
                   </span>
                   <span>
-                    <strong>Created:</strong> {formatDate(item.date)}
+                    <strong>Created At:</strong> {formatDate(item.date)}
                   </span>
                   <span>
-                    <strong>Latest update:</strong> {item.updatedAt ? formatDate(item.updatedAt) : formatDate(item.date)}
+                    <strong>Updated At:</strong> {item.updatedAt ? formatDate(item.updatedAt) : formatDate(item.date)}
                   </span>
                   <span>
-                    <strong>Vendor owner:</strong> {item.assignedVendorId}
+                    <strong>Vendor Owner:</strong> {item.assignedVendorId}
                   </span>
                   <span>
-                    <strong>Refunded SKUs:</strong> {item.refundedSkus?.length ? item.refundedSkus.join(', ') : 'Visible in refund detail'}
+                    <strong>{item.sourceType === 'shopify_return_request' ? 'Requested SKUs' : 'Refunded SKUs'}:</strong>{' '}
+                    {item.refundedSkus?.length ? item.refundedSkus.join(', ') : 'Visible in return detail'}
                   </span>
                   <span>
-                    <strong>Refund context:</strong>{' '}
+                    <strong>Operational Source:</strong>{' '}
                     {item.sourceType === 'shopify_return_request'
                       ? 'Shopify return lifecycle request'
                       : 'Shopify webhook allocation'}

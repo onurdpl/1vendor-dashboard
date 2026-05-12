@@ -18,6 +18,7 @@ type FinanceDashboardDto = {
     status: string;
     description: string | null;
     relatedOrderId: string | null;
+    relatedOrderNumber: string | null;
     relatedReturnId: string | null;
     relatedRefundId: string | null;
     createdAt: string;
@@ -52,6 +53,20 @@ function mapTransactionStatus(status: string): FinanceTransaction['status'] {
   return 'Pending';
 }
 
+function mapRecordStatusLabel(status: string): FinanceTransaction['status'] {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'processed' || normalized === 'settled' || normalized === 'completed') {
+    return 'Completed';
+  }
+  if (normalized === 'verified' || normalized === 'reconciled') {
+    return 'Reconciled';
+  }
+  if (normalized === 'failed' || normalized === 'error') {
+    return 'Failed';
+  }
+  return mapTransactionStatus(status);
+}
+
 export async function getFinanceDashboard(): Promise<FinanceDashboard> {
   const response = await apiClient.get<FinanceDashboardDto>('/finance');
   const grossSales = formatCurrency(response.summary.grossSales);
@@ -81,7 +96,10 @@ export async function getFinanceDashboard(): Promise<FinanceDashboard> {
       counterparty: record.relatedRefundId ?? record.relatedReturnId ?? record.relatedOrderId ?? 'Platform ledger',
       category: mapTransactionCategory(record.type),
       amount: formatCurrency(record.amount),
-      status: mapTransactionStatus(record.status),
+      status: mapRecordStatusLabel(record.status),
+      shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
+      shopifyOrderId: record.relatedOrderId ?? undefined,
+      shopifyRefundId: record.relatedRefundId ?? undefined,
     })),
   };
 }

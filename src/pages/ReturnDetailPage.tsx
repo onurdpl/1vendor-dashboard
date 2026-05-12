@@ -59,10 +59,12 @@ export function ReturnDetailPage() {
     <section className="dashboard return-detail returns-workspace">
       <div className="hero-card operational-card queue-header">
         <div>
-          <p className="eyebrow">Refund allocation</p>
+          <p className="eyebrow">
+            {returnRequest.sourceType === 'shopify_return_request' ? 'Pending return request' : 'Processed refund'}
+          </p>
           <h2>{returnRequest.id}</h2>
           <p className="page-description">
-            Shopify order #{returnRequest.sourceShopifyOrderNumber} ·{' '}
+            Shopify Order #{returnRequest.sourceShopifyOrderNumber} ·{' '}
             {returnRequest.sourceType === 'shopify_return_request'
               ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Not available'}`
               : `Refund ${returnRequest.sourceShopifyRefundId || 'Not available'}`}
@@ -83,10 +85,10 @@ export function ReturnDetailPage() {
 
       <div className="detail-grid">
         <article className="panel operational-card">
-          <h3>{returnRequest.sourceType === 'shopify_return_request' ? 'Return request summary' : 'Refund summary'}</h3>
+          <h3>Operational summary</h3>
           <div className="allocation-summary-grid refund-summary-grid">
             <div className="summary-row">
-              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Refund amount' : 'Total refund amount'}</span>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Refund amount' : 'Refund amount'}</span>
               {returnRequest.sourceType === 'shopify_return_request' ? (
                 <strong className="muted">Not posted yet</strong>
               ) : (
@@ -102,11 +104,11 @@ export function ReturnDetailPage() {
               <strong>{currentVendor.vendorName}</strong>
             </div>
             <div className="summary-row">
-              <span>Related order</span>
+              <span>Shopify Order Number</span>
               <strong>#{returnRequest.sourceShopifyOrderNumber}</strong>
             </div>
             <div className="summary-row">
-              <span>Shopify order ID</span>
+              <span>Shopify Order ID</span>
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="summary-row">
@@ -118,7 +120,7 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="summary-row">
-              <span>Source type</span>
+              <span>Source</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
                   ? 'Shopify return lifecycle request'
@@ -126,18 +128,18 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="summary-row">
-              <span>Created</span>
+              <span>Created At</span>
               <strong>{formatDate(returnRequest.date)}</strong>
             </div>
             <div className="summary-row">
-              <span>Latest backend update</span>
+              <span>Updated At</span>
               <strong>{returnRequest.updatedAt ? formatDate(returnRequest.updatedAt) : formatDate(returnRequest.date)}</strong>
             </div>
           </div>
         </article>
 
         <article className="panel operational-card">
-          <h3>Workflow timeline</h3>
+          <h3>Lifecycle timeline</h3>
           <ul className="timeline">
             {returnRequest.timeline.map((entry) => (
               <li key={entry.label}>
@@ -151,15 +153,15 @@ export function ReturnDetailPage() {
 
       <div className="detail-grid">
         <article className="panel operational-card">
-          <h3>Refunded items</h3>
+          <h3>{returnRequest.sourceType === 'shopify_return_request' ? 'Requested return items' : 'Refunded items'}</h3>
           <div className="line-item-table return-line-items">
             <div className="line-item-head">
               <span>SKU</span>
               <span>Variant</span>
               <span>Item</span>
               <span>Quantity</span>
-              <span>Condition</span>
-              <span>Refund amount</span>
+              <span>Lifecycle state</span>
+              <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Pending amount' : 'Refund amount'}</span>
             </div>
             {(returnRequest.refundedItems ?? returnRequest.items).map((item) => (
               <div key={item.id} className="line-item-row">
@@ -167,8 +169,12 @@ export function ReturnDetailPage() {
                 <span>{item.variantTitle}</span>
                 <span>{item.name}</span>
                 <span>{item.quantity}</span>
-                <span>{item.condition}</span>
-                <span className="finance-negative">-{item.refundAmount}</span>
+                <span>{returnRequest.status}</span>
+                {returnRequest.sourceType === 'shopify_return_request' ? (
+                  <span className="muted">Not posted yet</span>
+                ) : (
+                  <span className="finance-negative">-{item.refundAmount}</span>
+                )}
               </div>
             ))}
           </div>
@@ -194,7 +200,7 @@ export function ReturnDetailPage() {
               <strong>{returnRequest.originalVendorId}</strong>
             </div>
             <div className="meta-item">
-              <span>Source Shopify order ID</span>
+              <span>Shopify Order ID</span>
               <strong>{returnRequest.sourceShopifyOrderId}</strong>
             </div>
             <div className="meta-item">
@@ -206,7 +212,7 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="meta-item">
-              <span>Refund operational state</span>
+              <span>Return lifecycle state</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
                   ? 'Return requested / lifecycle pending'
@@ -216,11 +222,11 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="meta-item">
-              <span>Resolution</span>
+              <span>Workflow summary</span>
               <strong>{returnRequest.resolution}</strong>
             </div>
             <div className="meta-item">
-              <span>Refund method</span>
+              <span>Refund lifecycle</span>
               <strong>{returnRequest.refundMethod}</strong>
             </div>
             <div className="meta-item">
@@ -232,11 +238,11 @@ export function ReturnDetailPage() {
               </strong>
             </div>
             <div className="meta-item">
-              <span>Operational sync source</span>
+              <span>Sync source</span>
               <strong>{returnRequest.processedBy}</strong>
             </div>
             <div className="meta-item">
-              <span>Refund notes</span>
+              <span>Operational notes</span>
               <strong>{returnRequest.reason}</strong>
             </div>
           </div>

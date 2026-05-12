@@ -41,6 +41,19 @@ function formatWebhookTopic(topic: string) {
     .join(' / ');
 }
 
+function formatRecoverability(payloadAvailable: boolean, status: string) {
+  if (!payloadAvailable) {
+    return 'Unavailable (payload missing)';
+  }
+  if (status === 'PROCESSED') {
+    return 'Not recommended (already processed)';
+  }
+  if (status === 'FAILED' || status === 'RECEIVED' || status === 'PROCESSING') {
+    return 'Replay/recover candidate';
+  }
+  return 'Review required';
+}
+
 export function AdminDiagnosticsPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [selectedWebhookEventId, setSelectedWebhookEventId] = useState<string | null>(null);
@@ -215,7 +228,7 @@ export function AdminDiagnosticsPage() {
                       <h4>{formatWebhookTopic(event.topic)}</h4>
                     </div>
                     <span className={`status-badge status-${event.payloadAvailable ? 'processed' : 'pending'}`}>
-                      {event.payloadAvailable ? 'Replayable' : 'No payload'}
+                      {event.payloadAvailable ? 'Replayable' : 'Payload missing'}
                     </span>
                   </div>
                   <p className="queue-description">{event.errorMessage ?? 'Webhook stored successfully.'}</p>
@@ -230,7 +243,7 @@ export function AdminDiagnosticsPage() {
                       <strong>Webhook ID:</strong> {event.shopifyWebhookId ?? 'Not provided'}
                     </span>
                     <span>
-                      <strong>Replay eligibility:</strong> {event.payloadAvailable ? 'Eligible' : 'Not eligible (payload missing)'}
+                      <strong>Recoverability:</strong> {formatRecoverability(event.payloadAvailable, event.status)}
                     </span>
                   </div>
                 </button>
@@ -242,7 +255,7 @@ export function AdminDiagnosticsPage() {
         <article className="panel operational-card diagnostics-panel">
           <div className="queue-list-header">
             <h3>Webhook detail</h3>
-            <p className="page-description">Inspect payload availability, related order context, and explicit replay controls.</p>
+            <p className="page-description">Inspect payload availability, related order context, and replay/recovery readiness.</p>
           </div>
           {!selectedWebhook ? (
             <div className="queue-empty">
@@ -260,6 +273,10 @@ export function AdminDiagnosticsPage() {
                 <div className="meta-item">
                   <span>Payload available</span>
                   <strong>{selectedWebhook.payloadAvailable ? 'Yes' : 'No'}</strong>
+                </div>
+                <div className="meta-item">
+                  <span>Recoverability</span>
+                  <strong>{formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)}</strong>
                 </div>
                 <div className="meta-item">
                   <span>Related Shopify order</span>
@@ -296,10 +313,12 @@ export function AdminDiagnosticsPage() {
                     disabled={replayMutation.isPending}
                     onClick={() => replayMutation.mutate(selectedWebhook.id)}
                   >
-                    {replayMutation.isPending ? 'Replaying...' : 'Replay webhook'}
+                    {replayMutation.isPending ? 'Replaying...' : 'Replay webhook event'}
                   </button>
                 ) : (
-                  <span className="queue-muted-action">Replay unavailable: payload not stored for this event. Use reconciliation suggested action instead.</span>
+                  <span className="queue-muted-action">
+                    Replay unavailable because payload is not stored for this event. Use reconciliation suggested actions for manual recovery.
+                  </span>
                 )}
                 {selectedWebhook.relatedShopifyOrderId ? (
                   <Link className="button button-secondary" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
@@ -356,6 +375,14 @@ export function AdminDiagnosticsPage() {
                         : item.relatedWebhookEventId && item.payloadAvailable === false
                           ? 'Not eligible (payload missing)'
                           : 'Not applicable'}
+                    </span>
+                    <span>
+                      <strong>Recoverability:</strong>{' '}
+                      {item.type === 'stuck_webhook' || item.type === 'failed_webhook'
+                        ? item.payloadAvailable
+                          ? 'Replay/recover candidate'
+                          : 'Manual recovery required'
+                        : 'Investigate and monitor'}
                     </span>
                   </div>
                 </article>

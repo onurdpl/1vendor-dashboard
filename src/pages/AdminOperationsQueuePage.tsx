@@ -46,6 +46,19 @@ function classifyOperationalSource(item: {
   return 'Operational issue';
 }
 
+function getLifecycleLabel(type: string) {
+  if (type === 'awaiting_shipment') {
+    return 'Fulfillment lifecycle';
+  }
+  if (type === 'refund_attention') {
+    return 'Return/refund lifecycle';
+  }
+  if (type === 'pending_reassignment' || type === 'vendor_blocked') {
+    return 'Allocation lifecycle';
+  }
+  return 'Operational lifecycle';
+}
+
 export function AdminOperationsQueuePage() {
   const { data: queue, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.queue(), () =>
     runtimeServices.operations.list(),
@@ -192,16 +205,22 @@ export function AdminOperationsQueuePage() {
                     <strong>Source:</strong> {classifyOperationalSource(item)}
                   </span>
                   <span>
-                    <strong>Type:</strong> {item.type}
+                    <strong>Lifecycle:</strong> {getLifecycleLabel(item.type)}
+                  </span>
+                  <span>
+                    <strong>Queue type:</strong> {toTitleCaseLabel(item.type)}
                   </span>
                   <span>
                     <strong>Vendor:</strong> {item.vendorName ?? item.vendorId}
                   </span>
                   <span>
-                    <strong>Order:</strong> {item.relatedOrderId ?? item.relatedShopifyOrderId ?? 'N/A'}
+                    <strong>Allocation ID:</strong> {item.relatedOrderId ?? 'Not available'}
                   </span>
                   <span>
-                    <strong>Created:</strong> {formatDate(item.createdAt)}
+                    <strong>Shopify Order ID:</strong> {item.relatedShopifyOrderId ?? 'Not available'}
+                  </span>
+                  <span>
+                    <strong>Created At:</strong> {formatDate(item.createdAt)}
                   </span>
                 </div>
                 <div className="queue-actions">
