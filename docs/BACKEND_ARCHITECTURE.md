@@ -387,7 +387,13 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 - Backend now adds explicit admin recovery tooling without introducing queue workers or silent retries.
 - Current recovery endpoints:
   - `POST /admin/diagnostics/webhooks/:webhookEventId/replay`
+  - `POST /admin/diagnostics/webhooks/:webhookEventId/recover`
   - `GET /admin/diagnostics/reconciliation`
+- Webhook lifecycle states are explicitly used for recovery boundaries:
+  - `RECEIVED`
+  - `PROCESSING`
+  - `PROCESSED`
+  - `FAILED`
 - Replay strategy:
   - admin-only
   - supported topics only:
@@ -397,10 +403,17 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - missing payload is a hard `409` with:
     - `Webhook payload is not available for replay`
   - unsupported topics are rejected explicitly instead of pretending to recover
+- Recover strategy:
+  - admin-only
+  - allows explicit operator recovery for events in `RECEIVED` or `FAILED`
+  - requires `payloadAvailable=true`
+  - marks event `PROCESSING` before re-running ingestion
+  - blocks `PROCESSED` recovery with `409` to prevent accidental re-processing
+  - reuses idempotent upsert-based ingestion paths (safe duplicate protection without queue worker)
 - Payload retention:
   - new `WebhookEvent` rows persist `rawPayload` for future replay
   - older historical events are not backfilled
-  - diagnostics detail and reconciliation expose payload availability so operators can tell whether replay is possible
+  - diagnostics detail and reconciliation expose payload availability so operators can tell whether replay/recover is possible
 - Reconciliation strategy:
   - surfaces `RECEIVED` webhook events older than 5 minutes
   - surfaces failed webhook events
@@ -422,7 +435,7 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - duplicates are therefore visible through request/response semantics and idempotency keys, but not yet persisted as standalone duplicate-event rows
 - Raw payload note:
   - webhook payload hash is persisted
-  - raw webhook body is not currently stored in the database
+  - webhook raw payload is persisted for newer events and used by replay/recover tooling
 - Frontend note:
   - this phase adds API-level diagnostics only
   - admin diagnostics UI remains future work

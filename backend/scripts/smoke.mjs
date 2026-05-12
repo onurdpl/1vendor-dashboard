@@ -639,6 +639,7 @@ async function runSmoke() {
     }
 
     const legacyMissingPayloadEventId = `legacy-missing-payload-${runId}`;
+    const recoverableReceivedEventId = `recoverable-received-${runId}`;
     if (prisma) {
       await prisma.webhookEvent.create({
         data: {
@@ -648,6 +649,19 @@ async function runSmoke() {
           idempotencyKey: `legacy:orders/create:${runId}`,
           payloadHash: `legacy-payload-hash-${runId}`,
           rawPayload: null,
+          status: 'RECEIVED',
+          receivedAt: new Date(Date.now() - 10 * 60 * 1000),
+        },
+      });
+
+      await prisma.webhookEvent.create({
+        data: {
+          id: recoverableReceivedEventId,
+          sourceShopDomain: 'demo-shop.myshopify.com',
+          topic: 'orders/create',
+          idempotencyKey: `recoverable:orders/create:${runId}`,
+          payloadHash: `recoverable-payload-hash-${runId}`,
+          rawPayload: webhookPayload,
           status: 'RECEIVED',
           receivedAt: new Date(Date.now() - 10 * 60 * 1000),
         },
@@ -1288,6 +1302,12 @@ async function runSmoke() {
     if (!adminWebhookDiagnostics?.summary || !Array.isArray(adminWebhookDiagnostics?.events)) {
       throw new Error('/admin/diagnostics/webhooks returned invalid shape.');
     }
+    const recoverableReceivedEvent =
+      adminWebhookDiagnostics.events.find((event) => event?.id === recoverableReceivedEventId) ??
+      adminWebhookDiagnostics.events.find((event) => event?.status === 'RECEIVED' && event?.payloadAvailable === true);
+    if (!recoverableReceivedEvent) {
+      throw new Error('/admin/diagnostics/webhooks missing recoverable RECEIVED event with payload.');
+    }
     const processedWebhookEvent = adminWebhookDiagnostics.events.find((event) => event?.status === 'PROCESSED');
     if (!processedWebhookEvent) {
       throw new Error('/admin/diagnostics/webhooks missing processed webhook event.');
@@ -1469,6 +1489,101 @@ async function runSmoke() {
     if (missingReplayIdResponse.status !== 404) {
       throw new Error(
         `/admin/diagnostics/webhooks/:id/replay missing event expected 404, got ${missingReplayIdResponse.status}`,
+      );
+    }
+
+    const recoverReceivedResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${recoverableReceivedEvent.id}/recover`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (recoverReceivedResponse.status !== 202) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover received event expected 202, got ${recoverReceivedResponse.status}`,
+      );
+    }
+    const recoverReceivedJson = await recoverReceivedResponse.json();
+    if (
+      recoverReceivedJson?.ok !== true ||
+      typeof recoverReceivedJson?.recoveryStatus !== 'string' ||
+      typeof recoverReceivedJson?.processingStatus !== 'string'
+    ) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover received event returned invalid payload: ${JSON.stringify(recoverReceivedJson)}`,
+      );
+    }
+
+    const recoverReceivedAgainResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${recoverableReceivedEvent.id}/recover`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (recoverReceivedAgainResponse.status !== 409) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover processed event expected 409, got ${recoverReceivedAgainResponse.status}`,
+      );
+    }
+
+    const recoverMissingPayloadResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${legacyMissingPayloadEventId}/recover`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (recoverMissingPayloadResponse.status !== 409) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover missing payload expected 409, got ${recoverMissingPayloadResponse.status}`,
+      );
+    }
+
+    const recoverFailedResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${failedWebhookEvent.id}/recover`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (recoverFailedResponse.status !== 202) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover failed event expected 202, got ${recoverFailedResponse.status}`,
+      );
+    }
+    const recoverFailedJson = await recoverFailedResponse.json();
+    if (
+      recoverFailedJson?.ok !== true ||
+      typeof recoverFailedJson?.recoveryStatus !== 'string' ||
+      typeof recoverFailedJson?.processingStatus !== 'string'
+    ) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover failed event returned invalid payload: ${JSON.stringify(recoverFailedJson)}`,
+      );
+    }
+
+    const vendorRecoverResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${failedWebhookEvent.id}/recover`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${vendorToken}`,
+        },
+      },
+    );
+    if (vendorRecoverResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover vendor forbidden expected 403, got ${vendorRecoverResponse.status}`,
       );
     }
 

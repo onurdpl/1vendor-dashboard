@@ -1,11 +1,17 @@
+import type { WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
 import { ingestShopifyOrderWebhook } from '../shopify/order-ingestion.service.js';
 import { ingestShopifyRefundWebhook } from '../shopify/refund-ingestion.service.js';
+import {
+  applyReturnLifecycleStatusWebhook,
+  ingestReturnRequestWebhook,
+} from '../shopify/return-lifecycle-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type { ShopifyRefundsCreateWebhookPayload } from '../shopify/refund-ingestion.types.js';
+import type { ReturnLifecycleWebhookPayload } from '../shopify/return-lifecycle-ingestion.types.js';
 import type {
   AdminWebhookDiagnosticDetail,
   AdminWebhookDiagnosticsEvent,
@@ -15,6 +21,7 @@ import type {
   SyncDiagnosticItem,
   SyncDiagnosticsResponse,
   SyncDiagnosticSeverity,
+  WebhookRecoverResponse,
   WebhookReplayResponse,
 } from './diagnostics.types.js';
 
@@ -236,7 +243,7 @@ export async function listSyncDiagnostics(): Promise<SyncDiagnosticsResponse> {
 type ReplayPayloadResult =
   | {
       ok: true;
-      payload: ShopifyOrdersCreateWebhookPayload | ShopifyRefundsCreateWebhookPayload;
+      payload: Record<string, unknown>;
     }
   | {
       ok: false;
@@ -254,7 +261,7 @@ function parseStoredPayload(rawPayload: string | null): ReplayPayloadResult {
   try {
     return {
       ok: true,
-      payload: JSON.parse(rawPayload) as ShopifyOrdersCreateWebhookPayload | ShopifyRefundsCreateWebhookPayload,
+      payload: JSON.parse(rawPayload) as Record<string, unknown>,
     };
   } catch {
     return {
@@ -262,6 +269,173 @@ function parseStoredPayload(rawPayload: string | null): ReplayPayloadResult {
       message: 'Stored webhook payload is not valid JSON and cannot be replayed.',
     };
   }
+}
+
+async function markWebhookProcessing(eventId: string) {
+  await prisma.webhookEvent.update({
+    where: { id: eventId },
+    data: {
+      status: 'PROCESSING',
+      errorMessage: null,
+    },
+  });
+}
+
+async function markWebhookFailed(eventId: string, message: string) {
+  await prisma.webhookEvent.update({
+    where: { id: eventId },
+    data: {
+      status: 'FAILED',
+      errorMessage: message,
+    },
+  });
+}
+
+async function processWebhookEvent(
+  env: AppEnv,
+  event: WebhookEvent,
+  payload: Record<string, unknown>,
+): Promise<WebhookReplayResponse> {
+  if (event.topic === 'orders/create') {
+    const typedPayload = payload as ShopifyOrdersCreateWebhookPayload;
+    const sourceShopifyOrderId =
+      typedPayload.id !== undefined && typedPayload.id !== null ? String(typedPayload.id) : null;
+
+    if (!sourceShopifyOrderId) {
+      await markWebhookFailed(event.id, 'Shopify orders/create payload did not include an order id.');
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message: 'Shopify orders/create payload did not include an order id.',
+      };
+    }
+
+    const shopifyAdminService = createShopifyAdminService(env);
+    const sellerInfoResult = await fetchSellerInfoWithRetry({
+      orderId: sourceShopifyOrderId,
+      fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
+      delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
+    });
+
+    if (!sellerInfoResult.ok) {
+      await markWebhookFailed(event.id, sellerInfoResult.error);
+      return {
+        ok: true,
+        topic: event.topic,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message: sellerInfoResult.error,
+      };
+    }
+
+    const ingestionResult = await ingestShopifyOrderWebhook({
+      event,
+      payload: typedPayload,
+      sellerInfo: sellerInfoResult.sellerInfo,
+    });
+
+    return ingestionResult.ok
+      ? {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          shopifyOrderId: ingestionResult.shopifyOrderId,
+          allocationCount: ingestionResult.allocationCount,
+        }
+      : {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        };
+  }
+
+  if (event.topic === 'refunds/create') {
+    const ingestionResult = await ingestShopifyRefundWebhook({
+      event,
+      payload: payload as ShopifyRefundsCreateWebhookPayload,
+    });
+
+    return ingestionResult.ok
+      ? {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          shopifyOrderId: ingestionResult.shopifyOrderId,
+          refundAllocationCount: ingestionResult.refundAllocationCount,
+        }
+      : {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        };
+  }
+
+  if (event.topic === 'returns/request') {
+    const ingestionResult = await ingestReturnRequestWebhook(env, {
+      event,
+      payload: payload as ReturnLifecycleWebhookPayload,
+    });
+
+    return ingestionResult.ok
+      ? {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          affectedRecordCount: ingestionResult.affectedRecordCount,
+        }
+      : {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        };
+  }
+
+  if (
+    event.topic === 'returns/approve' ||
+    event.topic === 'returns/decline' ||
+    event.topic === 'returns/close' ||
+    event.topic === 'returns/cancel'
+  ) {
+    const ingestionResult = await applyReturnLifecycleStatusWebhook(event.topic, {
+      event,
+      payload: payload as ReturnLifecycleWebhookPayload,
+    });
+
+    return ingestionResult.ok
+      ? {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          affectedRecordCount: ingestionResult.affectedRecordCount,
+        }
+      : {
+          ok: true,
+          topic: event.topic,
+          action: ingestionResult.action,
+          processingStatus: ingestionResult.processingStatus,
+          message: ingestionResult.error,
+        };
+  }
+
+  return {
+    ok: true,
+    topic: event.topic,
+    action: 'not_recoverable',
+    processingStatus: 'needs_attention',
+    message: `Replay/recover is not supported for topic ${event.topic}.`,
+  };
 }
 
 export async function replayWebhookEvent(
@@ -302,110 +476,9 @@ export async function replayWebhookEvent(
     };
   }
 
-  if (event.topic === 'orders/create') {
-    const payload = parsedPayload.payload as ShopifyOrdersCreateWebhookPayload;
-    const sourceShopifyOrderId =
-      payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
-
-    if (!sourceShopifyOrderId) {
-      await prisma.webhookEvent.update({
-        where: { id: event.id },
-        data: {
-          status: 'FAILED',
-          errorMessage: 'Shopify orders/create payload did not include an order id.',
-        },
-      });
-
-      return {
-        ok: true,
-        response: {
-          ok: true,
-          topic: event.topic,
-          action: 'received_needs_attention',
-          processingStatus: 'needs_attention',
-          message: 'Shopify orders/create payload did not include an order id.',
-        },
-      };
-    }
-
-    const shopifyAdminService = createShopifyAdminService(env);
-    const sellerInfoResult = await fetchSellerInfoWithRetry({
-      orderId: sourceShopifyOrderId,
-      fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
-      delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
-    });
-
-    if (!sellerInfoResult.ok) {
-      await prisma.webhookEvent.update({
-        where: { id: event.id },
-        data: {
-          status: 'FAILED',
-          errorMessage: sellerInfoResult.error,
-        },
-      });
-
-      return {
-        ok: true,
-        response: {
-          ok: true,
-          topic: event.topic,
-          action: 'received_needs_attention',
-          processingStatus: 'needs_attention',
-          message: sellerInfoResult.error,
-        },
-      };
-    }
-
-    const ingestionResult = await ingestShopifyOrderWebhook({
-      event,
-      payload,
-      sellerInfo: sellerInfoResult.sellerInfo,
-    });
-
-    return {
-      ok: true,
-      response: ingestionResult.ok
-        ? {
-            ok: true,
-            topic: event.topic,
-            action: ingestionResult.action,
-            processingStatus: ingestionResult.processingStatus,
-            shopifyOrderId: ingestionResult.shopifyOrderId,
-            allocationCount: ingestionResult.allocationCount,
-          }
-        : {
-            ok: true,
-            topic: event.topic,
-            action: ingestionResult.action,
-            processingStatus: ingestionResult.processingStatus,
-            message: ingestionResult.error,
-          },
-    };
-  }
-
-  const ingestionResult = await ingestShopifyRefundWebhook({
-    event,
-    payload: parsedPayload.payload as ShopifyRefundsCreateWebhookPayload,
-  });
-
   return {
     ok: true,
-    response: ingestionResult.ok
-      ? {
-          ok: true,
-          topic: event.topic,
-          action: ingestionResult.action,
-          processingStatus: ingestionResult.processingStatus,
-          shopifyOrderId: ingestionResult.shopifyOrderId,
-          refundAllocationCount: ingestionResult.refundAllocationCount,
-        }
-      : {
-          ok: true,
-          topic: event.topic,
-          action: ingestionResult.action,
-          processingStatus: ingestionResult.processingStatus,
-          message: ingestionResult.error,
-        },
+    response: await processWebhookEvent(env, event, parsedPayload.payload),
   };
 }
 
@@ -492,7 +565,9 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
-    suggestedAction: event.rawPayload ? 'Replay webhook event from diagnostics.' : 'Investigate source delivery and payload retention.',
+    suggestedAction: event.rawPayload
+      ? 'Use diagnostics recover endpoint to resume stuck processing.'
+      : 'Payload missing. Manual recovery from Shopify source data is required.',
     payloadAvailable: Boolean(event.rawPayload),
   }));
 
@@ -507,7 +582,9 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
-    suggestedAction: event.rawPayload ? 'Replay after confirming the underlying mapping issue is resolved.' : 'Payload unavailable; inspect Shopify source event and diagnostics.',
+    suggestedAction: event.rawPayload
+      ? 'Use diagnostics recover/replay after confirming the mapping issue is resolved.'
+      : 'Payload missing. Manual recovery from Shopify source data is required.',
     payloadAvailable: Boolean(event.rawPayload),
   }));
 
@@ -537,7 +614,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     relatedAllocationId: null,
     status: event.status,
     createdAt: event.receivedAt.toISOString(),
-    suggestedAction: 'Use Shopify source data and diagnostics to recover manually; replay is not available.',
+    suggestedAction: 'Manual recovery required: payload unavailable for recover/replay.',
     payloadAvailable: false,
   }));
 
@@ -554,5 +631,88 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       total: items.length,
     },
     items,
+  };
+}
+
+export async function recoverWebhookEvent(
+  env: AppEnv,
+  webhookEventId: string,
+): Promise<
+  | { ok: false; statusCode: 404 | 409; message: string }
+  | { ok: true; response: WebhookRecoverResponse }
+> {
+  const event = await prisma.webhookEvent.findUnique({
+    where: { id: webhookEventId },
+  });
+
+  if (!event) {
+    return {
+      ok: false,
+      statusCode: 404,
+      message: 'Webhook event not found.',
+    };
+  }
+
+  const supportedTopics = new Set([
+    'orders/create',
+    'refunds/create',
+    'returns/request',
+    'returns/approve',
+    'returns/decline',
+    'returns/close',
+    'returns/cancel',
+  ]);
+
+  if (!supportedTopics.has(event.topic)) {
+    return {
+      ok: true,
+      response: {
+        ok: true,
+        recoveryStatus: 'not_recoverable',
+        topic: event.topic,
+        action: 'not_recoverable',
+        processingStatus: 'needs_attention',
+        message: `Recover is not supported for topic ${event.topic}.`,
+      },
+    };
+  }
+
+  if (event.status === 'PROCESSED') {
+    return {
+      ok: false,
+      statusCode: 409,
+      message: 'Processed webhook events are not recoverable.',
+    };
+  }
+
+  if (event.status !== 'RECEIVED' && event.status !== 'FAILED') {
+    return {
+      ok: false,
+      statusCode: 409,
+      message: `Webhook event in status ${event.status} is not recoverable.`,
+    };
+  }
+
+  const parsedPayload = parseStoredPayload(event.rawPayload);
+  if (!parsedPayload.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      message: parsedPayload.message,
+    };
+  }
+
+  await markWebhookProcessing(event.id);
+
+  const response = await processWebhookEvent(env, event, parsedPayload.payload);
+  const recoveryStatus: WebhookRecoverResponse['recoveryStatus'] =
+    response.processingStatus === 'processed' ? 'recovered' : 'failed';
+
+  return {
+    ok: true,
+    response: {
+      ...response,
+      recoveryStatus,
+    },
   };
 }

@@ -73,7 +73,12 @@ export type WebhookReplayResponse = {
   shopifyOrderId?: string;
   allocationCount?: number;
   refundAllocationCount?: number;
+  affectedRecordCount?: number;
   message?: string;
+};
+
+export type WebhookRecoverResponse = WebhookReplayResponse & {
+  recoveryStatus: 'recovered' | 'failed' | 'not_recoverable';
 };
 
 export type ReconciliationSummary = {

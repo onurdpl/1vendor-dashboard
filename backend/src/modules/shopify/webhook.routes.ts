@@ -59,6 +59,26 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     );
   };
 
+  const markWebhookProcessing = async (eventId: string) => {
+    await prisma.webhookEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'PROCESSING',
+        errorMessage: null,
+      },
+    });
+  };
+
+  const markWebhookFailed = async (eventId: string, message: string) => {
+    await prisma.webhookEvent.update({
+      where: { id: eventId },
+      data: {
+        status: 'FAILED',
+        errorMessage: message,
+      },
+    });
+  };
+
   const registerSkeletonReturnLifecycleRoute = (
     path: string,
     topic: ReturnLifecycleTopic,
@@ -111,16 +131,31 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       const payload = (request.body ?? {}) as ReturnLifecycleWebhookPayload;
-      const ingestionResult =
-        topic === 'returns/request'
-          ? await ingestReturnRequestWebhook(env, {
-              event: idempotencyResult.event,
-              payload,
-            })
-          : await applyReturnLifecycleStatusWebhook(topic, {
-              event: idempotencyResult.event,
-              payload,
-            });
+      let ingestionResult;
+      try {
+        await markWebhookProcessing(idempotencyResult.event.id);
+        ingestionResult =
+          topic === 'returns/request'
+            ? await ingestReturnRequestWebhook(env, {
+                event: idempotencyResult.event,
+                payload,
+              })
+            : await applyReturnLifecycleStatusWebhook(topic, {
+                event: idempotencyResult.event,
+                payload,
+              });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : `Shopify ${topic} lifecycle ingestion failed.`;
+        await markWebhookFailed(idempotencyResult.event.id, message);
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          topic,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message,
+        });
+      }
 
       if (!ingestionResult.ok) {
         return reply.code(202).send({
@@ -193,56 +228,56 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
-    const sourceShopifyOrderId =
-      payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+    let ingestionResult;
+    try {
+      await markWebhookProcessing(idempotencyResult.event.id);
+      const sourceShopifyOrderId =
+        payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
 
-    if (!sourceShopifyOrderId) {
-      await prisma.webhookEvent.update({
-        where: { id: idempotencyResult.event.id },
-        data: {
-          status: 'FAILED',
-          errorMessage: 'Shopify orders/create payload did not include an order id.',
-        },
+      if (!sourceShopifyOrderId) {
+        await markWebhookFailed(idempotencyResult.event.id, 'Shopify orders/create payload did not include an order id.');
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message: 'Shopify orders/create payload did not include an order id.',
+        });
+      }
+
+      const sellerInfoResult = await fetchSellerInfoWithRetry({
+        orderId: sourceShopifyOrderId,
+        fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
+        delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
       });
 
+      if (!sellerInfoResult.ok) {
+        await markWebhookFailed(idempotencyResult.event.id, sellerInfoResult.error);
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'received_needs_attention',
+          processingStatus: 'needs_attention',
+          message: sellerInfoResult.error,
+        });
+      }
+
+      ingestionResult = await ingestShopifyOrderWebhook({
+        event: idempotencyResult.event,
+        payload,
+        sellerInfo: sellerInfoResult.sellerInfo,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Shopify orders/create ingestion failed.';
+      await markWebhookFailed(idempotencyResult.event.id, message);
       return reply.code(202).send({
         ok: true,
         duplicate: false,
         action: 'received_needs_attention',
         processingStatus: 'needs_attention',
-        message: 'Shopify orders/create payload did not include an order id.',
+        message,
       });
     }
-
-    const sellerInfoResult = await fetchSellerInfoWithRetry({
-      orderId: sourceShopifyOrderId,
-      fetchSellerInfo: shopifyAdminService.fetchOrderSellerInfo,
-      delayMs: env.SHOPIFY_SELLER_INFO_RETRY_DELAY_MS,
-    });
-
-    if (!sellerInfoResult.ok) {
-      await prisma.webhookEvent.update({
-        where: { id: idempotencyResult.event.id },
-        data: {
-          status: 'FAILED',
-          errorMessage: sellerInfoResult.error,
-        },
-      });
-
-      return reply.code(202).send({
-        ok: true,
-        duplicate: false,
-        action: 'received_needs_attention',
-        processingStatus: 'needs_attention',
-        message: sellerInfoResult.error,
-      });
-    }
-
-    const ingestionResult = await ingestShopifyOrderWebhook({
-      event: idempotencyResult.event,
-      payload,
-      sellerInfo: sellerInfoResult.sellerInfo,
-    });
 
     if (!ingestionResult.ok) {
       return reply.code(202).send({
@@ -312,10 +347,24 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
-    const ingestionResult = await ingestShopifyRefundWebhook({
-      event: idempotencyResult.event,
-      payload,
-    });
+    let ingestionResult;
+    try {
+      await markWebhookProcessing(idempotencyResult.event.id);
+      ingestionResult = await ingestShopifyRefundWebhook({
+        event: idempotencyResult.event,
+        payload,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Shopify refunds/create ingestion failed.';
+      await markWebhookFailed(idempotencyResult.event.id, message);
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'received_needs_attention',
+        processingStatus: 'needs_attention',
+        message,
+      });
+    }
 
     if (!ingestionResult.ok) {
       return reply.code(202).send({

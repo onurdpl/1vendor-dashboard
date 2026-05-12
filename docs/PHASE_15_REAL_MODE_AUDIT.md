@@ -258,6 +258,15 @@
   - consistent fallback: `Not available`
 - Empty-state copy was refined for finance and automation views to reduce ambiguous “blank” states and improve operator clarity.
 
+## Phase 15-9 Backend Recovery Lifecycle Prep
+- Webhook processing lifecycle boundaries are now explicit and consistently used:
+  - `RECEIVED` -> `PROCESSING` -> `PROCESSED` / `FAILED`
+- Admin recovery tooling now includes:
+  - replay endpoint (existing)
+  - recover endpoint for stuck/failed webhook events with payload availability
+- Reconciliation suggestions now point operators toward recover/replay when payload exists, and manual recovery when payload is missing.
+- No queue worker was introduced in this phase; recovery remains explicit and operator-driven.
+
 ## Remaining Gaps After Phase 15-8
 - No return approve/decline/close mutation actions in frontend yet.
 - No admin reassignment mutation in real mode yet.

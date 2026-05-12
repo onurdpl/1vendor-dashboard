@@ -7,6 +7,7 @@ import {
   getReconciliationDiagnostics,
   listSyncDiagnostics,
   listWebhookDiagnostics,
+  recoverWebhookEvent,
   replayWebhookEvent,
 } from './diagnostics.service.js';
 
@@ -86,6 +87,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const result = await replayWebhookEvent(env, request.params.webhookEventId);
+      if (!result.ok) {
+        return reply.code(result.statusCode).send({ message: result.message });
+      }
+
+      return reply.code(202).send(result.response);
+    },
+  );
+
+  app.post<{ Params: { webhookEventId: string } }>(
+    '/admin/diagnostics/webhooks/:webhookEventId/recover',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const result = await recoverWebhookEvent(env, request.params.webhookEventId);
       if (!result.ok) {
         return reply.code(result.statusCode).send({ message: result.message });
       }

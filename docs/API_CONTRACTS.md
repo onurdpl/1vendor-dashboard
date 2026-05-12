@@ -71,12 +71,18 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 
 - `POST /webhooks/shopify/orders-create`
 - `POST /webhooks/shopify/refunds-create`
-- `POST /webhooks/shopify/returns-request` (skeleton; ingestion deferred)
-- `POST /webhooks/shopify/returns-approve` (skeleton; ingestion deferred)
-- `POST /webhooks/shopify/returns-decline` (skeleton; ingestion deferred)
-- `POST /webhooks/shopify/returns-close` (skeleton; ingestion deferred)
+- `POST /webhooks/shopify/returns-request` (pending-return ingestion path)
+- `POST /webhooks/shopify/returns-approve` (lifecycle status update)
+- `POST /webhooks/shopify/returns-decline` (lifecycle status update)
+- `POST /webhooks/shopify/returns-close` (lifecycle status update)
 - `POST /webhooks/shopify/returns-cancel` (lifecycle status update)
 - `POST /fulfillments/:allocationId/tracking`
+
+Webhook processing lifecycle states:
+- `RECEIVED`: webhook envelope persisted.
+- `PROCESSING`: ingestion/recovery execution started.
+- `PROCESSED`: ingestion completed successfully.
+- `FAILED`: ingestion failed with explicit `errorMessage`.
 
 ## Endpoint Contracts
 
@@ -260,6 +266,31 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - Replay note:
   - replay uses stored payload content only
   - older persisted webhook events may not have replayable payloads because raw payload retention was added later
+
+### POST /admin/diagnostics/webhooks/:webhookEventId/recover
+
+- Purpose: recover stuck (`RECEIVED`) or failed (`FAILED`) webhook events using stored payloads without introducing queue workers.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Allowed source states:
+  - `RECEIVED`
+  - `FAILED`
+- Protected states:
+  - `PROCESSED` returns `409` (not recoverable)
+- Expected `202` behavior:
+  - returns `{ ok: true, recoveryStatus, action, processingStatus, ... }`
+  - `recoveryStatus` is one of:
+    - `recovered`
+    - `failed`
+    - `not_recoverable`
+- Expected `409` behavior:
+  - payload missing (`Webhook payload is not available for replay`)
+  - unsupported topic
+  - already processed event
+- Recovery note:
+  - recover marks the event `PROCESSING` before executing ingestion path
+  - recover reuses idempotent ingestion/upsert behavior
+  - recover does not add background workers in this phase
 
 ### POST /webhooks/shopify/orders-create
 
