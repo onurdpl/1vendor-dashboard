@@ -133,6 +133,9 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
             estimatedPayout: formatCurrency(record.payoutCalculation.estimatedPayout),
             shippingApplied: record.payoutCalculation.shippingApplied,
             shippingMode: record.payoutCalculation.shippingMode,
+            profileSource: record.payoutCalculation.profileSource,
+            commissionPercent: record.payoutCalculation.commissionPercent,
+            commissionVatPercent: record.payoutCalculation.commissionVatPercent,
           }
         : null,
     })),

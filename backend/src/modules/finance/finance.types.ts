@@ -29,6 +29,9 @@ export type PayoutCalculationDto = {
   estimatedPayout: string;
   shippingApplied: boolean;
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
+  profileSource: 'snapshot' | 'current' | 'default';
+  commissionPercent: string;
+  commissionVatPercent: string;
 };
 
 export type FinanceRecordDto = {

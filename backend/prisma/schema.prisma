@@ -307,17 +307,25 @@ model ShopifyRefundLineItem {
 }
 
 model FinanceLedgerEntry {
-  id                 String            @id @default(cuid())
-  vendorAllocationId String?
-  vendorId           String
-  entryType          String
-  amount             Decimal           @db.Decimal(10, 2)
-  payoutStatus       PayoutStatus      @default(PENDING)
-  description        String?
-  createdAt          DateTime          @default(now())
-  updatedAt          DateTime          @updatedAt
-  vendorAllocation   VendorAllocation? @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
-  vendor             Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  id                            String                 @id @default(cuid())
+  vendorAllocationId            String?
+  vendorId                      String
+  entryType                     String
+  amount                        Decimal                @db.Decimal(10, 2)
+  payoutStatus                  PayoutStatus           @default(PENDING)
+  description                   String?
+  commissionPercentSnapshot     Decimal?               @db.Decimal(5, 2)
+  commissionVatPercentSnapshot  Decimal?               @db.Decimal(5, 2)
+  deductShippingEnabledSnapshot Boolean?
+  shippingModeSnapshot          ShippingDeductionMode?
+  fixedShippingFeeSnapshot      Decimal?               @db.Decimal(10, 2)
+  financialProfileIdSnapshot    String?
+  createdAt                     DateTime               @default(now())
+  updatedAt                     DateTime               @updatedAt
+  vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, entryType])
 }
 
 model WebhookEvent {

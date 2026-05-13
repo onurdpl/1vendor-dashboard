@@ -262,7 +262,7 @@ export function FinancePage() {
           <p className="eyebrow">Vendor finance profile</p>
           <h3>{currentVendor.vendorName} payout settings</h3>
           <p className="page-description">
-            This vendor-level profile applies to all current and future payout estimates for the selected vendor.
+            Applies to new vendor payout estimates from now on. Existing ledger rows keep their original profile snapshot.
           </p>
         </div>
         <div className="finance-profile-summary">
@@ -478,10 +478,11 @@ export function FinancePage() {
                 <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
               </MetadataGroup>
               <MetadataGroup title="Vendor financial profile">
-                <MetadataRow label="Profile source" value={finance.profile?.source ?? 'default'} />
-                <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Commission VAT" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Shipping mode" value={finance.profile?.shippingMode ?? 'disabled'} />
+                <MetadataRow label="Profile used" value={selectedRecord.payoutCalculation?.profileSource ?? finance.profile?.source ?? 'default'} />
+                <MetadataRow label="Commission used" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label="Commission VAT used" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Current profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
+                <MetadataRow label="Shipping mode" value={selectedRecord.payoutCalculation?.shippingMode ?? finance.profile?.shippingMode ?? 'disabled'} />
                 <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
               </MetadataGroup>
               <div className="op-panel-section">

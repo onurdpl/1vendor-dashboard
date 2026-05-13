@@ -92,6 +92,55 @@ function profileToCalculationConfig(profile: VendorFinancialProfileDto): VendorF
   };
 }
 
+type CalculationProfile = VendorFinanceProfileConfig & {
+  source: 'snapshot' | 'current' | 'default';
+};
+
+function entrySnapshotToCalculationProfile(entry: {
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  deductShippingEnabledSnapshot?: boolean | null;
+  shippingModeSnapshot?: string | null;
+  fixedShippingFeeSnapshot?: unknown;
+}): CalculationProfile | null {
+  if (entry.commissionPercentSnapshot === null || entry.commissionPercentSnapshot === undefined) {
+    return null;
+  }
+
+  return {
+    commissionPercent: toNumber(entry.commissionPercentSnapshot),
+    commissionVatPercent: toNumber(entry.commissionVatPercentSnapshot),
+    deductShippingEnabled: entry.deductShippingEnabledSnapshot ?? false,
+    shippingMode: mapShippingMode(entry.shippingModeSnapshot ?? 'disabled'),
+    fixedShippingFee:
+      entry.fixedShippingFeeSnapshot === null || entry.fixedShippingFeeSnapshot === undefined
+        ? null
+        : toNumber(entry.fixedShippingFeeSnapshot),
+    source: 'snapshot',
+  };
+}
+
+function resolveCalculationProfile(
+  entry: {
+    commissionPercentSnapshot?: unknown;
+    commissionVatPercentSnapshot?: unknown;
+    deductShippingEnabledSnapshot?: boolean | null;
+    shippingModeSnapshot?: string | null;
+    fixedShippingFeeSnapshot?: unknown;
+  },
+  activeProfile: VendorFinancialProfileDto,
+): CalculationProfile {
+  const snapshotProfile = entrySnapshotToCalculationProfile(entry);
+  if (snapshotProfile) {
+    return snapshotProfile;
+  }
+
+  return {
+    ...profileToCalculationConfig(activeProfile),
+    source: activeProfile.source === 'configured' ? 'current' : 'default',
+  };
+}
+
 function isFulfilledForShipping(allocation: {
   allocationStatus?: string;
   fulfillmentStatus?: string | null;
@@ -116,7 +165,10 @@ function isFulfilledForShipping(allocation: {
   );
 }
 
-function mapCalculation(calculation: ReturnType<typeof calculateVendorPayout>): PayoutCalculationDto {
+function mapCalculation(
+  calculation: ReturnType<typeof calculateVendorPayout>,
+  profile: CalculationProfile,
+): PayoutCalculationDto {
   return {
     grossAmount: toAmountString(calculation.grossAmount),
     commission: toAmountString(calculation.commission),
@@ -126,6 +178,9 @@ function mapCalculation(calculation: ReturnType<typeof calculateVendorPayout>): 
     estimatedPayout: toAmountString(calculation.estimatedPayout),
     shippingApplied: calculation.shippingApplied,
     shippingMode: calculation.shippingMode,
+    profileSource: profile.source,
+    commissionPercent: toPercentString(profile.commissionPercent),
+    commissionVatPercent: toPercentString(profile.commissionVatPercent),
   };
 }
 
@@ -171,6 +226,11 @@ export async function getVendorFinanceDashboard(
         entryType: true,
         amount: true,
         payoutStatus: true,
+        commissionPercentSnapshot: true,
+        commissionVatPercentSnapshot: true,
+        deductShippingEnabledSnapshot: true,
+        shippingModeSnapshot: true,
+        fixedShippingFeeSnapshot: true,
         vendorAllocation: {
           select: {
             id: true,
@@ -225,7 +285,6 @@ export async function getVendorFinanceDashboard(
     }),
   ]);
   const profile = mapProfile(storedProfile, vendorId);
-  const calculationProfile = profileToCalculationConfig(profile);
 
   const grossSales = summaryEntries
     .filter((entry) => normalizeType(entry.entryType) === 'sale')
@@ -234,32 +293,40 @@ export async function getVendorFinanceDashboard(
     .filter((entry) => normalizeType(entry.entryType) === 'refund')
     .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
   const netRevenue = grossSales - refunds;
-  const grossCalculation = calculateVendorPayout({
-    grossAmount: grossSales,
-    refundAmount: refunds,
-    fulfilled: false,
-    profile: calculationProfile,
-  });
-  const shippingDeductions = summaryEntries
+  const saleSummary = summaryEntries
     .filter((entry) => normalizeType(entry.entryType) === 'sale')
-    .reduce((sum, entry) => {
-      const calculation = calculateVendorPayout({
-        grossAmount: toNumber(entry.amount),
-        refundAmount: 0,
-        fulfilled: isFulfilledForShipping(entry.vendorAllocation),
-        profile: calculationProfile,
-      });
+    .reduce(
+      (summary, entry) => {
+        const entryProfile = resolveCalculationProfile(entry, profile);
+        const calculation = calculateVendorPayout({
+          grossAmount: toNumber(entry.amount),
+          refundAmount: 0,
+          fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+          profile: entryProfile,
+        });
 
-      return sum + calculation.shippingDeduction;
-    }, 0);
-  const platformFee = grossCalculation.commission;
-  const commissionVat = grossCalculation.commissionVat;
+        return {
+          platformFee: summary.platformFee + calculation.commission,
+          commissionVat: summary.commissionVat + calculation.commissionVat,
+          shippingDeductions: summary.shippingDeductions + calculation.shippingDeduction,
+        };
+      },
+      {
+        platformFee: 0,
+        commissionVat: 0,
+        shippingDeductions: 0,
+      },
+    );
+  const platformFee = saleSummary.platformFee;
+  const commissionVat = saleSummary.commissionVat;
+  const shippingDeductions = saleSummary.shippingDeductions;
   const payoutEstimate = grossSales - platformFee - commissionVat - shippingDeductions - refunds;
   const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);
     const type = normalizeType(entry.entryType);
+    const entryProfile = resolveCalculationProfile(entry, profile);
     const payoutCalculation = calculateVendorPayout({
       grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
       refundAmount:
@@ -267,7 +334,7 @@ export async function getVendorFinanceDashboard(
           ? toNumber(entry.amount)
           : sumRefundImpact(entry.vendorAllocation?.refundRecords),
       fulfilled: isFulfilledForShipping(entry.vendorAllocation),
-      profile: calculationProfile,
+      profile: entryProfile,
     });
 
     return {
@@ -281,7 +348,7 @@ export async function getVendorFinanceDashboard(
       relatedReturnId: references.relatedReturnId,
       relatedRefundId: references.relatedRefundId,
       createdAt: entry.createdAt.toISOString(),
-      payoutCalculation: mapCalculation(payoutCalculation),
+      payoutCalculation: mapCalculation(payoutCalculation, entryProfile),
     };
   });
 

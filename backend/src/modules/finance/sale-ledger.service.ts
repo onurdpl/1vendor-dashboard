@@ -1,4 +1,4 @@
-import type { Prisma } from '@prisma/client';
+import { ShippingDeductionMode, type Prisma } from '@prisma/client';
 
 type FinanceLedgerTransaction = Prisma.TransactionClient;
 
@@ -13,6 +13,17 @@ function toNumber(value: unknown) {
 
 function buildSaleLedgerEntryId(vendorId: string, sourceShopifyOrderId: string) {
   return `fin-${vendorId}-sale-${sourceShopifyOrderId}`;
+}
+
+function mapShippingModeSnapshot(mode: string | null | undefined) {
+  const normalized = mode?.trim().toUpperCase();
+  if (normalized === 'FIXED') {
+    return ShippingDeductionMode.FIXED;
+  }
+  if (normalized === 'EXTERNAL_PROVIDER') {
+    return ShippingDeductionMode.EXTERNAL_PROVIDER;
+  }
+  return ShippingDeductionMode.DISABLED;
 }
 
 export async function upsertSaleLedgerForAllocation(
@@ -35,6 +46,20 @@ export async function upsertSaleLedgerForAllocation(
 
   const amount = allocation.lineItems.reduce((sum, lineItem) => sum + toNumber(lineItem.lineAmount), 0);
   const ledgerId = buildSaleLedgerEntryId(allocation.assignedVendorId, allocation.order.sourceShopifyOrderId);
+  const activeProfile = await tx.vendorFinancialProfile.findFirst({
+    where: {
+      vendorId: allocation.assignedVendorId,
+      active: true,
+    },
+  });
+  const profileSnapshot = {
+    commissionPercentSnapshot: activeProfile?.commissionPercent ?? '10.00',
+    commissionVatPercentSnapshot: activeProfile?.commissionVatPercent ?? '0.00',
+    deductShippingEnabledSnapshot: activeProfile?.deductShippingEnabled ?? false,
+    shippingModeSnapshot: mapShippingModeSnapshot(activeProfile?.shippingMode),
+    fixedShippingFeeSnapshot: activeProfile?.fixedShippingFee ?? null,
+    financialProfileIdSnapshot: activeProfile?.id ?? null,
+  };
 
   return tx.financeLedgerEntry.upsert({
     where: {
@@ -56,6 +81,7 @@ export async function upsertSaleLedgerForAllocation(
       amount: toAmountString(amount),
       payoutStatus: 'PENDING',
       description: `Allocated sale for Shopify order ${allocation.order.sourceShopifyOrderNumber}`,
+      ...profileSnapshot,
     },
   });
 }

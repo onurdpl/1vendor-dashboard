@@ -18,8 +18,71 @@ const { getVendorFinanceDashboard, upsertVendorFinancialProfile } = await import
   '../backend/src/modules/finance/finance.service.js'
 );
 
+type LedgerFixture = {
+  id: string;
+  entryType: string;
+  amount: number;
+  payoutStatus: string;
+  description: string;
+  createdAt: Date;
+  commissionPercentSnapshot: number | null;
+  commissionVatPercentSnapshot: number | null;
+  deductShippingEnabledSnapshot: boolean | null;
+  shippingModeSnapshot: string | null;
+  fixedShippingFeeSnapshot: number | null;
+  vendorAllocation: {
+    id: string;
+    allocationStatus: string;
+    fulfillmentStatus: string;
+    shippingStatus: string;
+    fulfillment: { fulfilledAt: Date | null };
+    sourceShopifyOrderId: string;
+    sourceShopifyOrderNumber: string;
+    returnRecords: Array<{ id: string }>;
+    refundRecords: Array<{ id: string; sourceShopifyRefundId: string; amount?: number }>;
+  } | null;
+};
+
+function buildSaleFixture(input: {
+  id: string;
+  amount: number;
+  orderId: string;
+  orderNumber: string;
+  commissionPercentSnapshot: number;
+  commissionVatPercentSnapshot: number;
+  createdAt: string;
+}): LedgerFixture {
+  return {
+    id: input.id,
+    entryType: 'sale',
+    amount: input.amount,
+    payoutStatus: 'PENDING',
+    description: `Shopify order sale recorded ${input.orderNumber}`,
+    createdAt: new Date(input.createdAt),
+    commissionPercentSnapshot: input.commissionPercentSnapshot,
+    commissionVatPercentSnapshot: input.commissionVatPercentSnapshot,
+    deductShippingEnabledSnapshot: true,
+    shippingModeSnapshot: 'EXTERNAL_PROVIDER',
+    fixedShippingFeeSnapshot: 88,
+    vendorAllocation: {
+      id: `alloc-${input.orderId}`,
+      allocationStatus: 'ACTIVE',
+      fulfillmentStatus: 'Fulfilled',
+      shippingStatus: 'Delivered',
+      fulfillment: {
+        fulfilledAt: new Date('2026-05-13T10:00:00.000Z'),
+      },
+      sourceShopifyOrderId: input.orderId,
+      sourceShopifyOrderNumber: input.orderNumber,
+      returnRecords: [],
+      refundRecords: [],
+    },
+  };
+}
+
 describe('persisted vendor finance calculations', () => {
   let activeProfile: {
+    id: string;
     vendorId: string;
     commissionPercent: number;
     commissionVatPercent: number;
@@ -28,9 +91,35 @@ describe('persisted vendor finance calculations', () => {
     fixedShippingFee: number | null;
     active: boolean;
   } | null;
+  let ledgerRows: LedgerFixture[];
 
   beforeEach(() => {
     activeProfile = null;
+    ledgerRows = [
+      buildSaleFixture({
+        id: 'fin-sporjinal-sale-7616676626769',
+        amount: 3399,
+        orderId: '7616676626769',
+        orderNumber: '#1023',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 0,
+        createdAt: '2026-05-13T10:30:00.000Z',
+      }),
+      {
+        id: 'fin-sporjinal-refund-1074189959505',
+        entryType: 'refund',
+        amount: 100,
+        payoutStatus: 'RECORDED',
+        description: 'Shopify refund recorded',
+        createdAt: new Date('2026-05-13T11:00:00.000Z'),
+        commissionPercentSnapshot: null,
+        commissionVatPercentSnapshot: null,
+        deductShippingEnabledSnapshot: null,
+        shippingModeSnapshot: null,
+        fixedShippingFeeSnapshot: null,
+        vendorAllocation: null,
+      },
+    ];
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.upsert.mockReset();
@@ -39,6 +128,7 @@ describe('persisted vendor finance calculations', () => {
     prismaMock.vendorFinancialProfile.upsert.mockImplementation(async ({ create, update }) => {
       const next = activeProfile ? update : create;
       activeProfile = {
+        id: activeProfile?.id ?? 'profile-sporjinal',
         vendorId: next.vendorId ?? 'sporjinal',
         commissionPercent: Number(next.commissionPercent),
         commissionVatPercent: Number(next.commissionVatPercent),
@@ -50,65 +140,33 @@ describe('persisted vendor finance calculations', () => {
       return activeProfile;
     });
     prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
-      const allocation = {
-        id: 'alloc-sporjinal-7616676626769',
-        allocationStatus: 'ACTIVE',
-        fulfillmentStatus: 'Fulfilled',
-        shippingStatus: 'Delivered',
-        fulfillment: {
-          fulfilledAt: new Date('2026-05-13T10:00:00.000Z'),
-        },
-      };
-
       if (args.select) {
-        return [
-          {
-            entryType: 'sale',
-            amount: 3399,
-            payoutStatus: 'PENDING',
-            vendorAllocation: allocation,
-          },
-        ];
+        return ledgerRows.map((row) => ({
+          entryType: row.entryType,
+          amount: row.amount,
+          payoutStatus: row.payoutStatus,
+          commissionPercentSnapshot: row.commissionPercentSnapshot,
+          commissionVatPercentSnapshot: row.commissionVatPercentSnapshot,
+          deductShippingEnabledSnapshot: row.deductShippingEnabledSnapshot,
+          shippingModeSnapshot: row.shippingModeSnapshot,
+          fixedShippingFeeSnapshot: row.fixedShippingFeeSnapshot,
+          vendorAllocation: row.vendorAllocation
+            ? {
+                id: row.vendorAllocation.id,
+                allocationStatus: row.vendorAllocation.allocationStatus,
+                fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
+                shippingStatus: row.vendorAllocation.shippingStatus,
+                fulfillment: row.vendorAllocation.fulfillment,
+              }
+            : null,
+        }));
       }
 
-      return [
-        {
-          id: 'fin-sporjinal-sale-7616676626769',
-          entryType: 'sale',
-          amount: 3399,
-          payoutStatus: 'PENDING',
-          description: 'Shopify order sale recorded',
-          createdAt: new Date('2026-05-13T10:30:00.000Z'),
-          vendorAllocation: {
-            ...allocation,
-            sourceShopifyOrderId: '7616676626769',
-            sourceShopifyOrderNumber: '#1023',
-            returnRecords: [],
-            refundRecords: [],
-          },
-        },
-      ];
+      return ledgerRows;
     });
   });
 
-  it('recalculates finance rows from the active persisted profile after admin update', async () => {
-    const before = await getVendorFinanceDashboard('sporjinal');
-    expect(before.profile).toMatchObject({
-      commissionPercent: '10.00',
-      commissionVatPercent: '0.00',
-      source: 'default',
-    });
-    expect(before.summary.platformFee).toBe('339.90');
-    expect(before.summary.commissionVat).toBe('0.00');
-    expect(before.summary.payoutEstimate).toBe('3059.10');
-    expect(before.records[0]?.payoutCalculation).toMatchObject({
-      grossAmount: '3399.00',
-      commission: '339.90',
-      commissionVat: '0.00',
-      shippingDeduction: '0.00',
-      estimatedPayout: '3059.10',
-    });
-
+  it('keeps existing sale rows on their profile snapshot after admin profile updates', async () => {
     await upsertVendorFinancialProfile('sporjinal', {
       commissionPercent: 15,
       commissionVatPercent: 18,
@@ -117,27 +175,77 @@ describe('persisted vendor finance calculations', () => {
       fixedShippingFee: 88,
     });
 
-    const after = await getVendorFinanceDashboard('sporjinal');
-    expect(after.profile).toMatchObject({
+    const dashboard = await getVendorFinanceDashboard('sporjinal');
+    const historicalSale = dashboard.records.find((record) => record.id === 'fin-sporjinal-sale-7616676626769');
+
+    expect(dashboard.profile).toMatchObject({
       commissionPercent: '15.00',
       commissionVatPercent: '18.00',
-      deductShippingEnabled: true,
-      shippingMode: 'external_provider',
-      fixedShippingFee: '88.00',
       source: 'configured',
     });
-    expect(after.summary.platformFee).toBe('509.85');
-    expect(after.summary.commissionVat).toBe('91.77');
-    expect(after.summary.shippingDeductions).toBe('0.00');
-    expect(after.summary.payoutEstimate).toBe('2797.38');
-    expect(after.records[0]?.payoutCalculation).toMatchObject({
+    expect(historicalSale?.payoutCalculation).toMatchObject({
       grossAmount: '3399.00',
-      commission: '509.85',
-      commissionVat: '91.77',
+      commission: '339.90',
+      commissionVat: '0.00',
       shippingDeduction: '0.00',
-      estimatedPayout: '2797.38',
-      shippingApplied: false,
+      estimatedPayout: '3059.10',
+      profileSource: 'snapshot',
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+    });
+  });
+
+  it('uses the new active profile only for new sale ledger snapshots and aggregates mixed rates', async () => {
+    await upsertVendorFinancialProfile('sporjinal', {
+      commissionPercent: 15,
+      commissionVatPercent: 18,
+      deductShippingEnabled: true,
       shippingMode: 'external_provider',
+      fixedShippingFee: 88,
+    });
+    ledgerRows.unshift(
+      buildSaleFixture({
+        id: 'fin-sporjinal-sale-new',
+        amount: 1000,
+        orderId: 'new-order',
+        orderNumber: '#1024',
+        commissionPercentSnapshot: activeProfile?.commissionPercent ?? 15,
+        commissionVatPercentSnapshot: activeProfile?.commissionVatPercent ?? 18,
+        createdAt: '2026-05-13T12:00:00.000Z',
+      }),
+    );
+
+    const dashboard = await getVendorFinanceDashboard('sporjinal');
+    const historicalSale = dashboard.records.find((record) => record.id === 'fin-sporjinal-sale-7616676626769');
+    const newSale = dashboard.records.find((record) => record.id === 'fin-sporjinal-sale-new');
+    const refund = dashboard.records.find((record) => record.id === 'fin-sporjinal-refund-1074189959505');
+
+    expect(historicalSale?.payoutCalculation).toMatchObject({
+      commission: '339.90',
+      commissionVat: '0.00',
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+    });
+    expect(newSale?.payoutCalculation).toMatchObject({
+      grossAmount: '1000.00',
+      commission: '150.00',
+      commissionVat: '27.00',
+      estimatedPayout: '823.00',
+      profileSource: 'snapshot',
+      commissionPercent: '15.00',
+      commissionVatPercent: '18.00',
+    });
+    expect(refund?.payoutCalculation).toMatchObject({
+      grossAmount: '0.00',
+      refundImpact: '100.00',
+      estimatedPayout: '-100.00',
+    });
+    expect(dashboard.summary).toMatchObject({
+      grossSales: '4399.00',
+      refunds: '100.00',
+      platformFee: '489.90',
+      commissionVat: '27.00',
+      payoutEstimate: '3782.10',
     });
   });
 });
