@@ -177,25 +177,35 @@ Webhook processing lifecycle states:
   - `topic`
   - `shopDomain`
   - `shopifyWebhookId`
+  - `eventId` (same Shopify webhook delivery id when available)
   - `idempotencyKey`
+  - `payloadHash`
   - `status`
+  - `processingStatus`
   - `receivedAt`
   - `processedAt`
   - `errorMessage`
+  - `lastErrorSummary`
   - `duplicate`
   - `payloadAvailable`
+  - `replayEligible` / `replayBlockedReason`
+  - `recoverEligible` / `recoverBlockedReason`
+  - `recommendedAction`
+  - `affectedEntities` with safe hints for Shopify order, return, refund, fulfillment, and vendor when inferable
 
 ### GET /admin/diagnostics/webhooks/:webhookEventId
 
-- Purpose: return full persisted diagnostics metadata for one webhook event.
+- Purpose: return safe persisted diagnostics metadata for one webhook event.
 - Required auth: yes.
 - Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
-- Expected success response shape: webhook event metadata plus `payloadHash`, `status`, `errorMessage`, timestamps, and `relatedShopifyOrderId` when inferable.
+- Expected success response shape: webhook event metadata plus `payloadHash`, `status`, `errorMessage`, timestamps, replay/recover eligibility, recommended action, safe affected entity hints, and `relatedShopifyOrderId` when inferable.
 - Expected `404` behavior: return `404 Not Found` when the webhook event does not exist.
 - Raw payload note:
   - newer webhook events persist `rawPayload` for replay support
-  - older events created before payload retention may still return `rawPayload: null`
+  - diagnostics detail does not return full raw payload by default
+  - detail may return a truncated `payloadPreview` for operator context
   - response includes `payloadAvailable` so admin tooling can fail clearly before replay
+  - secrets and webhook signing material are never returned
 
 ### GET /admin/diagnostics/sync-events
 
@@ -259,14 +269,21 @@ Webhook processing lifecycle states:
 - Supported topics:
   - `orders/create`
   - `refunds/create`
+  - `fulfillments/create`
+  - `fulfillments/update`
+  - `fulfillment_events/create`
+  - `fulfillment_orders/cancelled`
 - Expected `202` behavior:
-  - returns the same processed or needs-attention semantics as the underlying ingestion service
+  - returns an explicit result with `action`, `topic`, `webhookEventId`, `beforeStatus`, `afterStatus`, `replayStatus`, `processingStatus`, optional affected counts, and safe `errorSummary`
   - does not silently succeed
 - Expected `404` behavior:
   - webhook event not found
 - Expected `409` behavior:
-  - `Webhook payload is not available for replay`
+  - returns `{ ok: false, replayStatus: "not_replayable", skippedReason, ... }`
+  - payload unavailable
+  - payload hash unavailable
   - unsupported topic
+  - currently processing event
 - Replay note:
   - replay uses stored payload content only
   - older persisted webhook events may not have replayable payloads because raw payload retention was added later
@@ -282,13 +299,15 @@ Webhook processing lifecycle states:
 - Protected states:
   - `PROCESSED` returns `409` (not recoverable)
 - Expected `202` behavior:
-  - returns `{ ok: true, recoveryStatus, action, processingStatus, ... }`
+  - returns `{ ok: true, recoveryStatus, action, topic, webhookEventId, beforeStatus, afterStatus, processingStatus, ... }`
   - `recoveryStatus` is one of:
     - `recovered`
     - `failed`
     - `not_recoverable`
 - Expected `409` behavior:
-  - payload missing (`Webhook payload is not available for replay`)
+  - returns `{ ok: false, recoveryStatus: "not_recoverable", skippedReason, ... }`
+  - payload missing
+  - payload hash missing
   - unsupported topic
   - already processed event
 - Recovery note:

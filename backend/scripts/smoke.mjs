@@ -1929,9 +1929,25 @@ async function runSmoke() {
     if (
       adminWebhookDiagnosticsDetail?.id !== processedWebhookEvent.id ||
       typeof adminWebhookDiagnosticsDetail?.payloadHash !== 'string' ||
-      typeof adminWebhookDiagnosticsDetail?.payloadAvailable !== 'boolean'
+      typeof adminWebhookDiagnosticsDetail?.payloadAvailable !== 'boolean' ||
+      typeof adminWebhookDiagnosticsDetail?.replayEligible !== 'boolean' ||
+      typeof adminWebhookDiagnosticsDetail?.recoverEligible !== 'boolean' ||
+      adminWebhookDiagnosticsDetail?.rawPayload !== undefined
     ) {
       throw new Error('/admin/diagnostics/webhooks/:webhookEventId returned invalid shape.');
+    }
+    const vendorWebhookDiagnosticsDetailResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/webhooks/${processedWebhookEvent.id}`,
+      {
+        headers: {
+          Authorization: `Bearer ${vendorToken}`,
+        },
+      },
+    );
+    if (vendorWebhookDiagnosticsDetailResponse.status !== 403) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:webhookEventId vendor forbidden expected 403, got ${vendorWebhookDiagnosticsDetailResponse.status}`,
+      );
     }
 
     const adminSyncEventsResponse = await fetch(`${baseUrl}/admin/diagnostics/sync-events`, {
@@ -2021,9 +2037,12 @@ async function runSmoke() {
       );
     }
     const missingPayloadReplayJson = await missingPayloadReplayResponse.json();
-    if (missingPayloadReplayJson?.message !== 'Webhook payload is not available for replay') {
+    if (
+      missingPayloadReplayJson?.skippedReason !== 'Webhook payload is not available for replay.' ||
+      missingPayloadReplayJson?.replayStatus !== 'not_replayable'
+    ) {
       throw new Error(
-        `/admin/diagnostics/webhooks/:id/replay missing payload returned unexpected message: ${JSON.stringify(missingPayloadReplayJson)}`,
+        `/admin/diagnostics/webhooks/:id/replay missing payload returned unexpected result: ${JSON.stringify(missingPayloadReplayJson)}`,
       );
     }
 
@@ -2044,6 +2063,10 @@ async function runSmoke() {
     const failedReplayJson = await failedReplayResponse.json();
     if (
       failedReplayJson?.ok !== true ||
+      failedReplayJson?.webhookEventId !== failedWebhookEvent.id ||
+      typeof failedReplayJson?.beforeStatus !== 'string' ||
+      typeof failedReplayJson?.afterStatus !== 'string' ||
+      typeof failedReplayJson?.replayStatus !== 'string' ||
       typeof failedReplayJson?.action !== 'string' ||
       typeof failedReplayJson?.processingStatus !== 'string'
     ) {
@@ -2121,6 +2144,15 @@ async function runSmoke() {
         `/admin/diagnostics/webhooks/:id/recover processed event expected 409, got ${recoverReceivedAgainResponse.status}`,
       );
     }
+    const recoverReceivedAgainJson = await recoverReceivedAgainResponse.json();
+    if (
+      recoverReceivedAgainJson?.skippedReason !== 'Processed webhook events are not recoverable.' ||
+      recoverReceivedAgainJson?.recoveryStatus !== 'not_recoverable'
+    ) {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover processed event returned unexpected result: ${JSON.stringify(recoverReceivedAgainJson)}`,
+      );
+    }
 
     const recoverMissingPayloadResponse = await fetch(
       `${baseUrl}/admin/diagnostics/webhooks/${legacyMissingPayloadEventId}/recover`,
@@ -2134,6 +2166,12 @@ async function runSmoke() {
     if (recoverMissingPayloadResponse.status !== 409) {
       throw new Error(
         `/admin/diagnostics/webhooks/:id/recover missing payload expected 409, got ${recoverMissingPayloadResponse.status}`,
+      );
+    }
+    const recoverMissingPayloadJson = await recoverMissingPayloadResponse.json();
+    if (recoverMissingPayloadJson?.skippedReason !== 'Webhook payload is not available for replay.') {
+      throw new Error(
+        `/admin/diagnostics/webhooks/:id/recover missing payload returned unexpected result: ${JSON.stringify(recoverMissingPayloadJson)}`,
       );
     }
 
@@ -2154,6 +2192,9 @@ async function runSmoke() {
     const recoverFailedJson = await recoverFailedResponse.json();
     if (
       recoverFailedJson?.ok !== true ||
+      recoverFailedJson?.webhookEventId !== failedWebhookEvent.id ||
+      typeof recoverFailedJson?.beforeStatus !== 'string' ||
+      typeof recoverFailedJson?.afterStatus !== 'string' ||
       typeof recoverFailedJson?.recoveryStatus !== 'string' ||
       typeof recoverFailedJson?.processingStatus !== 'string'
     ) {

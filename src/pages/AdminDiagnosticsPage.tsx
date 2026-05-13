@@ -83,6 +83,36 @@ function formatRecoverability(payloadAvailable: boolean, status: string) {
   return 'Review required';
 }
 
+function getPrimaryEntityLabel(entities: {
+  shopifyOrderId: string | null;
+  shopifyOrderNumber: string | null;
+  shopifyReturnId: string | null;
+  shopifyRefundId: string | null;
+  shopifyFulfillmentId: string | null;
+}) {
+  if (entities.shopifyReturnId) {
+    return `Return ${entities.shopifyReturnId}`;
+  }
+
+  if (entities.shopifyRefundId) {
+    return `Refund ${entities.shopifyRefundId}`;
+  }
+
+  if (entities.shopifyFulfillmentId) {
+    return `Fulfillment ${entities.shopifyFulfillmentId}`;
+  }
+
+  if (entities.shopifyOrderNumber) {
+    return `Order #${String(entities.shopifyOrderNumber).replace(/^#/, '')}`;
+  }
+
+  if (entities.shopifyOrderId) {
+    return `Order ${entities.shopifyOrderId}`;
+  }
+
+  return 'Not inferable';
+}
+
 export function AdminDiagnosticsPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [selectedWebhookEventId, setSelectedWebhookEventId] = useState<string | null>(null);
@@ -195,8 +225,8 @@ export function AdminDiagnosticsPage() {
     );
   }
 
-  const canRecover = selectedWebhook?.payloadAvailable === true && ['RECEIVED', 'FAILED'].includes(selectedWebhook.status);
-  const canReplay = selectedWebhook?.payloadAvailable === true;
+  const canRecover = selectedWebhook?.recoverEligible === true;
+  const canReplay = selectedWebhook?.replayEligible === true;
 
   return (
     <section className="op-page diagnostics-control-center">
@@ -232,7 +262,7 @@ export function AdminDiagnosticsPage() {
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Topic', 'Payload', 'Recoverability', 'Shopify order', 'Received', 'Action']}
+              columns={['Status', 'Topic', 'Payload', 'Operator guidance', 'Affected entity', 'Received', 'Actions']}
               className="diagnostics-op-table"
             >
               {visibleWebhooks.map((event) => (
@@ -257,13 +287,37 @@ export function AdminDiagnosticsPage() {
                     {event.payloadAvailable ? 'Available' : 'Missing'}
                   </StatusBadge>
                   <span>
-                    <strong>{formatRecoverability(event.payloadAvailable, event.status)}</strong>
-                    <small>{event.errorMessage ?? 'No error recorded'}</small>
+                    <strong>{event.recoverEligible ? 'Recover eligible' : event.replayEligible ? 'Replay available' : 'No action'}</strong>
+                    <small>{event.lastErrorSummary ?? event.recommendedAction}</small>
                   </span>
-                  <span>{event.shopifyWebhookId ?? 'Not provided'}</span>
+                  <span>{getPrimaryEntityLabel(event.affectedEntities)}</span>
                   <span>{formatDate(event.receivedAt)}</span>
                   <OperationalActionGroup>
-                    <span className="queue-muted-action">Inspect</span>
+                    <button type="button" className="button button-secondary" onClick={() => setSelectedWebhookEventId(event.id)}>
+                      View
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={!event.replayEligible || replayMutation.isPending}
+                      onClick={(clickEvent) => {
+                        clickEvent.stopPropagation();
+                        replayMutation.mutate(event.id);
+                      }}
+                    >
+                      Replay
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={!event.recoverEligible || recoverMutation.isPending}
+                      onClick={(clickEvent) => {
+                        clickEvent.stopPropagation();
+                        recoverMutation.mutate(event.id);
+                      }}
+                    >
+                      Recover
+                    </button>
                   </OperationalActionGroup>
                 </div>
               ))}
@@ -342,9 +396,13 @@ export function AdminDiagnosticsPage() {
               </div>
               <div className="op-meta-grid">
                 <MetadataRow label="Recoverability" value={formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)} />
+                <MetadataRow label="Recommended action" value={selectedWebhook.recommendedAction} />
                 <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
                 <MetadataRow label="Webhook ID" value={selectedWebhook.shopifyWebhookId ?? 'Not provided'} />
-                <MetadataRow label="Shopify Order ID" value={selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'} />
+                <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'} />
+                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not inferable'} />
+                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities.shopifyRefundId ?? 'Not inferable'} />
+                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities.shopifyFulfillmentId ?? 'Not inferable'} />
                 <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </div>
@@ -369,16 +427,23 @@ export function AdminDiagnosticsPage() {
                   </button>
                 </OperationalActionGroup>
                 <p className="page-description">
-                  Recover is intended for stuck or failed events with stored payloads. Replay is available when payload exists and should be used deliberately.
+                  Recover is intended for stuck or failed events with stored payloads. Replay is shown only when the backend considers the topic and payload safe for intentional idempotent reprocessing.
                 </p>
+                {!canRecover && selectedWebhook.recoverBlockedReason ? (
+                  <p className="queue-muted-action">Recover blocked: {selectedWebhook.recoverBlockedReason}</p>
+                ) : null}
+                {!canReplay && selectedWebhook.replayBlockedReason ? (
+                  <p className="queue-muted-action">Replay blocked: {selectedWebhook.replayBlockedReason}</p>
+                ) : null}
               </div>
               <div className="op-panel-section">
                 <h4>Timeline</h4>
                 <TimelineBlock
                   items={[
                     { label: 'Received', at: formatDate(selectedWebhook.receivedAt) },
+                    { label: 'Processing', detail: selectedWebhook.status === 'RECEIVED' ? 'Not started or stuck before processing.' : 'Processing boundary reached.' },
                     { label: selectedWebhook.status, at: formatDate(selectedWebhook.processedAt) },
-                    { label: selectedWebhook.errorMessage ? 'Error recorded' : 'No error recorded', detail: selectedWebhook.errorMessage ?? 'Clear' },
+                    { label: selectedWebhook.lastErrorSummary ? 'Error recorded' : 'No error recorded', detail: selectedWebhook.lastErrorSummary ?? 'Clear' },
                   ]}
                 />
               </div>
@@ -386,6 +451,14 @@ export function AdminDiagnosticsPage() {
                 <h4>Payload diagnostics</h4>
                 <MetadataRow label="Payload hash" value={selectedWebhook.payloadHash ?? 'Not recorded'} />
                 <MetadataRow label="Idempotency key" value={selectedWebhook.idempotencyKey ?? 'Not recorded'} />
+                {selectedWebhook.payloadPreview ? (
+                  <pre className="diagnostics-payload-preview">
+                    {selectedWebhook.payloadPreview}
+                    {selectedWebhook.payloadPreviewTruncated ? '\n...' : ''}
+                  </pre>
+                ) : (
+                  <p className="page-description">No stored payload preview is available for this event.</p>
+                )}
               </div>
             </>
           ) : (

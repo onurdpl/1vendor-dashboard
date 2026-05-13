@@ -463,12 +463,18 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - new `WebhookEvent` rows persist `rawPayload` for future replay
   - older historical events are not backfilled
   - diagnostics detail and reconciliation expose payload availability so operators can tell whether replay/recover is possible
+  - diagnostics detail does not return full raw payload by default; it returns payload hash, payload availability, safe affected-entity hints, and a capped preview only for operator context
+- Replay/recover response model:
+  - blocked actions return `409` with `skippedReason`, before/after status, topic, and `not_replayable` / `not_recoverable` status
+  - successful operator actions return `202` with `webhookEventId`, `beforeStatus`, `afterStatus`, explicit replay/recovery status, affected counts when available, and a safe error summary when processing still fails
+  - `PROCESSED` events remain protected from recovery; replay remains deliberate and topic-gated for idempotent ingestion paths
 - Reconciliation strategy:
   - surfaces `RECEIVED` webhook events older than 5 minutes
   - surfaces failed webhook events
   - surfaces fulfillment records with `fulfillment_sync_failed`
   - surfaces events missing replayable payload content
   - provides a `suggestedAction` per item rather than attempting silent recovery
+  - recommends recovery for stuck `RECEIVED` events with payload, recover/replay review for `FAILED` events with payload, manual investigation for missing payload, and no action for processed/duplicate-safe outcomes
 - Operational guardrail:
   - this phase does not change Shopify ingestion assumptions
   - this phase does not add queue workers

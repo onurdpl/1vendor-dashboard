@@ -88,7 +88,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
 
       const result = await replayWebhookEvent(env, request.params.webhookEventId);
       if (!result.ok) {
-        return reply.code(result.statusCode).send({ message: result.message });
+        return reply.code(result.statusCode).send(result.response);
       }
 
       return reply.code(202).send(result.response);
@@ -107,7 +107,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
 
       const result = await recoverWebhookEvent(env, request.params.webhookEventId);
       if (!result.ok) {
-        return reply.code(result.statusCode).send({ message: result.message });
+        return reply.code(result.statusCode).send(result.response);
       }
 
       return reply.code(202).send(result.response);

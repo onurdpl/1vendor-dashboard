@@ -12,13 +12,23 @@ export type AdminWebhookDiagnosticsEvent = {
   topic: string;
   shopDomain: string;
   shopifyWebhookId: string | null;
+  eventId: string | null;
   idempotencyKey: string | null;
+  payloadHash: string | null;
   status: string;
+  processingStatus: string;
   receivedAt: string;
   processedAt: string | null;
   errorMessage: string | null;
+  lastErrorSummary: string | null;
   duplicate: boolean;
   payloadAvailable: boolean;
+  replayEligible: boolean;
+  replayBlockedReason: string | null;
+  recoverEligible: boolean;
+  recoverBlockedReason: string | null;
+  recommendedAction: string;
+  affectedEntities: WebhookAffectedEntities;
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -33,17 +43,36 @@ export type AdminWebhookDiagnosticDetail = {
   topic: string;
   shopDomain: string;
   shopifyWebhookId: string | null;
+  eventId: string | null;
   idempotencyKey: string | null;
   payloadHash: string | null;
-  rawPayload: string | null;
+  payloadPreview: string | null;
+  payloadPreviewTruncated: boolean;
   payloadAvailable: boolean;
   status: string;
+  processingStatus: string;
   errorMessage: string | null;
+  lastErrorSummary: string | null;
+  replayEligible: boolean;
+  replayBlockedReason: string | null;
+  recoverEligible: boolean;
+  recoverBlockedReason: string | null;
+  recommendedAction: string;
+  affectedEntities: WebhookAffectedEntities;
   receivedAt: string;
   processedAt: string | null;
   createdAt: string | null;
   updatedAt: string | null;
   relatedShopifyOrderId: string | null;
+};
+
+export type WebhookAffectedEntities = {
+  shopifyOrderId: string | null;
+  shopifyOrderNumber: string | null;
+  shopifyReturnId: string | null;
+  shopifyRefundId: string | null;
+  shopifyFulfillmentId: string | null;
+  vendorId: string | null;
 };
 
 export type SyncDiagnosticSeverity = 'critical' | 'warning' | 'attention' | 'normal';
@@ -66,15 +95,22 @@ export type SyncDiagnosticsResponse = {
 };
 
 export type WebhookReplayResponse = {
-  ok: true;
+  ok: boolean;
   topic: string;
+  webhookEventId?: string;
   action: string;
+  beforeStatus?: string | null;
+  afterStatus?: string | null;
+  replayStatus?: 'replayed' | 'failed' | 'not_replayable';
+  recoveryStatus?: 'recovered' | 'failed' | 'not_recoverable';
   processingStatus: string;
+  affectedRecordCount?: number;
   shopifyOrderId?: string;
   allocationCount?: number;
   refundAllocationCount?: number;
-  affectedRecordCount?: number;
   affectedAllocationCount?: number;
+  skippedReason?: string;
+  errorSummary?: string | null;
   message?: string;
 };
 

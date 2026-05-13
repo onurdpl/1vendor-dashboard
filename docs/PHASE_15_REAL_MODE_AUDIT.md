@@ -301,6 +301,11 @@
   - recoverability labels
   - replay and recover action hierarchy
   - reconciliation and sync event panels
+- Phase 16-3I tightened diagnostics into a safer operator workflow:
+  - webhook detail now uses safe metadata, payload hash, affected Shopify entity hints, and a truncated payload preview instead of returning full raw payload by default
+  - replay/recover actions now show backend-computed eligibility and blocked reasons
+  - replay/recover responses include before/after status, explicit result status, affected counts where available, and safe error summaries
+  - reconciliation guidance now distinguishes recover recommended, replay available, manual investigation, and no-action states
 - Admin operations queue now uses a denser queue table with source, lifecycle, urgency, and action context.
 - App shell styling was tightened toward the operational control-center baseline while preserving existing routes and session/vendor behavior.
 - Remaining future direction:

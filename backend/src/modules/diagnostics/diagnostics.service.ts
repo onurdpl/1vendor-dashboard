@@ -27,6 +27,31 @@ import type {
   WebhookReplayResponse,
 } from './diagnostics.types.js';
 
+const SUPPORTED_REPLAY_TOPICS = new Set([
+  'orders/create',
+  'refunds/create',
+  'fulfillments/create',
+  'fulfillments/update',
+  'fulfillment_events/create',
+  'fulfillment_orders/cancelled',
+]);
+
+const SUPPORTED_RECOVER_TOPICS = new Set([
+  'orders/create',
+  'refunds/create',
+  'returns/request',
+  'returns/approve',
+  'returns/decline',
+  'returns/close',
+  'returns/cancel',
+  'fulfillments/create',
+  'fulfillments/update',
+  'fulfillment_events/create',
+  'fulfillment_orders/cancelled',
+]);
+
+const PAYLOAD_PREVIEW_LIMIT = 1200;
+
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
@@ -88,30 +113,223 @@ function detectWebhookFailureSeverity(errorMessage: string | null): SyncDiagnost
   return 'warning';
 }
 
+function summarizeError(message: string | null | undefined) {
+  if (!message) {
+    return null;
+  }
+
+  return message.length > 220 ? `${message.slice(0, 217)}...` : message;
+}
+
+function stringifyEntityId(value: unknown) {
+  if (typeof value === 'string' && value.trim()) {
+    return value;
+  }
+
+  if (typeof value === 'number' || typeof value === 'bigint') {
+    return String(value);
+  }
+
+  return null;
+}
+
+function getStringField(payload: Record<string, unknown> | null, key: string) {
+  if (!payload) {
+    return null;
+  }
+
+  return stringifyEntityId(payload[key]);
+}
+
+function parsePayloadForHints(rawPayload: string | null) {
+  if (!rawPayload) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(rawPayload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function inferAffectedEntities(event: {
+  topic: string;
+  rawPayload: string | null;
+  shopifyOrder?: { sourceShopifyOrderId: string; sourceShopifyOrderNumber?: string | number | null } | null;
+}) {
+  const payload = parsePayloadForHints(event.rawPayload);
+  const adminGraphqlId = getStringField(payload, 'admin_graphql_api_id');
+  const payloadId = getStringField(payload, 'id');
+  const fulfillmentId = getStringField(payload, 'fulfillment_id');
+  const orderId = getStringField(payload, 'order_id');
+  const orderNumber = getStringField(payload, 'order_number') ?? getStringField(payload, 'name');
+
+  return {
+    shopifyOrderId:
+      event.shopifyOrder?.sourceShopifyOrderId ??
+      orderId ??
+      (event.topic === 'orders/create' ? payloadId : null),
+    shopifyOrderNumber: event.shopifyOrder?.sourceShopifyOrderNumber
+      ? String(event.shopifyOrder.sourceShopifyOrderNumber)
+      : orderNumber,
+    shopifyReturnId: event.topic.startsWith('returns/')
+      ? adminGraphqlId ?? payloadId
+      : null,
+    shopifyRefundId: event.topic === 'refunds/create' ? payloadId : null,
+    shopifyFulfillmentId:
+      event.topic.startsWith('fulfillments/') || event.topic.startsWith('fulfillment_events/')
+        ? adminGraphqlId ?? fulfillmentId ?? payloadId
+        : null,
+    vendorId: null,
+  };
+}
+
+function buildPayloadPreview(rawPayload: string | null) {
+  if (!rawPayload) {
+    return {
+      payloadPreview: null,
+      payloadPreviewTruncated: false,
+    };
+  }
+
+  const preview = rawPayload.slice(0, PAYLOAD_PREVIEW_LIMIT);
+  return {
+    payloadPreview: preview,
+    payloadPreviewTruncated: rawPayload.length > PAYLOAD_PREVIEW_LIMIT,
+  };
+}
+
+function getReplayBlockedReason(event: {
+  topic: string;
+  status: string;
+  rawPayload: string | null;
+  payloadHash: string | null;
+}) {
+  if (!SUPPORTED_REPLAY_TOPICS.has(event.topic)) {
+    return `Replay is not supported for topic ${event.topic}.`;
+  }
+
+  if (!event.rawPayload) {
+    return 'Webhook payload is not available for replay.';
+  }
+
+  if (!event.payloadHash) {
+    return 'Webhook payload hash is not available for replay.';
+  }
+
+  if (event.status === 'PROCESSING') {
+    return 'Webhook is currently processing.';
+  }
+
+  return null;
+}
+
+function getRecoverBlockedReason(event: {
+  topic: string;
+  status: string;
+  rawPayload: string | null;
+  payloadHash: string | null;
+}) {
+  if (!SUPPORTED_RECOVER_TOPICS.has(event.topic)) {
+    return `Recover is not supported for topic ${event.topic}.`;
+  }
+
+  if (!event.rawPayload) {
+    return 'Webhook payload is not available for replay.';
+  }
+
+  if (!event.payloadHash) {
+    return 'Webhook payload hash is not available for recovery.';
+  }
+
+  if (event.status === 'PROCESSED') {
+    return 'Processed webhook events are not recoverable.';
+  }
+
+  if (event.status !== 'RECEIVED' && event.status !== 'FAILED') {
+    return `Webhook event in status ${event.status} is not recoverable.`;
+  }
+
+  return null;
+}
+
+function getRecommendedAction(event: {
+  topic: string;
+  status: string;
+  rawPayload: string | null;
+  payloadHash: string | null;
+  errorMessage: string | null;
+}) {
+  const recoverBlockedReason = getRecoverBlockedReason(event);
+  const replayBlockedReason = getReplayBlockedReason(event);
+
+  if (event.status === 'PROCESSED') {
+    return 'No action needed. Event processed successfully.';
+  }
+
+  if (event.status === 'RECEIVED' && !recoverBlockedReason) {
+    return 'Recover recommended: payload is stored and event is stuck in RECEIVED.';
+  }
+
+  if (event.status === 'FAILED' && !recoverBlockedReason) {
+    return 'Recover recommended after confirming the root cause is resolved.';
+  }
+
+  if (event.status === 'FAILED' && !replayBlockedReason) {
+    return 'Replay is available if idempotent reprocessing is intentional.';
+  }
+
+  if (!event.rawPayload) {
+    return 'Manual investigation required because payload is unavailable.';
+  }
+
+  if (event.status === 'PROCESSING') {
+    return 'Monitor processing before taking action.';
+  }
+
+  return event.errorMessage ? 'Review error summary before choosing recovery.' : 'Review event metadata.';
+}
+
 function buildWebhookDiagnosticsEvent(event: {
   id: string;
   topic: string;
   sourceShopDomain: string;
   webhookId: string | null;
   idempotencyKey: string | null;
+  payloadHash: string | null;
   rawPayload: string | null;
   status: string;
   receivedAt: Date;
   processedAt: Date | null;
   errorMessage: string | null;
+  shopifyOrder?: { sourceShopifyOrderId: string; sourceShopifyOrderNumber?: string | number | null } | null;
 }): AdminWebhookDiagnosticsEvent {
+  const replayBlockedReason = getReplayBlockedReason(event);
+  const recoverBlockedReason = getRecoverBlockedReason(event);
+
   return {
     id: event.id,
     topic: event.topic,
     shopDomain: event.sourceShopDomain,
     shopifyWebhookId: event.webhookId,
+    eventId: event.webhookId,
     idempotencyKey: event.idempotencyKey,
+    payloadHash: event.payloadHash,
     status: event.status,
+    processingStatus: event.status,
     receivedAt: event.receivedAt.toISOString(),
     processedAt: toIsoString(event.processedAt),
     errorMessage: event.errorMessage,
+    lastErrorSummary: summarizeError(event.errorMessage),
     duplicate: false,
     payloadAvailable: Boolean(event.rawPayload),
+    replayEligible: !replayBlockedReason,
+    replayBlockedReason,
+    recoverEligible: !recoverBlockedReason,
+    recoverBlockedReason,
+    recommendedAction: getRecommendedAction(event),
+    affectedEntities: inferAffectedEntities(event),
     createdAt: toIsoString(event.receivedAt),
     updatedAt: toIsoString(event.processedAt ?? event.receivedAt),
   };
@@ -119,6 +337,14 @@ function buildWebhookDiagnosticsEvent(event: {
 
 export async function listWebhookDiagnostics(): Promise<AdminWebhookDiagnosticsResponse> {
   const webhookEvents = await prisma.webhookEvent.findMany({
+    include: {
+      shopifyOrder: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+    },
     orderBy: {
       receivedAt: 'desc',
     },
@@ -141,6 +367,7 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
       shopifyOrder: {
         select: {
           sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
         },
       },
     },
@@ -150,17 +377,30 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
     return null;
   }
 
+  const replayBlockedReason = getReplayBlockedReason(event);
+  const recoverBlockedReason = getRecoverBlockedReason(event);
+  const payloadPreview = buildPayloadPreview(event.rawPayload);
+
   return {
     id: event.id,
     topic: event.topic,
     shopDomain: event.sourceShopDomain,
     shopifyWebhookId: event.webhookId,
+    eventId: event.webhookId,
     idempotencyKey: event.idempotencyKey,
     payloadHash: event.payloadHash,
-    rawPayload: event.rawPayload,
+    ...payloadPreview,
     payloadAvailable: Boolean(event.rawPayload),
     status: event.status,
+    processingStatus: event.status,
     errorMessage: event.errorMessage,
+    lastErrorSummary: summarizeError(event.errorMessage),
+    replayEligible: !replayBlockedReason,
+    replayBlockedReason,
+    recoverEligible: !recoverBlockedReason,
+    recoverBlockedReason,
+    recommendedAction: getRecommendedAction(event),
+    affectedEntities: inferAffectedEntities(event),
     receivedAt: event.receivedAt.toISOString(),
     processedAt: toIsoString(event.processedAt),
     createdAt: toIsoString(event.receivedAt),
@@ -470,11 +710,48 @@ async function processWebhookEvent(
   };
 }
 
+async function getWebhookStatus(webhookEventId: string) {
+  const event = await prisma.webhookEvent.findUnique({
+    where: {
+      id: webhookEventId,
+    },
+    select: {
+      status: true,
+      errorMessage: true,
+    },
+  });
+
+  return {
+    afterStatus: event?.status ?? null,
+    errorSummary: summarizeError(event?.errorMessage),
+  };
+}
+
+function buildBlockedReplayResponse(input: {
+  event: Pick<WebhookEvent, 'id' | 'topic' | 'status'> | null;
+  action: 'replay' | 'recover';
+  reason: string;
+}) {
+  return {
+    ok: false,
+    topic: input.event?.topic ?? 'unknown',
+    webhookEventId: input.event?.id,
+    action: input.action,
+    beforeStatus: input.event?.status ?? null,
+    afterStatus: input.event?.status ?? null,
+    replayStatus: input.action === 'replay' ? 'not_replayable' : undefined,
+    recoveryStatus: input.action === 'recover' ? 'not_recoverable' : undefined,
+    processingStatus: 'not_recoverable',
+    skippedReason: input.reason,
+    message: input.reason,
+  } satisfies WebhookReplayResponse;
+}
+
 export async function replayWebhookEvent(
   env: AppEnv,
   webhookEventId: string,
 ): Promise<
-  | { ok: false; statusCode: 404 | 409; message: string }
+  | { ok: false; statusCode: 404 | 409; response: WebhookReplayResponse }
   | { ok: true; response: WebhookReplayResponse }
 > {
   const event = await prisma.webhookEvent.findUnique({
@@ -487,22 +764,24 @@ export async function replayWebhookEvent(
     return {
       ok: false,
       statusCode: 404,
-      message: 'Webhook event not found.',
+      response: buildBlockedReplayResponse({
+        event: null,
+        action: 'replay',
+        reason: 'Webhook event not found.',
+      }),
     };
   }
 
-  if (
-    event.topic !== 'orders/create' &&
-    event.topic !== 'refunds/create' &&
-    event.topic !== 'fulfillments/create' &&
-    event.topic !== 'fulfillments/update' &&
-    event.topic !== 'fulfillment_events/create' &&
-    event.topic !== 'fulfillment_orders/cancelled'
-  ) {
+  const replayBlockedReason = getReplayBlockedReason(event);
+  if (replayBlockedReason) {
     return {
       ok: false,
       statusCode: 409,
-      message: `Replay is not supported for topic ${event.topic}.`,
+      response: buildBlockedReplayResponse({
+        event,
+        action: 'replay',
+        reason: replayBlockedReason,
+      }),
     };
   }
 
@@ -511,13 +790,30 @@ export async function replayWebhookEvent(
     return {
       ok: false,
       statusCode: 409,
-      message: parsedPayload.message,
+      response: buildBlockedReplayResponse({
+        event,
+        action: 'replay',
+        reason: parsedPayload.message,
+      }),
     };
   }
 
+  const beforeStatus = event.status;
+  const response = await processWebhookEvent(env, event, parsedPayload.payload);
+  const { afterStatus, errorSummary } = await getWebhookStatus(event.id);
+  const replayStatus: WebhookReplayResponse['replayStatus'] =
+    response.processingStatus === 'processed' ? 'replayed' : 'failed';
+
   return {
     ok: true,
-    response: await processWebhookEvent(env, event, parsedPayload.payload),
+    response: {
+      ...response,
+      webhookEventId: event.id,
+      beforeStatus,
+      afterStatus,
+      replayStatus,
+      errorSummary,
+    },
   };
 }
 
@@ -677,7 +973,7 @@ export async function recoverWebhookEvent(
   env: AppEnv,
   webhookEventId: string,
 ): Promise<
-  | { ok: false; statusCode: 404 | 409; message: string }
+  | { ok: false; statusCode: 404 | 409; response: WebhookRecoverResponse }
   | { ok: true; response: WebhookRecoverResponse }
 > {
   const event = await prisma.webhookEvent.findUnique({
@@ -688,51 +984,30 @@ export async function recoverWebhookEvent(
     return {
       ok: false,
       statusCode: 404,
-      message: 'Webhook event not found.',
-    };
-  }
-
-  const supportedTopics = new Set([
-    'orders/create',
-    'refunds/create',
-    'returns/request',
-    'returns/approve',
-    'returns/decline',
-    'returns/close',
-    'returns/cancel',
-    'fulfillments/create',
-    'fulfillments/update',
-    'fulfillment_events/create',
-    'fulfillment_orders/cancelled',
-  ]);
-
-  if (!supportedTopics.has(event.topic)) {
-    return {
-      ok: true,
       response: {
-        ok: true,
+        ...buildBlockedReplayResponse({
+          event: null,
+          action: 'recover',
+          reason: 'Webhook event not found.',
+        }),
         recoveryStatus: 'not_recoverable',
-        topic: event.topic,
-        action: 'not_recoverable',
-        processingStatus: 'needs_attention',
-        message: `Recover is not supported for topic ${event.topic}.`,
       },
     };
   }
 
-  if (event.status === 'PROCESSED') {
+  const recoverBlockedReason = getRecoverBlockedReason(event);
+  if (recoverBlockedReason) {
     return {
       ok: false,
       statusCode: 409,
-      message: 'Processed webhook events are not recoverable.',
-    };
-  }
-
-  if (event.status !== 'RECEIVED' && event.status !== 'FAILED') {
-    return {
-      ok: false,
-      statusCode: 409,
-      message: `Webhook event in status ${event.status} is not recoverable.`,
+      response: {
+        ...buildBlockedReplayResponse({
+          event,
+          action: 'recover',
+          reason: recoverBlockedReason,
+        }),
+        recoveryStatus: 'not_recoverable',
+      },
     };
   }
 
@@ -741,13 +1016,22 @@ export async function recoverWebhookEvent(
     return {
       ok: false,
       statusCode: 409,
-      message: parsedPayload.message,
+      response: {
+        ...buildBlockedReplayResponse({
+          event,
+          action: 'recover',
+          reason: parsedPayload.message,
+        }),
+        recoveryStatus: 'not_recoverable',
+      },
     };
   }
 
+  const beforeStatus = event.status;
   await markWebhookProcessing(event.id);
 
   const response = await processWebhookEvent(env, event, parsedPayload.payload);
+  const { afterStatus, errorSummary } = await getWebhookStatus(event.id);
   const recoveryStatus: WebhookRecoverResponse['recoveryStatus'] =
     response.processingStatus === 'processed' ? 'recovered' : 'failed';
 
@@ -755,7 +1039,11 @@ export async function recoverWebhookEvent(
     ok: true,
     response: {
       ...response,
+      webhookEventId: event.id,
+      beforeStatus,
+      afterStatus,
       recoveryStatus,
+      errorSummary,
     },
   };
 }
