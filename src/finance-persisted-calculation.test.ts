@@ -33,6 +33,10 @@ type LedgerFixture = {
   deductShippingEnabledSnapshot: boolean | null;
   shippingModeSnapshot: string | null;
   fixedShippingFeeSnapshot: number | null;
+  shippingCostSnapshot?: number | null;
+  shippingVatAmountSnapshot?: number | null;
+  shippingCostSourceSnapshot?: string | null;
+  shippingCostProviderSnapshot?: string | null;
   settlementStatus: string;
   settlementEligibleAt: Date | null;
   accruedAt: Date | null;
@@ -76,6 +80,10 @@ function buildSaleFixture(input: {
     deductShippingEnabledSnapshot: true,
     shippingModeSnapshot: 'EXTERNAL_PROVIDER',
     fixedShippingFeeSnapshot: 88,
+    shippingCostSnapshot: null,
+    shippingVatAmountSnapshot: null,
+    shippingCostSourceSnapshot: null,
+    shippingCostProviderSnapshot: null,
     settlementStatus: fulfilled ? 'PAYABLE' : 'ACCRUING',
     settlementEligibleAt: fulfilled ? createdAt : null,
     accruedAt: createdAt,
@@ -135,6 +143,10 @@ describe('persisted vendor finance calculations', () => {
         deductShippingEnabledSnapshot: null,
         shippingModeSnapshot: null,
         fixedShippingFeeSnapshot: null,
+        shippingCostSnapshot: null,
+        shippingVatAmountSnapshot: null,
+        shippingCostSourceSnapshot: null,
+        shippingCostProviderSnapshot: null,
         settlementStatus: 'PARTIALLY_REFUNDED',
         settlementEligibleAt: null,
         accruedAt: null,
@@ -188,6 +200,10 @@ describe('persisted vendor finance calculations', () => {
           deductShippingEnabledSnapshot: row.deductShippingEnabledSnapshot,
           shippingModeSnapshot: row.shippingModeSnapshot,
           fixedShippingFeeSnapshot: row.fixedShippingFeeSnapshot,
+          shippingCostSnapshot: row.shippingCostSnapshot,
+          shippingVatAmountSnapshot: row.shippingVatAmountSnapshot,
+          shippingCostSourceSnapshot: row.shippingCostSourceSnapshot,
+          shippingCostProviderSnapshot: row.shippingCostProviderSnapshot,
           settlementStatus: row.settlementStatus,
           settlementEligibleAt: row.settlementEligibleAt,
           accruedAt: row.accruedAt,

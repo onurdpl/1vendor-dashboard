@@ -178,6 +178,21 @@ export const runtimeServices = {
             lineCount: 0,
             warning: null,
           }),
+    attachShippingCost: (input: Parameters<typeof realFinance.attachShippingCost>[0]) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.attachShippingCost(input)
+        : Promise.resolve({
+            id: `mock-shipping-cost-${input.financeLedgerEntryId}`,
+            ...input,
+            allocationId: 'mock-allocation',
+            sourceShopifyOrderId: 'mock-order',
+            sourceShopifyFulfillmentId: null,
+            currency: 'TRY',
+            shippingCost: input.shippingCost.toFixed(2),
+            shippingVatAmount: input.shippingVatAmount === null ? null : input.shippingVatAmount.toFixed(2),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
   },
   automation: {
     dashboard: () =>

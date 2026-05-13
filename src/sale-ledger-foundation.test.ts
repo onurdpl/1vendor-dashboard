@@ -42,6 +42,15 @@ describe('sale ledger foundation', () => {
           fixedShippingFee: 88,
         }),
       },
+      shipmentShippingCost: {
+        findFirst: async () => ({
+          id: 'shipcost-sporjinal-alloc-1-manual',
+          shippingCost: 72,
+          shippingVatAmount: 12,
+          sourceType: 'MANUAL',
+          providerName: 'Manual provider',
+        }),
+      },
       financeLedgerEntry: {
         upsert: async (args: unknown) => args,
       },
@@ -59,6 +68,11 @@ describe('sale ledger foundation', () => {
       deductShippingEnabledSnapshot: true,
       shippingModeSnapshot: 'EXTERNAL_PROVIDER',
       fixedShippingFeeSnapshot: 88,
+      shippingCostSnapshot: 72,
+      shippingVatAmountSnapshot: 12,
+      shippingCostSourceSnapshot: 'MANUAL',
+      shippingCostProviderSnapshot: 'Manual provider',
+      shippingCostIdSnapshot: 'shipcost-sporjinal-alloc-1-manual',
       financialProfileIdSnapshot: 'profile-sporjinal',
       settlementStatus: 'PAYABLE',
       accruedAt: new Date('2026-05-13T10:00:00.000Z'),
@@ -67,5 +81,6 @@ describe('sale ledger foundation', () => {
     });
     expect(result.update).not.toHaveProperty('commissionPercentSnapshot');
     expect(result.update).not.toHaveProperty('commissionVatPercentSnapshot');
+    expect(result.update).not.toHaveProperty('shippingCostSnapshot');
   });
 });

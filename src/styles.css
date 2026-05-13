@@ -2896,6 +2896,20 @@ h3 {
   justify-content: flex-end;
 }
 
+.finance-shipping-cost-form {
+  display: grid;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-raised);
+}
+
+.finance-shipping-cost-form h4 {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
 .finance-vendor-workspace .finance-profile-card,
 .finance-vendor-workspace .finance-payout-prep-card {
   grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) auto;

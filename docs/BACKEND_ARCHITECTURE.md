@@ -937,3 +937,41 @@ Frontend note:
 - Vendor users cannot prepare, cancel, review, approve, or execute payout batches.
 - Vendor isolation remains enforced by existing auth/vendor context and vendor-scoped finance queries.
 - Phase 18D remains read-only for vendors and does not execute payments, integrate banks/ERP/accounting providers, generate invoices, or mark real settlement completion.
+
+## External Shipping Cost Foundation (Phase 18E)
+- `ShipmentShippingCost` stores vendor-scoped shipment/provider cost inputs:
+  - vendor id
+  - vendor allocation id
+  - Shopify order id
+  - optional Shopify fulfillment id
+  - provider name and optional provider reference
+  - shipping cost and optional shipping VAT
+  - currency
+  - status
+  - source type
+- Source types are preparation metadata only:
+  - `MANUAL`
+  - `IMPORTED`
+  - `EXTERNAL_PROVIDER`
+- Cost statuses are operational review states:
+  - `PENDING`
+  - `CONFIRMED`
+  - `DISPUTED`
+  - `IGNORED`
+- Finance sale rows now have optional immutable shipping cost snapshot fields:
+  - cost
+  - VAT
+  - source
+  - provider
+  - shipment cost record id
+- Shipping deduction rules remain deterministic:
+  - disabled mode deducts nothing
+  - fixed mode deducts the fixed vendor profile fee after fulfillment/shipping
+  - external-provider mode deducts confirmed provider cost only when a ledger snapshot exists
+  - missing provider cost keeps the deduction at `0.00`
+- Admin-only ingestion endpoint:
+  - `POST /admin/shipping-costs`
+- The ingestion endpoint validates vendor ownership through the selected allocation or finance ledger row and uses a deterministic id to avoid duplicate provider/reference rows.
+- Existing finance ledger snapshots are not rewritten when a provider cost is attached later.
+- `GET /finance` exposes shipping deduction source, provider, snapshot, and pending-provider-cost state for Finance detail views.
+- Phase 18E does not call carrier/provider APIs, create shipment labels, integrate ERP/accounting systems, or execute payouts.

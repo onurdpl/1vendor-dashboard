@@ -21,7 +21,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
-import { getFinanceDashboard, preparePayoutBatch, updateVendorFinancialProfile } from '../features/finance/api';
+import { attachShippingCost, getFinanceDashboard, preparePayoutBatch, updateVendorFinancialProfile } from '../features/finance/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
@@ -173,6 +173,9 @@ export function FinancePage() {
   const [deductShippingEnabled, setDeductShippingEnabled] = useState(false);
   const [shippingMode, setShippingMode] = useState<'disabled' | 'fixed' | 'external_provider'>('disabled');
   const [fixedShippingFee, setFixedShippingFee] = useState('');
+  const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
+  const [shippingCostAmount, setShippingCostAmount] = useState('');
+  const [shippingVatAmount, setShippingVatAmount] = useState('');
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const availableVendors = getAvailableVendors();
@@ -203,6 +206,34 @@ export function FinancePage() {
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Payout batch could not be prepared.', 'error'),
     },
   );
+  const attachShippingCostMutation = useMutationAction(
+    (input: {
+      financeLedgerEntryId: string;
+      providerName: string;
+      providerReference: string | null;
+      shippingCost: number;
+      shippingVatAmount: number | null;
+    }) =>
+      attachShippingCost({
+        vendorId: currentVendor.vendorId,
+        financeLedgerEntryId: input.financeLedgerEntryId,
+        providerName: input.providerName,
+        providerReference: input.providerReference,
+        shippingCost: input.shippingCost,
+        shippingVatAmount: input.shippingVatAmount,
+        status: 'confirmed',
+        sourceType: 'manual',
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.finance.summary()],
+      onSuccess: async () => {
+        await refetch();
+        showFeedback('Shipping cost saved for future payout context.', 'success');
+      },
+      onError: (mutationError) =>
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
+    },
+  );
 
   useEffect(() => {
     if (!finance?.profile) {
@@ -229,6 +260,28 @@ export function FinancePage() {
         shippingMode: nextShippingMode,
         fixedShippingFee: String(formData.get('fixedShippingFee') ?? '').trim()
           ? Number(formData.get('fixedShippingFee'))
+          : null,
+      });
+    } catch {
+      // The mutation onError handler renders the compact save failure message.
+    }
+  }
+
+  async function handleAttachShippingCost(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!selectedRecord) {
+      return;
+    }
+    const formData = new FormData(event.currentTarget);
+
+    try {
+      await attachShippingCostMutation.mutateAsync({
+        financeLedgerEntryId: selectedRecord.id,
+        providerName: String(formData.get('providerName') ?? '').trim() || 'Manual provider',
+        providerReference: String(formData.get('providerReference') ?? '').trim() || null,
+        shippingCost: Number(formData.get('shippingCost') || 0),
+        shippingVatAmount: String(formData.get('shippingVatAmount') ?? '').trim()
+          ? Number(formData.get('shippingVatAmount'))
           : null,
       });
     } catch {
@@ -602,6 +655,10 @@ export function FinancePage() {
                     label="Shipping deduction"
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.shippingDeduction)}</span>}
                   />
+                  <MetadataRow label="Shipping source" value={selectedRecord.payoutCalculation.shippingDeductionSource ?? 'none'} />
+                  <MetadataRow label="Shipping provider" value={selectedRecord.payoutCalculation.shippingCostProvider ?? 'Pending provider cost'} />
+                  <MetadataRow label="Shipping cost snapshot" value={selectedRecord.payoutCalculation.shippingCostSnapshot ?? 'No shipping cost snapshot'} />
+                  <MetadataRow label="Provider cost state" value={selectedRecord.payoutCalculation.shippingCostStatus ?? 'not_applicable'} />
                   <MetadataRow
                     label="Refund impact"
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.refundImpact)}</span>}
@@ -629,8 +686,8 @@ export function FinancePage() {
               <MetadataGroup title="Payout batch">
                 <MetadataRow label="Batch status" value={selectedRecord.payoutBatch ? getPayoutBatchStatusLabel(selectedRecord.payoutBatch.status) : 'Unbatched'} />
                 <MetadataRow label="Batch reference" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
-                <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
-              </MetadataGroup>
+                  <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
+                </MetadataGroup>
               {isVendorUser ? null : (
                 <>
                   <MetadataGroup title="Shopify identifiers">
@@ -653,6 +710,49 @@ export function FinancePage() {
                   </MetadataGroup>
                 </>
               )}
+              {isAdmin && selectedRecord.category === 'Invoice' ? (
+                <form className="finance-shipping-cost-form" aria-label="Attach shipping cost" onSubmit={handleAttachShippingCost}>
+                  <h4>Shipping cost</h4>
+                  <div className="op-form-grid">
+                    <label>
+                      <span>Provider</span>
+                      <input
+                        name="providerName"
+                        value={shippingCostProvider}
+                        onChange={(event) => setShippingCostProvider(event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      <span>Reference</span>
+                      <input name="providerReference" placeholder="Optional" />
+                    </label>
+                    <label>
+                      <span>Cost</span>
+                      <input
+                        name="shippingCost"
+                        value={shippingCostAmount}
+                        onChange={(event) => setShippingCostAmount(event.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                    <label>
+                      <span>VAT</span>
+                      <input
+                        name="shippingVatAmount"
+                        value={shippingVatAmount}
+                        onChange={(event) => setShippingVatAmount(event.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                  </div>
+                  <button type="submit" className="button button-secondary button-compact" disabled={attachShippingCostMutation.isPending}>
+                    {attachShippingCostMutation.isPending ? 'Saving...' : 'Attach confirmed cost'}
+                  </button>
+                  <p className="page-description">
+                    Confirmed costs are stored for provider readiness. Existing ledger snapshots are not rewritten.
+                  </p>
+                </form>
+              ) : null}
               <div className="op-panel-section">
                 <h4>{isVendorUser ? 'Payout note' : 'Related return / refund context'}</h4>
                 <p className="page-description">

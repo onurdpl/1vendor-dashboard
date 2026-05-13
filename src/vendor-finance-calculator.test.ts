@@ -113,4 +113,26 @@ describe('vendor payout calculation foundation', () => {
     expect(result.shippingApplied).toBe(false);
     expect(result.estimatedPayout).toBe(856);
   });
+
+  it('uses confirmed external provider shipping cost after fulfillment', () => {
+    const result = calculateVendorPayout({
+      grossAmount: 1000,
+      refundAmount: 0,
+      fulfilled: true,
+      profile: {
+        ...baseProfile,
+        shippingMode: 'external_provider',
+        fixedShippingFee: 88,
+        externalProviderShippingCost: 70,
+        externalProviderShippingVatAmount: 14,
+        shippingCostProvider: 'Manual provider',
+      },
+    });
+
+    expect(result.shippingDeduction).toBe(84);
+    expect(result.shippingVatAmount).toBe(14);
+    expect(result.shippingDeductionSource).toBe('external_provider');
+    expect(result.shippingCostProvider).toBe('Manual provider');
+    expect(result.estimatedPayout).toBe(772);
+  });
 });

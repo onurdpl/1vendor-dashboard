@@ -45,6 +45,11 @@ export type PayoutCalculationDto = {
   commission: string;
   commissionVat: string;
   shippingDeduction: string;
+  shippingVatAmount: string;
+  shippingDeductionSource: 'none' | 'fixed' | 'external_provider';
+  shippingCostProvider: string | null;
+  shippingCostSnapshot: string | null;
+  shippingCostStatus: 'snapshot' | 'pending_provider_cost' | 'not_applicable';
   refundImpact: string;
   estimatedPayout: string;
   shippingApplied: boolean;
@@ -52,6 +57,37 @@ export type PayoutCalculationDto = {
   profileSource: 'snapshot' | 'current' | 'default';
   commissionPercent: string;
   commissionVatPercent: string;
+};
+
+export type ShippingCostDto = {
+  id: string;
+  vendorId: string;
+  allocationId: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyFulfillmentId: string | null;
+  providerName: string;
+  providerReference: string | null;
+  shippingCost: string;
+  shippingVatAmount: string | null;
+  currency: string;
+  status: 'pending' | 'confirmed' | 'disputed' | 'ignored';
+  sourceType: 'manual' | 'imported' | 'external_provider';
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ShippingCostInputDto = {
+  vendorId: string;
+  allocationId?: string;
+  financeLedgerEntryId?: string;
+  providerName: string;
+  providerReference?: string | null;
+  shippingCost: number;
+  shippingVatAmount?: number | null;
+  currency?: string;
+  status?: ShippingCostDto['status'];
+  sourceType?: ShippingCostDto['sourceType'];
+  sourceShopifyFulfillmentId?: string | null;
 };
 
 export type SettlementDto = {

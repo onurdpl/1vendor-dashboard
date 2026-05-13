@@ -260,6 +260,11 @@ export type PayoutCalculation = {
   commission: string;
   commissionVat: string;
   shippingDeduction: string;
+  shippingVatAmount?: string;
+  shippingDeductionSource?: 'none' | 'fixed' | 'external_provider';
+  shippingCostProvider?: string | null;
+  shippingCostSnapshot?: string | null;
+  shippingCostStatus?: 'snapshot' | 'pending_provider_cost' | 'not_applicable';
   refundImpact: string;
   estimatedPayout: string;
   shippingApplied: boolean;

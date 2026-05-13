@@ -6,6 +6,10 @@ export type VendorFinanceProfileConfig = {
   deductShippingEnabled: boolean;
   shippingMode: ShippingMode;
   fixedShippingFee: number | null;
+  externalProviderShippingCost?: number | null;
+  externalProviderShippingVatAmount?: number | null;
+  shippingCostSource?: string | null;
+  shippingCostProvider?: string | null;
 };
 
 export type PayoutCalculationInput = {
@@ -20,10 +24,13 @@ export type PayoutCalculationResult = {
   commission: number;
   commissionVat: number;
   shippingDeduction: number;
+  shippingVatAmount: number;
   refundImpact: number;
   estimatedPayout: number;
   shippingApplied: boolean;
   shippingMode: ShippingMode;
+  shippingDeductionSource: 'none' | 'fixed' | 'external_provider';
+  shippingCostProvider: string | null;
 };
 
 export const DEFAULT_VENDOR_FINANCIAL_PROFILE: VendorFinanceProfileConfig = {
@@ -50,9 +57,18 @@ export function calculateVendorPayout(input: PayoutCalculationInput): PayoutCalc
   const shippingApplied =
     input.profile.deductShippingEnabled &&
     input.fulfilled &&
-    input.profile.shippingMode === 'fixed' &&
-    Number(input.profile.fixedShippingFee ?? 0) > 0;
-  const shippingDeduction = shippingApplied ? clampMoney(Number(input.profile.fixedShippingFee)) : 0;
+    ((input.profile.shippingMode === 'fixed' && Number(input.profile.fixedShippingFee ?? 0) > 0) ||
+      (input.profile.shippingMode === 'external_provider' && Number(input.profile.externalProviderShippingCost ?? 0) > 0));
+  const shippingVatAmount =
+    shippingApplied && input.profile.shippingMode === 'external_provider'
+      ? clampMoney(Number(input.profile.externalProviderShippingVatAmount ?? 0))
+      : 0;
+  const shippingDeduction =
+    shippingApplied && input.profile.shippingMode === 'external_provider'
+      ? clampMoney(Number(input.profile.externalProviderShippingCost ?? 0) + shippingVatAmount)
+      : shippingApplied
+        ? clampMoney(Number(input.profile.fixedShippingFee))
+        : 0;
   const estimatedPayout = clampMoney(grossAmount - commission - commissionVat - shippingDeduction - refundImpact);
 
   return {
@@ -60,9 +76,16 @@ export function calculateVendorPayout(input: PayoutCalculationInput): PayoutCalc
     commission,
     commissionVat,
     shippingDeduction,
+    shippingVatAmount,
     refundImpact,
     estimatedPayout,
     shippingApplied,
     shippingMode: input.profile.shippingMode,
+    shippingDeductionSource: shippingApplied
+      ? input.profile.shippingMode === 'external_provider'
+        ? 'external_provider'
+        : 'fixed'
+      : 'none',
+    shippingCostProvider: input.profile.shippingCostProvider ?? null,
   };
 }

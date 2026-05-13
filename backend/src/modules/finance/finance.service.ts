@@ -15,6 +15,8 @@ import type {
   SettlementDto,
   VendorFinancialProfileDto,
   VendorFinancialProfileUpdateDto,
+  ShippingCostDto,
+  ShippingCostInputDto,
 } from './finance.types.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
@@ -116,6 +118,10 @@ function entrySnapshotToCalculationProfile(entry: {
   deductShippingEnabledSnapshot?: boolean | null;
   shippingModeSnapshot?: string | null;
   fixedShippingFeeSnapshot?: unknown;
+  shippingCostSnapshot?: unknown;
+  shippingVatAmountSnapshot?: unknown;
+  shippingCostSourceSnapshot?: string | null;
+  shippingCostProviderSnapshot?: string | null;
 }): CalculationProfile | null {
   if (entry.commissionPercentSnapshot === null || entry.commissionPercentSnapshot === undefined) {
     return null;
@@ -130,6 +136,16 @@ function entrySnapshotToCalculationProfile(entry: {
       entry.fixedShippingFeeSnapshot === null || entry.fixedShippingFeeSnapshot === undefined
         ? null
         : toNumber(entry.fixedShippingFeeSnapshot),
+    externalProviderShippingCost:
+      entry.shippingCostSnapshot === null || entry.shippingCostSnapshot === undefined
+        ? null
+        : toNumber(entry.shippingCostSnapshot),
+    externalProviderShippingVatAmount:
+      entry.shippingVatAmountSnapshot === null || entry.shippingVatAmountSnapshot === undefined
+        ? null
+        : toNumber(entry.shippingVatAmountSnapshot),
+    shippingCostSource: entry.shippingCostSourceSnapshot ?? null,
+    shippingCostProvider: entry.shippingCostProviderSnapshot ?? null,
     source: 'snapshot',
   };
 }
@@ -141,6 +157,10 @@ function resolveCalculationProfile(
     deductShippingEnabledSnapshot?: boolean | null;
     shippingModeSnapshot?: string | null;
     fixedShippingFeeSnapshot?: unknown;
+    shippingCostSnapshot?: unknown;
+    shippingVatAmountSnapshot?: unknown;
+    shippingCostSourceSnapshot?: string | null;
+    shippingCostProviderSnapshot?: string | null;
   },
   activeProfile: VendorFinancialProfileDto,
 ): CalculationProfile {
@@ -182,12 +202,29 @@ function isFulfilledForShipping(allocation: {
 function mapCalculation(
   calculation: ReturnType<typeof calculateVendorPayout>,
   profile: CalculationProfile,
+  entry: {
+    shippingCostSnapshot?: unknown;
+    shippingVatAmountSnapshot?: unknown;
+    shippingCostProviderSnapshot?: string | null;
+  },
+  fulfilled: boolean,
 ): PayoutCalculationDto {
+  const hasShippingCostSnapshot = entry.shippingCostSnapshot !== null && entry.shippingCostSnapshot !== undefined;
   return {
     grossAmount: toAmountString(calculation.grossAmount),
     commission: toAmountString(calculation.commission),
     commissionVat: toAmountString(calculation.commissionVat),
     shippingDeduction: toAmountString(calculation.shippingDeduction),
+    shippingVatAmount: toAmountString(calculation.shippingVatAmount),
+    shippingDeductionSource: calculation.shippingDeductionSource,
+    shippingCostProvider: calculation.shippingCostProvider,
+    shippingCostSnapshot: hasShippingCostSnapshot ? toAmountString(toNumber(entry.shippingCostSnapshot)) : null,
+    shippingCostStatus:
+      hasShippingCostSnapshot
+        ? 'snapshot'
+        : fulfilled && profile.deductShippingEnabled && profile.shippingMode === 'external_provider'
+          ? 'pending_provider_cost'
+          : 'not_applicable',
     refundImpact: toAmountString(calculation.refundImpact),
     estimatedPayout: toAmountString(calculation.estimatedPayout),
     shippingApplied: calculation.shippingApplied,
@@ -195,6 +232,40 @@ function mapCalculation(
     profileSource: profile.source,
     commissionPercent: toPercentString(profile.commissionPercent),
     commissionVatPercent: toPercentString(profile.commissionVatPercent),
+  };
+}
+
+function mapShippingCost(cost: {
+  id: string;
+  vendorId: string;
+  allocationId: string;
+  sourceShopifyOrderId: string;
+  sourceShopifyFulfillmentId: string | null;
+  providerName: string;
+  providerReference: string | null;
+  shippingCost: unknown;
+  shippingVatAmount: unknown;
+  currency: string;
+  status: string;
+  sourceType: string;
+  createdAt: Date;
+  updatedAt: Date;
+}): ShippingCostDto {
+  return {
+    id: cost.id,
+    vendorId: cost.vendorId,
+    allocationId: cost.allocationId,
+    sourceShopifyOrderId: cost.sourceShopifyOrderId,
+    sourceShopifyFulfillmentId: cost.sourceShopifyFulfillmentId,
+    providerName: cost.providerName,
+    providerReference: cost.providerReference,
+    shippingCost: toAmountString(toNumber(cost.shippingCost)),
+    shippingVatAmount: cost.shippingVatAmount === null ? null : toAmountString(toNumber(cost.shippingVatAmount)),
+    currency: cost.currency,
+    status: cost.status.trim().toLowerCase() as ShippingCostDto['status'],
+    sourceType: cost.sourceType.trim().toLowerCase() as ShippingCostDto['sourceType'],
+    createdAt: cost.createdAt.toISOString(),
+    updatedAt: cost.updatedAt.toISOString(),
   };
 }
 
@@ -366,6 +437,10 @@ function calculateEntryBatchAmounts(
     deductShippingEnabledSnapshot?: boolean | null;
     shippingModeSnapshot?: string | null;
     fixedShippingFeeSnapshot?: unknown;
+    shippingCostSnapshot?: unknown;
+    shippingVatAmountSnapshot?: unknown;
+    shippingCostSourceSnapshot?: string | null;
+    shippingCostProviderSnapshot?: string | null;
     vendorAllocation?: {
       allocationStatus?: string;
       fulfillmentStatus?: string | null;
@@ -496,6 +571,10 @@ export async function getVendorFinanceDashboard(
         deductShippingEnabledSnapshot: true,
         shippingModeSnapshot: true,
         fixedShippingFeeSnapshot: true,
+        shippingCostSnapshot: true,
+        shippingVatAmountSnapshot: true,
+        shippingCostSourceSnapshot: true,
+        shippingCostProviderSnapshot: true,
         settlementStatus: true,
         settlementEligibleAt: true,
         accruedAt: true,
@@ -733,13 +812,14 @@ export async function getVendorFinanceDashboard(
     const type = normalizeType(entry.entryType);
     const entryProfile = resolveCalculationProfile(entry, profile);
     const settlement = buildSettlement(entry);
+    const fulfilled = isFulfilledForShipping(entry.vendorAllocation);
     const payoutCalculation = calculateVendorPayout({
       grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
       refundAmount:
         type === 'refund'
           ? toNumber(entry.amount)
           : sumRefundImpact(entry.vendorAllocation?.refundRecords),
-      fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+      fulfilled,
       profile: entryProfile,
     });
 
@@ -754,7 +834,7 @@ export async function getVendorFinanceDashboard(
       relatedReturnId: references.relatedReturnId,
       relatedRefundId: references.relatedRefundId,
       createdAt: entry.createdAt.toISOString(),
-      payoutCalculation: mapCalculation(payoutCalculation, entryProfile),
+      payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
       settlement,
       payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
     };
@@ -796,6 +876,118 @@ export async function getVendorFinancialProfile(vendorId: string): Promise<Vendo
   });
 
   return mapProfile(profile, vendorId);
+}
+
+function normalizeShippingCostStatus(value: ShippingCostInputDto['status'] | undefined) {
+  const normalized = (value ?? 'confirmed').toUpperCase();
+  if (normalized === 'PENDING' || normalized === 'CONFIRMED' || normalized === 'DISPUTED' || normalized === 'IGNORED') {
+    return normalized as 'PENDING' | 'CONFIRMED' | 'DISPUTED' | 'IGNORED';
+  }
+  throw new Error('Unsupported shipping cost status.');
+}
+
+function normalizeShippingCostSourceType(value: ShippingCostInputDto['sourceType'] | undefined) {
+  const normalized = (value ?? 'manual').toUpperCase();
+  if (normalized === 'MANUAL' || normalized === 'IMPORTED' || normalized === 'EXTERNAL_PROVIDER') {
+    return normalized as 'MANUAL' | 'IMPORTED' | 'EXTERNAL_PROVIDER';
+  }
+  throw new Error('Unsupported shipping cost source type.');
+}
+
+function buildShippingCostId(input: {
+  vendorId: string;
+  allocationId: string;
+  providerName: string;
+  providerReference?: string | null;
+}) {
+  const provider = input.providerName.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'provider';
+  const reference = (input.providerReference?.trim() || 'manual')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+
+  return `shipcost-${input.vendorId}-${input.allocationId}-${provider}-${reference}`;
+}
+
+export async function upsertShipmentShippingCost(input: ShippingCostInputDto): Promise<ShippingCostDto> {
+  if (!input.vendorId || !input.providerName || (!input.allocationId && !input.financeLedgerEntryId)) {
+    throw new Error('vendorId, providerName, and allocation or finance ledger reference are required.');
+  }
+  if (!Number.isFinite(input.shippingCost) || input.shippingCost < 0) {
+    throw new Error('shippingCost must be zero or greater.');
+  }
+  if (input.shippingVatAmount !== undefined && input.shippingVatAmount !== null && (!Number.isFinite(input.shippingVatAmount) || input.shippingVatAmount < 0)) {
+    throw new Error('shippingVatAmount must be zero or greater.');
+  }
+
+  const ledgerEntry = input.financeLedgerEntryId
+    ? await prisma.financeLedgerEntry.findUnique({
+        where: {
+          id: input.financeLedgerEntryId,
+        },
+        select: {
+          vendorAllocationId: true,
+          vendorId: true,
+        },
+      })
+    : null;
+  if (ledgerEntry && ledgerEntry.vendorId !== input.vendorId) {
+    throw new Error('Finance ledger row does not belong to the selected vendor.');
+  }
+
+  const allocationId = input.allocationId ?? ledgerEntry?.vendorAllocationId ?? null;
+  const allocation = allocationId
+    ? await prisma.vendorAllocation.findUnique({
+        where: {
+          id: allocationId,
+        },
+        include: {
+          fulfillment: true,
+          order: true,
+        },
+      })
+    : null;
+  if (!allocation || allocation.assignedVendorId !== input.vendorId) {
+    throw new Error('Allocation could not be found for the selected vendor.');
+  }
+
+  const costId = buildShippingCostId({
+    vendorId: input.vendorId,
+    allocationId: allocation.id,
+    providerName: input.providerName,
+    providerReference: input.providerReference,
+  });
+  const cost = await prisma.shipmentShippingCost.upsert({
+    where: {
+      id: costId,
+    },
+    update: {
+      sourceShopifyFulfillmentId: input.sourceShopifyFulfillmentId ?? allocation.fulfillment?.shopifyFulfillmentId ?? null,
+      providerName: input.providerName,
+      providerReference: input.providerReference ?? null,
+      shippingCost: input.shippingCost,
+      shippingVatAmount: input.shippingVatAmount ?? null,
+      currency: input.currency ?? 'TRY',
+      status: normalizeShippingCostStatus(input.status),
+      sourceType: normalizeShippingCostSourceType(input.sourceType),
+    },
+    create: {
+      id: costId,
+      vendorId: input.vendorId,
+      allocationId: allocation.id,
+      sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+      sourceShopifyFulfillmentId: input.sourceShopifyFulfillmentId ?? allocation.fulfillment?.shopifyFulfillmentId ?? null,
+      providerName: input.providerName,
+      providerReference: input.providerReference ?? null,
+      shippingCost: input.shippingCost,
+      shippingVatAmount: input.shippingVatAmount ?? null,
+      currency: input.currency ?? 'TRY',
+      status: normalizeShippingCostStatus(input.status),
+      sourceType: normalizeShippingCostSourceType(input.sourceType),
+    },
+  });
+
+  return mapShippingCost(cost);
 }
 
 export async function listPayoutBatches(vendorId?: string): Promise<PayoutBatchDto[]> {

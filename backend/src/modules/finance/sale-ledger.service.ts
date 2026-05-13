@@ -72,12 +72,27 @@ export async function upsertSaleLedgerForAllocation(
       active: true,
     },
   });
+  const confirmedShippingCost = await tx.shipmentShippingCost.findFirst({
+    where: {
+      vendorId: allocation.assignedVendorId,
+      allocationId: allocation.id,
+      status: 'CONFIRMED',
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+  });
   const profileSnapshot = {
     commissionPercentSnapshot: activeProfile?.commissionPercent ?? '10.00',
     commissionVatPercentSnapshot: activeProfile?.commissionVatPercent ?? '0.00',
     deductShippingEnabledSnapshot: activeProfile?.deductShippingEnabled ?? false,
     shippingModeSnapshot: mapShippingModeSnapshot(activeProfile?.shippingMode),
     fixedShippingFeeSnapshot: activeProfile?.fixedShippingFee ?? null,
+    shippingCostSnapshot: confirmedShippingCost?.shippingCost ?? null,
+    shippingVatAmountSnapshot: confirmedShippingCost?.shippingVatAmount ?? null,
+    shippingCostSourceSnapshot: confirmedShippingCost?.sourceType ?? null,
+    shippingCostProviderSnapshot: confirmedShippingCost?.providerName ?? null,
+    shippingCostIdSnapshot: confirmedShippingCost?.id ?? null,
     financialProfileIdSnapshot: activeProfile?.id ?? null,
   };
   const fulfilled = isFulfilledForSettlement(allocation);

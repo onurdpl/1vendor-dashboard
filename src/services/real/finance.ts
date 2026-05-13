@@ -166,6 +166,15 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
             commission: formatCurrency(record.payoutCalculation.commission),
             commissionVat: formatCurrency(record.payoutCalculation.commissionVat),
             shippingDeduction: formatCurrency(record.payoutCalculation.shippingDeduction),
+            shippingVatAmount: record.payoutCalculation.shippingVatAmount
+              ? formatCurrency(record.payoutCalculation.shippingVatAmount)
+              : undefined,
+            shippingDeductionSource: record.payoutCalculation.shippingDeductionSource,
+            shippingCostProvider: record.payoutCalculation.shippingCostProvider,
+            shippingCostSnapshot: record.payoutCalculation.shippingCostSnapshot
+              ? formatCurrency(record.payoutCalculation.shippingCostSnapshot)
+              : record.payoutCalculation.shippingCostSnapshot,
+            shippingCostStatus: record.payoutCalculation.shippingCostStatus,
             refundImpact: formatCurrency(record.payoutCalculation.refundImpact),
             estimatedPayout: formatCurrency(record.payoutCalculation.estimatedPayout),
             shippingApplied: record.payoutCalculation.shippingApplied,
@@ -194,4 +203,17 @@ export async function updateVendorFinancialProfile(
 
 export function preparePayoutBatch(vendorId: string): Promise<PayoutBatch> {
   return apiClient.post<PayoutBatch>('/admin/payout-batches/prepare', { vendorId });
+}
+
+export function attachShippingCost(input: {
+  vendorId: string;
+  financeLedgerEntryId: string;
+  providerName: string;
+  providerReference: string | null;
+  shippingCost: number;
+  shippingVatAmount: number | null;
+  status: 'pending' | 'confirmed' | 'disputed' | 'ignored';
+  sourceType: 'manual' | 'imported' | 'external_provider';
+}) {
+  return apiClient.post('/admin/shipping-costs', input);
 }

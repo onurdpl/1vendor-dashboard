@@ -21,3 +21,16 @@ export function updateVendorFinancialProfile(
 export function preparePayoutBatch(vendorId: string) {
   return runtimeServices.finance.preparePayoutBatch(vendorId);
 }
+
+export function attachShippingCost(input: {
+  vendorId: string;
+  financeLedgerEntryId: string;
+  providerName: string;
+  providerReference: string | null;
+  shippingCost: number;
+  shippingVatAmount: number | null;
+  status: 'pending' | 'confirmed' | 'disputed' | 'ignored';
+  sourceType: 'manual' | 'imported' | 'external_provider';
+}) {
+  return runtimeServices.finance.attachShippingCost(input);
+}

@@ -11,10 +11,11 @@ import {
   listPayoutBatches,
   markPayoutBatchReview,
   preparePayoutBatch,
+  upsertShipmentShippingCost,
   upsertVendorFinancialProfile,
 } from './finance.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
-import type { PreparePayoutBatchDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
+import type { PreparePayoutBatchDto, ShippingCostInputDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -152,6 +153,25 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { id } = request.params as { id: string };
       return markPayoutBatchReview(id);
+    },
+  );
+
+  app.post(
+    '/admin/shipping-costs',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await upsertShipmentShippingCost((request.body ?? {}) as ShippingCostInputDto);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipping cost could not be saved.';
+        return reply.code(400).send({ message });
+      }
     },
   );
 }

@@ -89,6 +89,19 @@ enum PayoutBatchStatus {
   PAID_PLACEHOLDER
 }
 
+enum ShippingCostSourceType {
+  MANUAL
+  IMPORTED
+  EXTERNAL_PROVIDER
+}
+
+enum ShippingCostStatus {
+  PENDING
+  CONFIRMED
+  DISPUTED
+  IGNORED
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -112,6 +125,7 @@ model Vendor {
   originalAllocations   VendorAllocation[]            @relation("originalVendor")
   assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
   financeEntries        FinanceLedgerEntry[]
+  shippingCosts         ShipmentShippingCost[]
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
@@ -204,6 +218,7 @@ model VendorAllocation {
   refundRecords            RefundRecord[]
   financeEntries           FinanceLedgerEntry[]
   operationalJobs          OperationalJob[]
+  shippingCosts            ShipmentShippingCost[]
 }
 
 model VendorAllocationLineItem {
@@ -339,6 +354,11 @@ model FinanceLedgerEntry {
   deductShippingEnabledSnapshot Boolean?
   shippingModeSnapshot          ShippingDeductionMode?
   fixedShippingFeeSnapshot      Decimal?               @db.Decimal(10, 2)
+  shippingCostSnapshot          Decimal?               @db.Decimal(10, 2)
+  shippingVatAmountSnapshot     Decimal?               @db.Decimal(10, 2)
+  shippingCostSourceSnapshot    String?
+  shippingCostProviderSnapshot  String?
+  shippingCostIdSnapshot        String?
   financialProfileIdSnapshot    String?
   settlementStatus              SettlementStatus       @default(PENDING)
   settlementEligibleAt          DateTime?
@@ -354,6 +374,29 @@ model FinanceLedgerEntry {
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
+}
+
+model ShipmentShippingCost {
+  id                         String                 @id
+  vendorId                   String
+  allocationId               String
+  sourceShopifyOrderId       String
+  sourceShopifyFulfillmentId String?
+  providerName               String
+  providerReference          String?
+  shippingCost               Decimal                @db.Decimal(10, 2)
+  shippingVatAmount          Decimal?               @db.Decimal(10, 2)
+  currency                   String                 @default("TRY")
+  status                     ShippingCostStatus     @default(PENDING)
+  sourceType                 ShippingCostSourceType @default(MANUAL)
+  createdAt                  DateTime               @default(now())
+  updatedAt                  DateTime               @updatedAt
+  vendor                     Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  allocation                 VendorAllocation       @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, status])
+  @@index([allocationId, status])
+  @@index([sourceShopifyOrderId])
 }
 
 model PayoutBatch {
