@@ -1,5 +1,6 @@
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
+import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import type { ShopifyOrderFulfillment, ShopifyOrderFulfillmentState } from '../shopify/shopify-admin.types.js';
 import type {
@@ -439,9 +440,29 @@ export function createReconciliationService(env: AppEnv) {
         }
       }
 
+      const expectedSaleLedgerId = `fin-${allocation.assignedVendorId}-sale-${shopifyOrder.sourceShopifyOrderId}`;
+      const hasSaleLedger = allocation.financeEntries.some((entry) => entry.id === expectedSaleLedgerId);
+      if (!hasSaleLedger) {
+        const change = {
+          scope: allocation.id,
+          field: 'saleFinanceLedgerEntry',
+          localValue: null,
+          canonicalValue: expectedSaleLedgerId,
+        };
+        await prisma.$transaction(async (tx) => {
+          await upsertSaleLedgerForAllocation(tx, allocation.id);
+        });
+        staleFields.push(change);
+        repairedFields.push(change);
+        allocationResult.staleFields.push(change);
+        allocationResult.repairedFields.push(change);
+        affectedVendorIds.add(allocation.assignedVendorId);
+      }
+
       if (allocationResult.staleFields.length > 0 || allocationResult.warnings.length > 0) {
         affectedAllocations.push(allocationResult);
       }
+
       warnings.push(...allocationResult.warnings);
     }
 

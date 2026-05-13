@@ -823,6 +823,12 @@ Frontend note:
   - commission VAT = commission × commission VAT percent
   - refunds fully reduce payout
   - shipping deduction applies only after fulfillment/shipping lifecycle evidence exists
+- Accepted `orders/create` allocation ingestion creates one idempotent sale ledger row per vendor allocation:
+  - ledger id: `fin-{vendorId}-sale-{sourceShopifyOrderId}`
+  - `entryType`: `sale`
+  - `amount`: summed vendor allocation line amount
+  - duplicate webhook delivery updates the same row rather than creating another ledger record
+- Shopify reconciliation repairs missing sale ledger rows for already-ingested allocations without changing canonical Shopify state.
 - `GET /finance` remains vendor-scoped and now includes:
   - `profile`
   - summary commission VAT and shipping deduction totals

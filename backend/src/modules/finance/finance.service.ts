@@ -133,11 +133,13 @@ function mapRelatedReferences(record: {
   entryType: string;
   vendorAllocation: {
     sourceShopifyOrderId: string;
+    sourceShopifyOrderNumber: string;
     returnRecords: Array<{ id: string }>;
-    refundRecords: Array<{ id: string; sourceShopifyRefundId: string }>;
+    refundRecords: Array<{ id: string; sourceShopifyRefundId: string; amount?: unknown }>;
   } | null;
 }) {
   const relatedOrderId = record.vendorAllocation?.sourceShopifyOrderId ?? null;
+  const relatedOrderNumber = record.vendorAllocation?.sourceShopifyOrderNumber ?? null;
   const relatedReturnId = record.vendorAllocation?.returnRecords[0]?.id ?? null;
   const relatedRefundId =
     record.vendorAllocation?.refundRecords[0]?.sourceShopifyRefundId ??
@@ -146,9 +148,14 @@ function mapRelatedReferences(record: {
 
   return {
     relatedOrderId,
+    relatedOrderNumber,
     relatedReturnId,
     relatedRefundId,
   };
+}
+
+function sumRefundImpact(refundRecords: Array<{ amount?: unknown }> | undefined) {
+  return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
 
 export async function getVendorFinanceDashboard(
@@ -200,7 +207,6 @@ export async function getVendorFinanceDashboard(
               orderBy: {
                 createdAt: 'asc',
               },
-              take: 1,
             },
           },
         },
@@ -255,7 +261,10 @@ export async function getVendorFinanceDashboard(
     const type = normalizeType(entry.entryType);
     const payoutCalculation = calculateVendorPayout({
       grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
-      refundAmount: type === 'refund' ? toNumber(entry.amount) : 0,
+      refundAmount:
+        type === 'refund'
+          ? toNumber(entry.amount)
+          : sumRefundImpact(entry.vendorAllocation?.refundRecords),
       fulfilled: isFulfilledForShipping(entry.vendorAllocation),
       profile: calculationProfile,
     });
@@ -267,6 +276,7 @@ export async function getVendorFinanceDashboard(
       status: mapStatus(entry.payoutStatus),
       description: entry.description,
       relatedOrderId: references.relatedOrderId,
+      relatedOrderNumber: references.relatedOrderNumber,
       relatedReturnId: references.relatedReturnId,
       relatedRefundId: references.relatedRefundId,
       createdAt: entry.createdAt.toISOString(),

@@ -91,6 +91,20 @@ Phase 18A preserves:
 
 Payout values are estimates and preparation for the future settlement engine.
 
+## Phase 18A Fix — Sale Ledger Creation
+
+Real `orders/create` ingestion now creates idempotent vendor-scoped sale ledger rows for each accepted vendor allocation:
+- ledger id: `fin-{vendorId}-sale-{sourceShopifyOrderId}`
+- `entryType`: `sale`
+- `vendorId`: assigned allocation vendor
+- `vendorAllocationId`: allocation id
+- `amount`: summed allocation line amount for that vendor
+- `payoutStatus`: `PENDING`
+
+Duplicate webhook delivery, replay, or recovery reuses the deterministic ledger id and updates the existing sale row instead of creating duplicates.
+
+Reconciliation can also repair missing sale ledger rows for already-ingested orders. This is intentionally scoped to local allocation state and does not invent Shopify state.
+
 ## Future Evolution
 
 Future phases can build on this foundation with:

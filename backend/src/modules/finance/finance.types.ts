@@ -38,6 +38,7 @@ export type FinanceRecordDto = {
   status: string;
   description: string | null;
   relatedOrderId: string | null;
+  relatedOrderNumber: string | null;
   relatedReturnId: string | null;
   relatedRefundId: string | null;
   createdAt: string;

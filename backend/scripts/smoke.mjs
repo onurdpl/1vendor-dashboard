@@ -515,6 +515,27 @@ async function runSmoke() {
         `/webhooks/shopify/orders-create duplicate webhook id payload invalid: ${JSON.stringify(duplicateWebhookJson)}`,
       );
     }
+    if (prisma) {
+      const saleLedgerRows = await prisma.financeLedgerEntry.findMany({
+        where: {
+          id: {
+            in: [`fin-yalispor-sale-${smokeOrderId}`, `fin-sporjinal-sale-${smokeOrderId}`],
+          },
+          entryType: 'sale',
+        },
+        orderBy: {
+          id: 'asc',
+        },
+      });
+      if (saleLedgerRows.length !== 2) {
+        throw new Error(`orders/create should create one sale ledger row per vendor allocation, got ${saleLedgerRows.length}.`);
+      }
+      const yalisporSale = saleLedgerRows.find((entry) => entry.vendorId === 'yalispor');
+      const sporjinalSale = saleLedgerRows.find((entry) => entry.vendorId === 'sporjinal');
+      if (Number(yalisporSale?.amount ?? 0) !== 210 || Number(sporjinalSale?.amount ?? 0) !== 135) {
+        throw new Error(`orders/create sale ledger amounts were not vendor-scoped: ${JSON.stringify(saleLedgerRows)}`);
+      }
+    }
 
     const payloadHashWebhookPayload = JSON.stringify({
       id: 9003,
@@ -1529,6 +1550,9 @@ async function runSmoke() {
       await prisma.financeLedgerEntry.deleteMany({
         where: { id: `fin-yalispor-refund-rf-${runId}` },
       });
+      await prisma.financeLedgerEntry.deleteMany({
+        where: { id: `fin-yalispor-sale-${smokeOrderId}` },
+      });
     }
 
     const reconcileOrderResponse = await fetch(`${baseUrl}/admin/reconciliation/shopify-order/${smokeOrderId}`, {
@@ -1544,10 +1568,11 @@ async function runSmoke() {
     if (
       !['repaired', 'needs_attention'].includes(reconcileOrderJson?.reconciliationStatus) ||
       !reconcileOrderJson.repairedFields?.some((field) => field.field === 'refund.status') ||
-      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry')
+      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry') ||
+      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'saleFinanceLedgerEntry')
     ) {
       throw new Error(
-        `/admin/reconciliation/shopify-order/:shopifyOrderId should repair refund state and missing ledger: ${JSON.stringify(reconcileOrderJson)}`,
+        `/admin/reconciliation/shopify-order/:shopifyOrderId should repair refund state and missing sale/refund ledger: ${JSON.stringify(reconcileOrderJson)}`,
       );
     }
 
@@ -1949,6 +1974,9 @@ async function runSmoke() {
     const adminFinanceYali = await adminFinanceYaliResponse.json();
     if (!adminFinanceYali?.summary || !Array.isArray(adminFinanceYali?.records)) {
       throw new Error('/finance admin yalispor returned invalid shape.');
+    }
+    if (!adminFinanceYali.records.some((record) => record.id === `fin-yalispor-sale-${smokeOrderId}` && record.type === 'sale')) {
+      throw new Error('/finance admin yalispor missing ingested order sale ledger row.');
     }
 
     const adminFinanceSporjinalResponse = await fetch(`${baseUrl}/finance`, {

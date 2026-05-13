@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import type {
   ParsedShopifyOrderLineItem,
   ParsedShopifyOrderPayload,
@@ -270,6 +271,10 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             reason: 'Initial seller_info allocation',
           },
         });
+      }
+
+      for (const allocationId of allocationIds) {
+        await upsertSaleLedgerForAllocation(tx, allocationId);
       }
 
       await tx.webhookEvent.update({
