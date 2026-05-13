@@ -197,11 +197,35 @@ export type FinanceSummary = {
   refunds: string;
   netRevenue: string;
   platformFee: string;
+  commissionVat?: string;
+  shippingDeductions?: string;
   payoutEstimate: string;
   totalRevenue: string;
   availableBalance: string;
   pendingPayouts: string;
   refundsThisMonth: string;
+};
+
+export type VendorFinancialProfile = {
+  vendorId: string;
+  commissionPercent: string;
+  commissionVatPercent: string;
+  deductShippingEnabled: boolean;
+  shippingMode: 'disabled' | 'fixed' | 'external_provider';
+  fixedShippingFee: string | null;
+  active: boolean;
+  source: 'configured' | 'default';
+};
+
+export type PayoutCalculation = {
+  grossAmount: string;
+  commission: string;
+  commissionVat: string;
+  shippingDeduction: string;
+  refundImpact: string;
+  estimatedPayout: string;
+  shippingApplied: boolean;
+  shippingMode: 'disabled' | 'fixed' | 'external_provider';
 };
 
 export type FinanceTransaction = {
@@ -215,10 +239,12 @@ export type FinanceTransaction = {
   shopifyOrderNumber?: string;
   shopifyOrderId?: string;
   shopifyRefundId?: string;
+  payoutCalculation?: PayoutCalculation | null;
 };
 
 export type FinanceDashboard = {
   summary: FinanceSummary;
+  profile?: VendorFinancialProfile;
   transactions: FinanceTransaction[];
 };
 

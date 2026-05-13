@@ -142,6 +142,22 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceDashboard()
         : Promise.resolve(getMockFinanceDashboard(getCurrentVendorId())),
+    updateProfile: (
+      vendorId: string,
+      input: Parameters<typeof realFinance.updateVendorFinancialProfile>[1],
+    ) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.updateVendorFinancialProfile(vendorId, input)
+        : Promise.resolve({
+            vendorId,
+            commissionPercent: input.commissionPercent.toFixed(2),
+            commissionVatPercent: input.commissionVatPercent.toFixed(2),
+            deductShippingEnabled: input.deductShippingEnabled,
+            shippingMode: input.shippingMode,
+            fixedShippingFee: input.fixedShippingFee === null ? null : input.fixedShippingFee.toFixed(2),
+            active: true,
+            source: 'configured' as const,
+          }),
   },
   automation: {
     dashboard: () =>

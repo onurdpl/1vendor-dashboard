@@ -804,3 +804,30 @@ Frontend note:
   - assignment history
   - vendor-scoped return/refund records tied to each allocation
 - Frontend remains mock-based in this phase; backend admin order breakdown route is prepared for future integration.
+
+## Vendor Finance Foundation (Phase 18A)
+- `VendorFinancialProfile` stores vendor-level finance configuration:
+  - commission percent
+  - commission VAT percent
+  - shipping deduction enabled flag
+  - shipping deduction mode (`DISABLED`, `FIXED`, `EXTERNAL_PROVIDER`)
+  - optional fixed shipping fee
+  - active flag
+- Phase 18A keeps one configured profile per vendor by keying the profile on `vendorId`.
+- If no profile exists, finance reads use a deterministic default profile:
+  - `10.00%` commission
+  - `0.00%` commission VAT
+  - shipping deduction disabled
+- Finance calculation is estimate-only:
+  - commission = gross amount × commission percent
+  - commission VAT = commission × commission VAT percent
+  - refunds fully reduce payout
+  - shipping deduction applies only after fulfillment/shipping lifecycle evidence exists
+- `GET /finance` remains vendor-scoped and now includes:
+  - `profile`
+  - summary commission VAT and shipping deduction totals
+  - per-record payout calculation context
+- Admin-only profile endpoints:
+  - `GET /admin/vendors/:vendorId/financial-profile`
+  - `PUT /admin/vendors/:vendorId/financial-profile`
+- Phase 18A does not execute payouts, schedule settlements, integrate banks, generate invoices, calculate taxes, or ingest external shipping provider costs.

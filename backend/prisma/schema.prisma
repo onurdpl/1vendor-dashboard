@@ -64,6 +64,12 @@ enum OperationalJobType {
   RETURN_SYNC
 }
 
+enum ShippingDeductionMode {
+  DISABLED
+  FIXED
+  EXTERNAL_PROVIDER
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -87,8 +93,25 @@ model Vendor {
   originalAllocations   VendorAllocation[]            @relation("originalVendor")
   assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
   financeEntries        FinanceLedgerEntry[]
+  financialProfile      VendorFinancialProfile?
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
+}
+
+model VendorFinancialProfile {
+  id                     String                @id @default(cuid())
+  vendorId               String                @unique
+  commissionPercent      Decimal               @default(10.00) @db.Decimal(5, 2)
+  commissionVatPercent   Decimal               @default(0.00) @db.Decimal(5, 2)
+  deductShippingEnabled  Boolean               @default(false)
+  shippingMode           ShippingDeductionMode @default(DISABLED)
+  fixedShippingFee       Decimal?              @db.Decimal(10, 2)
+  active                 Boolean               @default(true)
+  createdAt              DateTime              @default(now())
+  updatedAt              DateTime              @updatedAt
+  vendor                 Vendor                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, active])
 }
 
 model UserVendorAccess {

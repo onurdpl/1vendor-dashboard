@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { FinanceDashboard, FinanceTransaction } from '../../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, VendorFinancialProfile } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
 
 type FinanceDashboardDto = {
@@ -8,9 +8,12 @@ type FinanceDashboardDto = {
     refunds: string;
     netRevenue: string;
     platformFee: string;
+    commissionVat?: string;
+    shippingDeductions?: string;
     payoutEstimate: string;
     payoutStatus: string;
   };
+  profile?: VendorFinancialProfile;
   records: Array<{
     id: string;
     type: string;
@@ -22,6 +25,7 @@ type FinanceDashboardDto = {
     relatedReturnId: string | null;
     relatedRefundId: string | null;
     createdAt: string;
+    payoutCalculation?: FinanceTransaction['payoutCalculation'];
   }>;
 };
 
@@ -95,12 +99,17 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       refunds,
       netRevenue,
       platformFee,
+      commissionVat: response.summary.commissionVat ? formatCurrency(response.summary.commissionVat) : undefined,
+      shippingDeductions: response.summary.shippingDeductions
+        ? formatCurrency(response.summary.shippingDeductions)
+        : undefined,
       payoutEstimate,
       totalRevenue: grossSales,
       availableBalance: payoutEstimate,
       pendingPayouts: payoutEstimate,
       refundsThisMonth: refunds,
     },
+    profile: response.profile,
     transactions: response.records.map((record) => ({
       id: record.id,
       date: record.createdAt,
@@ -114,6 +123,31 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,
+      payoutCalculation: record.payoutCalculation
+        ? {
+            grossAmount: formatCurrency(record.payoutCalculation.grossAmount),
+            commission: formatCurrency(record.payoutCalculation.commission),
+            commissionVat: formatCurrency(record.payoutCalculation.commissionVat),
+            shippingDeduction: formatCurrency(record.payoutCalculation.shippingDeduction),
+            refundImpact: formatCurrency(record.payoutCalculation.refundImpact),
+            estimatedPayout: formatCurrency(record.payoutCalculation.estimatedPayout),
+            shippingApplied: record.payoutCalculation.shippingApplied,
+            shippingMode: record.payoutCalculation.shippingMode,
+          }
+        : null,
     })),
   };
+}
+
+export async function updateVendorFinancialProfile(
+  vendorId: string,
+  input: {
+    commissionPercent: number;
+    commissionVatPercent: number;
+    deductShippingEnabled: boolean;
+    shippingMode: VendorFinancialProfile['shippingMode'];
+    fixedShippingFee: number | null;
+  },
+): Promise<VendorFinancialProfile> {
+  return apiClient.put<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, input);
 }

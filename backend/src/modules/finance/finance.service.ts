@@ -1,5 +1,17 @@
 import { prisma } from '../../db/prisma.js';
-import type { FinanceDashboardDto, FinanceRecordDto } from './finance.types.js';
+import {
+  calculateVendorPayout,
+  DEFAULT_VENDOR_FINANCIAL_PROFILE,
+  type ShippingMode,
+  type VendorFinanceProfileConfig,
+} from './payout-calculator.js';
+import type {
+  FinanceDashboardDto,
+  FinanceRecordDto,
+  PayoutCalculationDto,
+  VendorFinancialProfileDto,
+  VendorFinancialProfileUpdateDto,
+} from './finance.types.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -10,12 +22,111 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
+function toPercentString(value: number) {
+  return value.toFixed(2);
+}
+
 function normalizeType(entryType: string) {
   return entryType.trim().toLowerCase();
 }
 
 function mapStatus(status: string) {
   return status.trim().toLowerCase();
+}
+
+function mapShippingMode(mode: string): ShippingMode {
+  const normalized = mode.trim().toLowerCase();
+  if (normalized === 'fixed') {
+    return 'fixed';
+  }
+  if (normalized === 'external_provider') {
+    return 'external_provider';
+  }
+  return 'disabled';
+}
+
+function mapProfile(profile: {
+  vendorId: string;
+  commissionPercent: unknown;
+  commissionVatPercent: unknown;
+  deductShippingEnabled: boolean;
+  shippingMode: string;
+  fixedShippingFee: unknown;
+  active: boolean;
+} | null, vendorId: string): VendorFinancialProfileDto {
+  const config = profile
+    ? {
+        commissionPercent: toNumber(profile.commissionPercent),
+        commissionVatPercent: toNumber(profile.commissionVatPercent),
+        deductShippingEnabled: profile.deductShippingEnabled,
+        shippingMode: mapShippingMode(profile.shippingMode),
+        fixedShippingFee: profile.fixedShippingFee === null ? null : toNumber(profile.fixedShippingFee),
+        active: profile.active,
+        source: 'configured' as const,
+      }
+    : {
+        ...DEFAULT_VENDOR_FINANCIAL_PROFILE,
+        active: true,
+        source: 'default' as const,
+      };
+
+  return {
+    vendorId: profile?.vendorId ?? vendorId,
+    commissionPercent: toPercentString(config.commissionPercent),
+    commissionVatPercent: toPercentString(config.commissionVatPercent),
+    deductShippingEnabled: config.deductShippingEnabled,
+    shippingMode: config.shippingMode,
+    fixedShippingFee: config.fixedShippingFee === null ? null : toAmountString(config.fixedShippingFee),
+    active: config.active,
+    source: config.source,
+  };
+}
+
+function profileToCalculationConfig(profile: VendorFinancialProfileDto): VendorFinanceProfileConfig {
+  return {
+    commissionPercent: toNumber(profile.commissionPercent),
+    commissionVatPercent: toNumber(profile.commissionVatPercent),
+    deductShippingEnabled: profile.deductShippingEnabled,
+    shippingMode: profile.shippingMode,
+    fixedShippingFee: profile.fixedShippingFee === null ? null : toNumber(profile.fixedShippingFee),
+  };
+}
+
+function isFulfilledForShipping(allocation: {
+  allocationStatus?: string;
+  fulfillmentStatus?: string | null;
+  shippingStatus?: string | null;
+  fulfillment?: { fulfilledAt: Date | null } | null;
+} | null | undefined) {
+  const lifecycle = [
+    allocation?.allocationStatus,
+    allocation?.fulfillmentStatus,
+    allocation?.shippingStatus,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return Boolean(
+    allocation?.fulfillment?.fulfilledAt ||
+      lifecycle.includes('fulfilled') ||
+      lifecycle.includes('shipped') ||
+      lifecycle.includes('in transit') ||
+      lifecycle.includes('delivered'),
+  );
+}
+
+function mapCalculation(calculation: ReturnType<typeof calculateVendorPayout>): PayoutCalculationDto {
+  return {
+    grossAmount: toAmountString(calculation.grossAmount),
+    commission: toAmountString(calculation.commission),
+    commissionVat: toAmountString(calculation.commissionVat),
+    shippingDeduction: toAmountString(calculation.shippingDeduction),
+    refundImpact: toAmountString(calculation.refundImpact),
+    estimatedPayout: toAmountString(calculation.estimatedPayout),
+    shippingApplied: calculation.shippingApplied,
+    shippingMode: calculation.shippingMode,
+  };
 }
 
 function mapRelatedReferences(record: {
@@ -44,7 +155,7 @@ export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<FinanceDashboardDto> {
-  const [summaryEntries, entries] = await Promise.all([
+  const [summaryEntries, entries, storedProfile] = await Promise.all([
     prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
@@ -53,6 +164,19 @@ export async function getVendorFinanceDashboard(
         entryType: true,
         amount: true,
         payoutStatus: true,
+        vendorAllocation: {
+          select: {
+            id: true,
+            allocationStatus: true,
+            fulfillmentStatus: true,
+            shippingStatus: true,
+            fulfillment: {
+              select: {
+                fulfilledAt: true,
+              },
+            },
+          },
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -65,6 +189,7 @@ export async function getVendorFinanceDashboard(
       include: {
         vendorAllocation: {
           include: {
+            fulfillment: true,
             returnRecords: {
               orderBy: {
                 createdAt: 'asc',
@@ -86,7 +211,14 @@ export async function getVendorFinanceDashboard(
       take: options.limit ?? 100,
       skip: options.offset ?? 0,
     }),
+    prisma.vendorFinancialProfile.findUnique({
+      where: {
+        vendorId,
+      },
+    }),
   ]);
+  const profile = mapProfile(storedProfile, vendorId);
+  const calculationProfile = profileToCalculationConfig(profile);
 
   const grossSales = summaryEntries
     .filter((entry) => normalizeType(entry.entryType) === 'sale')
@@ -95,15 +227,42 @@ export async function getVendorFinanceDashboard(
     .filter((entry) => normalizeType(entry.entryType) === 'refund')
     .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
   const netRevenue = grossSales - refunds;
-  const platformFee = netRevenue * 0.1;
-  const payoutEstimate = netRevenue - platformFee;
+  const grossCalculation = calculateVendorPayout({
+    grossAmount: grossSales,
+    refundAmount: refunds,
+    fulfilled: false,
+    profile: calculationProfile,
+  });
+  const shippingDeductions = summaryEntries
+    .filter((entry) => normalizeType(entry.entryType) === 'sale')
+    .reduce((sum, entry) => {
+      const calculation = calculateVendorPayout({
+        grossAmount: toNumber(entry.amount),
+        refundAmount: 0,
+        fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+        profile: calculationProfile,
+      });
+
+      return sum + calculation.shippingDeduction;
+    }, 0);
+  const platformFee = grossCalculation.commission;
+  const commissionVat = grossCalculation.commissionVat;
+  const payoutEstimate = grossSales - platformFee - commissionVat - shippingDeductions - refunds;
   const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);
+    const type = normalizeType(entry.entryType);
+    const payoutCalculation = calculateVendorPayout({
+      grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
+      refundAmount: type === 'refund' ? toNumber(entry.amount) : 0,
+      fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+      profile: calculationProfile,
+    });
+
     return {
       id: entry.id,
-      type: normalizeType(entry.entryType),
+      type,
       amount: toAmountString(toNumber(entry.amount)),
       status: mapStatus(entry.payoutStatus),
       description: entry.description,
@@ -111,6 +270,7 @@ export async function getVendorFinanceDashboard(
       relatedReturnId: references.relatedReturnId,
       relatedRefundId: references.relatedRefundId,
       createdAt: entry.createdAt.toISOString(),
+      payoutCalculation: mapCalculation(payoutCalculation),
     };
   });
 
@@ -120,9 +280,83 @@ export async function getVendorFinanceDashboard(
       refunds: toAmountString(refunds),
       netRevenue: toAmountString(netRevenue),
       platformFee: toAmountString(platformFee),
+      commissionVat: toAmountString(commissionVat),
+      shippingDeductions: toAmountString(shippingDeductions),
       payoutEstimate: toAmountString(payoutEstimate),
       payoutStatus,
     },
+    profile,
     records,
   };
+}
+
+export async function getVendorFinancialProfile(vendorId: string): Promise<VendorFinancialProfileDto> {
+  const profile = await prisma.vendorFinancialProfile.findUnique({
+    where: {
+      vendorId,
+    },
+  });
+
+  return mapProfile(profile, vendorId);
+}
+
+function normalizePercent(value: number | undefined, fallback: number) {
+  if (value === undefined) {
+    return fallback;
+  }
+
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error('Percent values must be between 0 and 100.');
+  }
+
+  return Math.round(value * 100) / 100;
+}
+
+function normalizeShippingMode(value: VendorFinancialProfileUpdateDto['shippingMode'] | undefined, fallback: ShippingMode) {
+  return value ?? fallback;
+}
+
+export async function upsertVendorFinancialProfile(
+  vendorId: string,
+  input: VendorFinancialProfileUpdateDto,
+): Promise<VendorFinancialProfileDto> {
+  const existing = await getVendorFinancialProfile(vendorId);
+  const commissionPercent = normalizePercent(input.commissionPercent, toNumber(existing.commissionPercent));
+  const commissionVatPercent = normalizePercent(input.commissionVatPercent, toNumber(existing.commissionVatPercent));
+  const shippingMode = normalizeShippingMode(input.shippingMode, existing.shippingMode);
+  const fixedShippingFee =
+    input.fixedShippingFee === undefined
+      ? existing.fixedShippingFee === null
+        ? null
+        : toNumber(existing.fixedShippingFee)
+      : input.fixedShippingFee;
+
+  if (fixedShippingFee !== null && (!Number.isFinite(fixedShippingFee) || fixedShippingFee < 0)) {
+    throw new Error('Fixed shipping fee must be zero or greater.');
+  }
+
+  const profile = await prisma.vendorFinancialProfile.upsert({
+    where: {
+      vendorId,
+    },
+    update: {
+      commissionPercent,
+      commissionVatPercent,
+      deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
+      shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
+      fixedShippingFee,
+      active: input.active ?? existing.active,
+    },
+    create: {
+      vendorId,
+      commissionPercent,
+      commissionVatPercent,
+      deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
+      shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
+      fixedShippingFee,
+      active: input.active ?? existing.active,
+    },
+  });
+
+  return mapProfile(profile, vendorId);
 }

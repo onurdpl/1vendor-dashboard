@@ -2,7 +2,7 @@ import { getCurrentVendorContext, getToken } from './auth';
 import { ApiError } from './api/errors';
 import { runtimeConfig } from '../config/runtime';
 
-type HttpMethod = 'GET' | 'POST';
+type HttpMethod = 'GET' | 'POST' | 'PUT';
 
 type ApiClientRequestOptions = {
   method?: HttpMethod;
@@ -122,5 +122,8 @@ export const apiClient = {
   },
   post<T>(path: string, body?: unknown, options: Omit<ApiClientRequestOptions, 'method' | 'body'> = {}) {
     return request<T>(path, { ...options, method: 'POST', body });
+  },
+  put<T>(path: string, body?: unknown, options: Omit<ApiClientRequestOptions, 'method' | 'body'> = {}) {
+    return request<T>(path, { ...options, method: 'PUT', body });
   },
 };

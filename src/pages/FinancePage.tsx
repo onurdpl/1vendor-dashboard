@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -18,8 +18,9 @@ import {
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
-import { getFinanceDashboard } from '../features/finance/api';
+import { getFinanceDashboard, updateVendorFinancialProfile } from '../features/finance/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
@@ -98,9 +99,42 @@ export function FinancePage() {
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [vendorFilter, setVendorFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [commissionPercent, setCommissionPercent] = useState('10.00');
+  const [commissionVatPercent, setCommissionVatPercent] = useState('0.00');
+  const [deductShippingEnabled, setDeductShippingEnabled] = useState(false);
+  const [shippingMode, setShippingMode] = useState<'disabled' | 'fixed' | 'external_provider'>('disabled');
+  const [fixedShippingFee, setFixedShippingFee] = useState('');
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const availableVendors = getAvailableVendors();
+  const saveProfileMutation = useMutationAction(
+    () =>
+      updateVendorFinancialProfile(currentVendor.vendorId, {
+        commissionPercent: Number(commissionPercent || 0),
+        commissionVatPercent: Number(commissionVatPercent || 0),
+        deductShippingEnabled,
+        shippingMode,
+        fixedShippingFee: fixedShippingFee.trim() ? Number(fixedShippingFee) : null,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.finance.summary()],
+      onSuccess: () => showFeedback('Vendor financial profile saved.', 'success'),
+      onError: (mutationError) =>
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Financial profile could not be saved.', 'error'),
+    },
+  );
+
+  useEffect(() => {
+    if (!finance?.profile) {
+      return;
+    }
+
+    setCommissionPercent(finance.profile.commissionPercent);
+    setCommissionVatPercent(finance.profile.commissionVatPercent);
+    setDeductShippingEnabled(finance.profile.deductShippingEnabled);
+    setShippingMode(finance.profile.shippingMode);
+    setFixedShippingFee(finance.profile.fixedShippingFee ?? '');
+  }, [finance?.profile]);
 
   const financeKpis = useMemo(() => {
     const transactions = finance?.transactions ?? [];
@@ -193,7 +227,8 @@ export function FinancePage() {
         <KPIStatCard label="Total refund amount" value={finance.summary.refunds} detail="Summary refund impact" tone="danger" />
         <KPIStatCard label="Pending / hold" value={financeKpis.pendingOrHeld} detail="Recorded or pending items" tone="attention" />
         <KPIStatCard label="Failed / attention" value={financeKpis.failed} detail="Requires operator review" tone="danger" />
-        <KPIStatCard label="Vendor payable" value={finance.summary.payoutEstimate} detail="Placeholder; payout engine disabled" tone="neutral" />
+        <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
+        <KPIStatCard label="Vendor payable" value={finance.summary.payoutEstimate} detail="Estimated before settlement engine" tone="neutral" />
       </div>
 
       <div className="op-control-layout finance-layout">
@@ -321,6 +356,16 @@ export function FinancePage() {
                 <MetadataRow label="Counterparty" value={selectedRecord.counterparty} />
                 <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
               </MetadataGroup>
+              {selectedRecord.payoutCalculation ? (
+                <MetadataGroup title="Payout estimate">
+                  <MetadataRow label="Gross amount" value={selectedRecord.payoutCalculation.grossAmount} />
+                  <MetadataRow label="Commission" value={selectedRecord.payoutCalculation.commission} />
+                  <MetadataRow label="Commission VAT" value={selectedRecord.payoutCalculation.commissionVat} />
+                  <MetadataRow label="Shipping deduction" value={selectedRecord.payoutCalculation.shippingDeduction} />
+                  <MetadataRow label="Refund impact" value={selectedRecord.payoutCalculation.refundImpact} />
+                  <MetadataRow label="Estimated payout" value={selectedRecord.payoutCalculation.estimatedPayout} />
+                </MetadataGroup>
+              ) : null}
               <MetadataGroup title="Shopify identifiers">
                 <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
                 <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
@@ -331,10 +376,60 @@ export function FinancePage() {
                 <MetadataRow label="Vendor ID" value={currentVendor.vendorId} />
                 <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
               </MetadataGroup>
+              <MetadataGroup title="Vendor financial profile">
+                <MetadataRow label="Profile source" value={finance.profile?.source ?? 'default'} />
+                <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label="Commission VAT" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Shipping mode" value={finance.profile?.shippingMode ?? 'disabled'} />
+                <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
+              </MetadataGroup>
+              {currentUser?.role === 'admin' ? (
+                <div className="op-panel-section finance-profile-form">
+                  <h4>Profile settings</h4>
+                  <div className="op-form-grid">
+                    <label>
+                      <span>Commission %</span>
+                      <input value={commissionPercent} onChange={(event) => setCommissionPercent(event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label>
+                      <span>Commission VAT %</span>
+                      <input value={commissionVatPercent} onChange={(event) => setCommissionVatPercent(event.target.value)} inputMode="decimal" />
+                    </label>
+                    <label>
+                      <span>Shipping mode</span>
+                      <select value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
+                        <option value="disabled">Disabled</option>
+                        <option value="fixed">Fixed</option>
+                        <option value="external_provider">External provider</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Fixed shipping fee</span>
+                      <input value={fixedShippingFee} onChange={(event) => setFixedShippingFee(event.target.value)} inputMode="decimal" />
+                    </label>
+                  </div>
+                  <label className="op-checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={deductShippingEnabled}
+                      onChange={(event) => setDeductShippingEnabled(event.target.checked)}
+                    />
+                    <span>Deduct shipping after fulfillment</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={saveProfileMutation.isPending}
+                    onClick={() => void saveProfileMutation.mutateAsync(undefined)}
+                  >
+                    {saveProfileMutation.isPending ? 'Saving...' : 'Save profile'}
+                  </button>
+                </div>
+              ) : null}
               <div className="op-panel-section">
                 <h4>Related return / refund context</h4>
                 <p className="page-description">
-                  Finance rows are derived from backend ledger state and related Shopify order/refund identifiers where available. The payout engine is not enabled yet; payable values remain reporting placeholders.
+                  Finance rows are derived from backend ledger state and vendor profile settings. The settlement engine is not enabled yet.
                 </p>
               </div>
             </>
