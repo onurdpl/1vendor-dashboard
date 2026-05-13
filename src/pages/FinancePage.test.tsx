@@ -160,7 +160,7 @@ describe('FinancePage control center', () => {
     await userEvent.click(screen.getByText('Refund ledger write failed'));
 
     expect((await screen.findAllByText('gid://shopify/Refund/502')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/settlement engine is not enabled yet/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Payout execution is not enabled yet/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Current vendor-scoped finance query').length).toBeGreaterThan(0);
   });
 

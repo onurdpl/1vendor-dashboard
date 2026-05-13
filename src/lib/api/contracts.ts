@@ -204,6 +204,11 @@ export type FinanceSummary = {
   availableBalance: string;
   pendingPayouts: string;
   refundsThisMonth: string;
+  accruedBalance?: string;
+  payableBalance?: string;
+  heldBalance?: string;
+  refundedBalance?: string;
+  pendingSettlement?: string;
 };
 
 export type VendorFinancialProfile = {
@@ -243,6 +248,16 @@ export type FinanceTransaction = {
   shopifyOrderId?: string;
   shopifyRefundId?: string;
   payoutCalculation?: PayoutCalculation | null;
+  settlement?: {
+    status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed';
+    payoutReady: boolean;
+    eligibleAt: string | null;
+    accruedAt: string | null;
+    payableAt: string | null;
+    settledAt: string | null;
+    holdReason: string | null;
+    note: string;
+  };
 };
 
 export type FinanceDashboard = {

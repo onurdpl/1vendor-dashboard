@@ -254,7 +254,8 @@ export function FinancePage() {
         <KPIStatCard label="Pending / hold" value={financeKpis.pendingOrHeld} detail="Recorded or pending items" tone="attention" />
         <KPIStatCard label="Failed / attention" value={financeKpis.failed} detail="Requires operator review" tone="danger" />
         <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
-        <KPIStatCard label="Vendor payable" value={finance.summary.payoutEstimate} detail="Estimated before settlement engine" tone="neutral" />
+        <KPIStatCard label="Vendor payable" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Fulfilled settlement-ready balance" tone="success" />
+        <KPIStatCard label="Accrued balance" value={finance.summary.accruedBalance ?? finance.summary.payoutEstimate} detail="Pending fulfillment or settlement readiness" tone="attention" />
       </div>
 
       <section className="operational-card finance-profile-card">
@@ -467,6 +468,15 @@ export function FinancePage() {
                   <MetadataRow label="Estimated payout" value={selectedRecord.payoutCalculation.estimatedPayout} />
                 </MetadataGroup>
               ) : null}
+              {selectedRecord.settlement ? (
+                <MetadataGroup title="Settlement lifecycle">
+                  <MetadataRow label="Settlement status" value={selectedRecord.settlement.status} />
+                  <MetadataRow label="Payout readiness" value={selectedRecord.settlement.payoutReady ? 'Ready' : 'Not ready'} />
+                  <MetadataRow label="Eligible at" value={selectedRecord.settlement.eligibleAt ? formatDate(selectedRecord.settlement.eligibleAt) : 'Not eligible'} />
+                  <MetadataRow label="Payable at" value={selectedRecord.settlement.payableAt ? formatDate(selectedRecord.settlement.payableAt) : 'Not payable'} />
+                  <MetadataRow label="Settlement note" value={selectedRecord.settlement.note} />
+                </MetadataGroup>
+              ) : null}
               <MetadataGroup title="Shopify identifiers">
                 <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
                 <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
@@ -488,7 +498,7 @@ export function FinancePage() {
               <div className="op-panel-section">
                 <h4>Related return / refund context</h4>
                 <p className="page-description">
-                  Finance rows are derived from backend ledger state and vendor profile settings. The settlement engine is not enabled yet.
+                  Finance rows are derived from immutable ledger snapshots and settlement readiness state. Payout execution is not enabled yet.
                 </p>
               </div>
             </>

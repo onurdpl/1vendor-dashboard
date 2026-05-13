@@ -9,6 +9,7 @@ import type {
   FinanceDashboardDto,
   FinanceRecordDto,
   PayoutCalculationDto,
+  SettlementDto,
   VendorFinancialProfileDto,
   VendorFinancialProfileUpdateDto,
 } from './finance.types.js';
@@ -32,6 +33,10 @@ function normalizeType(entryType: string) {
 
 function mapStatus(status: string) {
   return status.trim().toLowerCase();
+}
+
+function toIso(value: Date | null | undefined) {
+  return value ? value.toISOString() : null;
 }
 
 function mapShippingMode(mode: string): ShippingMode {
@@ -213,6 +218,102 @@ function sumRefundImpact(refundRecords: Array<{ amount?: unknown }> | undefined)
   return (refundRecords ?? []).reduce((sum, refundRecord) => sum + toNumber(refundRecord.amount), 0);
 }
 
+function normalizeSettlementStatus(status: string | null | undefined): SettlementDto['status'] {
+  const normalized = status?.trim().toLowerCase() ?? 'pending';
+  if (
+    normalized === 'accruing' ||
+    normalized === 'payable' ||
+    normalized === 'partially_refunded' ||
+    normalized === 'held' ||
+    normalized === 'settled' ||
+    normalized === 'disputed'
+  ) {
+    return normalized;
+  }
+  return 'pending';
+}
+
+function getSettlementStatus(entry: {
+  entryType: string;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  vendorAllocation?: {
+    allocationStatus?: string;
+    fulfillmentStatus?: string | null;
+    shippingStatus?: string | null;
+    fulfillment?: { fulfilledAt: Date | null } | null;
+    refundRecords?: Array<{ amount?: unknown }>;
+  } | null;
+}): SettlementDto['status'] {
+  const payoutStatus = mapStatus(entry.payoutStatus ?? '');
+  if (payoutStatus === 'hold') {
+    return 'held';
+  }
+  if (payoutStatus === 'paid') {
+    return 'settled';
+  }
+
+  const storedStatus = normalizeSettlementStatus(entry.settlementStatus);
+  if (storedStatus === 'held' || storedStatus === 'settled' || storedStatus === 'disputed') {
+    return storedStatus;
+  }
+
+  const type = normalizeType(entry.entryType);
+  if (type === 'refund' || sumRefundImpact(entry.vendorAllocation?.refundRecords) > 0) {
+    return 'partially_refunded';
+  }
+  if (type === 'sale') {
+    return isFulfilledForShipping(entry.vendorAllocation) ? 'payable' : 'accruing';
+  }
+  return storedStatus;
+}
+
+function buildSettlement(entry: {
+  entryType: string;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  settlementEligibleAt?: Date | null;
+  accruedAt?: Date | null;
+  payableAt?: Date | null;
+  settledAt?: Date | null;
+  settlementHoldReason?: string | null;
+  createdAt?: Date;
+  vendorAllocation?: {
+    allocationStatus?: string;
+    fulfillmentStatus?: string | null;
+    shippingStatus?: string | null;
+    fulfillment?: { fulfilledAt: Date | null } | null;
+    refundRecords?: Array<{ amount?: unknown }>;
+  } | null;
+}): SettlementDto {
+  const status = getSettlementStatus(entry);
+  const fulfilledAt = entry.vendorAllocation?.fulfillment?.fulfilledAt ?? null;
+  const payableAt = entry.payableAt ?? fulfilledAt ?? (status === 'payable' ? entry.createdAt : null) ?? null;
+  const accruedAt = entry.accruedAt ?? (normalizeType(entry.entryType) === 'sale' ? entry.createdAt : null) ?? null;
+  const eligibleAt = entry.settlementEligibleAt ?? payableAt;
+  const payoutReady = status === 'payable' || status === 'partially_refunded';
+  const noteByStatus: Record<SettlementDto['status'], string> = {
+    pending: 'Awaiting settlement classification.',
+    accruing: 'Accruing until fulfillment or shipping evidence is present.',
+    payable: 'Fulfilled or shipped sale is payout-ready.',
+    partially_refunded: 'Refund impact is reducing the vendor balance.',
+    held: entry.settlementHoldReason ?? 'Settlement is held for operator review.',
+    settled: 'Marked settled in the operational ledger.',
+    disputed: 'Settlement is disputed and requires operator review.',
+  };
+
+  return {
+    status,
+    payoutReady,
+    eligibleAt: toIso(eligibleAt),
+    accruedAt: toIso(accruedAt),
+    payableAt: toIso(payableAt),
+    settledAt: toIso(entry.settledAt),
+    holdReason: entry.settlementHoldReason ?? null,
+    note: noteByStatus[status],
+  };
+}
+
 export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -231,6 +332,13 @@ export async function getVendorFinanceDashboard(
         deductShippingEnabledSnapshot: true,
         shippingModeSnapshot: true,
         fixedShippingFeeSnapshot: true,
+        settlementStatus: true,
+        settlementEligibleAt: true,
+        accruedAt: true,
+        payableAt: true,
+        settledAt: true,
+        settlementHoldReason: true,
+        createdAt: true,
         vendorAllocation: {
           select: {
             id: true,
@@ -240,6 +348,11 @@ export async function getVendorFinanceDashboard(
             fulfillment: {
               select: {
                 fulfilledAt: true,
+              },
+            },
+            refundRecords: {
+              select: {
+                amount: true,
               },
             },
           },
@@ -321,12 +434,70 @@ export async function getVendorFinanceDashboard(
   const commissionVat = saleSummary.commissionVat;
   const shippingDeductions = saleSummary.shippingDeductions;
   const payoutEstimate = grossSales - platformFee - commissionVat - shippingDeductions - refunds;
+  const balanceSummary = summaryEntries.reduce(
+    (summary, entry) => {
+      const type = normalizeType(entry.entryType);
+      const settlement = buildSettlement(entry);
+      if (type === 'sale') {
+        const entryProfile = resolveCalculationProfile(entry, profile);
+        const calculation = calculateVendorPayout({
+          grossAmount: toNumber(entry.amount),
+          refundAmount: 0,
+          fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+          profile: entryProfile,
+        });
+        const saleNet = calculation.estimatedPayout;
+
+        if (settlement.status === 'held' || settlement.status === 'disputed') {
+          return {
+            ...summary,
+            heldBalance: summary.heldBalance + saleNet,
+            pendingSettlement: summary.pendingSettlement + saleNet,
+          };
+        }
+        if (settlement.status === 'payable' || settlement.status === 'partially_refunded' || settlement.status === 'settled') {
+          return {
+            ...summary,
+            payableBalance: summary.payableBalance + saleNet,
+          };
+        }
+
+        return {
+          ...summary,
+          accruedBalance: summary.accruedBalance + saleNet,
+          pendingSettlement: summary.pendingSettlement + saleNet,
+        };
+      }
+
+      if (type === 'refund') {
+        const refundAmount = toNumber(entry.amount);
+        const refundAppliesToPayable = isFulfilledForShipping(entry.vendorAllocation);
+
+        return {
+          ...summary,
+          refundedBalance: summary.refundedBalance + refundAmount,
+          payableBalance: refundAppliesToPayable ? summary.payableBalance - refundAmount : summary.payableBalance,
+          accruedBalance: refundAppliesToPayable ? summary.accruedBalance : summary.accruedBalance - refundAmount,
+        };
+      }
+
+      return summary;
+    },
+    {
+      accruedBalance: 0,
+      payableBalance: 0,
+      heldBalance: 0,
+      refundedBalance: 0,
+      pendingSettlement: 0,
+    },
+  );
   const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);
     const type = normalizeType(entry.entryType);
     const entryProfile = resolveCalculationProfile(entry, profile);
+    const settlement = buildSettlement(entry);
     const payoutCalculation = calculateVendorPayout({
       grossAmount: type === 'refund' ? 0 : toNumber(entry.amount),
       refundAmount:
@@ -349,6 +520,7 @@ export async function getVendorFinanceDashboard(
       relatedRefundId: references.relatedRefundId,
       createdAt: entry.createdAt.toISOString(),
       payoutCalculation: mapCalculation(payoutCalculation, entryProfile),
+      settlement,
     };
   });
 
@@ -362,6 +534,11 @@ export async function getVendorFinanceDashboard(
       shippingDeductions: toAmountString(shippingDeductions),
       payoutEstimate: toAmountString(payoutEstimate),
       payoutStatus,
+      accruedBalance: toAmountString(balanceSummary.accruedBalance),
+      payableBalance: toAmountString(balanceSummary.payableBalance),
+      heldBalance: toAmountString(balanceSummary.heldBalance),
+      refundedBalance: toAmountString(balanceSummary.refundedBalance),
+      pendingSettlement: toAmountString(balanceSummary.pendingSettlement),
     },
     profile,
     records,

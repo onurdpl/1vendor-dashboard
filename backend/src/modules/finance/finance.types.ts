@@ -7,6 +7,11 @@ export type FinanceSummaryDto = {
   shippingDeductions: string;
   payoutEstimate: string;
   payoutStatus: string;
+  accruedBalance: string;
+  payableBalance: string;
+  heldBalance: string;
+  refundedBalance: string;
+  pendingSettlement: string;
 };
 
 export type VendorFinancialProfileDto = {
@@ -34,6 +39,17 @@ export type PayoutCalculationDto = {
   commissionVatPercent: string;
 };
 
+export type SettlementDto = {
+  status: 'pending' | 'accruing' | 'payable' | 'partially_refunded' | 'held' | 'settled' | 'disputed';
+  payoutReady: boolean;
+  eligibleAt: string | null;
+  accruedAt: string | null;
+  payableAt: string | null;
+  settledAt: string | null;
+  holdReason: string | null;
+  note: string;
+};
+
 export type FinanceRecordDto = {
   id: string;
   type: string;
@@ -46,6 +62,7 @@ export type FinanceRecordDto = {
   relatedRefundId: string | null;
   createdAt: string;
   payoutCalculation: PayoutCalculationDto | null;
+  settlement: SettlementDto;
 };
 
 export type FinanceDashboardDto = {

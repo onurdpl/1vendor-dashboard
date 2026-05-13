@@ -14,6 +14,10 @@ describe('sale ledger foundation', () => {
         findUnique: async () => ({
           id: 'alloc-1',
           assignedVendorId: 'sporjinal',
+          createdAt: new Date('2026-05-13T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-13T10:30:00.000Z'),
+          fulfillmentStatus: 'Fulfilled',
+          shippingStatus: 'Delivered',
           order: {
             sourceShopifyOrderId: '7616676626769',
             sourceShopifyOrderNumber: '#1023',
@@ -23,6 +27,9 @@ describe('sale ledger foundation', () => {
               lineAmount: 3399,
             },
           ],
+          fulfillment: {
+            fulfilledAt: new Date('2026-05-13T10:20:00.000Z'),
+          },
         }),
       },
       vendorFinancialProfile: {
@@ -53,6 +60,10 @@ describe('sale ledger foundation', () => {
       shippingModeSnapshot: 'EXTERNAL_PROVIDER',
       fixedShippingFeeSnapshot: 88,
       financialProfileIdSnapshot: 'profile-sporjinal',
+      settlementStatus: 'PAYABLE',
+      accruedAt: new Date('2026-05-13T10:00:00.000Z'),
+      payableAt: new Date('2026-05-13T10:20:00.000Z'),
+      settlementEligibleAt: new Date('2026-05-13T10:20:00.000Z'),
     });
     expect(result.update).not.toHaveProperty('commissionPercentSnapshot');
     expect(result.update).not.toHaveProperty('commissionVatPercentSnapshot');

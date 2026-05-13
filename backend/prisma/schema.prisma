@@ -70,6 +70,16 @@ enum ShippingDeductionMode {
   EXTERNAL_PROVIDER
 }
 
+enum SettlementStatus {
+  PENDING
+  ACCRUING
+  PAYABLE
+  PARTIALLY_REFUNDED
+  HELD
+  SETTLED
+  DISPUTED
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -320,12 +330,19 @@ model FinanceLedgerEntry {
   shippingModeSnapshot          ShippingDeductionMode?
   fixedShippingFeeSnapshot      Decimal?               @db.Decimal(10, 2)
   financialProfileIdSnapshot    String?
+  settlementStatus              SettlementStatus       @default(PENDING)
+  settlementEligibleAt          DateTime?
+  accruedAt                     DateTime?
+  payableAt                     DateTime?
+  settledAt                     DateTime?
+  settlementHoldReason          String?
   createdAt                     DateTime               @default(now())
   updatedAt                     DateTime               @updatedAt
   vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId, entryType])
+  @@index([vendorId, settlementStatus])
 }
 
 model WebhookEvent {

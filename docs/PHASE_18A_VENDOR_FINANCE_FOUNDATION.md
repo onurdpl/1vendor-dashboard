@@ -131,3 +131,7 @@ Future phases can build on this foundation with:
 - ERP synchronization
 - tax engine
 - category/SKU commission matrix if the business model later requires it
+
+## Phase 18B Handoff
+
+Phase 18B adds the first settlement ledger foundation on top of these immutable profile snapshots. Active vendor profile edits remain future-effective only; historical sale rows keep their original snapshot inputs while settlement readiness and vendor balances are calculated from the ledger.

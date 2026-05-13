@@ -840,3 +840,41 @@ Frontend note:
   - `GET /admin/vendors/:vendorId/financial-profile`
   - `PUT /admin/vendors/:vendorId/financial-profile`
 - Phase 18A does not execute payouts, schedule settlements, integrate banks, generate invoices, calculate taxes, or ingest external shipping provider costs.
+
+## Settlement Ledger Foundation (Phase 18B)
+- `FinanceLedgerEntry` now includes lightweight settlement lifecycle metadata:
+  - `settlementStatus`
+  - `settlementEligibleAt`
+  - `accruedAt`
+  - `payableAt`
+  - `settledAt`
+  - `settlementHoldReason`
+- Settlement statuses are operational readiness states, not money movement:
+  - `PENDING`
+  - `ACCRUING`
+  - `PAYABLE`
+  - `PARTIALLY_REFUNDED`
+  - `HELD`
+  - `SETTLED`
+  - `DISPUTED`
+- Sale rows continue to use immutable Phase 18A finance profile snapshots.
+  - Updating the active vendor profile applies only to future sale rows.
+  - Existing calculation snapshots are not rewritten by settlement lifecycle changes.
+- Vendor balance aggregation is ledger-backed:
+  - unfulfilled sale net amounts contribute to accrued balance
+  - fulfilled/shipped sale net amounts contribute to payable balance
+  - refunds fully reduce accrued/payable balances
+  - held/disputed rows contribute to held balance
+- `GET /finance` includes settlement balance fields:
+  - `accruedBalance`
+  - `payableBalance`
+  - `heldBalance`
+  - `refundedBalance`
+  - `pendingSettlement`
+- Each finance record includes settlement detail for the UI drawer:
+  - status
+  - payout readiness
+  - eligible/accrued/payable/settled timestamps
+  - hold reason
+  - operational note
+- Phase 18B still does not execute payouts, create payout batches, integrate bank transfers, export ERP/accounting data, generate invoices, or ingest external provider shipping costs.

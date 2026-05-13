@@ -12,6 +12,11 @@ type FinanceDashboardDto = {
     shippingDeductions?: string;
     payoutEstimate: string;
     payoutStatus: string;
+    accruedBalance?: string;
+    payableBalance?: string;
+    heldBalance?: string;
+    refundedBalance?: string;
+    pendingSettlement?: string;
   };
   profile?: VendorFinancialProfile;
   records: Array<{
@@ -26,6 +31,7 @@ type FinanceDashboardDto = {
     relatedRefundId: string | null;
     createdAt: string;
     payoutCalculation?: FinanceTransaction['payoutCalculation'];
+    settlement?: FinanceTransaction['settlement'];
   }>;
 };
 
@@ -108,6 +114,11 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       availableBalance: payoutEstimate,
       pendingPayouts: payoutEstimate,
       refundsThisMonth: refunds,
+      accruedBalance: response.summary.accruedBalance ? formatCurrency(response.summary.accruedBalance) : undefined,
+      payableBalance: response.summary.payableBalance ? formatCurrency(response.summary.payableBalance) : undefined,
+      heldBalance: response.summary.heldBalance ? formatCurrency(response.summary.heldBalance) : undefined,
+      refundedBalance: response.summary.refundedBalance ? formatCurrency(response.summary.refundedBalance) : undefined,
+      pendingSettlement: response.summary.pendingSettlement ? formatCurrency(response.summary.pendingSettlement) : undefined,
     },
     profile: response.profile,
     transactions: response.records.map((record) => ({
@@ -123,6 +134,7 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyOrderNumber: record.relatedOrderNumber ?? undefined,
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,
+      settlement: record.settlement,
       payoutCalculation: record.payoutCalculation
         ? {
             grossAmount: formatCurrency(record.payoutCalculation.grossAmount),
