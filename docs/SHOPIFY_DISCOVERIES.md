@@ -255,6 +255,19 @@ POST /fulfillments.json
   - `FULFILLMENTS_CREATE`
   - `FULFILLMENTS_UPDATE`
   - `FULFILLMENT_EVENTS_CREATE`
+  - `FULFILLMENT_ORDERS_CANCELLED`
+- Fulfillment cancellation behavior confirmed by Shopify AI:
+  - cancelling a fulfillment emits `FULFILLMENTS_UPDATE`
+  - cancellation can also emit `FULFILLMENT_ORDERS_CANCELLED`
+  - `ORDERS_UPDATED` may also fire, but it is broad/noisy and should not be the primary cancellation path
+  - `FULFILLMENT_EVENTS_CREATE` is not reliable for cancellations
+  - there is no dedicated `FULFILLMENTS_CANCEL` topic
+  - preferred cancellation topic is `FULFILLMENT_ORDERS_CANCELLED`
+- Canonical cancellation signals:
+  - `fulfillmentOrder.status === CANCELLED`
+  - `fulfillment.status === CANCELLED`
+  - `order.displayFulfillmentStatus` is display-only aggregate state, not the source of truth for allocation mutation
+  - cancellation can restore `remainingQuantity` / line-item fulfillment state
 - Required app scope for fulfillment webhook topics: `read_fulfillments` (or the documented marketplace/order alternatives where applicable).
 - Canonical order fulfillment refresh should read:
   - Shopify order id
@@ -267,6 +280,7 @@ POST /fulfillments.json
   - tracking info when present
   - fulfillment events when available
 - Vendor allocation updates must be scoped by exact Shopify line item ids. Do not mark a vendor allocation fulfilled because another vendor line item in the same Shopify order was fulfilled.
+- Fulfillment cancellation updates must also be scoped by exact Shopify line item ids. Do not clear another vendor allocation's tracking/fulfilled state because a different fulfillment order was cancelled.
 - If Shopify tracking info is absent, do not invent carrier, tracking number, or tracking URL.
 - Shopify can report a fulfillment as complete while `trackingInfo` is empty; the app should still persist fulfillment/shipment timestamps from canonical fulfillment data but keep carrier/tracking fields unassigned.
 - `FULFILLMENT_EVENTS_CREATE` may indicate delivery progression, but unknown event status values should go to diagnostics instead of false delivery state.

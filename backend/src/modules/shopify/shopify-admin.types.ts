@@ -96,5 +96,6 @@ export type ShopifyOrderFulfillmentState = {
   orderName: string | null;
   displayFulfillmentStatus: string | null;
   fulfillments: ShopifyOrderFulfillment[];
+  fulfillmentOrders: ShopifyFulfillmentOrder[];
   source: 'mock' | 'shopify_admin';
 };

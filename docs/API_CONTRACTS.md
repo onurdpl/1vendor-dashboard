@@ -79,6 +79,7 @@ Backend-only integration skeleton endpoints also exist for future Shopify ingest
 - `POST /webhooks/shopify/fulfillments-create` (inbound fulfillment sync)
 - `POST /webhooks/shopify/fulfillments-update` (inbound fulfillment sync)
 - `POST /webhooks/shopify/fulfillment-events-create` (inbound delivery/event sync)
+- `POST /webhooks/shopify/fulfillment-orders-cancelled` (inbound fulfillment cancellation sync)
 - `POST /fulfillments/:allocationId/tracking`
 
 Webhook processing lifecycle states:
@@ -427,6 +428,7 @@ Webhook processing lifecycle states:
 - Required auth: none; verification is via Shopify HMAC signature.
 - Response semantics match `POST /webhooks/shopify/fulfillments-create`, with topic `fulfillments/update`.
 - Operational note: updates remain line-item scoped so a fulfillment change for one vendor allocation cannot mark another vendor allocation as fulfilled.
+- Cancellation note: Shopify fulfillment cancellation can arrive through this topic; backend confirms cancellation from canonical `fulfillment.status === CANCELLED` / fulfillment-order state before reverting allocation fulfillment or clearing tracking.
 
 ### POST /webhooks/shopify/fulfillment-events-create
 
@@ -439,6 +441,21 @@ Webhook processing lifecycle states:
   - `failure`, `failed`, or `attempted_delivery` -> `shippingStatus: "fulfillment_event_attention"`
   - unknown event statuses do not invent delivery state; canonical fulfillment still syncs as shipped/partially shipped when fulfillment line items match
   - raw fulfillment event status is applied only to the matching Shopify fulfillment id to prevent cross-vendor status leakage
+
+### POST /webhooks/shopify/fulfillment-orders-cancelled
+
+- Purpose: receive verified Shopify `FULFILLMENT_ORDERS_CANCELLED` webhook envelopes and sync canonical cancellation state back into vendor allocations.
+- Required auth: none; verification is via Shopify HMAC signature.
+- Response semantics match `POST /webhooks/shopify/fulfillments-create`, with topic `fulfillment_orders/cancelled`.
+- Cancellation semantics:
+  - webhook payload is treated as trigger/envelope
+  - backend fetches canonical Shopify fulfillment/order state before changing allocations
+  - cancellation is recognized from canonical `fulfillmentOrder.status === CANCELLED` or `fulfillment.status === CANCELLED`
+  - affected allocations are matched by exact Shopify line item id
+  - fully cancelled allocations are reverted to `fulfillmentStatus: "pending"` and `shippingStatus: "awaiting_shipment"`
+  - active tracking/fulfillment fields are cleared only for the affected cancelled allocation
+  - unrelated vendor allocations and unrelated active fulfillments remain unchanged
+  - ambiguous canonical state is treated as needs-attention/failed sync rather than inventing cancellation behavior
 
 ### POST /fulfillments/:allocationId/tracking
 

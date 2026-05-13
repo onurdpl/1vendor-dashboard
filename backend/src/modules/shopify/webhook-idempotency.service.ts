@@ -64,9 +64,20 @@ export async function getOrCreateWebhookEvent(
       throw error;
     }
 
-    const existingEvent = await prisma.webhookEvent.findUnique({
+    const existingEvent = await prisma.webhookEvent.findFirst({
       where: {
-        idempotencyKey,
+        OR: [
+          { idempotencyKey },
+          ...(input.webhookId
+            ? [
+                {
+                  sourceShopDomain: input.shopDomain,
+                  topic: input.topic,
+                  webhookId: input.webhookId,
+                },
+              ]
+            : []),
+        ],
       },
     });
 

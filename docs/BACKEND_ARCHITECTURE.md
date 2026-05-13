@@ -265,10 +265,12 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - `POST /webhooks/shopify/fulfillments-create`
   - `POST /webhooks/shopify/fulfillments-update`
   - `POST /webhooks/shopify/fulfillment-events-create`
+  - `POST /webhooks/shopify/fulfillment-orders-cancelled`
 - Supported Shopify subscription topics:
   - `FULFILLMENTS_CREATE`
   - `FULFILLMENTS_UPDATE`
   - `FULFILLMENT_EVENTS_CREATE`
+  - `FULFILLMENT_ORDERS_CANCELLED`
 - Registration is opt-in through:
   - `npm run shopify:fulfillment-webhooks:register`
   - requires `SHOPIFY_REGISTER_FULFILLMENT_WEBHOOKS=true`
@@ -286,6 +288,9 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - fulfillment without a delivery event maps shipping to `shipped` or `partially_shipped`
   - `FULFILLMENT_EVENTS_CREATE` can map confirmed delivered/in-transit/failure statuses into shipping status
   - delivery/in-transit/failure events are applied only to allocations linked to the matching Shopify fulfillment id
+  - fulfillment cancellation is confirmed from canonical `fulfillment.status` / `fulfillmentOrder.status`, not broad `orders/updated`
+  - fully cancelled allocation line items revert the owning allocation to pending/awaiting shipment and clear active tracking fields
+  - partial/multi-vendor cancellations do not clear unrelated vendor allocations or unrelated active fulfillments
 - Diagnostics behavior:
   - inbound fulfillment webhooks use the same HMAC verification, idempotency, `WebhookEvent`, replay, recover, and reconciliation boundaries as other Shopify webhooks
   - HMAC verification uses `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when configured, otherwise `SHOPIFY_WEBHOOK_SECRET`
@@ -437,6 +442,7 @@ Frontend will never call Shopify directly or hold Shopify credentials.
     - `fulfillments/create`
     - `fulfillments/update`
     - `fulfillment_events/create`
+    - `fulfillment_orders/cancelled`
   - replay reuses the stored raw webhook payload and existing ingestion services
   - missing payload is a hard `409` with:
     - `Webhook payload is not available for replay`

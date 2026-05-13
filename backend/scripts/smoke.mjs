@@ -81,11 +81,16 @@ async function waitForReady(url, timeoutMs = 15000) {
 async function runSmoke() {
   const runId = Date.now().toString();
   const smokeOrderId = String(9000000000 + Number(runId.slice(-6)));
+  const cancellationOrderId = String(9100000000 + Number(runId.slice(-6)));
   const sellerInfoMap = JSON.stringify({
     [smokeOrderId]: {
       'DH2987-100-41': 'yalispor',
       'YALI-NOT-RETURNED-42': 'yalispor',
       'DH2987-100-40,5': 'sporjinal',
+    },
+    [cancellationOrderId]: {
+      'CANCEL-YALI-41': 'yalispor',
+      'CANCEL-SPOR-40': 'sporjinal',
     },
     '9002': {
       'DH2987-100-41': 'yalispor',
@@ -130,6 +135,30 @@ async function runSmoke() {
           {
             id: 'foli-9001-sporjinal',
             lineItemId: `li-b-${runId}`,
+            quantity: 1,
+          },
+        ],
+      },
+    ],
+    [cancellationOrderId]: [
+      {
+        id: 'fo-cancel-yalispor',
+        status: 'cancelled',
+        lineItems: [
+          {
+            id: 'foli-cancel-yalispor',
+            lineItemId: `cancel-li-yali-${runId}`,
+            quantity: 1,
+          },
+        ],
+      },
+      {
+        id: 'fo-cancel-sporjinal',
+        status: 'open',
+        lineItems: [
+          {
+            id: 'foli-cancel-sporjinal',
+            lineItemId: `cancel-li-spor-${runId}`,
             quantity: 1,
           },
         ],
@@ -182,6 +211,58 @@ async function runSmoke() {
               lineItemGid: `gid://shopify/LineItem/li-b-${runId}`,
               sourceLineItemId: `li-b-${runId}`,
               sku: 'DH2987-100-40,5',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    },
+    [cancellationOrderId]: {
+      orderName: `#${cancellationOrderId}`,
+      displayFulfillmentStatus: 'PARTIALLY_FULFILLED',
+      fulfillments: [
+        {
+          id: `gid://shopify/Fulfillment/fulfillment-cancel-yali-${runId}`,
+          sourceFulfillmentId: `fulfillment-cancel-yali-${runId}`,
+          status: 'CANCELLED',
+          createdAt: '2026-05-11T13:00:00.000Z',
+          updatedAt: '2026-05-11T13:05:00.000Z',
+          events: [],
+          trackingInfo: [
+            {
+              company: 'Cancelled Carrier',
+              number: `CANCELLED-${runId}`,
+              url: `https://tracking.example/CANCELLED-${runId}`,
+            },
+          ],
+          lineItems: [
+            {
+              lineItemGid: `gid://shopify/LineItem/cancel-li-yali-${runId}`,
+              sourceLineItemId: `cancel-li-yali-${runId}`,
+              sku: 'CANCEL-YALI-41',
+              quantity: 1,
+            },
+          ],
+        },
+        {
+          id: `gid://shopify/Fulfillment/fulfillment-cancel-spor-${runId}`,
+          sourceFulfillmentId: `fulfillment-cancel-spor-${runId}`,
+          status: 'SUCCESS',
+          createdAt: '2026-05-11T13:10:00.000Z',
+          updatedAt: '2026-05-11T13:12:00.000Z',
+          events: [],
+          trackingInfo: [
+            {
+              company: 'Aras Kargo',
+              number: `ACTIVE-SPOR-${runId}`,
+              url: `https://tracking.example/ACTIVE-SPOR-${runId}`,
+            },
+          ],
+          lineItems: [
+            {
+              lineItemGid: `gid://shopify/LineItem/cancel-li-spor-${runId}`,
+              sourceLineItemId: `cancel-li-spor-${runId}`,
+              sku: 'CANCEL-SPOR-40',
               quantity: 1,
             },
           ],
@@ -1133,6 +1214,173 @@ async function runSmoke() {
     if (yalisporAfterDeliveredEvent?.shippingStatus === 'delivered') {
       throw new Error(
         `/orders/:orderId fulfillment event leaked delivered status to unrelated yalispor fulfillment: ${JSON.stringify(yalisporAfterDeliveredEvent)}`,
+      );
+    }
+
+    const cancellationOrderPayload = JSON.stringify({
+      id: cancellationOrderId,
+      order_number: Number(cancellationOrderId),
+      name: `#${cancellationOrderId}`,
+      total_price: '255.00',
+      created_at: '2026-05-11T13:00:00.000Z',
+      customer: {
+        email: 'cancel.customer@example.com',
+        first_name: 'Cancel',
+        last_name: 'Customer',
+      },
+      line_items: [
+        {
+          id: `cancel-li-yali-${runId}`,
+          variant_id: 601,
+          sku: 'CANCEL-YALI-41',
+          title: 'Cancelled Yali Item',
+          variant_title: '41',
+          quantity: 1,
+          price: '120.00',
+        },
+        {
+          id: `cancel-li-spor-${runId}`,
+          variant_id: 602,
+          sku: 'CANCEL-SPOR-40',
+          title: 'Active Spor Item',
+          variant_title: '40',
+          quantity: 1,
+          price: '135.00',
+        },
+      ],
+    });
+    const cancellationOrderHmac = createHmac('sha256', shopifyWebhookSecret)
+      .update(cancellationOrderPayload, 'utf8')
+      .digest('base64');
+    const cancellationOrderResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-shopify-hmac-sha256': cancellationOrderHmac,
+        'x-shopify-topic': 'orders/create',
+        'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+        'x-shopify-webhook-id': `smoke-cancel-order-${runId}`,
+      },
+      body: cancellationOrderPayload,
+    });
+    if (cancellationOrderResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/orders-create cancellation fixture expected 202, got ${cancellationOrderResponse.status}`,
+      );
+    }
+
+    const cancellationPayload = JSON.stringify({
+      id: `fulfillment-order-cancelled-${runId}`,
+      order_id: cancellationOrderId,
+      admin_graphql_api_id: `gid://shopify/FulfillmentOrder/fo-cancel-yalispor`,
+    });
+    const cancellationHmac = createHmac('sha256', shopifyFulfillmentWebhookSecret)
+      .update(cancellationPayload, 'utf8')
+      .digest('base64');
+    const cancellationHeaders = {
+      'content-type': 'application/json',
+      'x-shopify-hmac-sha256': cancellationHmac,
+      'x-shopify-topic': 'fulfillment_orders/cancelled',
+      'x-shopify-shop-domain': 'demo-shop.myshopify.com',
+      'x-shopify-webhook-id': `smoke-fulfillment-cancelled-${runId}`,
+    };
+    const cancellationResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillment-orders-cancelled`, {
+      method: 'POST',
+      headers: cancellationHeaders,
+      body: cancellationPayload,
+    });
+    if (cancellationResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-orders-cancelled expected 202, got ${cancellationResponse.status}`,
+      );
+    }
+    const cancellationJson = await cancellationResponse.json();
+    if (
+      cancellationJson?.duplicate !== false ||
+      cancellationJson?.action !== 'accepted' ||
+      cancellationJson?.processingStatus !== 'processed' ||
+      cancellationJson?.affectedAllocationCount !== 2
+    ) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-orders-cancelled payload invalid: ${JSON.stringify(cancellationJson)}`,
+      );
+    }
+    const cancellationDuplicateResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillment-orders-cancelled`, {
+      method: 'POST',
+      headers: cancellationHeaders,
+      body: cancellationPayload,
+    });
+    if (cancellationDuplicateResponse.status !== 202) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-orders-cancelled duplicate expected 202, got ${cancellationDuplicateResponse.status}`,
+      );
+    }
+    const cancellationDuplicateJson = await cancellationDuplicateResponse.json();
+    if (
+      cancellationDuplicateJson?.duplicate !== true ||
+      cancellationDuplicateJson?.action !== 'duplicate_ignored'
+    ) {
+      throw new Error(
+        `/webhooks/shopify/fulfillment-orders-cancelled duplicate payload invalid: ${JSON.stringify(cancellationDuplicateJson)}`,
+      );
+    }
+
+    const cancellationAdminYaliResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    const cancellationAdminYali = await cancellationAdminYaliResponse.json();
+    const cancelledYaliAllocation = cancellationAdminYali.find((order) => order.sourceShopifyOrderId === cancellationOrderId);
+    if (!cancelledYaliAllocation) {
+      throw new Error(`/orders admin yalispor missing cancellation fixture ${cancellationOrderId}.`);
+    }
+    const cancelledYaliDetailResponse = await fetch(`${baseUrl}/orders/${cancelledYaliAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    const cancelledYaliDetail = await cancelledYaliDetailResponse.json();
+    if (
+      cancelledYaliDetail.fulfillmentStatus !== 'pending' ||
+      cancelledYaliDetail.shippingStatus !== 'awaiting_shipment' ||
+      cancelledYaliDetail.trackingNumber !== null ||
+      cancelledYaliDetail.carrier !== null ||
+      cancelledYaliDetail.trackingUrl !== null
+    ) {
+      throw new Error(
+        `/orders/:orderId cancelled yalispor allocation should revert to awaiting shipment: ${JSON.stringify(cancelledYaliDetail)}`,
+      );
+    }
+
+    const cancellationAdminSporResponse = await fetch(`${baseUrl}/orders`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    const cancellationAdminSpor = await cancellationAdminSporResponse.json();
+    const activeSporAllocation = cancellationAdminSpor.find((order) => order.sourceShopifyOrderId === cancellationOrderId);
+    if (!activeSporAllocation) {
+      throw new Error(`/orders admin sporjinal missing cancellation fixture ${cancellationOrderId}.`);
+    }
+    const activeSporDetailResponse = await fetch(`${baseUrl}/orders/${activeSporAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    const activeSporDetail = await activeSporDetailResponse.json();
+    if (
+      activeSporDetail.fulfillmentStatus !== 'fulfilled' ||
+      activeSporDetail.shippingStatus !== 'shipped' ||
+      activeSporDetail.trackingNumber !== `ACTIVE-SPOR-${runId}` ||
+      activeSporDetail.carrier !== 'Aras Kargo'
+    ) {
+      throw new Error(
+        `/orders/:orderId active sporjinal allocation should stay fulfilled after yalispor cancellation: ${JSON.stringify(activeSporDetail)}`,
       );
     }
 

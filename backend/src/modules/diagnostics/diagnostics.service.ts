@@ -434,7 +434,8 @@ async function processWebhookEvent(
   if (
     event.topic === 'fulfillments/create' ||
     event.topic === 'fulfillments/update' ||
-    event.topic === 'fulfillment_events/create'
+    event.topic === 'fulfillment_events/create' ||
+    event.topic === 'fulfillment_orders/cancelled'
   ) {
     const ingestionResult = await ingestFulfillmentWebhook(env, {
       event,
@@ -495,7 +496,8 @@ export async function replayWebhookEvent(
     event.topic !== 'refunds/create' &&
     event.topic !== 'fulfillments/create' &&
     event.topic !== 'fulfillments/update' &&
-    event.topic !== 'fulfillment_events/create'
+    event.topic !== 'fulfillment_events/create' &&
+    event.topic !== 'fulfillment_orders/cancelled'
   ) {
     return {
       ok: false,
@@ -701,6 +703,7 @@ export async function recoverWebhookEvent(
     'fulfillments/create',
     'fulfillments/update',
     'fulfillment_events/create',
+    'fulfillment_orders/cancelled',
   ]);
 
   if (!supportedTopics.has(event.topic)) {

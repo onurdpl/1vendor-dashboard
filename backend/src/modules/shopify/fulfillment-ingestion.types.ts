@@ -3,7 +3,8 @@ import type { WebhookEvent } from '@prisma/client';
 export type FulfillmentWebhookTopic =
   | 'fulfillments/create'
   | 'fulfillments/update'
-  | 'fulfillment_events/create';
+  | 'fulfillment_events/create'
+  | 'fulfillment_orders/cancelled';
 
 export type FulfillmentWebhookPayload = Record<string, unknown>;
 

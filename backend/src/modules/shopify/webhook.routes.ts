@@ -32,7 +32,11 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       return env.SHOPIFY_RETURN_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
     }
 
-    if (topic.startsWith('fulfillments/') || topic.startsWith('fulfillment_events/')) {
+    if (
+      topic.startsWith('fulfillments/') ||
+      topic.startsWith('fulfillment_events/') ||
+      topic.startsWith('fulfillment_orders/')
+    ) {
       return env.SHOPIFY_FULFILLMENT_WEBHOOK_SECRET || env.SHOPIFY_WEBHOOK_SECRET;
     }
 
@@ -499,4 +503,5 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
   registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillments-create', 'fulfillments/create');
   registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillments-update', 'fulfillments/update');
   registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillment-events-create', 'fulfillment_events/create');
+  registerFulfillmentLifecycleRoute('/webhooks/shopify/fulfillment-orders-cancelled', 'fulfillment_orders/cancelled');
 }

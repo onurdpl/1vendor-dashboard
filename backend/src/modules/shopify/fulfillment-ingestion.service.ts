@@ -136,6 +136,10 @@ function getCanonicalEventStatus(fulfillment: ShopifyOrderFulfillment) {
   return normalizeFulfillmentEventStatus((latestEvent?.status ?? '').toLowerCase());
 }
 
+function isCancelledStatus(value: string | null | undefined) {
+  return (value ?? '').trim().toLowerCase() === 'cancelled' || (value ?? '').trim().toLowerCase() === 'canceled';
+}
+
 async function failWebhook(eventId: string, errorMessage: string): Promise<FulfillmentIngestionResult> {
   await prisma.webhookEvent.update({
     where: { id: eventId },
@@ -175,9 +179,6 @@ export async function ingestFulfillmentWebhook(
       });
 
       const fulfillmentState = await shopifyAdminService.fetchOrderFulfillmentState(sourceShopifyOrderId);
-      if (fulfillmentState.fulfillments.length === 0) {
-        throw new Error(`Shopify order ${sourceShopifyOrderId} has no canonical fulfillments to sync.`);
-      }
 
       const shopifyOrder = await tx.shopifyOrder.findUnique({
         where: { sourceShopifyOrderId },
@@ -200,6 +201,7 @@ export async function ingestFulfillmentWebhook(
       }
 
       const fulfilledLineItemIds = new Set<string>();
+      const cancelledLineItemIds = new Set<string>();
       const fulfillmentByLineItemId = new Map<string, ShopifyOrderFulfillment>();
 
       for (const fulfillment of fulfillmentState.fulfillments) {
@@ -213,9 +215,31 @@ export async function ingestFulfillmentWebhook(
             throw new Error(`Shopify fulfillment ${fulfillment.id} has a line item without a usable id.`);
           }
 
+          if (isCancelledStatus(fulfillment.status)) {
+            cancelledLineItemIds.add(normalizedId);
+            continue;
+          }
+
           fulfilledLineItemIds.add(normalizedId);
           fulfillmentByLineItemId.set(normalizedId, fulfillment);
         }
+      }
+
+      for (const fulfillmentOrder of fulfillmentState.fulfillmentOrders) {
+        if (!isCancelledStatus(fulfillmentOrder.status)) {
+          continue;
+        }
+
+        for (const lineItem of fulfillmentOrder.lineItems) {
+          const normalizedId = normalizeLineItemId(lineItem.lineItemId);
+          if (normalizedId) {
+            cancelledLineItemIds.add(normalizedId);
+          }
+        }
+      }
+
+      if (fulfilledLineItemIds.size === 0 && cancelledLineItemIds.size === 0) {
+        throw new Error(`Shopify order ${sourceShopifyOrderId} has no canonical fulfillment or cancellation line items to sync.`);
       }
 
       const deliveryEventStatus =
@@ -230,8 +254,54 @@ export async function ingestFulfillmentWebhook(
           normalizeLineItemId(lineItem.shopifyOrderLineItem.sourceLineItemId),
         );
         const matchedLineItemIds = allocationLineItemIds.filter((lineItemId) => fulfilledLineItemIds.has(lineItemId));
+        const cancelledMatchedLineItemIds = allocationLineItemIds.filter((lineItemId) =>
+          cancelledLineItemIds.has(lineItemId),
+        );
 
-        if (matchedLineItemIds.length === 0) {
+        if (matchedLineItemIds.length === 0 && cancelledMatchedLineItemIds.length === 0) {
+          continue;
+        }
+
+        if (matchedLineItemIds.length === 0 && cancelledMatchedLineItemIds.length > 0) {
+          await tx.vendorAllocation.update({
+            where: { id: allocation.id },
+            data: {
+              fulfillmentStatus: 'pending',
+              shippingStatus: 'awaiting_shipment',
+              trackingNumber: null,
+              carrier: null,
+            },
+          });
+
+          await tx.fulfillment.upsert({
+            where: { vendorAllocationId: allocation.id },
+            update: {
+              fulfillmentStatus: 'cancelled',
+              trackingNumber: null,
+              carrier: null,
+              trackingUrl: null,
+              fulfilledAt: null,
+              shipmentCreatedAt: null,
+              shipmentUpdatedAt: new Date(),
+              syncStatus: 'shopify_inbound_cancelled',
+              errorMessage: null,
+            },
+            create: {
+              vendorAllocationId: allocation.id,
+              fulfillmentStatus: 'cancelled',
+              trackingNumber: null,
+              carrier: null,
+              trackingUrl: null,
+              notifyCustomer: false,
+              fulfilledAt: null,
+              shipmentCreatedAt: null,
+              shipmentUpdatedAt: new Date(),
+              syncStatus: 'shopify_inbound_cancelled',
+              errorMessage: null,
+            },
+          });
+
+          affectedAllocationCount += 1;
           continue;
         }
 

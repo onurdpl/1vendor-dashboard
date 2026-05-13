@@ -9,6 +9,7 @@ const topics = [
   { topic: 'FULFILLMENTS_CREATE', routePath: '/webhooks/shopify/fulfillments-create' },
   { topic: 'FULFILLMENTS_UPDATE', routePath: '/webhooks/shopify/fulfillments-update' },
   { topic: 'FULFILLMENT_EVENTS_CREATE', routePath: '/webhooks/shopify/fulfillment-events-create' },
+  { topic: 'FULFILLMENT_ORDERS_CANCELLED', routePath: '/webhooks/shopify/fulfillment-orders-cancelled' },
 ];
 
 function loadEnvFile(filePath) {

@@ -327,6 +327,7 @@ function parseMockOrderFulfillmentStateByOrderId(
           };
         })
         .filter((entry) => entry.id),
+      fulfillmentOrders: [],
       source: 'mock',
     };
 
@@ -570,7 +571,10 @@ export function createShopifyAdminService(env: AppEnv) {
 
   async function fetchOrderFulfillmentState(shopifyOrderId: string): Promise<ShopifyOrderFulfillmentState> {
     if (mockOrderFulfillmentStateByOrderId[shopifyOrderId]) {
-      return mockOrderFulfillmentStateByOrderId[shopifyOrderId];
+      return {
+        ...mockOrderFulfillmentStateByOrderId[shopifyOrderId],
+        fulfillmentOrders: mockFulfillmentOrdersByOrderId[shopifyOrderId] ?? [],
+      };
     }
 
     if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
@@ -648,6 +652,8 @@ export function createShopifyAdminService(env: AppEnv) {
       throw new Error(`Shopify order fulfillment state was not found for order ${shopifyOrderId}.`);
     }
 
+    const fulfillmentOrdersResponse = await fetchFulfillmentOrders(shopifyOrderId);
+
     return {
       orderGid: order.id,
       sourceShopifyOrderId: extractShopifyGidTail(order.id) ?? shopifyOrderId,
@@ -680,6 +686,7 @@ export function createShopifyAdminService(env: AppEnv) {
           })
           .filter((lineItem) => lineItem.sourceLineItemId || lineItem.lineItemGid),
       })),
+      fulfillmentOrders: fulfillmentOrdersResponse.fulfillmentOrders,
       source: 'shopify_admin',
     };
   }
