@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { getVendorFinanceDashboard } from './finance.service.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -20,7 +21,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      return getVendorFinanceDashboard(vendorId);
+      return getVendorFinanceDashboard(vendorId, resolvePagination(request.query));
     },
   );
 }

@@ -164,10 +164,10 @@ function parsePayloadForHints(rawPayload: string | null) {
 
 function inferAffectedEntities(event: {
   topic: string;
-  rawPayload: string | null;
+  rawPayload?: string | null;
   shopifyOrder?: { sourceShopifyOrderId: string; sourceShopifyOrderNumber?: string | number | null } | null;
 }) {
-  const payload = parsePayloadForHints(event.rawPayload);
+  const payload = parsePayloadForHints(event.rawPayload ?? null);
   const adminGraphqlId = getStringField(payload, 'admin_graphql_api_id');
   const payloadId = getStringField(payload, 'id');
   const fulfillmentId = getStringField(payload, 'fulfillment_id');
@@ -212,14 +212,15 @@ function buildPayloadPreview(rawPayload: string | null) {
 function getReplayBlockedReason(event: {
   topic: string;
   status: string;
-  rawPayload: string | null;
+  rawPayload?: string | null;
+  payloadAvailable?: boolean;
   payloadHash: string | null;
 }) {
   if (!SUPPORTED_REPLAY_TOPICS.has(event.topic)) {
     return `Replay is not supported for topic ${event.topic}.`;
   }
 
-  if (!event.rawPayload) {
+  if (!(event.payloadAvailable ?? Boolean(event.rawPayload))) {
     return 'Webhook payload is not available for replay.';
   }
 
@@ -237,14 +238,15 @@ function getReplayBlockedReason(event: {
 function getRecoverBlockedReason(event: {
   topic: string;
   status: string;
-  rawPayload: string | null;
+  rawPayload?: string | null;
+  payloadAvailable?: boolean;
   payloadHash: string | null;
 }) {
   if (!SUPPORTED_RECOVER_TOPICS.has(event.topic)) {
     return `Recover is not supported for topic ${event.topic}.`;
   }
 
-  if (!event.rawPayload) {
+  if (!(event.payloadAvailable ?? Boolean(event.rawPayload))) {
     return 'Webhook payload is not available for replay.';
   }
 
@@ -266,7 +268,8 @@ function getRecoverBlockedReason(event: {
 function getRecommendedAction(event: {
   topic: string;
   status: string;
-  rawPayload: string | null;
+  rawPayload?: string | null;
+  payloadAvailable?: boolean;
   payloadHash: string | null;
   errorMessage: string | null;
 }) {
@@ -289,7 +292,7 @@ function getRecommendedAction(event: {
     return 'Replay is available if idempotent reprocessing is intentional.';
   }
 
-  if (!event.rawPayload) {
+  if (!(event.payloadAvailable ?? Boolean(event.rawPayload))) {
     return 'Manual investigation required because payload is unavailable.';
   }
 
@@ -307,7 +310,8 @@ function buildWebhookDiagnosticsEvent(event: {
   webhookId: string | null;
   idempotencyKey: string | null;
   payloadHash: string | null;
-  rawPayload: string | null;
+  rawPayload?: string | null;
+  payloadAvailable?: boolean;
   status: string;
   receivedAt: Date;
   processedAt: Date | null;
@@ -333,7 +337,7 @@ function buildWebhookDiagnosticsEvent(event: {
     errorMessage: event.errorMessage,
     lastErrorSummary: summarizeError(event.errorMessage),
     duplicate: false,
-    payloadAvailable: Boolean(event.rawPayload),
+    payloadAvailable: event.payloadAvailable ?? Boolean(event.rawPayload),
     replayEligible: !replayBlockedReason,
     replayBlockedReason,
     recoverEligible: !recoverBlockedReason,
@@ -346,9 +350,19 @@ function buildWebhookDiagnosticsEvent(event: {
   };
 }
 
-export async function listWebhookDiagnostics(): Promise<AdminWebhookDiagnosticsResponse> {
+export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}): Promise<AdminWebhookDiagnosticsResponse> {
   const webhookEvents = await prisma.webhookEvent.findMany({
-    include: {
+    select: {
+      id: true,
+      topic: true,
+      sourceShopDomain: true,
+      webhookId: true,
+      idempotencyKey: true,
+      payloadHash: true,
+      status: true,
+      receivedAt: true,
+      processedAt: true,
+      errorMessage: true,
       shopifyOrder: {
         select: {
           sourceShopifyOrderId: true,
@@ -365,9 +379,16 @@ export async function listWebhookDiagnostics(): Promise<AdminWebhookDiagnosticsR
     orderBy: {
       receivedAt: 'desc',
     },
+    take: options.limit ?? 100,
+    skip: options.offset ?? 0,
   });
 
-  const events = webhookEvents.map(buildWebhookDiagnosticsEvent);
+  const events = webhookEvents.map((event) =>
+    buildWebhookDiagnosticsEvent({
+      ...event,
+      payloadAvailable: Boolean(event.payloadHash),
+    }),
+  );
 
   return {
     summary: buildWebhookEventSummary(events),

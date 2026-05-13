@@ -11,6 +11,7 @@ import {
   replayWebhookEvent,
   retryOperationalJob,
 } from './diagnostics.service.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -26,7 +27,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return listWebhookDiagnostics();
+      return listWebhookDiagnostics(resolvePagination(request.query));
     },
   );
 

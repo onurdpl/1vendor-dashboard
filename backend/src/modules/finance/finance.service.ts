@@ -40,42 +40,64 @@ function mapRelatedReferences(record: {
   };
 }
 
-export async function getVendorFinanceDashboard(vendorId: string): Promise<FinanceDashboardDto> {
-  const entries = await prisma.financeLedgerEntry.findMany({
-    where: {
-      vendorId,
-    },
-    include: {
-      vendorAllocation: {
-        include: {
-          returnRecords: {
-            orderBy: {
-              createdAt: 'asc',
+export async function getVendorFinanceDashboard(
+  vendorId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<FinanceDashboardDto> {
+  const [summaryEntries, entries] = await Promise.all([
+    prisma.financeLedgerEntry.findMany({
+      where: {
+        vendorId,
+      },
+      select: {
+        entryType: true,
+        amount: true,
+        payoutStatus: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    }),
+    prisma.financeLedgerEntry.findMany({
+      where: {
+        vendorId,
+      },
+      include: {
+        vendorAllocation: {
+          include: {
+            returnRecords: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+              take: 1,
             },
-          },
-          refundRecords: {
-            orderBy: {
-              createdAt: 'asc',
+            refundRecords: {
+              orderBy: {
+                createdAt: 'asc',
+              },
+              take: 1,
             },
           },
         },
       },
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: options.limit ?? 100,
+      skip: options.offset ?? 0,
+    }),
+  ]);
 
-  const grossSales = entries
+  const grossSales = summaryEntries
     .filter((entry) => normalizeType(entry.entryType) === 'sale')
     .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
-  const refunds = entries
+  const refunds = summaryEntries
     .filter((entry) => normalizeType(entry.entryType) === 'refund')
     .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
   const netRevenue = grossSales - refunds;
   const platformFee = netRevenue * 0.1;
   const payoutEstimate = netRevenue - platformFee;
-  const payoutStatus = entries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
+  const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);

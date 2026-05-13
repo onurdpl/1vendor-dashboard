@@ -25,7 +25,10 @@ function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
 
-export async function listVendorOrders(vendorId: string): Promise<OrderSummaryDto[]> {
+export async function listVendorOrders(
+  vendorId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<OrderSummaryDto[]> {
   const allocations = await prisma.vendorAllocation.findMany({
     where: {
       assignedVendorId: vendorId,
@@ -37,6 +40,8 @@ export async function listVendorOrders(vendorId: string): Promise<OrderSummaryDt
     orderBy: {
       createdAt: 'desc',
     },
+    take: options.limit ?? 100,
+    skip: options.offset ?? 0,
   });
 
   return allocations.map((allocation) => {

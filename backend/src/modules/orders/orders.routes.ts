@@ -4,6 +4,7 @@ import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { getAdminShopifyOrderBreakdown, getVendorOrderById, listVendorOrders } from './orders.service.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -20,7 +21,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return listVendorOrders(vendorId);
+      return listVendorOrders(vendorId, resolvePagination(request.query));
     },
   );
 

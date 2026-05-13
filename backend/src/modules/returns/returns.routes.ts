@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { getVendorReturnById, listVendorReturns } from './returns.service.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -20,7 +21,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return listVendorReturns(vendorId);
+      return listVendorReturns(vendorId, resolvePagination(request.query));
     },
   );
 

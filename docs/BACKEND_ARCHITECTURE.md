@@ -322,6 +322,23 @@ Alternative for quick schema sync without migration history:
 - Dashboard and diagnostics now surface admin-only health, retry pressure, dead-letter, reconciliation backlog, stale-state, and webhook success-rate signals.
 - This phase does not add Prometheus, Grafana, OpenTelemetry, external metrics storage, distributed tracing, websocket infrastructure, or realtime delivery.
 
+## Phase 17E Performance and Scale Hardening
+- Performance hardening is documented in [PHASE_17E_PERFORMANCE_HARDENING.md](/Users/onur/Documents/New project 4/docs/PHASE_17E_PERFORMANCE_HARDENING.md).
+- Backend list endpoints now share bounded `limit`/`offset` pagination semantics:
+  - default limit 100
+  - max limit 250
+  - offset defaults to 0
+- Pagination-ready endpoints:
+  - `GET /orders`
+  - `GET /returns`
+  - `GET /finance`
+  - `GET /admin/operations`
+  - `GET /admin/diagnostics/webhooks`
+- Diagnostics list hydration now avoids loading raw webhook payload content; payload preview remains detail-only through `GET /admin/diagnostics/webhooks/:webhookEventId`.
+- Finance summaries are computed separately from the windowed ledger rows, preserving totals while allowing ledger pagination.
+- Real-mode frontend services can pass `limit` and `offset` for future load-more or virtualization work without changing current page behavior.
+- This phase does not introduce external infrastructure, queue workers, websocket/realtime behavior, automatic history deletion, or raw payload retention changes.
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.

@@ -34,7 +34,7 @@ function createSummary(items: OperationsQueueItemDto[]): OperationsQueueDashboar
   };
 }
 
-export async function getAdminOperationsQueue(): Promise<OperationsQueueDashboardDto> {
+export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
   const allocations = await prisma.vendorAllocation.findMany({
     include: {
       assignedVendor: true,
@@ -169,8 +169,11 @@ export async function getAdminOperationsQueue(): Promise<OperationsQueueDashboar
 
   items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 100;
+
   return {
     summary: createSummary(items),
-    items,
+    items: items.slice(offset, offset + limit),
   };
 }

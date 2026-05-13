@@ -345,8 +345,11 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
   };
 }
 
-export async function listOrders() {
-  const response = await apiClient.get<OrderSummaryDto[]>('/orders');
+export async function listOrders(options: { limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+  const response = await apiClient.get<OrderSummaryDto[]>(`/orders${params.size ? `?${params.toString()}` : ''}`);
   return response.map(mapOrderSummary);
 }
 

@@ -97,8 +97,11 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
   };
 }
 
-export async function listReturns() {
-  const response = await apiClient.get<ReturnSummaryDto[]>('/returns');
+export async function listReturns(options: { limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+  const response = await apiClient.get<ReturnSummaryDto[]>(`/returns${params.size ? `?${params.toString()}` : ''}`);
   return response.map(mapSummary);
 }
 

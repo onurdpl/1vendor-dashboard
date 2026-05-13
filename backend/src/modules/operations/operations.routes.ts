@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { getAdminOperationsQueue } from './operations.service.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -18,7 +19,7 @@ export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return getAdminOperationsQueue();
+      return getAdminOperationsQueue(resolvePagination(request.query));
     },
   );
 }

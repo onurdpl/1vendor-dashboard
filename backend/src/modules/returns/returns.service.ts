@@ -49,7 +49,10 @@ function filterReturnRequestAllocationLineItems<
   );
 }
 
-export async function listVendorReturns(vendorId: string): Promise<ReturnSummaryDto[]> {
+export async function listVendorReturns(
+  vendorId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<ReturnSummaryDto[]> {
   const records = await prisma.returnRecord.findMany({
     where: {
       vendorAllocation: {
@@ -78,6 +81,8 @@ export async function listVendorReturns(vendorId: string): Promise<ReturnSummary
     orderBy: {
       createdAt: 'desc',
     },
+    take: options.limit ?? 100,
+    skip: options.offset ?? 0,
   });
 
   return records.map((record) => {

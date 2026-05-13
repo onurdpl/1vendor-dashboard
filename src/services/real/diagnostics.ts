@@ -234,8 +234,11 @@ export type RetryOperationalJobResponse = {
   message?: string;
 };
 
-export async function listWebhookDiagnostics() {
-  return apiClient.get<WebhooksResponseDto>('/admin/diagnostics/webhooks');
+export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
+  const params = new URLSearchParams();
+  if (options.limit) params.set('limit', String(options.limit));
+  if (options.offset) params.set('offset', String(options.offset));
+  return apiClient.get<WebhooksResponseDto>(`/admin/diagnostics/webhooks${params.size ? `?${params.toString()}` : ''}`);
 }
 
 export async function getWebhookDiagnostic(webhookEventId: string) {
