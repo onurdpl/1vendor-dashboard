@@ -273,4 +273,32 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(await screen.findByText('Replay accepted')).toBeInTheDocument();
     expect(diagnosticsMocks.replay).toHaveBeenCalledWith('webhook-replayable');
   });
+
+  it('keeps safe payload preview collapsed until explicitly opened', async () => {
+    diagnosticsMocks.webhooks.mockResolvedValueOnce({
+      summary: {
+        total: 1,
+        received: 1,
+        processed: 0,
+        failed: 0,
+        duplicates: 0,
+        needsAttention: 1,
+      },
+      events: [replayableEvent],
+    });
+    diagnosticsMocks.webhookDetail.mockResolvedValueOnce(replayableDetail);
+
+    renderDiagnosticsPage();
+
+    expect(await screen.findByRole('button', { name: 'Show payload preview' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Show payload preview' }));
+
+    expect(await screen.findByLabelText('Payload preview')).toHaveTextContent('"id":501');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Hide payload preview' }));
+
+    expect(screen.queryByLabelText('Payload preview')).not.toBeInTheDocument();
+  });
 });

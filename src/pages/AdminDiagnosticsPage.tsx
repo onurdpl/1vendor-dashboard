@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
@@ -133,6 +133,7 @@ export function AdminDiagnosticsPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [payloadFilter, setPayloadFilter] = useState('all');
   const [eligibilityFilter, setEligibilityFilter] = useState('all');
+  const [showPayloadPreview, setShowPayloadPreview] = useState(false);
   const isRealMode = runtimeConfig.apiMode === 'real';
 
   const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), () =>
@@ -146,6 +147,10 @@ export function AdminDiagnosticsPage() {
   );
 
   const latestWebhookEventId = selectedWebhookEventId ?? webhooksQuery.data?.events[0]?.id ?? null;
+
+  useEffect(() => {
+    setShowPayloadPreview(false);
+  }, [latestWebhookEventId]);
 
   const webhookDetailQuery = useQueryResource(
     latestWebhookEventId
@@ -392,7 +397,7 @@ export function AdminDiagnosticsPage() {
               </select>
               <button
                 type="button"
-                className="button button-secondary"
+                className="button button-secondary button-compact"
                 onClick={() => {
                   setSearchTerm('');
                   setTopicFilter('all');
@@ -450,7 +455,7 @@ export function AdminDiagnosticsPage() {
                   <OperationalActionGroup>
                     <button
                       type="button"
-                      className="button button-secondary"
+                      className="button button-secondary button-compact"
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
                         setSelectedWebhookEventId(event.id);
@@ -460,7 +465,7 @@ export function AdminDiagnosticsPage() {
                     </button>
                     <button
                       type="button"
-                      className="button button-secondary"
+                      className="button button-secondary button-compact"
                       disabled={!event.replayEligible || replayMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
@@ -471,7 +476,7 @@ export function AdminDiagnosticsPage() {
                     </button>
                     <button
                       type="button"
-                      className="button button-primary"
+                      className="button button-primary button-compact"
                       disabled={!event.recoverEligible || recoverMutation.isPending}
                       onClick={(clickEvent) => {
                         clickEvent.stopPropagation();
@@ -516,7 +521,7 @@ export function AdminDiagnosticsPage() {
                         {item.relatedAllocationId ? (
                           <button
                             type="button"
-                            className="button button-secondary"
+                            className="button button-secondary button-compact"
                             disabled={reconcileAllocationMutation.isPending}
                             onClick={() => reconcileAllocationMutation.mutate(item.relatedAllocationId as string)}
                           >
@@ -526,7 +531,7 @@ export function AdminDiagnosticsPage() {
                         {!item.relatedAllocationId && item.relatedShopifyOrderId ? (
                           <button
                             type="button"
-                            className="button button-secondary"
+                            className="button button-secondary button-compact"
                             disabled={reconcileShopifyOrderMutation.isPending}
                             onClick={() => reconcileShopifyOrderMutation.mutate(item.relatedShopifyOrderId as string)}
                           >
@@ -573,7 +578,7 @@ export function AdminDiagnosticsPage() {
           title={selectedWebhook ? formatWebhookTopic(selectedWebhook.topic) : 'No event selected'}
           action={
             selectedWebhook?.relatedShopifyOrderId ? (
-              <Link className="button button-secondary" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
+              <Link className="button button-secondary button-compact" to={`/admin/orders/${selectedWebhook.relatedShopifyOrderId}`}>
                 Shopify order
               </Link>
             ) : null
@@ -620,7 +625,7 @@ export function AdminDiagnosticsPage() {
                         {canRetryOperationalJob(job.status) ? (
                           <button
                             type="button"
-                            className="button button-secondary"
+                            className="button button-secondary button-compact"
                             disabled={retryOperationalJobMutation.isPending}
                             onClick={() => retryOperationalJobMutation.mutate(job.id)}
                           >
@@ -641,11 +646,14 @@ export function AdminDiagnosticsPage() {
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </MetadataGroup>
               <div className="op-panel-section">
-                <h4>Recovery actions</h4>
+                <div className="diagnostics-compact-section-heading">
+                  <h4>Recovery actions</h4>
+                  <span>{selectedWebhook.recommendedAction}</span>
+                </div>
                 <OperationalActionGroup>
                   <button
                     type="button"
-                    className="button button-primary"
+                    className="button button-primary button-compact"
                     disabled={!canRecover || recoverMutation.isPending}
                     onClick={() => recoverMutation.mutate(selectedWebhook.id)}
                   >
@@ -653,24 +661,21 @@ export function AdminDiagnosticsPage() {
                   </button>
                   <button
                     type="button"
-                    className="button button-secondary"
+                    className="button button-secondary button-compact"
                     disabled={!canReplay || replayMutation.isPending}
                     onClick={() => replayMutation.mutate(selectedWebhook.id)}
                   >
                     {replayMutation.isPending ? 'Replaying...' : 'Replay'}
                   </button>
                 </OperationalActionGroup>
-                <p className="page-description">
-                  Recover is intended for stuck or failed events with stored payloads. Replay is shown only when the backend considers the topic and payload safe for intentional idempotent reprocessing.
-                </p>
                 {!canRecover && selectedWebhook.recoverBlockedReason ? (
-                  <p className="queue-muted-action">Recover blocked: {selectedWebhook.recoverBlockedReason}</p>
+                  <p className="queue-muted-action diagnostics-inline-note">Recover blocked: {selectedWebhook.recoverBlockedReason}</p>
                 ) : null}
                 {!canReplay && selectedWebhook.replayBlockedReason ? (
-                  <p className="queue-muted-action">Replay blocked: {selectedWebhook.replayBlockedReason}</p>
+                  <p className="queue-muted-action diagnostics-inline-note">Replay blocked: {selectedWebhook.replayBlockedReason}</p>
                 ) : null}
                 {!canRecover && !selectedWebhook.recoverBlockedReason && !canReplay && !selectedWebhook.replayBlockedReason ? (
-                  <p className="queue-muted-action">No action is recommended for the current processed state.</p>
+                  <p className="queue-muted-action diagnostics-inline-note">No action recommended.</p>
                 ) : null}
               </div>
               <div className="op-panel-section">
@@ -685,16 +690,29 @@ export function AdminDiagnosticsPage() {
                 />
               </div>
               <div className="op-panel-section">
-                <h4>Payload diagnostics</h4>
-                <MetadataRow label="Payload hash" value={selectedWebhook.payloadHash ?? 'Not synced'} />
-                <MetadataRow label="Idempotency key" value={selectedWebhook.idempotencyKey ?? 'Not synced'} />
-                {selectedWebhook.payloadPreview ? (
-                  <pre className="diagnostics-payload-preview">
+                <div className="diagnostics-compact-section-heading">
+                  <h4>Payload diagnostics</h4>
+                  {selectedWebhook.payloadPreview ? (
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => setShowPayloadPreview((current) => !current)}
+                    >
+                      {showPayloadPreview ? 'Hide payload preview' : 'Show payload preview'}
+                    </button>
+                  ) : null}
+                </div>
+                <MetadataRow label="Payload hash" value={<code className="diagnostics-id-block">{selectedWebhook.payloadHash ?? 'Not synced'}</code>} />
+                <MetadataRow label="Idempotency key" value={<code className="diagnostics-id-block">{selectedWebhook.idempotencyKey ?? 'Not synced'}</code>} />
+                {selectedWebhook.payloadPreview && showPayloadPreview ? (
+                  <pre className="diagnostics-payload-preview" aria-label="Payload preview">
                     {selectedWebhook.payloadPreview}
                     {selectedWebhook.payloadPreviewTruncated ? '\n...' : ''}
                   </pre>
+                ) : selectedWebhook.payloadPreview ? (
+                  <p className="page-description diagnostics-inline-note">Safe preview available. It remains collapsed by default.</p>
                 ) : (
-                  <p className="page-description">No payload preview.</p>
+                  <p className="page-description diagnostics-inline-note">No payload preview.</p>
                 )}
               </div>
             </>
