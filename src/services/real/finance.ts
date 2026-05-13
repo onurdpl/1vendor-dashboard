@@ -47,7 +47,10 @@ function mapTransactionStatus(status: string): FinanceTransaction['status'] {
   if (normalized === 'approved' || normalized === 'reconciled') {
     return 'Reconciled';
   }
-  if (normalized === 'hold' || normalized === 'failed') {
+  if (normalized === 'hold' || normalized === 'recorded' || normalized === 'synced') {
+    return 'Recorded';
+  }
+  if (normalized === 'failed' || normalized === 'error') {
     return 'Failed';
   }
   return 'Pending';
@@ -55,8 +58,11 @@ function mapTransactionStatus(status: string): FinanceTransaction['status'] {
 
 function mapRecordStatusLabel(status: string): FinanceTransaction['status'] {
   const normalized = status.trim().toLowerCase();
-  if (normalized === 'processed' || normalized === 'settled' || normalized === 'completed') {
+  if (normalized === 'processed' || normalized === 'settled' || normalized === 'completed' || normalized === 'posted') {
     return 'Completed';
+  }
+  if (normalized === 'hold' || normalized === 'recorded' || normalized === 'synced') {
+    return 'Recorded';
   }
   if (normalized === 'verified' || normalized === 'reconciled') {
     return 'Reconciled';
@@ -66,6 +72,11 @@ function mapRecordStatusLabel(status: string): FinanceTransaction['status'] {
   }
   return mapTransactionStatus(status);
 }
+
+export const __financeStatusMapping = {
+  mapTransactionStatus,
+  mapRecordStatusLabel,
+};
 
 export async function getFinanceDashboard(): Promise<FinanceDashboard> {
   const response = await apiClient.get<FinanceDashboardDto>('/finance');

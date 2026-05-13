@@ -275,6 +275,11 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - `npm run shopify:fulfillment-webhooks:register`
   - requires `SHOPIFY_REGISTER_FULFILLMENT_WEBHOOKS=true`
   - requires `SHOPIFY_FULFILLMENT_WEBHOOK_BASE_URL`
+- Registration script behavior is mixed-state-safe:
+  - existing topic+callback subscriptions are reported as existing and skipped
+  - missing topics continue registration even when some topics already exist
+  - duplicate/address-taken responses trigger a subscription refresh and continue
+  - script exits non-zero only if unexpected failures remain after all topics are attempted
 - Sync boundary:
   - webhook payloads are treated as trigger/envelope metadata only
   - backend fetches canonical order fulfillment state through Shopify Admin GraphQL
@@ -599,6 +604,10 @@ Frontend note:
 - Response returns:
   - `summary`: `grossSales`, `refunds`, `netRevenue`, `platformFee`, `payoutEstimate`, `payoutStatus`
   - `records`: vendor-scoped ledger entries with related order/refund references where available
+- Finance record status semantics:
+  - successful ledger rows from `refunds/create` are non-failure records
+  - frontend should map `HOLD`/non-error statuses to non-failure wording (`Recorded` or equivalent)
+  - `Failed` should be reserved for actual financial operation errors
 - Model remains reporting-only:
   - no payout provider integration
   - no money movement execution

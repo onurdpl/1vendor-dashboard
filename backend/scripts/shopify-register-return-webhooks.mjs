@@ -1,5 +1,12 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import {
+  createShopifyGraphqlClient,
+  getEnvValue,
+  isValidShopDomain,
+  loadEnvFile,
+  printRegistrationSummary,
+  registerWebhookTopics,
+} from './shopify-webhook-registration-lib.mjs';
 
 const backendDir = process.cwd();
 const envFilePath = path.join(backendDir, '.env');
@@ -12,44 +19,6 @@ const topics = [
   { topic: 'RETURNS_CLOSE', routePath: '/webhooks/shopify/returns-close' },
 ];
 
-function loadEnvFile(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return {};
-  }
-
-  const content = fs.readFileSync(filePath, 'utf8');
-  return content
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'))
-    .reduce((acc, line) => {
-      const separatorIndex = line.indexOf('=');
-      if (separatorIndex === -1) {
-        return acc;
-      }
-
-      const key = line.slice(0, separatorIndex).trim();
-      const rawValue = line.slice(separatorIndex + 1).trim();
-      const value = rawValue.replace(/^['"]|['"]$/g, '');
-      acc[key] = value;
-      return acc;
-    }, {});
-}
-
-function getEnvValue(key, fallbackEnv) {
-  const runtimeValue = process.env[key];
-  if (typeof runtimeValue === 'string' && runtimeValue.trim()) {
-    return runtimeValue.trim();
-  }
-
-  const fallbackValue = fallbackEnv[key];
-  return typeof fallbackValue === 'string' ? fallbackValue.trim() : '';
-}
-
-function isValidShopDomain(value) {
-  return /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(value);
-}
-
 function isValidHttpUrl(value) {
   try {
     const url = new URL(value);
@@ -57,75 +26,6 @@ function isValidHttpUrl(value) {
   } catch {
     return false;
   }
-}
-
-async function registerWebhook(config, registration) {
-  const callbackUrl = `${config.SHOPIFY_RETURN_WEBHOOK_BASE_URL}${registration.routePath}`;
-  const response = await fetch(
-    `https://${config.SHOPIFY_SHOP_DOMAIN}/admin/api/${config.SHOPIFY_API_VERSION}/graphql.json`,
-    {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-shopify-access-token': config.SHOPIFY_ADMIN_ACCESS_TOKEN,
-      },
-      body: JSON.stringify({
-        query: `
-          mutation WebhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $callbackUrl: URL!) {
-            webhookSubscriptionCreate(
-              topic: $topic
-              webhookSubscription: {
-                callbackUrl: $callbackUrl
-                format: JSON
-              }
-            ) {
-              userErrors {
-                field
-                message
-              }
-              webhookSubscription {
-                id
-              }
-            }
-          }
-        `,
-        variables: {
-          topic: registration.topic,
-          callbackUrl,
-        },
-      }),
-    },
-  );
-
-  if (!response.ok) {
-    throw new Error(`Shopify webhook registration failed for ${registration.topic} with status ${response.status}.`);
-  }
-
-  const payload = await response.json();
-  if (Array.isArray(payload.errors) && payload.errors.length > 0) {
-    throw new Error(
-      `Shopify GraphQL errors for ${registration.topic}: ${payload.errors.map((error) => error.message).join('; ')}`,
-    );
-  }
-
-  const result = payload.data?.webhookSubscriptionCreate;
-  const userErrors = Array.isArray(result?.userErrors) ? result.userErrors : [];
-  if (userErrors.length > 0) {
-    throw new Error(
-      `Shopify user errors for ${registration.topic}: ${userErrors.map((error) => error.message).join('; ')}`,
-    );
-  }
-
-  const subscriptionId = result?.webhookSubscription?.id;
-  if (!subscriptionId) {
-    throw new Error(`Shopify did not return a webhook subscription id for ${registration.topic}.`);
-  }
-
-  return {
-    topic: registration.topic,
-    callbackUrl,
-    subscriptionId,
-  };
 }
 
 async function main() {
@@ -175,9 +75,22 @@ async function main() {
     throw new Error('Invalid SHOPIFY_RETURN_WEBHOOK_BASE_URL. Expected http(s) URL.');
   }
 
-  for (const topic of topics) {
-    const result = await registerWebhook(config, topic);
-    console.log(`topic=${result.topic} callback=${result.callbackUrl} subscriptionId=${result.subscriptionId}`);
+  const client = createShopifyGraphqlClient({
+    shopDomain: config.SHOPIFY_SHOP_DOMAIN,
+    accessToken: config.SHOPIFY_ADMIN_ACCESS_TOKEN,
+    apiVersion: config.SHOPIFY_API_VERSION,
+  });
+
+  const summary = await registerWebhookTopics({
+    client,
+    topics,
+    baseUrl: config.SHOPIFY_RETURN_WEBHOOK_BASE_URL,
+  });
+
+  printRegistrationSummary(summary);
+
+  if (summary.failed.length > 0) {
+    process.exitCode = 1;
   }
 }
 

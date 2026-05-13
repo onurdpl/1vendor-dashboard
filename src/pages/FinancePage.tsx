@@ -28,7 +28,7 @@ function formatDate(value: string) {
 }
 
 function getStatusTone(status: string) {
-  if (status === 'Completed' || status === 'Reconciled') {
+  if (status === 'Completed' || status === 'Reconciled' || status === 'Recorded') {
     return 'success' as const;
   }
   if (status === 'Failed') {

@@ -569,6 +569,10 @@ Webhook processing lifecycle states:
 - Payout estimate is net revenue minus platform fee.
 - The frontend should receive already vendor-scoped finance data and should not perform financial allocation in production.
 - Backend implementation note: route is protected by auth + vendor access middleware, and scoped by backend-resolved vendor context (`request.vendorContext.vendorId`).
+- Finance record status mapping:
+  - `failed`/`error` should display `Failed`
+  - non-failure lifecycle states used for persisted refund/sale ledger rows (such as `hold`) should display non-failure wording (`Recorded`, `Completed`, or `Reconciled` depending on state mapping)
+  - successful `refunds/create` ingestion that produces ledger rows must not be labeled as `Failed` in vendor-facing finance UI
 - Finance in this phase is reporting-only:
   - no payout execution
   - no payout provider integration
@@ -586,6 +590,17 @@ Webhook processing lifecycle states:
 - Expected `404` behavior: not typically used for this collection-like response, unless the backend intentionally obscures access.
 
 ## Data Shapes
+
+## Shopify Registration Scripts
+
+- `npm run shopify:return-webhooks:register` and `npm run shopify:fulfillment-webhooks:register` are opt-in operational scripts.
+- Mixed-state behavior is required:
+  - existing topic+callback subscriptions should be reported as existing
+  - missing topics should still be created even when other topics already exist
+  - duplicate/address-taken responses should trigger a subscription re-check and continue
+  - unexpected per-topic failures should be reported without stopping processing of remaining topics
+  - script exits non-zero only after all topics are attempted and one or more unexpected failures remain
+- Scripts must print only safe summaries (`created`, `existing`, `failed`, callback URLs, subscription ids) and must never print secrets.
 
 The frontend expects the following domain types from `src/lib/api/contracts.ts`:
 

@@ -318,6 +318,7 @@ POST /fulfillments.json
 - Use vendor slug mapping from `seller_info`, not display-name heuristics, for production ingestion.
 - Backend must validate vendor ownership before creating fulfillments or updating tracking.
 - Backend must preserve historical vendor assignment for refunds by using the original order mapping snapshot.
+- Webhook registration tooling must be mixed-state-safe: already-registered topics must not block registration of missing topics.
 
 ## Open Questions
 - Exact Shopify Admin API version to use.

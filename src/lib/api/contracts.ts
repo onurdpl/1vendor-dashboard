@@ -190,7 +190,7 @@ export type ReturnDetail = ReturnSummary & {
   timeline: Array<{ label: string; at: string }>;
 };
 
-export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed';
+export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed' | 'Recorded';
 
 export type FinanceSummary = {
   grossSales: string;

@@ -334,6 +334,13 @@
 - Remaining verification gap:
   - production Phase 16-3F should confirm Render receives a fresh fulfillment update and the live panel/API shows tracking and timestamps for the affected allocation.
 
+## Phase 16-3H Operational Hardening
+- Shopify webhook registration scripts now handle mixed registration state safely:
+  - existing topics no longer block missing-topic registration
+  - duplicate/address-taken responses trigger subscription re-check and continue
+  - summaries report created/existing/failed topics after all attempts
+- Finance status mapping now treats successful refund ledger records (`hold` lifecycle) as non-failure (`Recorded`) instead of `Failed`.
+
 ## Recommended Immediate Phase 15 Focus
 - Treat automation and dashboard real-mode behavior as the first frontend operationalization target.
 - Treat fulfillment action wiring as the first meaningful vendor write-path completion target.
