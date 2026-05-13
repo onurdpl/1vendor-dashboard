@@ -138,6 +138,7 @@ enum NotificationStatus {
   READ
   DISMISSED
   SKIPPED
+  FAILED
 }
 
 enum NotificationRecipientRole {

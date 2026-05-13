@@ -18,6 +18,7 @@ export function registerNotificationRoutes(app: FastifyInstance, env: AppEnv) {
       return listNotificationsForUser({
         role: request.authUser?.role ?? 'vendor',
         vendorId: request.authUser?.role === 'admin' ? null : request.vendorContext?.vendorId,
+        env,
       });
     },
   );

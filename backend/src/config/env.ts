@@ -24,6 +24,10 @@ export type AppEnv = {
   SCHEDULED_RECONCILIATION_INTERVAL_MS: number;
   SCHEDULED_RECONCILIATION_COOLDOWN_MS: number;
   SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT: number;
+  EMAIL_NOTIFICATIONS_ENABLED: boolean;
+  EMAIL_PROVIDER: 'noop' | 'console';
+  EMAIL_FROM?: string;
+  EMAIL_ADMIN_RECIPIENTS: string[];
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -92,6 +96,22 @@ function parseCorsOrigins(value: string | undefined, nodeEnv: NodeEnv) {
   return ['http://127.0.0.1:5173', 'http://localhost:5173'];
 }
 
+function parseEmailProvider(value: string | undefined): AppEnv['EMAIL_PROVIDER'] {
+  const normalized = (value || 'noop').trim().toLowerCase();
+  if (normalized === 'console' || normalized === 'noop') {
+    return normalized;
+  }
+
+  throw new Error('Invalid EMAIL_PROVIDER value. Expected noop or console.');
+}
+
+function parseCommaList(value: string | undefined) {
+  return (value || '')
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 export function loadEnv(): AppEnv {
   const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
   const jwtSecret = process.env.JWT_SECRET || (nodeEnv !== 'production' ? 'dev-only-jwt-secret-change-in-production' : undefined);
@@ -154,5 +174,9 @@ export function loadEnv(): AppEnv {
       process.env.SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT,
       25,
     ),
+    EMAIL_NOTIFICATIONS_ENABLED: parseBoolean(process.env.EMAIL_NOTIFICATIONS_ENABLED, false),
+    EMAIL_PROVIDER: parseEmailProvider(process.env.EMAIL_PROVIDER),
+    EMAIL_FROM: process.env.EMAIL_FROM || undefined,
+    EMAIL_ADMIN_RECIPIENTS: parseCommaList(process.env.EMAIL_ADMIN_RECIPIENTS),
   };
 }

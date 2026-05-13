@@ -1130,3 +1130,29 @@ Frontend note:
 - Automation actions are folded into the admin operations queue as `automation_action` items and can create admin in-app notification reminders.
 - Vendor users do not execute automation actions. Vendor-safe business visibility remains controlled by existing signal and notification routing rules.
 - Phase 19D does not add external integrations, AI decisioning, destructive automation, or customer-facing actions.
+
+## Email Notification Delivery Foundation (Phase 19E)
+- Phase 19E adds env-gated email delivery preparation on top of existing `NotificationIntent` rows.
+- Email configuration:
+  - `EMAIL_NOTIFICATIONS_ENABLED=false` by default
+  - `EMAIL_PROVIDER=noop` by default
+  - `EMAIL_FROM` optional
+  - `EMAIL_ADMIN_RECIPIENTS` optional comma-separated admin recipient list
+- Supported providers:
+  - `noop`: records skipped delivery and sends nothing
+  - `console`: local/dev provider that writes a safe email preview to backend logs
+- No real SendGrid, Postmark, SES, Slack, SMS, push, webhook, or external alert provider was added.
+- Email uses `NotificationChannel.EMAIL_PLACEHOLDER`.
+- `NotificationStatus.FAILED` was added so failed provider attempts can be represented safely.
+- Email eligibility:
+  - high/critical signals only
+  - admin high/critical signals route to configured admin recipients
+  - vendor high/critical signals route only to active users linked to the signal vendor
+  - vendor emails are limited to vendor-safe source areas
+  - diagnostics/reconciliation internals are not emailed to vendors
+- Disabled email behavior:
+  - eligible email intents are created for auditability
+  - delivery is marked `SKIPPED` with a compact reason
+- Email templates are deterministic text and include severity, source area, related entity label, summary, suggested action, and dashboard path placeholder.
+- Email templates intentionally exclude raw webhook payloads, secrets, internal stack traces, and sensitive diagnostics previews.
+- Phase 19E does not add background email workers, external provider retries, notification preferences, Slack delivery, or marketing/bulk email.

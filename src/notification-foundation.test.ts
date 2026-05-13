@@ -10,6 +10,9 @@ const prismaMock = vi.hoisted(() => ({
   operationalSignal: {
     findMany: vi.fn(),
   },
+  userVendorAccess: {
+    findMany: vi.fn(),
+  },
 }));
 
 const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
@@ -29,6 +32,13 @@ vi.mock('../backend/src/modules/automation/automation-actions.service.js', () =>
 const { listNotificationsForUser, updateNotificationLifecycle } = await import(
   '../backend/src/modules/notifications/notifications.service.js'
 );
+
+const testEnv = {
+  EMAIL_NOTIFICATIONS_ENABLED: false,
+  EMAIL_PROVIDER: 'noop',
+  EMAIL_FROM: undefined,
+  EMAIL_ADMIN_RECIPIENTS: ['ops@example.test'],
+} as const;
 
 function buildSignal(overrides: Record<string, unknown>) {
   const now = new Date('2026-05-13T10:00:00.000Z');
@@ -84,10 +94,12 @@ describe('notification foundation', () => {
     prismaMock.notificationIntent.update.mockReset();
     prismaMock.notificationIntent.upsert.mockReset();
     prismaMock.operationalSignal.findMany.mockReset();
+    prismaMock.userVendorAccess.findMany.mockReset();
     listOperationalSignalsMock.mockReset();
 
     listOperationalSignalsMock.mockResolvedValue({ summary: { total: 0 }, signals: [] });
     prismaMock.notificationIntent.findMany.mockResolvedValue([]);
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
     prismaMock.notificationIntent.upsert.mockImplementation(async ({ create, update, where }) =>
       buildNotification({
         ...create,
@@ -95,13 +107,19 @@ describe('notification foundation', () => {
         id: where.id,
       }),
     );
+    prismaMock.notificationIntent.update.mockImplementation(async ({ data, where }) =>
+      buildNotification({
+        id: where.id,
+        ...data,
+      }),
+    );
   });
 
   it('creates one duplicate-safe in-app notification for an active vendor-safe signal', async () => {
     prismaMock.operationalSignal.findMany.mockResolvedValue([buildSignal({ id: 'signal-1' })]);
 
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal' });
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal' });
+    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
+    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
 
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledTimes(2);
     expect(prismaMock.notificationIntent.upsert).toHaveBeenLastCalledWith(
@@ -129,7 +147,7 @@ describe('notification foundation', () => {
       }),
     ]);
 
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal' });
+    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
 
     expect(prismaMock.operationalSignal.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -138,11 +156,18 @@ describe('notification foundation', () => {
         }),
       }),
     );
-    expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledTimes(1);
+    expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledTimes(2);
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {
           id: 'notif-in_app-vendor-sporjinal-signal-vendor',
+        },
+      }),
+    );
+    expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'notif-email_placeholder-vendor-sporjinal-signal-vendor',
         },
       }),
     );
@@ -158,7 +183,7 @@ describe('notification foundation', () => {
       }),
     ]);
 
-    await listNotificationsForUser({ role: 'admin' });
+    await listNotificationsForUser({ role: 'admin', env: testEnv });
 
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -171,6 +196,83 @@ describe('notification foundation', () => {
       expect.objectContaining({
         where: {
           recipientRole: 'ADMIN',
+        },
+      }),
+    );
+    expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'notif-email_placeholder-admin-admins-signal-job',
+        },
+      }),
+    );
+  });
+
+  it('creates vendor email intents only for vendor-safe high or critical signals', async () => {
+    prismaMock.userVendorAccess.findMany.mockResolvedValue([
+      {
+        user: {
+          email: 'vendor@example.test',
+        },
+      },
+    ]);
+    prismaMock.operationalSignal.findMany.mockResolvedValue([
+      buildSignal({
+        id: 'signal-vendor-critical',
+        sourceArea: 'FULFILLMENT',
+        severity: 'CRITICAL',
+        vendorId: 'sporjinal',
+      }),
+      buildSignal({
+        id: 'signal-vendor-warning',
+        sourceArea: 'SHIPPING_COST',
+        severity: 'WARNING',
+        vendorId: 'sporjinal',
+      }),
+      buildSignal({
+        id: 'signal-internal',
+        sourceArea: 'DIAGNOSTICS',
+        severity: 'CRITICAL',
+        vendorId: 'sporjinal',
+      }),
+    ]);
+
+    await listNotificationsForUser({
+      role: 'vendor',
+      vendorId: 'sporjinal',
+      env: {
+        ...testEnv,
+        EMAIL_NOTIFICATIONS_ENABLED: true,
+        EMAIL_PROVIDER: 'console',
+      },
+    });
+
+    expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'notif-email_placeholder-vendor-sporjinal-signal-vendor-critical',
+        },
+        create: expect.objectContaining({
+          channel: 'EMAIL_PLACEHOLDER',
+          recipientRole: 'VENDOR',
+          vendorId: 'sporjinal',
+          metadata: expect.objectContaining({
+            recipients: ['vendor@example.test'],
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'notif-email_placeholder-vendor-sporjinal-signal-vendor-warning',
+        },
+      }),
+    );
+    expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'notif-email_placeholder-vendor-sporjinal-signal-internal',
         },
       }),
     );

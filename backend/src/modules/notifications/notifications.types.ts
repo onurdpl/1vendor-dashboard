@@ -1,5 +1,5 @@
 export type NotificationChannelDto = 'in_app' | 'email_placeholder' | 'slack_placeholder';
-export type NotificationStatusDto = 'pending' | 'delivered' | 'read' | 'dismissed' | 'skipped';
+export type NotificationStatusDto = 'pending' | 'delivered' | 'read' | 'dismissed' | 'skipped' | 'failed';
 export type NotificationRecipientRoleDto = 'admin' | 'vendor';
 export type NotificationSeverityDto = 'info' | 'warning' | 'high' | 'critical';
 
