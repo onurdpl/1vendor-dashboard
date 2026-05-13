@@ -152,6 +152,22 @@
   - Finance hold/recorded-equivalent refund ledger rows are normalized to `Recorded` in table/detail display; only actual failed/error states render as `Failed`.
   - No backend architecture, route, queue worker, payout engine, or external integration was introduced.
 
+### Phase 16E Operational UX Fidelity Polish
+- Density philosophy:
+  - Prefer compact operational scan rows over card-like vertical expansion.
+  - Preserve emphasis for statuses, amounts, and primary Shopify identifiers while compressing helper text, IDs, timestamps, and metadata labels.
+  - Keep fallback labels short and neutral: `Not synced`, `No tracking`, `No URL`, `Customer unavailable`, and `No warning`.
+- Viewport-fit strategy:
+  - Shared table row height, header height, badge size, metadata row spacing, KPI card height, and drawer padding were tightened.
+  - Returns, Finance, Orders, and Diagnostics table minimum widths and column proportions were reduced to fit laptop and standard desktop viewports more naturally.
+  - Horizontal overflow remains available for narrow screens, but standard desktop layouts now require substantially less side scrolling.
+- Drawer ergonomics:
+  - Side panels use narrower max widths, tighter metadata rows, compact timeline rhythm, and viewport-bounded internal scrolling.
+  - Detail sections prioritize compact hierarchy over large explanatory blocks.
+- Responsive operational layout:
+  - Medium desktop layouts keep the table and side panel usable with reduced panel width and denser table columns.
+  - Mobile/narrow layouts still collapse panels below tables through existing responsive behavior.
+
 ## Remaining Foundation Gaps
 - No global icon system was introduced in this phase.
 - No full page redesign was completed intentionally.
@@ -163,3 +179,4 @@
 - After Phase 16C, Diagnostics remains operator-triggered; background retry workers, scheduled reconciliation, alerting, and realtime socket updates remain infrastructure hardening work.
 - After Phase 16D, Orders still depends on currently available order detail DTOs; richer customer profiles, direct stale-allocation flags on order summaries, and direct diagnostics deep links remain future DTO/navigation work.
 - After Phase 16D, Dashboard remains an aggregate overview; realtime refresh, saved operator views, and cross-workspace drilldown filters are future UX/infrastructure work.
+- After Phase 16E, future polish opportunities are mostly workflow-adjacent: saved filters, personalized density preferences, richer entity linking, responsive card alternatives for very small screens, and realtime refresh.

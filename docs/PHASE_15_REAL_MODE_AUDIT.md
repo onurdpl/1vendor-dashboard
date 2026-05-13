@@ -400,6 +400,31 @@
   - Customer profile enrichment remains future backend DTO work
   - Reconciliation remains admin/operator-triggered
 
+## Phase 16E Operational UX Fidelity Polish
+- The control-center UI now uses a tighter operational density baseline across Returns, Finance, Orders, Dashboard, Diagnostics, and shared shell surfaces.
+- Viewport-fit strategy:
+  - table row height, header height, column gaps, KPI card height, metadata row spacing, badge scale, and drawer padding were reduced
+  - Returns, Finance, Orders, and Diagnostics table minimum widths were reduced so standard desktop/laptop viewports require far less horizontal scrolling
+  - table overflow remains as a safety mechanism on narrow screens
+- Drawer and timeline ergonomics:
+  - side panels use narrower widths and internal viewport-bounded scrolling
+  - metadata groups and timelines are more compact
+  - repetitive helper paragraphs were shortened where they were not operationally necessary
+- Fallback wording:
+  - developer-facing or verbose fallback copy was replaced with compact labels such as `Not synced`, `No tracking`, `No URL`, `No warning`, and `Customer unavailable`
+- Dashboard polish:
+  - command-center sections use tighter spacing, denser priority/activity rows, and compact metadata presentation
+- Production behavior preserved:
+  - no backend architecture changed
+  - no queue workers, payout engine, external integrations, routing rewrite, or state architecture rewrite were introduced
+  - replay/recover/reconcile actions, finance ledger logic, fulfillment tracking visibility, and vendor isolation remain on existing service contracts
+- Remaining future UX opportunities:
+  - saved filters and saved workspace views
+  - user-selectable density preferences
+  - richer entity linking between orders/returns/finance/diagnostics
+  - realtime refresh and proactive alerting
+  - responsive card alternatives for very small screens
+
 ## Phase 16-3C Inbound Fulfillment Sync
 - Backend now supports inbound Shopify fulfillment status refresh for:
   - `FULFILLMENTS_CREATE`

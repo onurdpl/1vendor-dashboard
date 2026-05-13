@@ -24,7 +24,7 @@ import { getCurrentVendorContext } from '../lib/auth';
 
 function formatDate(value?: string | null) {
   if (!value) {
-    return 'Not recorded';
+    return 'Not synced';
   }
 
   return new Intl.DateTimeFormat('en-US', {
@@ -64,7 +64,7 @@ function getTrackingLabel(order: OrderSummary | OrderDetail) {
     return [order.carrier, order.trackingNumber].filter(Boolean).join(' / ');
   }
 
-  return 'Tracking unavailable';
+  return 'No tracking';
 }
 
 function getCustomerLabel(customer?: string | null) {
@@ -320,7 +320,7 @@ export function OrdersPage() {
                   <StatusBadge tone={getStatusTone(order.shippingStatus)}>{order.shippingStatus}</StatusBadge>
                   <span>
                     <strong>{getTrackingLabel(order)}</strong>
-                    <small>{order.trackingUrl ? 'Tracking URL available' : 'No tracking URL'}</small>
+                    <small>{order.trackingUrl ? 'Tracking URL' : 'No URL'}</small>
                   </span>
                   <span>
                     <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
@@ -364,11 +364,11 @@ export function OrdersPage() {
               <MetadataGroup title="Fulfillment and shipment">
                 <MetadataRow label="Fulfillment status" value={selectedOrder.fulfillmentStatus} />
                 <MetadataRow label="Shipping status" value={selectedOrder.shippingStatus} />
-                <MetadataRow label="Carrier" value={selectedOrder.carrier ?? 'Carrier unavailable'} />
-                <MetadataRow label="Tracking number" value={selectedOrder.trackingNumber ?? 'Tracking unavailable'} />
+                <MetadataRow label="Carrier" value={selectedOrder.carrier ?? 'No carrier'} />
+                <MetadataRow label="Tracking number" value={selectedOrder.trackingNumber ?? 'No tracking'} />
                 <MetadataRow
                   label="Tracking URL"
-                  value={selectedOrder.trackingUrl ? <a className="inline-link" href={selectedOrder.trackingUrl}>Open tracking</a> : 'Not available'}
+                  value={selectedOrder.trackingUrl ? <a className="inline-link" href={selectedOrder.trackingUrl}>Open tracking</a> : 'No URL'}
                 />
                 <MetadataRow label="Fulfilled at" value={formatDate(selectedOrder.fulfilledAt)} />
                 <MetadataRow label="Shipment created" value={formatDate(selectedOrder.shipmentCreatedAt)} />
@@ -393,7 +393,7 @@ export function OrdersPage() {
                     ))}
                   </div>
                 ) : (
-                  <p className="page-description">Line item details are unavailable for this order summary.</p>
+                  <p className="page-description">No line items synced.</p>
                 )}
               </div>
 
@@ -413,7 +413,7 @@ export function OrdersPage() {
               <div className="op-panel-section">
                 <h4>Reconciliation context</h4>
                 <p className="page-description">
-                  Canonical Shopify reconciliation remains available through admin diagnostics when fulfillment, shipping, or tracking state looks stale.
+                  Reconcile from Diagnostics if fulfillment, shipping, or tracking looks stale.
                 </p>
               </div>
             </>

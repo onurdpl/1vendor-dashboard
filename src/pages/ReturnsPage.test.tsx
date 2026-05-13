@@ -198,7 +198,7 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect((await screen.findAllByText('Operator review recommended')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Diagnostics, replay\/recover, and reconciliation remain admin-only/i).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Review recommended')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Diagnostics and recovery remain admin-only/i).length).toBeGreaterThan(0);
   });
 });

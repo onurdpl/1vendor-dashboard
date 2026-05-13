@@ -106,7 +106,7 @@ export function FinancePage() {
     const transactions = finance?.transactions ?? [];
     const recordedRefunds = transactions.filter((record) => isRefundRecord(record) && normalizeFinanceStatus(record.status) === 'Recorded').length;
     const pendingOrHeld = transactions.filter(isPendingOrHoldRecord).length;
-    const failed = transactions.filter((record) => record.status === 'Failed').length;
+    const failed = transactions.filter((record) => normalizeFinanceStatus(record.status) === 'Failed').length;
 
     return {
       recordedRefunds,
@@ -271,10 +271,10 @@ export function FinancePage() {
                   <ShopifyEntityDisplay label="Vendor" primary={currentVendor.vendorName} secondary={currentVendor.vendorId} />
                   <ShopifyEntityDisplay
                     label="Shopify Order"
-                    primary={record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : 'Not available'}
+                    primary={record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : 'Not synced'}
                     secondary={record.shopifyOrderId ? `ID ${record.shopifyOrderId}` : undefined}
                   />
-                  <ShopifyEntityDisplay label="Shopify Refund" primary={record.shopifyRefundId ?? 'Not available'} />
+                  <ShopifyEntityDisplay label="Shopify Refund" primary={record.shopifyRefundId ?? 'Not synced'} />
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
                     {record.amount}
@@ -322,9 +322,9 @@ export function FinancePage() {
                 <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
               </MetadataGroup>
               <MetadataGroup title="Shopify identifiers">
-                <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not available'} />
-                <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not available'} />
-                <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not available'} />
+                <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
+                <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
+                <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not synced'} />
               </MetadataGroup>
               <MetadataGroup title="Vendor scope">
                 <MetadataRow label="Vendor" value={currentVendor.vendorName} />

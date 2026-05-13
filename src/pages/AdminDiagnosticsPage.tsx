@@ -29,7 +29,7 @@ import { toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string | null) {
   if (!value) {
-    return 'Not recorded';
+    return 'Not synced';
   }
 
   return new Intl.DateTimeFormat('en-US', {
@@ -587,10 +587,10 @@ export function AdminDiagnosticsPage() {
                 <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
               </MetadataGroup>
               <MetadataGroup title="Affected entities">
-                <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'} />
-                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not inferable'} />
-                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities.shopifyRefundId ?? 'Not inferable'} />
-                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities.shopifyFulfillmentId ?? 'Not inferable'} />
+                <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not synced'} />
+                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not synced'} />
+                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities.shopifyRefundId ?? 'Not synced'} />
+                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities.shopifyFulfillmentId ?? 'Not synced'} />
                 <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </MetadataGroup>
@@ -640,15 +640,15 @@ export function AdminDiagnosticsPage() {
               </div>
               <div className="op-panel-section">
                 <h4>Payload diagnostics</h4>
-                <MetadataRow label="Payload hash" value={selectedWebhook.payloadHash ?? 'Not recorded'} />
-                <MetadataRow label="Idempotency key" value={selectedWebhook.idempotencyKey ?? 'Not recorded'} />
+                <MetadataRow label="Payload hash" value={selectedWebhook.payloadHash ?? 'Not synced'} />
+                <MetadataRow label="Idempotency key" value={selectedWebhook.idempotencyKey ?? 'Not synced'} />
                 {selectedWebhook.payloadPreview ? (
                   <pre className="diagnostics-payload-preview">
                     {selectedWebhook.payloadPreview}
                     {selectedWebhook.payloadPreviewTruncated ? '\n...' : ''}
                   </pre>
                 ) : (
-                  <p className="page-description">No stored payload preview is available for this event.</p>
+                  <p className="page-description">No payload preview.</p>
                 )}
               </div>
             </>

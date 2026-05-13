@@ -27,7 +27,7 @@ type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'Not recorded';
+    return 'Not synced';
   }
 
   return new Intl.DateTimeFormat('en-US', {
@@ -57,8 +57,8 @@ function getEntityLabel(item: ReturnSummary) {
 
 function getEntityValue(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request'
-    ? item.sourceShopifyReturnId || 'Not available'
-    : item.sourceShopifyRefundId || 'Not available';
+    ? item.sourceShopifyReturnId || 'Not synced'
+    : item.sourceShopifyRefundId || 'Not synced';
 }
 
 function getStatusTone(item: ReturnSummary) {
@@ -459,21 +459,21 @@ export function ReturnsPage() {
 
               <MetadataGroup title="Operational metadata">
                 <MetadataRow label="Vendor" value={getVendorName(selectedReturn.assignedVendorId, vendorLookup)} />
-                <MetadataRow label="Customer" value={selectedReturn.customer || 'Not available'} />
+                <MetadataRow label="Customer" value={selectedReturn.customer || 'Customer unavailable'} />
                 <MetadataRow label="Lifecycle source" value={getSourceLabel(selectedReturn)} />
                 <MetadataRow label="Created" value={formatDate(selectedReturn.date)} />
                 <MetadataRow label="Updated" value={formatDate(selectedReturn.updatedAt ?? selectedReturn.date)} />
                 <MetadataRow
                   label="Reconciliation state"
-                  value={needsAttention(selectedReturn) ? 'Operator review recommended' : 'No reconciliation warning surfaced'}
+                  value={needsAttention(selectedReturn) ? 'Review recommended' : 'No warning'}
                 />
               </MetadataGroup>
 
               <MetadataGroup title="Shopify metadata">
                 <MetadataRow label="Shopify Order #" value={`#${selectedReturn.sourceShopifyOrderNumber}`} />
                 <MetadataRow label="Shopify Order ID" value={selectedReturn.sourceShopifyOrderId} />
-                <MetadataRow label="Shopify Return ID" value={selectedReturn.sourceShopifyReturnId ?? 'Not available'} />
-                <MetadataRow label="Shopify Refund ID" value={selectedReturn.sourceShopifyRefundId ?? 'Not available'} />
+                <MetadataRow label="Shopify Return ID" value={selectedReturn.sourceShopifyReturnId ?? 'Not synced'} />
+                <MetadataRow label="Shopify Refund ID" value={selectedReturn.sourceShopifyRefundId ?? 'Not synced'} />
               </MetadataGroup>
 
               <div className="op-panel-section">
@@ -532,7 +532,7 @@ export function ReturnsPage() {
               <div className="op-panel-section">
                 <h4>Diagnostics context</h4>
                 <p className="page-description">
-                  Diagnostics, replay/recover, and reconciliation remain admin-only operational tools. This drawer surfaces warning state without exposing raw webhook payloads.
+                  Diagnostics and recovery remain admin-only. This drawer only surfaces safe warning state.
                 </p>
               </div>
             </>

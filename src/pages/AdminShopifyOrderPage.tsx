@@ -177,7 +177,7 @@ export function AdminShopifyOrderPage() {
                   Open tracking
                 </a>
               ) : (
-                <strong className="muted">Not available</strong>
+                <strong className="muted">Not synced</strong>
               )}
             </div>
             <div className="meta-item">

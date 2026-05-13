@@ -66,8 +66,8 @@ export function ReturnDetailPage() {
           <p className="page-description">
             Shopify Order #{returnRequest.sourceShopifyOrderNumber} ·{' '}
             {returnRequest.sourceType === 'shopify_return_request'
-              ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Not available'}`
-              : `Refund ${returnRequest.sourceShopifyRefundId || 'Not available'}`}
+              ? `Return ${returnRequest.sourceShopifyReturnId ?? 'Not synced'}`
+              : `Refund ${returnRequest.sourceShopifyRefundId || 'Not synced'}`}
           </p>
           {isRealMode ? (
             <p className="page-description operational-helper-copy">
@@ -115,8 +115,8 @@ export function ReturnDetailPage() {
               <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Shopify Return ID' : 'Shopify Refund ID'}</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
-                  ? returnRequest.sourceShopifyReturnId ?? 'Not available'
-                  : returnRequest.sourceShopifyRefundId || 'Not available'}
+                  ? returnRequest.sourceShopifyReturnId ?? 'Not synced'
+                  : returnRequest.sourceShopifyRefundId || 'Not synced'}
               </strong>
             </div>
             <div className="summary-row">
@@ -207,8 +207,8 @@ export function ReturnDetailPage() {
               <span>{returnRequest.sourceType === 'shopify_return_request' ? 'Source Shopify return ID' : 'Source Shopify refund ID'}</span>
               <strong>
                 {returnRequest.sourceType === 'shopify_return_request'
-                  ? returnRequest.sourceShopifyReturnId ?? 'Not available'
-                  : returnRequest.sourceShopifyRefundId || 'Not available'}
+                  ? returnRequest.sourceShopifyReturnId ?? 'Not synced'
+                  : returnRequest.sourceShopifyRefundId || 'Not synced'}
               </strong>
             </div>
             <div className="meta-item">

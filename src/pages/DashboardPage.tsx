@@ -104,10 +104,10 @@ export function DashboardPage() {
 
         <OperationalSection title="Finance snapshot" description="Reporting-only finance visibility. Payout execution is not enabled yet.">
           <div className="op-meta-grid">
-            <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? 'Not available'} />
-            <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? 'Not available'} />
-            <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? 'Not available'} />
-            <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? 'Not available'} />
+            <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? 'Not synced'} />
+            <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? 'Not synced'} />
+            <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? 'Not synced'} />
+            <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? 'Not synced'} />
           </div>
         </OperationalSection>
 
@@ -138,7 +138,7 @@ export function DashboardPage() {
                 </StatusBadge>
               </div>
             ) : (
-              <EmptyStatePanel title="Diagnostics unavailable" description="Diagnostics summary is unavailable for the current scope." />
+              <EmptyStatePanel title="Diagnostics unavailable" description="Not synced for this scope." />
             )}
           </OperationalSection>
         ) : null}

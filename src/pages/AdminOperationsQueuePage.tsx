@@ -199,7 +199,7 @@ export function AdminOperationsQueuePage() {
                     <strong>{getLifecycleLabel(item.type)}</strong>
                     <small>{toTitleCaseLabel(item.type)}</small>
                   </span>
-                  <span>{item.relatedShopifyOrderId ?? 'Not available'}</span>
+                  <span>{item.relatedShopifyOrderId ?? 'Not synced'}</span>
                   <StatusBadge tone="info">{toTitleCaseLabel(item.status)}</StatusBadge>
                   <span>{formatDate(item.createdAt)}</span>
                   <OperationalActionGroup>
@@ -239,8 +239,8 @@ export function AdminOperationsQueuePage() {
                 <MetadataRow label="Lifecycle" value={getLifecycleLabel(selectedItem.type)} />
                 <MetadataRow label="Queue type" value={toTitleCaseLabel(selectedItem.type)} />
                 <MetadataRow label="Vendor" value={selectedItem.vendorName ?? selectedItem.vendorId} />
-                <MetadataRow label="Allocation ID" value={selectedItem.relatedOrderId ?? 'Not available'} />
-                <MetadataRow label="Shopify Order ID" value={selectedItem.relatedShopifyOrderId ?? 'Not available'} />
+                <MetadataRow label="Allocation ID" value={selectedItem.relatedOrderId ?? 'Not synced'} />
+                <MetadataRow label="Shopify Order ID" value={selectedItem.relatedShopifyOrderId ?? 'Not synced'} />
                 <MetadataRow label="Created At" value={formatDate(selectedItem.createdAt)} />
               </div>
               <div className="op-panel-section">
