@@ -913,3 +913,27 @@ Frontend note:
   - `POST /admin/payout-batches/:id/mark-review`
 - `GET /finance` includes `payoutBatchSummary` and per-record payout batch references for the Finance workspace.
 - Phase 18C does not execute bank transfers, mark real payments complete, export ERP/accounting data, generate invoices, or integrate external providers.
+
+## Vendor Balance Workspace (Phase 18D)
+- Finance now renders role-specific visibility on top of the same vendor-scoped `/finance` payload.
+- Admin users keep the operational finance workspace:
+  - vendor finance profile controls
+  - payout batch preparation action
+  - operational ledger metadata
+  - Shopify identifiers and calculation profile details
+- Vendor users receive a simplified read-only balance workspace:
+  - payable balance
+  - upcoming payout
+  - accruing balance
+  - refund impact
+  - held or pending amount
+- Vendor detail drawers prioritize payout understanding:
+  - gross sale
+  - commission/VAT/shipping/refund deductions
+  - estimated payout
+  - payout readiness
+  - payout batch reference
+  - simplified payout timeline
+- Vendor users cannot prepare, cancel, review, approve, or execute payout batches.
+- Vendor isolation remains enforced by existing auth/vendor context and vendor-scoped finance queries.
+- Phase 18D remains read-only for vendors and does not execute payments, integrate banks/ERP/accounting providers, generate invoices, or mark real settlement completion.

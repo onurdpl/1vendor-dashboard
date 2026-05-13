@@ -34,6 +34,19 @@ function createSummary(items: OperationsQueueItemDto[]): OperationsQueueDashboar
   };
 }
 
+function getSeverityRank(severity: OperationsQueueSeverity) {
+  if (severity === 'critical') {
+    return 0;
+  }
+  if (severity === 'warning') {
+    return 1;
+  }
+  if (severity === 'attention') {
+    return 2;
+  }
+  return 3;
+}
+
 export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
   const allocations = await prisma.vendorAllocation.findMany({
     include: {
@@ -167,7 +180,13 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     });
   }
 
-  items.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  items.sort((a, b) => {
+    const severityDelta = getSeverityRank(a.severity) - getSeverityRank(b.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+    return a.createdAt < b.createdAt ? 1 : -1;
+  });
 
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;

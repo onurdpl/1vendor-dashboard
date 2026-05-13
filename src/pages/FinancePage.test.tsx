@@ -37,7 +37,23 @@ const financeDashboard: FinanceDashboard = {
     eligibleRowCount: 1,
     eligibleNetAmount: '$3,059.10',
     blockedRowCount: 1,
-    latestBatch: null,
+    latestBatch: {
+      id: 'batch-demo-vendor-a',
+      vendorId: 'demo-vendor-a',
+      status: 'draft',
+      grossAmount: '$3,399.00',
+      commissionAmount: '$339.90',
+      commissionVatAmount: '$0.00',
+      shippingDeductionAmount: '$0.00',
+      refundAmount: '$0.00',
+      netAmount: '$3,059.10',
+      currency: 'TRY',
+      createdByUserId: 'admin',
+      createdAt: '2026-05-13T12:00:00Z',
+      updatedAt: '2026-05-13T12:00:00Z',
+      lineCount: 1,
+      warning: null,
+    },
   },
   profile: {
     vendorId: 'demo-vendor-a',
@@ -72,6 +88,22 @@ const financeDashboard: FinanceDashboard = {
         profileSource: 'snapshot',
         commissionPercent: '10.00',
         commissionVatPercent: '0.00',
+      },
+      settlement: {
+        status: 'payable',
+        payoutReady: true,
+        eligibleAt: '2026-05-10T09:15:00Z',
+        accruedAt: '2026-05-10T09:15:00Z',
+        payableAt: '2026-05-10T09:45:00Z',
+        settledAt: null,
+        holdReason: null,
+        note: 'Fulfilled or shipped sale is payout-ready.',
+      },
+      payoutBatch: {
+        id: 'batch-demo-vendor-a',
+        status: 'draft',
+        netAmount: '$3,059.10',
+        createdAt: '2026-05-13T12:00:00Z',
       },
     },
     {
@@ -247,6 +279,7 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByText('Demo Vendor A upcoming payout')).toBeInTheDocument();
     expect(screen.getByText('Eligible rows')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /prepare draft payout/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /prepare draft payout/i }));
 
     await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('demo-vendor-a'));
@@ -266,9 +299,68 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
+    expect(await screen.findByRole('heading', { name: /balance workspace/i })).toBeInTheDocument();
+    expect(screen.getByText('Payable balance')).toBeInTheDocument();
+    expect(screen.getByText('Upcoming payout')).toBeInTheDocument();
+    expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
+    expect(screen.getByText('Latest payout batch')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
+  });
+
+  it('shows vendor payout timeline and batch reference in read-only detail', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+
+    expect(await screen.findByText('Payout timeline')).toBeInTheDocument();
+    expect(screen.getByText('Included in payout batch')).toBeInTheDocument();
+    expect(screen.getByText('batch-demo-vendor-a')).toBeInTheDocument();
+    expect(screen.getByText('Payout pending')).toBeInTheDocument();
+    expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
+  });
+
+  it('communicates negative upcoming payout without enabling vendor actions', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      payoutBatchSummary: {
+        eligibleRowCount: 1,
+        eligibleNetAmount: '-$125.00',
+        blockedRowCount: 0,
+        latestBatch: {
+          ...financeDashboard.payoutBatchSummary!.latestBatch!,
+          netAmount: '-$125.00',
+          warning: 'Negative payout draft requires operator review.',
+        },
+      },
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Refunds reduce vendor payout')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
 

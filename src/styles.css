@@ -2896,6 +2896,28 @@ h3 {
   justify-content: flex-end;
 }
 
+.finance-vendor-workspace .finance-profile-card,
+.finance-vendor-workspace .finance-payout-prep-card {
+  grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) auto;
+}
+
+.finance-vendor-workspace .finance-payout-prep-card {
+  border-color: rgba(29, 78, 216, 0.18);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+}
+
+.finance-vendor-workspace .op-toolbar {
+  display: none;
+}
+
+.finance-vendor-workspace .op-side-panel .op-timeline {
+  gap: 5px;
+}
+
+.finance-vendor-workspace .op-side-panel .op-timeline li {
+  gap: 5px;
+}
+
 .op-form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

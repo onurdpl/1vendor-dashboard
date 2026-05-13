@@ -15,6 +15,7 @@ import {
   ShopifyEntityDisplay,
   SideDetailPanel,
   StatusBadge,
+  TimelineBlock,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -123,6 +124,42 @@ function formatDeductionValue(value: string) {
   return `-${value}`;
 }
 
+function getPayoutBatchStatusLabel(status?: string) {
+  if (!status) {
+    return 'Not batched';
+  }
+
+  return status
+    .split('_')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function getVendorTimelineItems(record: FinanceTransaction) {
+  const settlement = record.settlement;
+  return [
+    {
+      label: settlement?.status === 'accruing' ? 'Accruing' : 'Accrued',
+      at: settlement?.accruedAt ?? record.date,
+    },
+    {
+      label: settlement?.payoutReady ? 'Payable' : 'Waiting for payout readiness',
+      at: settlement?.payableAt ?? settlement?.eligibleAt ?? null,
+      detail: settlement?.payoutReady ? 'Ready' : 'Pending',
+    },
+    {
+      label: record.payoutBatch ? 'Included in payout batch' : 'Not batched yet',
+      at: record.payoutBatch?.createdAt ?? null,
+      detail: record.payoutBatch ? getPayoutBatchStatusLabel(record.payoutBatch.status) : 'Upcoming payout not prepared',
+    },
+    {
+      label: record.payoutBatch?.status === 'paid_placeholder' ? 'Paid placeholder' : 'Payout pending',
+      at: null,
+      detail: record.payoutBatch?.status === 'paid_placeholder' ? 'Marked placeholder only' : 'No payment execution yet',
+    },
+  ];
+}
+
 export function FinancePage() {
   const { data: finance, isLoading, isError, error, refetch } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
   const { message, tone, showFeedback } = useActionFeedback();
@@ -140,6 +177,7 @@ export function FinancePage() {
   const currentVendor = getCurrentVendorContext();
   const availableVendors = getAvailableVendors();
   const isAdmin = currentUser?.role === 'admin';
+  const isVendorUser = currentUser?.role === 'vendor';
   const saveProfileMutation = useMutationAction(
     (input: VendorProfileFormInput) =>
       updateVendorFinancialProfile(currentVendor.vendorId, input),
@@ -269,13 +307,15 @@ export function FinancePage() {
   }
 
   return (
-    <section className="op-page finance-control-center">
+    <section className={`op-page finance-control-center ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
       <div className="op-page-heading">
         <div>
           <p className="eyebrow">Finance</p>
-          <h2>{currentVendor.vendorName} finance control center</h2>
+          <h2>{currentVendor.vendorName} {isVendorUser ? 'balance workspace' : 'finance control center'}</h2>
           <p className="page-description">
-            Vendor-scoped ledger visibility for Shopify refunds, holds, failed records, and reporting-only payout estimates.
+            {isVendorUser
+              ? 'Your sales, refunds, deductions, and upcoming payout status in one vendor-scoped view.'
+              : 'Vendor-scoped ledger visibility for Shopify refunds, holds, failed records, and reporting-only payout estimates.'}
           </p>
         </div>
         <div className="op-heading-meta">
@@ -284,15 +324,25 @@ export function FinancePage() {
         </div>
       </div>
 
-      <div className="op-kpi-row finance-kpi-row">
-        <KPIStatCard label="Recorded refunds" value={financeKpis.recordedRefunds} detail="Refund ledger rows" tone="success" />
-        <KPIStatCard label="Total refund amount" value={finance.summary.refunds} detail="Summary refund impact" tone="danger" />
-        <KPIStatCard label="Pending / hold" value={financeKpis.pendingOrHeld} detail="Recorded or pending items" tone="attention" />
-        <KPIStatCard label="Failed / attention" value={financeKpis.failed} detail="Requires operator review" tone="danger" />
-        <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
-        <KPIStatCard label="Vendor payable" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Fulfilled settlement-ready balance" tone="success" />
-        <KPIStatCard label="Accrued balance" value={finance.summary.accruedBalance ?? finance.summary.payoutEstimate} detail="Pending fulfillment or settlement readiness" tone="attention" />
-      </div>
+      {isVendorUser ? (
+        <div className="op-kpi-row finance-kpi-row finance-vendor-balance-row">
+          <KPIStatCard label="Payable balance" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Ready for payout preparation" tone="success" />
+          <KPIStatCard label="Upcoming payout" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail={`${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`} tone="info" />
+          <KPIStatCard label="Accruing balance" value={finance.summary.accruedBalance ?? '$0.00'} detail="Waiting for fulfillment or payout readiness" tone="attention" />
+          <KPIStatCard label="Refund impact" value={finance.summary.refunds} detail="Refunds reduce vendor payout" tone="danger" />
+          <KPIStatCard label="Held / pending" value={finance.summary.heldBalance ?? finance.summary.pendingSettlement ?? '$0.00'} detail="Not currently payout-ready" tone="neutral" />
+        </div>
+      ) : (
+        <div className="op-kpi-row finance-kpi-row">
+          <KPIStatCard label="Recorded refunds" value={financeKpis.recordedRefunds} detail="Refund ledger rows" tone="success" />
+          <KPIStatCard label="Total refund amount" value={finance.summary.refunds} detail="Summary refund impact" tone="danger" />
+          <KPIStatCard label="Pending / hold" value={financeKpis.pendingOrHeld} detail="Recorded or pending items" tone="attention" />
+          <KPIStatCard label="Failed / attention" value={financeKpis.failed} detail="Requires operator review" tone="danger" />
+          <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
+          <KPIStatCard label="Vendor payable" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Fulfilled settlement-ready balance" tone="success" />
+          <KPIStatCard label="Accrued balance" value={finance.summary.accruedBalance ?? finance.summary.payoutEstimate} detail="Pending fulfillment or settlement readiness" tone="attention" />
+        </div>
+      )}
 
       <section className="operational-card finance-profile-card">
         <div>
@@ -374,7 +424,9 @@ export function FinancePage() {
           <p className="eyebrow">Payout preparation</p>
           <h3>{currentVendor.vendorName} upcoming payout</h3>
           <p className="page-description">
-            Draft batches group payable ledger rows for admin review only. No payment execution is performed here.
+            {isVendorUser
+              ? 'Upcoming payout reflects payable rows and prepared draft batches. This view is read-only.'
+              : 'Draft batches group payable ledger rows for admin review only. No payment execution is performed here.'}
           </p>
         </div>
         <div className="finance-profile-summary">
@@ -382,10 +434,10 @@ export function FinancePage() {
           <MetadataRow label="Eligible net" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} />
           <MetadataRow label="Blocked rows" value={finance.payoutBatchSummary?.blockedRowCount ?? 0} />
           <MetadataRow
-            label="Latest draft"
+            label={isVendorUser ? 'Latest payout batch' : 'Latest draft'}
             value={
               finance.payoutBatchSummary?.latestBatch
-                ? `${finance.payoutBatchSummary.latestBatch.status} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
+                ? `${getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status)} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
                 : 'No draft prepared'
             }
           />
@@ -526,15 +578,17 @@ export function FinancePage() {
                   {selectedRecord.amount}
                 </strong>
               </div>
-              <MetadataGroup title="Ledger metadata">
-                <MetadataRow label="Ledger Record" value={selectedRecord.id} />
-                <MetadataRow label="Source / type" value={selectedRecord.category} />
-                <MetadataRow label="Lifecycle" value={getFinanceLifecycleLabel(selectedRecord)} />
-                <MetadataRow label="Counterparty" value={selectedRecord.counterparty} />
-                <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
-              </MetadataGroup>
+              {isVendorUser ? null : (
+                <MetadataGroup title="Ledger metadata">
+                  <MetadataRow label="Ledger Record" value={selectedRecord.id} />
+                  <MetadataRow label="Source / type" value={selectedRecord.category} />
+                  <MetadataRow label="Lifecycle" value={getFinanceLifecycleLabel(selectedRecord)} />
+                  <MetadataRow label="Counterparty" value={selectedRecord.counterparty} />
+                  <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
+                </MetadataGroup>
+              )}
               {selectedRecord.payoutCalculation ? (
-                <MetadataGroup title="Payout estimate">
+                <MetadataGroup title={isVendorUser ? 'Payout breakdown' : 'Payout estimate'}>
                   <MetadataRow label="Gross amount" value={selectedRecord.payoutCalculation.grossAmount} />
                   <MetadataRow
                     label={`Commission (${selectedRecord.payoutCalculation.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%)`}
@@ -559,41 +613,52 @@ export function FinancePage() {
                 </MetadataGroup>
               ) : null}
               {selectedRecord.settlement ? (
-                <MetadataGroup title="Settlement lifecycle">
-                  <MetadataRow label="Settlement status" value={selectedRecord.settlement.status} />
+                <MetadataGroup title={isVendorUser ? 'Payout status' : 'Settlement lifecycle'}>
+                  <MetadataRow label={isVendorUser ? 'Current state' : 'Settlement status'} value={getPayoutBatchStatusLabel(selectedRecord.settlement.status)} />
                   <MetadataRow label="Payout readiness" value={selectedRecord.settlement.payoutReady ? 'Ready' : 'Not ready'} />
                   <MetadataRow label="Eligible at" value={selectedRecord.settlement.eligibleAt ? formatDate(selectedRecord.settlement.eligibleAt) : 'Not eligible'} />
                   <MetadataRow label="Payable at" value={selectedRecord.settlement.payableAt ? formatDate(selectedRecord.settlement.payableAt) : 'Not payable'} />
-                  <MetadataRow label="Settlement note" value={selectedRecord.settlement.note} />
+                  <MetadataRow label={isVendorUser ? 'What this means' : 'Settlement note'} value={selectedRecord.settlement.note} />
+                </MetadataGroup>
+              ) : null}
+              {isVendorUser ? (
+                <MetadataGroup title="Payout timeline">
+                  <TimelineBlock items={getVendorTimelineItems(selectedRecord)} />
                 </MetadataGroup>
               ) : null}
               <MetadataGroup title="Payout batch">
-                <MetadataRow label="Batch status" value={selectedRecord.payoutBatch ? selectedRecord.payoutBatch.status : 'Unbatched'} />
-                <MetadataRow label="Batch ID" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
+                <MetadataRow label="Batch status" value={selectedRecord.payoutBatch ? getPayoutBatchStatusLabel(selectedRecord.payoutBatch.status) : 'Unbatched'} />
+                <MetadataRow label="Batch reference" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
                 <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
               </MetadataGroup>
-              <MetadataGroup title="Shopify identifiers">
-                <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
-                <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
-                <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not synced'} />
-              </MetadataGroup>
-              <MetadataGroup title="Vendor scope">
-                <MetadataRow label="Vendor" value={currentVendor.vendorName} />
-                <MetadataRow label="Vendor ID" value={currentVendor.vendorId} />
-                <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
-              </MetadataGroup>
-              <MetadataGroup title="Calculation profile">
-                <MetadataRow label="Calculation profile" value={getCalculationProfileSourceLabel(selectedRecord.payoutCalculation?.profileSource)} />
-                <MetadataRow label="Applied commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Applied commission VAT" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Current vendor profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
-                <MetadataRow label="Shipping mode" value={selectedRecord.payoutCalculation?.shippingMode ?? finance.profile?.shippingMode ?? 'disabled'} />
-                <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
-              </MetadataGroup>
+              {isVendorUser ? null : (
+                <>
+                  <MetadataGroup title="Shopify identifiers">
+                    <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
+                    <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
+                    <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not synced'} />
+                  </MetadataGroup>
+                  <MetadataGroup title="Vendor scope">
+                    <MetadataRow label="Vendor" value={currentVendor.vendorName} />
+                    <MetadataRow label="Vendor ID" value={currentVendor.vendorId} />
+                    <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
+                  </MetadataGroup>
+                  <MetadataGroup title="Calculation profile">
+                    <MetadataRow label="Calculation profile" value={getCalculationProfileSourceLabel(selectedRecord.payoutCalculation?.profileSource)} />
+                    <MetadataRow label="Applied commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
+                    <MetadataRow label="Applied commission VAT" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                    <MetadataRow label="Current vendor profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
+                    <MetadataRow label="Shipping mode" value={selectedRecord.payoutCalculation?.shippingMode ?? finance.profile?.shippingMode ?? 'disabled'} />
+                    <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
+                  </MetadataGroup>
+                </>
+              )}
               <div className="op-panel-section">
-                <h4>Related return / refund context</h4>
+                <h4>{isVendorUser ? 'Payout note' : 'Related return / refund context'}</h4>
                 <p className="page-description">
-                  Finance rows are derived from immutable ledger snapshots and settlement readiness state. Payout execution is not enabled yet.
+                  {isVendorUser
+                    ? 'This is a read-only payout view. Actual payment execution is not enabled yet.'
+                    : 'Finance rows are derived from immutable ledger snapshots and settlement readiness state. Payout execution is not enabled yet.'}
                 </p>
               </div>
             </>
