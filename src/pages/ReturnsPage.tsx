@@ -3,10 +3,14 @@ import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
-  KPISummaryCard,
+  FilterBar,
+  KPIStatCard,
   MetadataRow,
   OperationalActionGroup,
   OperationalTable,
+  OperationalTableRow,
+  OperationalToolbar,
+  SearchInput,
   ShopifyEntityDisplay,
   SideDetailPanel,
   StatusBadge,
@@ -147,40 +151,41 @@ export function ReturnsPage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPISummaryCard label="Pending requests" value={pendingCount} detail="Shopify return lifecycle" tone="attention" />
-        <KPISummaryCard label="Approved" value={approvedCount} detail="Awaiting next lifecycle step" tone="success" />
-        <KPISummaryCard label="Processed refunds" value={processedCount} detail={`${totalReturns} total return records`} tone="info" />
-        <KPISummaryCard label="Total refunded" value={`TRY ${totalRefundAmount.toFixed(2)}`} detail="Posted refund webhook records" tone="danger" />
+        <KPIStatCard label="Pending requests" value={pendingCount} detail="Shopify return lifecycle" tone="attention" />
+        <KPIStatCard label="Approved" value={approvedCount} detail="Awaiting next lifecycle step" tone="success" />
+        <KPIStatCard label="Processed refunds" value={processedCount} detail={`${totalReturns} total return records`} tone="info" />
+        <KPIStatCard label="Total refunded" value={`TRY ${totalRefundAmount.toFixed(2)}`} detail="Posted refund webhook records" tone="danger" />
       </div>
 
       <div className="op-control-layout">
         <div className="op-main-column">
-          <div className="op-toolbar">
-            <input
-              type="search"
+          <OperationalToolbar>
+            <SearchInput
               placeholder="Search order, return, refund, SKU..."
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All statuses</option>
-              {statuses.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => {
-                setSearchTerm('');
-                setStatusFilter('all');
-              }}
-            >
-              Reset
-            </button>
-          </div>
+            <FilterBar>
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All statuses</option>
+                {statuses.map((status) => (
+                  <option key={status} value={status}>
+                    {status}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  setSearchTerm('');
+                  setStatusFilter('all');
+                }}
+              >
+                Reset
+              </button>
+            </FilterBar>
+          </OperationalToolbar>
 
           {filteredReturns.length === 0 ? (
             <EmptyStatePanel
@@ -193,17 +198,10 @@ export function ReturnsPage() {
               className="returns-op-table"
             >
               {filteredReturns.map((item) => (
-                <div
-                  role="button"
-                  tabIndex={0}
+                <OperationalTableRow
                   key={item.id}
-                  className={`op-table-row ${selectedReturn?.id === item.id ? 'op-row-selected' : ''}`}
-                  onClick={() => setSelectedReturnId(item.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      setSelectedReturnId(item.id);
-                    }
-                  }}
+                  selected={selectedReturn?.id === item.id}
+                  onSelect={() => setSelectedReturnId(item.id)}
                 >
                   <span>
                     <StatusBadge tone={getStatusTone(item)}>{item.status}</StatusBadge>
@@ -235,7 +233,7 @@ export function ReturnsPage() {
                       Open
                     </Link>
                   </OperationalActionGroup>
-                </div>
+                </OperationalTableRow>
               ))}
             </OperationalTable>
           )}

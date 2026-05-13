@@ -3,10 +3,13 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
-  KPISummaryCard,
+  KPIStatCard,
   MetadataRow,
   OperationalActionGroup,
   OperationalTable,
+  OperationalTableRow,
+  OperationalToolbar,
+  SearchInput,
   ShopifyEntityDisplay,
   SideDetailPanel,
   StatusBadge,
@@ -112,18 +115,17 @@ export function FinancePage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPISummaryCard label="Gross sales" value={finance.summary.grossSales} detail="Vendor allocation sales" tone="success" />
-        <KPISummaryCard label="Refunds" value={`-${finance.summary.refunds}`} detail="Processed refunds only" tone="danger" />
-        <KPISummaryCard label="Net revenue" value={finance.summary.netRevenue} detail="After refund impact" tone="info" />
-        <KPISummaryCard label="Platform fee" value={`-${finance.summary.platformFee}`} detail="Reporting model" tone="warning" />
-        <KPISummaryCard label="Payout estimate" value={finance.summary.payoutEstimate} detail="No payout execution yet" tone="neutral" />
+        <KPIStatCard label="Gross sales" value={finance.summary.grossSales} detail="Vendor allocation sales" tone="success" />
+        <KPIStatCard label="Refunds" value={`-${finance.summary.refunds}`} detail="Processed refunds only" tone="danger" />
+        <KPIStatCard label="Net revenue" value={finance.summary.netRevenue} detail="After refund impact" tone="info" />
+        <KPIStatCard label="Platform fee" value={`-${finance.summary.platformFee}`} detail="Reporting model" tone="warning" />
+        <KPIStatCard label="Payout estimate" value={finance.summary.payoutEstimate} detail="No payout execution yet" tone="neutral" />
       </div>
 
       <div className="op-control-layout finance-layout">
         <div className="op-main-column">
-          <div className="op-toolbar">
-            <input
-              type="search"
+          <OperationalToolbar>
+            <SearchInput
               placeholder="Search record, order, refund..."
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
@@ -138,7 +140,7 @@ export function FinancePage() {
             >
               Export snapshot
             </button>
-          </div>
+          </OperationalToolbar>
 
           {filteredRecords.length === 0 ? (
             <EmptyStatePanel
@@ -151,17 +153,10 @@ export function FinancePage() {
               className="finance-op-table"
             >
               {filteredRecords.map((record) => (
-                <div
+                <OperationalTableRow
                   key={record.id}
-                  role="button"
-                  tabIndex={0}
-                  className={`op-table-row ${selectedRecord?.id === record.id ? 'op-row-selected' : ''}`}
-                  onClick={() => setSelectedRecordId(record.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      setSelectedRecordId(record.id);
-                    }
-                  }}
+                  selected={selectedRecord?.id === record.id}
+                  onSelect={() => setSelectedRecordId(record.id)}
                 >
                   <span>
                     <strong>{record.category}</strong>
@@ -183,7 +178,7 @@ export function FinancePage() {
                     <strong>{formatDate(record.date)}</strong>
                     <small>Created</small>
                   </span>
-                </div>
+                </OperationalTableRow>
               ))}
             </OperationalTable>
           )}

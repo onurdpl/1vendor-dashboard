@@ -4,10 +4,12 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
-  KPISummaryCard,
+  KPIStatCard,
   MetadataRow,
   OperationalActionGroup,
+  OperationalSection,
   OperationalTable,
+  OperationalTableRow,
   SideDetailPanel,
   StatusBadge,
   TimelineBlock,
@@ -275,12 +277,12 @@ export function AdminDiagnosticsPage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPISummaryCard label="Webhook events" value={webhooksQuery.data.summary.total} detail="Persisted envelopes" tone="info" />
-        <KPISummaryCard label="Needs attention" value={webhooksQuery.data.summary.needsAttention} detail="Failed or blocked" tone="danger" />
-        <KPISummaryCard label="Reconciliation" value={reconciliationQuery.data.summary.total} detail="Operator candidates" tone="attention" />
-        <KPISummaryCard label="Missing payload" value={combinedCounts.missingPayload} detail="Manual recovery required" tone="warning" />
-        <KPISummaryCard label="Fulfillment failures" value={combinedCounts.fulfillmentFailures} detail="Sync failure signals" tone="danger" />
-        <KPISummaryCard label="Stale allocations" value={combinedCounts.staleAllocations} detail="Reconcile against Shopify" tone="attention" />
+        <KPIStatCard label="Webhook events" value={webhooksQuery.data.summary.total} detail="Persisted envelopes" tone="info" />
+        <KPIStatCard label="Needs attention" value={webhooksQuery.data.summary.needsAttention} detail="Failed or blocked" tone="danger" />
+        <KPIStatCard label="Reconciliation" value={reconciliationQuery.data.summary.total} detail="Operator candidates" tone="attention" />
+        <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Manual recovery required" tone="warning" />
+        <KPIStatCard label="Fulfillment failures" value={combinedCounts.fulfillmentFailures} detail="Sync failure signals" tone="danger" />
+        <KPIStatCard label="Stale allocations" value={combinedCounts.staleAllocations} detail="Reconcile against Shopify" tone="stale" />
       </div>
 
       <div className="op-control-layout diagnostics-layout-redesign">
@@ -296,17 +298,10 @@ export function AdminDiagnosticsPage() {
               className="diagnostics-op-table"
             >
               {visibleWebhooks.map((event) => (
-                <div
-                  role="button"
-                  tabIndex={0}
+                <OperationalTableRow
                   key={event.id}
-                  className={`op-table-row ${latestWebhookEventId === event.id ? 'op-row-selected' : ''}`}
-                  onClick={() => setSelectedWebhookEventId(event.id)}
-                  onKeyDown={(keyboardEvent) => {
-                    if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
-                      setSelectedWebhookEventId(event.id);
-                    }
-                  }}
+                  selected={latestWebhookEventId === event.id}
+                  onSelect={() => setSelectedWebhookEventId(event.id)}
                 >
                   <StatusBadge tone={getStatusTone(event.status)}>{event.status}</StatusBadge>
                   <span>
@@ -323,7 +318,14 @@ export function AdminDiagnosticsPage() {
                   <span>{getPrimaryEntityLabel(event.affectedEntities)}</span>
                   <span>{formatDate(event.receivedAt)}</span>
                   <OperationalActionGroup>
-                    <button type="button" className="button button-secondary" onClick={() => setSelectedWebhookEventId(event.id)}>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={(clickEvent) => {
+                        clickEvent.stopPropagation();
+                        setSelectedWebhookEventId(event.id);
+                      }}
+                    >
                       View
                     </button>
                     <button
@@ -349,17 +351,16 @@ export function AdminDiagnosticsPage() {
                       Recover
                     </button>
                   </OperationalActionGroup>
-                </div>
+                </OperationalTableRow>
               ))}
             </OperationalTable>
           )}
 
           <div className="op-secondary-grid">
-            <section className="op-panel-block">
-              <div className="op-section-heading">
-                <h3>Reconciliation queue</h3>
-                <p>Stuck events, missing payloads, and suggested recovery actions.</p>
-              </div>
+            <OperationalSection
+              title="Reconciliation queue"
+              description="Stuck events, missing payloads, and suggested recovery actions."
+            >
               {visibleReconciliationItems.length === 0 ? (
                 <EmptyStatePanel title="No active reconciliation work" description="No stuck webhook events or sync failures are currently waiting for admin recovery." />
               ) : (
@@ -399,13 +400,12 @@ export function AdminDiagnosticsPage() {
                   ))}
                 </div>
               )}
-            </section>
+            </OperationalSection>
 
-            <section className="op-panel-block">
-              <div className="op-section-heading">
-                <h3>Sync event stream</h3>
-                <p>Latest backend ingestion and fulfillment failure signals.</p>
-              </div>
+            <OperationalSection
+              title="Sync event stream"
+              description="Latest backend ingestion and fulfillment failure signals."
+            >
               {visibleSyncEvents.length === 0 ? (
                 <EmptyStatePanel title="No sync failures recorded" description="Webhook ingestion and fulfillment sync are currently clear." />
               ) : (
@@ -423,7 +423,7 @@ export function AdminDiagnosticsPage() {
                   ))}
                 </div>
               )}
-            </section>
+            </OperationalSection>
           </div>
         </div>
 

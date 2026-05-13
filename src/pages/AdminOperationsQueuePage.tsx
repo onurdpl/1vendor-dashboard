@@ -3,10 +3,11 @@ import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
-  KPISummaryCard,
+  KPIStatCard,
   MetadataRow,
   OperationalActionGroup,
   OperationalTable,
+  OperationalTableRow,
   SideDetailPanel,
   StatusBadge,
   TimelineBlock,
@@ -161,10 +162,10 @@ export function AdminOperationsQueuePage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPISummaryCard label="Pending reassignment" value={summary.pending_reassignment ?? 0} detail="Allocation lifecycle" tone="warning" />
-        <KPISummaryCard label="Awaiting shipment" value={summary.awaiting_shipment ?? 0} detail="Fulfillment lifecycle" tone="attention" />
-        <KPISummaryCard label="Vendor blocked" value={summary.vendor_blocked ?? 0} detail="Vendor action required" tone="danger" />
-        <KPISummaryCard label="Refund attention" value={summary.refund_attention ?? 0} detail="Return/refund lifecycle" tone="info" />
+        <KPIStatCard label="Pending reassignment" value={summary.pending_reassignment ?? 0} detail="Allocation lifecycle" tone="warning" />
+        <KPIStatCard label="Awaiting shipment" value={summary.awaiting_shipment ?? 0} detail="Fulfillment lifecycle" tone="attention" />
+        <KPIStatCard label="Vendor blocked" value={summary.vendor_blocked ?? 0} detail="Vendor action required" tone="danger" />
+        <KPIStatCard label="Refund attention" value={summary.refund_attention ?? 0} detail="Return/refund lifecycle" tone="info" />
       </div>
 
       <div className="op-control-layout operations-layout">
@@ -180,17 +181,10 @@ export function AdminOperationsQueuePage() {
               className="operations-op-table"
             >
               {sortedQueue.map((item) => (
-                <div
-                  role="button"
-                  tabIndex={0}
+                <OperationalTableRow
                   key={item.id}
-                  className={`op-table-row ${selectedItem?.id === item.id ? 'op-row-selected' : ''}`}
-                  onClick={() => setSelectedItemId(item.id)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      setSelectedItemId(item.id);
-                    }
-                  }}
+                  selected={selectedItem?.id === item.id}
+                  onSelect={() => setSelectedItemId(item.id)}
                 >
                   <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
                   <span>
@@ -217,7 +211,7 @@ export function AdminOperationsQueuePage() {
                       <span className="queue-muted-action">No action</span>
                     )}
                   </OperationalActionGroup>
-                </div>
+                </OperationalTableRow>
               ))}
             </OperationalTable>
           )}
