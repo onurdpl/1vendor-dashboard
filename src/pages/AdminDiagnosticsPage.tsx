@@ -4,12 +4,17 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
+  FilterBar,
   KPIStatCard,
+  MetadataGroup,
   MetadataRow,
   OperationalActionGroup,
   OperationalSection,
   OperationalTable,
   OperationalTableRow,
+  OperationalToolbar,
+  SearchInput,
+  SeverityBadge,
   SideDetailPanel,
   StatusBadge,
   TimelineBlock,
@@ -118,6 +123,11 @@ function getPrimaryEntityLabel(entities: {
 export function AdminDiagnosticsPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [selectedWebhookEventId, setSelectedWebhookEventId] = useState<string | null>(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [topicFilter, setTopicFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [payloadFilter, setPayloadFilter] = useState('all');
+  const [eligibilityFilter, setEligibilityFilter] = useState('all');
   const isRealMode = runtimeConfig.apiMode === 'real';
 
   const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), () =>
@@ -205,8 +215,50 @@ export function AdminDiagnosticsPage() {
     },
   );
 
+  const filteredWebhooks = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return (webhooksQuery.data?.events ?? []).filter((event) => {
+      const matchesTopic = topicFilter === 'all' || event.topic === topicFilter;
+      const matchesStatus = statusFilter === 'all' || event.status === statusFilter;
+      const matchesPayload =
+        payloadFilter === 'all' ||
+        (payloadFilter === 'available' && event.payloadAvailable) ||
+        (payloadFilter === 'missing' && !event.payloadAvailable);
+      const matchesEligibility =
+        eligibilityFilter === 'all' ||
+        (eligibilityFilter === 'replayable' && event.replayEligible) ||
+        (eligibilityFilter === 'recoverable' && event.recoverEligible) ||
+        (eligibilityFilter === 'blocked' && !event.replayEligible && !event.recoverEligible);
+      const searchableText = [
+        event.id,
+        event.topic,
+        event.status,
+        event.processingStatus ?? '',
+        event.shopDomain,
+        event.shopifyWebhookId ?? '',
+        event.eventId ?? '',
+        event.payloadHash ?? '',
+        event.lastErrorSummary ?? '',
+        event.recommendedAction,
+        event.affectedEntities.shopifyOrderId ?? '',
+        event.affectedEntities.shopifyOrderNumber ?? '',
+        event.affectedEntities.shopifyReturnId ?? '',
+        event.affectedEntities.shopifyRefundId ?? '',
+        event.affectedEntities.shopifyFulfillmentId ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return matchesTopic && matchesStatus && matchesPayload && matchesEligibility && (!query || searchableText.includes(query));
+    });
+  }, [eligibilityFilter, payloadFilter, searchTerm, statusFilter, topicFilter, webhooksQuery.data?.events]);
+
+  const topicOptions = useMemo(() => {
+    return Array.from(new Set((webhooksQuery.data?.events ?? []).map((event) => event.topic))).sort();
+  }, [webhooksQuery.data?.events]);
+
   const selectedWebhook = webhookDetailQuery.data;
-  const visibleWebhooks = webhooksQuery.data?.events.slice(0, 12) ?? [];
+  const visibleWebhooks = filteredWebhooks.slice(0, 20);
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
   const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
 
@@ -220,6 +272,8 @@ export function AdminDiagnosticsPage() {
       fulfillmentFailures: reconciliationQuery.data?.summary.fulfillmentSyncFailures ?? 0,
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
       staleAllocations: reconciliationQuery.data?.summary.staleAllocations ?? 0,
+      replayable: webhooksQuery.data?.events.filter((event) => event.replayEligible).length ?? 0,
+      recoverable: webhooksQuery.data?.events.filter((event) => event.recoverEligible).length ?? 0,
     };
   }, [reconciliationQuery.data, webhooksQuery.data]);
 
@@ -277,25 +331,81 @@ export function AdminDiagnosticsPage() {
       </div>
 
       <div className="op-kpi-row">
-        <KPIStatCard label="Webhook events" value={webhooksQuery.data.summary.total} detail="Persisted envelopes" tone="info" />
-        <KPIStatCard label="Needs attention" value={webhooksQuery.data.summary.needsAttention} detail="Failed or blocked" tone="danger" />
-        <KPIStatCard label="Reconciliation" value={reconciliationQuery.data.summary.total} detail="Operator candidates" tone="attention" />
-        <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Manual recovery required" tone="warning" />
-        <KPIStatCard label="Fulfillment failures" value={combinedCounts.fulfillmentFailures} detail="Sync failure signals" tone="danger" />
-        <KPIStatCard label="Stale allocations" value={combinedCounts.staleAllocations} detail="Reconcile against Shopify" tone="stale" />
+        <KPIStatCard label="Processed" value={webhooksQuery.data.summary.processed} detail="Completed envelopes" tone="success" />
+        <KPIStatCard label="Failed" value={webhooksQuery.data.summary.failed} detail="Backend processing failed" tone="danger" />
+        <KPIStatCard label="Received / stuck" value={combinedCounts.stuck} detail="Not yet processed" tone="attention" />
+        <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Recovery blocked" tone="warning" />
+        <KPIStatCard label="Replayable" value={combinedCounts.replayable} detail="Safe idempotent retry" tone="info" />
+        <KPIStatCard label="Recoverable" value={combinedCounts.recoverable} detail="Operator action enabled" tone="success" />
       </div>
 
       <div className="op-control-layout diagnostics-layout-redesign">
         <div className="op-main-column">
+          <OperationalToolbar>
+            <SearchInput
+              placeholder="Search topic, payload hash, entity, error..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
+            />
+            <FilterBar>
+              <select value={topicFilter} onChange={(event) => setTopicFilter(event.target.value)}>
+                <option value="all">All topics</option>
+                {topicOptions.map((topic) => (
+                  <option key={topic} value={topic}>
+                    {formatWebhookTopic(topic)}
+                  </option>
+                ))}
+              </select>
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All statuses</option>
+                <option value="RECEIVED">Received</option>
+                <option value="PROCESSING">Processing</option>
+                <option value="PROCESSED">Processed</option>
+                <option value="FAILED">Failed</option>
+              </select>
+              <select value={payloadFilter} onChange={(event) => setPayloadFilter(event.target.value)}>
+                <option value="all">All payloads</option>
+                <option value="available">Payload available</option>
+                <option value="missing">Payload missing</option>
+              </select>
+              <select value={eligibilityFilter} onChange={(event) => setEligibilityFilter(event.target.value)}>
+                <option value="all">All action states</option>
+                <option value="replayable">Replayable</option>
+                <option value="recoverable">Recoverable</option>
+                <option value="blocked">Blocked / no-op</option>
+              </select>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  setSearchTerm('');
+                  setTopicFilter('all');
+                  setStatusFilter('all');
+                  setPayloadFilter('all');
+                  setEligibilityFilter('all');
+                }}
+              >
+                Reset
+              </button>
+            </FilterBar>
+          </OperationalToolbar>
+
+          <div className="diagnostics-filter-summary">
+            <span>{filteredWebhooks.length} events</span>
+            <span>{topicFilter === 'all' ? 'All webhook topics' : formatWebhookTopic(topicFilter)}</span>
+            <span>{statusFilter === 'all' ? 'All processing statuses' : statusFilter}</span>
+            <span>{payloadFilter === 'all' ? 'All payload states' : payloadFilter}</span>
+          </div>
+
           {visibleWebhooks.length === 0 ? (
             <EmptyStatePanel
               title="No webhook events recorded"
-              description="Live backend diagnostics will appear here once Shopify deliveries reach the backend."
+              description="Live backend diagnostics will appear here once Shopify deliveries reach the backend, or when filters match recorded events."
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Topic', 'Payload', 'Operator guidance', 'Affected entity', 'Received', 'Actions']}
-              className="diagnostics-op-table"
+              columns={['Status', 'Topic', 'Event ID', 'Payload', 'Eligibility', 'Affected entity', 'Received', 'Actions']}
+              className="diagnostics-op-table diagnostics-op-table-v2"
             >
               {visibleWebhooks.map((event) => (
                 <OperationalTableRow
@@ -308,12 +418,16 @@ export function AdminDiagnosticsPage() {
                     <strong>{formatWebhookTopic(event.topic)}</strong>
                     <small>{event.shopDomain}</small>
                   </span>
+                  <span>
+                    <strong>{event.eventId ?? event.id}</strong>
+                    <small>{event.shopifyWebhookId ?? 'Shopify webhook ID not provided'}</small>
+                  </span>
                   <StatusBadge tone={event.payloadAvailable ? 'success' : 'warning'}>
                     {event.payloadAvailable ? 'Available' : 'Missing'}
                   </StatusBadge>
                   <span>
                     <strong>{event.recoverEligible ? 'Recover eligible' : event.replayEligible ? 'Replay available' : 'No action'}</strong>
-                    <small>{event.lastErrorSummary ?? event.recommendedAction}</small>
+                    <small>{event.recoverBlockedReason ?? event.replayBlockedReason ?? event.lastErrorSummary ?? event.recommendedAction}</small>
                   </span>
                   <span>{getPrimaryEntityLabel(event.affectedEntities)}</span>
                   <span>{formatDate(event.receivedAt)}</span>
@@ -362,19 +476,27 @@ export function AdminDiagnosticsPage() {
               description="Stuck events, missing payloads, and suggested recovery actions."
             >
               {visibleReconciliationItems.length === 0 ? (
-                <EmptyStatePanel title="No active reconciliation work" description="No stuck webhook events or sync failures are currently waiting for admin recovery." />
+                <EmptyStatePanel title="No active reconciliation work" description="No stuck webhook events, stale allocations, or sync failures are currently waiting for admin recovery." />
               ) : (
-                <div className="op-event-list">
+                <div className="op-event-list reconciliation-event-list">
                   {visibleReconciliationItems.map((item) => (
-                    <article key={item.id} className="op-event-row">
-                      <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                    <article key={item.id} className="op-event-row reconciliation-event-row">
+                      <SeverityBadge tone={getSeverityTone(item.severity)}>{item.severity}</SeverityBadge>
                       <div>
                         <strong>{item.title}</strong>
                         <p>{item.description}</p>
-                        <small>{item.suggestedAction}</small>
+                        <small>Recommended action: {item.suggestedAction}</small>
+                        <div className="reconciliation-meta">
+                          <span>{toTitleCaseLabel(item.type)}</span>
+                          <span>{item.status === 'processed' ? 'No-op / processed' : item.status}</span>
+                          {item.relatedAllocationId ? <span>Allocation {item.relatedAllocationId}</span> : null}
+                          {item.relatedShopifyOrderId ? <span>Order {item.relatedShopifyOrderId}</span> : null}
+                        </div>
                       </div>
                       <OperationalActionGroup>
-                        <span>{item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}</span>
+                        <StatusBadge tone={item.payloadAvailable === false ? 'warning' : 'neutral'}>
+                          {item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}
+                        </StatusBadge>
                         {item.relatedAllocationId ? (
                           <button
                             type="button"
@@ -394,6 +516,9 @@ export function AdminDiagnosticsPage() {
                           >
                             Reconcile order
                           </button>
+                        ) : null}
+                        {!item.relatedAllocationId && !item.relatedShopifyOrderId ? (
+                          <span className="queue-muted-action">No backend reconcile action exposed</span>
                         ) : null}
                       </OperationalActionGroup>
                     </article>
@@ -446,18 +571,29 @@ export function AdminDiagnosticsPage() {
                   {selectedWebhook.payloadAvailable ? 'Payload available' : 'Payload missing'}
                 </StatusBadge>
               </div>
-              <div className="op-meta-grid">
+              <MetadataGroup title="Event identity">
+                <MetadataRow label="Topic" value={formatWebhookTopic(selectedWebhook.topic)} />
+                <MetadataRow label="Webhook event ID" value={selectedWebhook.id} />
+                <MetadataRow label="Shopify webhook ID" value={selectedWebhook.shopifyWebhookId ?? 'Not provided'} />
+                <MetadataRow label="Event ID" value={selectedWebhook.eventId ?? 'Not provided'} />
+                <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
+              </MetadataGroup>
+              <MetadataGroup title="Recovery readiness">
                 <MetadataRow label="Recoverability" value={formatRecoverability(selectedWebhook.payloadAvailable, selectedWebhook.status)} />
                 <MetadataRow label="Recommended action" value={selectedWebhook.recommendedAction} />
-                <MetadataRow label="Shop domain" value={selectedWebhook.shopDomain} />
-                <MetadataRow label="Webhook ID" value={selectedWebhook.shopifyWebhookId ?? 'Not provided'} />
+                <MetadataRow label="Replay eligibility" value={selectedWebhook.replayEligible ? 'Replay allowed' : selectedWebhook.replayBlockedReason ?? 'Replay blocked'} />
+                <MetadataRow label="Recover eligibility" value={selectedWebhook.recoverEligible ? 'Recover allowed' : selectedWebhook.recoverBlockedReason ?? 'Recover blocked'} />
+                <MetadataRow label="Processing status" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
+                <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
+              </MetadataGroup>
+              <MetadataGroup title="Affected entities">
                 <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not inferable'} />
                 <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not inferable'} />
                 <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities.shopifyRefundId ?? 'Not inferable'} />
                 <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities.shopifyFulfillmentId ?? 'Not inferable'} />
                 <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
-              </div>
+              </MetadataGroup>
               <div className="op-panel-section">
                 <h4>Recovery actions</h4>
                 <OperationalActionGroup>
@@ -486,6 +622,9 @@ export function AdminDiagnosticsPage() {
                 ) : null}
                 {!canReplay && selectedWebhook.replayBlockedReason ? (
                   <p className="queue-muted-action">Replay blocked: {selectedWebhook.replayBlockedReason}</p>
+                ) : null}
+                {!canRecover && !selectedWebhook.recoverBlockedReason && !canReplay && !selectedWebhook.replayBlockedReason ? (
+                  <p className="queue-muted-action">No action is recommended for the current processed state.</p>
                 ) : null}
               </div>
               <div className="op-panel-section">

@@ -1836,6 +1836,90 @@ h3 {
   white-space: nowrap;
 }
 
+/* Phase 16C finance and diagnostics control centers */
+.finance-layout,
+.diagnostics-layout-redesign {
+  grid-template-columns: minmax(0, 1fr) minmax(360px, 430px);
+}
+
+.finance-kpi-row {
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.finance-op-table-v2 .op-table-head,
+.finance-op-table-v2 .op-table-row {
+  min-width: 1280px;
+  grid-template-columns: 0.82fr 1.35fr 1fr 1.05fr 1.05fr 0.8fr 1fr 0.95fr 0.72fr;
+}
+
+.finance-op-table-v2,
+.diagnostics-op-table-v2 {
+  overflow: auto;
+}
+
+.diagnostics-op-table-v2 .op-table-head,
+.diagnostics-op-table-v2 .op-table-row {
+  min-width: 1340px;
+  grid-template-columns: 0.78fr 1.2fr 1.15fr 0.82fr 1.15fr 1fr 0.95fr 0.95fr;
+}
+
+.finance-amount-emphasis {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.diagnostics-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--op-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.diagnostics-filter-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--op-border);
+  border-radius: 999px;
+  background: var(--op-surface);
+}
+
+.reconciliation-event-list {
+  max-height: 520px;
+  overflow: auto;
+}
+
+.reconciliation-event-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+.reconciliation-event-row .op-action-group {
+  grid-column: 2;
+}
+
+.reconciliation-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.reconciliation-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid rgba(223, 229, 238, 0.86);
+  border-radius: 999px;
+  background: var(--op-surface-soft);
+  color: var(--op-muted);
+  font-size: 0.76rem;
+  font-weight: 800;
+}
+
 /* Dashboard workspace */
 .dashboard-workspace {
   gap: 14px;

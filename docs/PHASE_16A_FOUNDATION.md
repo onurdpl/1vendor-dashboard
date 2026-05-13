@@ -130,6 +130,14 @@
 ### Phase 16C Finance + Diagnostics
 - Use `KPIStatCard`, `OperationalSection`, `StatusBadge`, `SeverityBadge`, and panel metadata primitives.
 - Keep diagnostics actions dependent on backend eligibility fields rather than frontend inference.
+- Phase 16C implementation update:
+  - Finance is now a ledger-oriented control center with compact KPIs, frontend status/source/vendor/search filtering, a dense operational table, and a right-side ledger detail panel.
+  - Finance status hierarchy separates recorded refund rows, pending/hold ledger items, failed attention states, and reporting-only payable placeholders without adding payout execution logic.
+  - Finance detail panels show ledger metadata, Shopify order/refund identifiers, current vendor scope, and a payout-engine-disabled note.
+  - Admin Diagnostics is now an operational event stream with processed/failed/stuck/missing-payload/replayable/recoverable KPIs, topic/status/payload/action-state filters, a dense webhook table, and a right-side recovery detail panel.
+  - Replay/recover/reconcile buttons still call backend eligibility-driven services; blocked reasons are displayed from backend DTO fields.
+  - Reconciliation display now highlights stale allocations, suggested action, payload availability, no-op/processed states, and admin-triggered reconcile actions.
+  - No backend workflow, queue worker, payout engine, or external integration was added.
 
 ### Phase 16D Orders + Shell Polish
 - Use the same table, toolbar, side panel, and status primitives for order allocation and fulfillment surfaces.
@@ -142,3 +150,5 @@
 - No Storybook or component catalog exists yet.
 - No realtime status updates or background refresh architecture was added.
 - After Phase 16B, Returns still depends on currently available backend fields; real product thumbnails, richer customer fields, and direct diagnostics links remain future DTO/workflow improvements.
+- After Phase 16C, Finance still uses existing ledger DTOs; richer return/refund joins, payout execution, invoice generation, and vendor payable math remain future finance work.
+- After Phase 16C, Diagnostics remains operator-triggered; background retry workers, scheduled reconciliation, alerting, and realtime socket updates remain infrastructure hardening work.

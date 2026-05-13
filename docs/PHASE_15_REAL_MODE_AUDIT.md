@@ -339,6 +339,38 @@
   - no direct diagnostics event deep-linking from a return record yet
   - richer customer fields depend on future backend DTO expansion
 
+## Phase 16C Finance + Diagnostics Control Centers
+- Finance is now a production-grade operational ledger workspace:
+  - compact KPIs for recorded refunds, total refund amount, pending/hold items, failed attention items, and vendor payable placeholder
+  - frontend filters for status, source/type, vendor scope, Shopify order/refund identifiers, and amount/search text
+  - dense ledger table showing status, source, vendor, Shopify order number/id, Shopify refund id, amount, lifecycle label, timestamp, and quick view action
+  - right-side detail panel for ledger metadata, Shopify identifiers, vendor isolation context, related refund context, and payout-engine-disabled guidance
+- The Finance page remains reporting-only:
+  - no payout engine was introduced
+  - no invoice generation was introduced
+  - no new payout math was invented beyond existing backend summary fields
+- Admin Diagnostics is now a recovery-oriented event stream:
+  - compact KPIs for processed, failed, received/stuck, missing payload, replayable, and recoverable events
+  - frontend filters for topic, status, payload availability, replay/recover eligibility, and entity/error search
+  - dense webhook table showing event identity, payload state, backend eligibility, affected Shopify entity, and replay/recover actions
+  - right-side detail panel for timeline, topic, webhook id, event id, shop domain, payload hash/idempotency key, affected entity hints, blocked reasons, safe error summaries, and payload preview
+- Reconciliation UX now emphasizes:
+  - stale allocation signals
+  - recommended operator action
+  - payload availability
+  - no-op/processed states
+  - admin-triggered allocation/order reconciliation actions
+- Existing production constraints remain:
+  - replay/recover/reconcile calls still use backend services and backend eligibility fields
+  - diagnostics/recovery remains admin-only by route/permission model
+  - vendor isolation is preserved by existing Finance service scope
+  - no queue worker, scheduled job, realtime socket, payout engine, ERP/cargo integration, invoice generation, or shipment label generation was introduced
+- Remaining gaps before Phase 16D:
+  - Finance detail records still depend on existing ledger DTO fields; richer return/refund joins are future DTO work
+  - Diagnostics does not auto-refresh or run background retries
+  - Reconciliation remains operator-triggered
+  - Direct cross-links from finance/refund rows to diagnostics events remain future navigation work
+
 ## Phase 16-3C Inbound Fulfillment Sync
 - Backend now supports inbound Shopify fulfillment status refresh for:
   - `FULFILLMENTS_CREATE`
