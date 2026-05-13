@@ -119,9 +119,9 @@ export function FinancePage() {
       }),
     {
       invalidateQueryKeys: [queryKeys.finance.summary()],
-      onSuccess: () => {
+      onSuccess: async () => {
+        await refetch();
         showFeedback('Vendor financial profile saved.', 'success');
-        void refetch();
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Financial profile could not be saved.', 'error'),
@@ -139,6 +139,10 @@ export function FinancePage() {
     setShippingMode(finance.profile.shippingMode);
     setFixedShippingFee(finance.profile.fixedShippingFee ?? '');
   }, [finance?.profile]);
+
+  async function handleSaveVendorProfile() {
+    await saveProfileMutation.mutateAsync(undefined);
+  }
 
   const financeKpis = useMemo(() => {
     const transactions = finance?.transactions ?? [];
@@ -285,7 +289,7 @@ export function FinancePage() {
               type="button"
               className="button button-primary"
               disabled={saveProfileMutation.isPending}
-              onClick={() => void saveProfileMutation.mutateAsync(undefined)}
+              onClick={() => void handleSaveVendorProfile()}
             >
               {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
             </button>

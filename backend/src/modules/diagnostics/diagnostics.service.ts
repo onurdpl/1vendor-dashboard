@@ -34,6 +34,7 @@ import type {
   WebhookRecoverResponse,
   OperationalJobRetryResponse,
   WebhookReplayResponse,
+  ReturnVisibilityDiagnostic,
 } from './diagnostics.types.js';
 
 const SUPPORTED_REPLAY_TOPICS = new Set([
@@ -128,6 +129,10 @@ function summarizeError(message: string | null | undefined) {
   }
 
   return message.length > 220 ? `${message.slice(0, 217)}...` : message;
+}
+
+function normalizeEntryType(value: string) {
+  return value.trim().toLowerCase();
 }
 
 function stringifyEntityId(value: unknown) {
@@ -450,6 +455,171 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
     createdAt: toIsoString(event.receivedAt),
     updatedAt: toIsoString(event.processedAt ?? event.receivedAt),
     relatedShopifyOrderId: event.shopifyOrder?.sourceShopifyOrderId ?? null,
+  };
+}
+
+function normalizeOrderLookup(value: string) {
+  const trimmed = value.trim();
+  return {
+    raw: trimmed,
+    number: trimmed.startsWith('#') ? trimmed : `#${trimmed}`,
+  };
+}
+
+function getPayloadOrderHint(payload: Record<string, unknown> | null) {
+  const orderId = getStringField(payload, 'order_id');
+  const orderNumber = getStringField(payload, 'order_number');
+  const name = getStringField(payload, 'name');
+  const orderObject = payload?.order && typeof payload.order === 'object' && !Array.isArray(payload.order)
+    ? (payload.order as Record<string, unknown>)
+    : null;
+  const nestedOrderId = getStringField(orderObject, 'id');
+  const nestedOrderGid = getStringField(orderObject, 'admin_graphql_api_id');
+
+  return orderId ?? nestedOrderId ?? nestedOrderGid ?? orderNumber ?? name;
+}
+
+export async function getReturnVisibilityDiagnostic(query: string): Promise<ReturnVisibilityDiagnostic> {
+  const lookup = normalizeOrderLookup(query);
+  const localOrder = await prisma.shopifyOrder.findFirst({
+    where: {
+      OR: [
+        { sourceShopifyOrderId: lookup.raw },
+        { sourceShopifyOrderNumber: lookup.raw },
+        { sourceShopifyOrderNumber: lookup.number },
+      ],
+    },
+    include: {
+      allocations: {
+        include: {
+          lineItems: {
+            include: {
+              shopifyOrderLineItem: true,
+            },
+          },
+          returnRecords: true,
+          refundRecords: true,
+          financeEntries: true,
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+
+  const webhookCandidates = await prisma.webhookEvent.findMany({
+    where: {
+      topic: {
+        startsWith: 'returns/',
+      },
+    },
+    orderBy: {
+      receivedAt: 'desc',
+    },
+    take: 250,
+  });
+
+  const matchingWebhookEvents = webhookCandidates
+    .map((event) => {
+      const payload = parsePayloadForHints(event.rawPayload);
+      const payloadOrderHint = getPayloadOrderHint(payload);
+      const affected = inferAffectedEntities({ topic: event.topic, rawPayload: event.rawPayload });
+      const matchesOrder =
+        localOrder?.id && event.shopifyOrderId === localOrder.id
+          ? true
+          : [payloadOrderHint, affected.shopifyOrderId, affected.shopifyOrderNumber]
+              .filter((value): value is string => Boolean(value))
+              .some((value) => value === lookup.raw || value === lookup.number || value.endsWith(`/${lookup.raw}`));
+
+      return {
+        event,
+        payload,
+        payloadOrderHint,
+        affected,
+        matchesOrder,
+      };
+    })
+    .filter((entry) => entry.matchesOrder);
+
+  const allocations = localOrder?.allocations ?? [];
+  const returnRecords = allocations.flatMap((allocation) =>
+    allocation.returnRecords.map((record) => ({
+      id: record.id,
+      vendorAllocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      sourceShopifyReturnId: record.sourceShopifyReturnId,
+      sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+      sourceShopifyLineItemId: record.sourceShopifyLineItemId,
+      status: record.status,
+      returnRequestSource: record.returnRequestSource,
+      createdAt: record.createdAt.toISOString(),
+      updatedAt: record.updatedAt.toISOString(),
+    })),
+  );
+  const financeLedger = allocations.flatMap((allocation) =>
+    allocation.financeEntries.map((entry) => ({
+      id: entry.id,
+      vendorId: entry.vendorId,
+      vendorAllocationId: entry.vendorAllocationId,
+      entryType: entry.entryType,
+      amount: String(entry.amount),
+      payoutStatus: entry.payoutStatus,
+    })),
+  );
+  const returnsRequestWebhookFound = matchingWebhookEvents.some((entry) => entry.event.topic === 'returns/request');
+  const failedReturnsRequestWebhookFound = matchingWebhookEvents.some(
+    (entry) => entry.event.topic === 'returns/request' && entry.event.status === 'FAILED',
+  );
+  const mappingIssueLikely = matchingWebhookEvents.some((entry) =>
+    (entry.event.errorMessage ?? '').toLowerCase().includes('mapping') ||
+    (entry.event.errorMessage ?? '').toLowerCase().includes('allocation') ||
+    (entry.event.errorMessage ?? '').toLowerCase().includes('seller_info'),
+  );
+
+  return {
+    query: lookup.raw,
+    localOrder: {
+      found: Boolean(localOrder),
+      id: localOrder?.id ?? null,
+      sourceShopifyOrderId: localOrder?.sourceShopifyOrderId ?? null,
+      sourceShopifyOrderNumber: localOrder?.sourceShopifyOrderNumber ?? null,
+      allocationCount: allocations.length,
+    },
+    allocations: allocations.map((allocation) => ({
+      id: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      originalVendorId: allocation.originalVendorId,
+      assignedVendorId: allocation.assignedVendorId,
+      lineItems: allocation.lineItems.map((lineItem) => ({
+        sourceLineItemId: lineItem.shopifyOrderLineItem.sourceLineItemId,
+        sku: lineItem.shopifyOrderLineItem.sku,
+        title: lineItem.shopifyOrderLineItem.title,
+        quantity: lineItem.quantity,
+      })),
+    })),
+    returnRecords,
+    webhookEvents: matchingWebhookEvents.map((entry) => ({
+      id: entry.event.id,
+      topic: entry.event.topic,
+      status: entry.event.status,
+      receivedAt: entry.event.receivedAt.toISOString(),
+      processedAt: toIsoString(entry.event.processedAt),
+      errorSummary: summarizeError(entry.event.errorMessage),
+      shopifyReturnId: entry.affected.shopifyReturnId,
+      payloadOrderHint: entry.payloadOrderHint,
+      payloadAvailable: Boolean(entry.event.rawPayload),
+    })),
+    financeLedger,
+    findings: {
+      localAllocationFound: allocations.length > 0,
+      returnsRequestWebhookFound,
+      failedReturnsRequestWebhookFound,
+      returnRecordFound: returnRecords.length > 0,
+      refundLedgerFound: financeLedger.some((entry) => normalizeEntryType(entry.entryType) === 'refund'),
+      mappingIssueLikely,
+      productionRepairNeeded: returnsRequestWebhookFound && returnRecords.length === 0,
+    },
   };
 }
 

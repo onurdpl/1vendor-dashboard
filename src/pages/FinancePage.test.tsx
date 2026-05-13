@@ -53,6 +53,16 @@ const financeDashboard: FinanceDashboard = {
       shopifyOrderNumber: '1001',
       shopifyOrderId: 'gid://shopify/Order/1001',
       shopifyRefundId: 'gid://shopify/Refund/501',
+      payoutCalculation: {
+        grossAmount: '$0.00',
+        commission: '$0.00',
+        commissionVat: '$0.00',
+        shippingDeduction: '$0.00',
+        refundImpact: '$425.00',
+        estimatedPayout: '-$425.00',
+        shippingApplied: false,
+        shippingMode: 'disabled',
+      },
     },
     {
       id: 'ledger-refund-failed',
@@ -197,10 +207,23 @@ describe('FinancePage control center', () => {
           ...financeDashboard.profile!,
           commissionPercent: '15.00',
         },
+        transactions: [
+          {
+            ...financeDashboard.transactions[0],
+            payoutCalculation: {
+              ...financeDashboard.transactions[0].payoutCalculation!,
+              commission: '$63.75',
+              estimatedPayout: '-$488.75',
+            },
+          },
+          financeDashboard.transactions[1],
+        ],
       });
 
     renderFinancePage();
 
+    await userEvent.click(await screen.findByText('Shopify refund recorded'));
+    expect((await screen.findAllByText('-$425.00')).length).toBeGreaterThan(0);
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
     const commissionInput = within(profilePanel).getByLabelText(/commission %/i);
     await userEvent.clear(commissionInput);
@@ -210,5 +233,6 @@ describe('FinancePage control center', () => {
     await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
+    expect(await screen.findByText('-$488.75')).toBeInTheDocument();
   });
 });

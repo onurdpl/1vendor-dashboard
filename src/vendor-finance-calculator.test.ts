@@ -23,6 +23,33 @@ describe('vendor payout calculation foundation', () => {
     expect(result.estimatedPayout).toBe(856);
   });
 
+  it('updates commission when profile changes from 10% to 15%', () => {
+    const tenPercent = calculateVendorPayout({
+      grossAmount: 1000,
+      refundAmount: 0,
+      fulfilled: false,
+      profile: {
+        ...baseProfile,
+        commissionPercent: 10,
+        commissionVatPercent: 0,
+      },
+    });
+    const fifteenPercent = calculateVendorPayout({
+      grossAmount: 1000,
+      refundAmount: 0,
+      fulfilled: false,
+      profile: {
+        ...baseProfile,
+        commissionPercent: 15,
+        commissionVatPercent: 0,
+      },
+    });
+
+    expect(tenPercent.commission).toBe(100);
+    expect(fifteenPercent.commission).toBe(150);
+    expect(fifteenPercent.estimatedPayout).toBe(850);
+  });
+
   it('applies shipping deduction only after fulfillment', () => {
     const beforeFulfillment = calculateVendorPayout({
       grossAmount: 1000,

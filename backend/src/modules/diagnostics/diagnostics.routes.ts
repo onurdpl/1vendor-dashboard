@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import {
   getWebhookDiagnosticById,
+  getReturnVisibilityDiagnostic,
   getReconciliationDiagnostics,
   listSyncDiagnostics,
   listWebhookDiagnostics,
@@ -75,6 +76,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return getReconciliationDiagnostics();
+    },
+  );
+
+  app.get<{ Params: { shopifyOrderId: string } }>(
+    '/admin/diagnostics/returns/order/:shopifyOrderId',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return getReturnVisibilityDiagnostic(request.params.shopifyOrderId);
     },
   );
 

@@ -217,9 +217,10 @@ export async function getVendorFinanceDashboard(
       take: options.limit ?? 100,
       skip: options.offset ?? 0,
     }),
-    prisma.vendorFinancialProfile.findUnique({
+    prisma.vendorFinancialProfile.findFirst({
       where: {
         vendorId,
+        active: true,
       },
     }),
   ]);
@@ -301,9 +302,10 @@ export async function getVendorFinanceDashboard(
 }
 
 export async function getVendorFinancialProfile(vendorId: string): Promise<VendorFinancialProfileDto> {
-  const profile = await prisma.vendorFinancialProfile.findUnique({
+  const profile = await prisma.vendorFinancialProfile.findFirst({
     where: {
       vendorId,
+      active: true,
     },
   });
 
@@ -355,7 +357,7 @@ export async function upsertVendorFinancialProfile(
       deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
-      active: input.active ?? existing.active,
+      active: input.active ?? true,
     },
     create: {
       vendorId,
@@ -364,7 +366,7 @@ export async function upsertVendorFinancialProfile(
       deductShippingEnabled: input.deductShippingEnabled ?? existing.deductShippingEnabled,
       shippingMode: shippingMode.toUpperCase() as 'DISABLED' | 'FIXED' | 'EXTERNAL_PROVIDER',
       fixedShippingFee,
-      active: input.active ?? existing.active,
+      active: input.active ?? true,
     },
   });
 

@@ -198,3 +198,66 @@ export type ReconciliationResponse = {
   summary: ReconciliationSummary;
   items: ReconciliationItem[];
 };
+
+export type ReturnVisibilityDiagnostic = {
+  query: string;
+  localOrder: {
+    found: boolean;
+    id: string | null;
+    sourceShopifyOrderId: string | null;
+    sourceShopifyOrderNumber: string | null;
+    allocationCount: number;
+  };
+  allocations: Array<{
+    id: string;
+    vendorId: string;
+    originalVendorId: string;
+    assignedVendorId: string;
+    lineItems: Array<{
+      sourceLineItemId: string;
+      sku: string | null;
+      title: string | null;
+      quantity: number;
+    }>;
+  }>;
+  returnRecords: Array<{
+    id: string;
+    vendorAllocationId: string;
+    vendorId: string;
+    sourceShopifyReturnId: string | null;
+    sourceShopifyReturnGid: string | null;
+    sourceShopifyLineItemId: string | null;
+    status: string;
+    returnRequestSource: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
+  webhookEvents: Array<{
+    id: string;
+    topic: string;
+    status: string;
+    receivedAt: string;
+    processedAt: string | null;
+    errorSummary: string | null;
+    shopifyReturnId: string | null;
+    payloadOrderHint: string | null;
+    payloadAvailable: boolean;
+  }>;
+  financeLedger: Array<{
+    id: string;
+    vendorId: string;
+    vendorAllocationId: string | null;
+    entryType: string;
+    amount: string;
+    payoutStatus: string;
+  }>;
+  findings: {
+    localAllocationFound: boolean;
+    returnsRequestWebhookFound: boolean;
+    failedReturnsRequestWebhookFound: boolean;
+    returnRecordFound: boolean;
+    refundLedgerFound: boolean;
+    mappingIssueLikely: boolean;
+    productionRepairNeeded: boolean;
+  };
+};

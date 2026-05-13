@@ -789,6 +789,30 @@ async function runSmoke() {
       throw new Error('Admin login token missing in /auth/login response.');
     }
 
+    const returnVisibilityDiagnosticResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/returns/order/${smokeOrderId}`,
+      {
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (!returnVisibilityDiagnosticResponse.ok) {
+      throw new Error(
+        `/admin/diagnostics/returns/order/:shopifyOrderId failed with ${returnVisibilityDiagnosticResponse.status}`,
+      );
+    }
+    const returnVisibilityDiagnostic = await returnVisibilityDiagnosticResponse.json();
+    if (
+      returnVisibilityDiagnostic?.localOrder?.found !== true ||
+      returnVisibilityDiagnostic?.findings?.returnsRequestWebhookFound !== true ||
+      returnVisibilityDiagnostic?.findings?.returnRecordFound !== true
+    ) {
+      throw new Error(
+        `/admin/diagnostics/returns/order/:shopifyOrderId should show allocation, webhook, and return record: ${JSON.stringify(returnVisibilityDiagnostic)}`,
+      );
+    }
+
     const adminVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
       headers: {
         Authorization: `Bearer ${adminToken}`,
