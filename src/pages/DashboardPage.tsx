@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
+import {
+  EmptyStatePanel,
+  KPIStatCard,
+  MetadataRow,
+  OperationalSection,
+  StatusBadge,
+} from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
 import { getDashboardOverview } from '../lib/api/dashboard';
 import { getCurrentUser, getCurrentVendorContext, onVendorChange } from '../lib/auth';
@@ -51,140 +58,102 @@ export function DashboardPage() {
   }
 
   return (
-    <section className="dashboard dashboard-workspace">
-      <div className="hero-card operational-card dashboard-header">
-        <div className="queue-header-copy">
+    <section className="op-page dashboard-command-center">
+      <div className="op-page-heading dashboard-command-heading">
+        <div>
           <p className="eyebrow">Dashboard</p>
           <h2>{dashboard.title}</h2>
           <p className="page-description">{dashboard.description}</p>
         </div>
-        <div className="queue-health">
-          <span className="severity-chip severity-normal">Vendor {dashboard.vendorName}</span>
-          <span className="severity-chip severity-attention">
+        <div className="op-heading-meta">
+          <StatusBadge tone="info">Vendor {dashboard.vendorName}</StatusBadge>
+          <StatusBadge tone="attention">
             Awaiting shipment {dashboard.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '0'}
-          </span>
-          <span className="severity-chip severity-warning">
+          </StatusBadge>
+          <StatusBadge tone="warning">
             Needs attention {getPriorityValue(dashboard.priorityWork, 'Blocked allocations') + getPriorityValue(dashboard.priorityWork, 'Refund attention')}
-          </span>
+          </StatusBadge>
         </div>
       </div>
 
-      <div className="stats-grid queue-stats">
+      <div className="op-kpi-row dashboard-kpi-row">
         {dashboard.stats.map((stat) => (
-          <article key={stat.label} className="stat-card operational-card">
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
-          </article>
+          <KPIStatCard key={stat.label} label={stat.label} value={stat.value} detail="Current vendor scope" tone={stat.label.includes('Blocked') || stat.label.includes('Refund') ? 'attention' : 'neutral'} />
         ))}
       </div>
 
-      <div className="content-grid dashboard-grid">
-        <article className="panel operational-card">
-          <h3>Priority work</h3>
-          <div className="queue-list">
+      <div className="dashboard-command-grid">
+        <OperationalSection
+          title="Priority work"
+          description="Current operational work sorted by fulfillment, return, refund, and automation attention."
+        >
+          <div className="dashboard-priority-list">
             {dashboard.priorityWork.map((item) => (
-              <article key={item.label} className="queue-item queue-medium">
-                <header className="queue-item-top">
-                  <h4>{item.label}</h4>
+              <article key={item.label} className="dashboard-priority-row">
+                <header>
+                  <div>
+                    <strong>{item.label}</strong>
+                    {item.description ? <p>{item.description}</p> : null}
+                  </div>
                   <span className={`severity-chip ${item.tone}`}>{item.value}</span>
                 </header>
-                {item.description ? <p className="queue-description">{item.description}</p> : null}
               </article>
             ))}
           </div>
-        </article>
+        </OperationalSection>
 
-        <article className="panel operational-card">
-          <h3>Finance snapshot</h3>
-          <div className="allocation-summary-grid">
-            <div className="summary-row">
-              <span>Gross sales</span>
-              <strong>{dashboard.financeSnapshot?.grossSales ?? '—'}</strong>
-            </div>
-            <div className="summary-row">
-              <span>Refunds</span>
-              <strong>{dashboard.financeSnapshot?.refunds ?? '—'}</strong>
-            </div>
-            <div className="summary-row">
-              <span>Net revenue</span>
-              <strong>{dashboard.financeSnapshot?.netRevenue ?? '—'}</strong>
-            </div>
-            <div className="summary-row">
-              <span>Payout estimate</span>
-              <strong>{dashboard.financeSnapshot?.payoutEstimate ?? '—'}</strong>
-            </div>
+        <OperationalSection title="Finance snapshot" description="Reporting-only finance visibility. Payout execution is not enabled yet.">
+          <div className="op-meta-grid">
+            <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? 'Not available'} />
+            <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? 'Not available'} />
+            <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? 'Not available'} />
+            <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? 'Not available'} />
           </div>
-        </article>
-      </div>
+        </OperationalSection>
 
-      <div className="content-grid dashboard-grid">
-        <article className="panel operational-card">
-          <h3>Recent activity</h3>
+        <OperationalSection title="Recent activity" description="Latest vendor-scoped operational signals.">
           {dashboard.recentActivity.length === 0 ? (
-            <div className="queue-empty">
-              <p className="page-description">No recent activity for the current vendor.</p>
-            </div>
+            <EmptyStatePanel title="No recent activity" description="No recent activity for the current vendor." />
           ) : (
-            <ul className="list">
+            <ul className="dashboard-activity-list">
               {dashboard.recentActivity.map((item) => (
                 <li key={item}>{item}</li>
               ))}
             </ul>
           )}
-        </article>
+        </OperationalSection>
+
         {currentUser?.role === 'admin' ? (
-          <article className="panel operational-card">
-            <h3>Diagnostics summary</h3>
+          <OperationalSection title="Diagnostics summary" description="Admin-only webhook and reconciliation attention.">
             {dashboard.diagnosticsSummary ? (
-              <div className="allocation-summary-grid">
-                <div className="summary-row">
-                  <span>Failed webhooks</span>
-                  <strong>{dashboard.diagnosticsSummary.failedWebhooks}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Stuck received</span>
-                  <strong>{dashboard.diagnosticsSummary.stuckReceived}</strong>
-                </div>
-                <div className="summary-row">
-                  <span>Fulfillment sync failures</span>
-                  <strong>{dashboard.diagnosticsSummary.fulfillmentSyncFailures}</strong>
-                </div>
+              <div className="dashboard-signal-row">
+                <StatusBadge tone={dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success'}>
+                  Failed webhooks {dashboard.diagnosticsSummary.failedWebhooks}
+                </StatusBadge>
+                <StatusBadge tone={dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success'}>
+                  Stuck received {dashboard.diagnosticsSummary.stuckReceived}
+                </StatusBadge>
+                <StatusBadge tone={dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success'}>
+                  Fulfillment sync failures {dashboard.diagnosticsSummary.fulfillmentSyncFailures}
+                </StatusBadge>
               </div>
             ) : (
-              <div className="queue-empty">
-                <p className="page-description">Diagnostics summary is unavailable for the current scope.</p>
-              </div>
+              <EmptyStatePanel title="Diagnostics unavailable" description="Diagnostics summary is unavailable for the current scope." />
             )}
-          </article>
-        ) : (
-          <article className="panel operational-card">
-            <h3>Operational signals</h3>
-            <div className="queue-list">
-              {dashboard.priorityWork.map((item) => (
-                <article key={item.label} className="queue-item queue-low">
-                  <header className="queue-item-top">
-                    <h4>{item.label}</h4>
-                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
-                  </header>
-                  {item.description ? <p className="queue-description">{item.description}</p> : null}
-                </article>
-              ))}
-            </div>
-          </article>
-        )}
+          </OperationalSection>
+        ) : null}
       </div>
 
-      <article className="panel operational-card">
-        <h3>Workspace status</h3>
+      <OperationalSection title="Workspace status">
         <p>{dashboard.workspaceStatus}</p>
         {dashboard.partialDataWarnings?.length ? (
-          <ul className="list">
+          <ul className="dashboard-activity-list">
             {dashboard.partialDataWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>
         ) : null}
-      </article>
+      </OperationalSection>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>

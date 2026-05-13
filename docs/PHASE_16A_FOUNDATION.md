@@ -142,6 +142,15 @@
 ### Phase 16D Orders + Shell Polish
 - Use the same table, toolbar, side panel, and status primitives for order allocation and fulfillment surfaces.
 - Extend shell polish incrementally without changing navigation, auth, or vendor context behavior.
+- Phase 16D implementation update:
+  - Orders is now a dense operational control center with KPIs, search/filter toolbar, table-first scanning, and a right-side order detail panel.
+  - Orders table surfaces status, Shopify order, neutral customer label, item count, value, fulfillment, shipping, tracking/carrier, updated timestamp, and compact actions.
+  - Orders detail panel hydrates existing order detail data for Shopify identifiers, allocation id, line items, fulfillment/shipping state, carrier/tracking URL, shipment timestamps, and reconciliation helper context.
+  - Dashboard is now a command-center workspace with KPI row, priority work, recent activity, finance snapshot, admin diagnostics summary, and workspace status without duplicating the same operational signal list.
+  - Shell/sidebar rhythm was tightened with clearer workspace/operations/admin groupings, improved active state, smaller page frame radius, and denser header/context spacing.
+  - Cross-workspace fallback wording now uses neutral customer labels instead of developer-facing sync-scope copy.
+  - Finance hold/recorded-equivalent refund ledger rows are normalized to `Recorded` in table/detail display; only actual failed/error states render as `Failed`.
+  - No backend architecture, route, queue worker, payout engine, or external integration was introduced.
 
 ## Remaining Foundation Gaps
 - No global icon system was introduced in this phase.
@@ -152,3 +161,5 @@
 - After Phase 16B, Returns still depends on currently available backend fields; real product thumbnails, richer customer fields, and direct diagnostics links remain future DTO/workflow improvements.
 - After Phase 16C, Finance still uses existing ledger DTOs; richer return/refund joins, payout execution, invoice generation, and vendor payable math remain future finance work.
 - After Phase 16C, Diagnostics remains operator-triggered; background retry workers, scheduled reconciliation, alerting, and realtime socket updates remain infrastructure hardening work.
+- After Phase 16D, Orders still depends on currently available order detail DTOs; richer customer profiles, direct stale-allocation flags on order summaries, and direct diagnostics deep links remain future DTO/navigation work.
+- After Phase 16D, Dashboard remains an aggregate overview; realtime refresh, saved operator views, and cross-workspace drilldown filters are future UX/infrastructure work.

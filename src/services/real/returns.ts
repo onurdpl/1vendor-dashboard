@@ -90,7 +90,7 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     relatedOrderId: dto.sourceShopifyOrderId,
     date: dto.createdAt,
     updatedAt: dto.updatedAt,
-    customer: 'Shopify customer details stay outside the current refund sync scope.',
+    customer: 'Customer unavailable',
     reason: `${sourceLabel} · ${sourceId}`,
     amount: formatCurrency(dto.refundAmount),
     refundedSkus: dto.refundedSkus,

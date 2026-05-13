@@ -84,23 +84,26 @@ a:focus-visible {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 248px minmax(0, 1fr);
 }
 
 .sidebar {
-  padding: var(--space-5) var(--space-3);
+  position: sticky;
+  top: 0;
+  min-height: 100vh;
+  padding: var(--space-5) var(--space-4);
   border-right: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.9);
   display: grid;
   align-content: start;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .brand {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  margin-bottom: var(--space-5);
+  margin-bottom: var(--space-2);
 }
 
 .brand-mark {
@@ -142,7 +145,7 @@ a:focus-visible {
 .nav-group {
   display: grid;
   gap: var(--space-2);
-  margin-bottom: var(--space-1);
+  margin-bottom: var(--space-2);
 }
 
 .nav-group-label {
@@ -210,7 +213,7 @@ a:focus-visible {
 }
 
 .nav-link {
-  padding: 8px 10px;
+  padding: 9px 10px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   color: #475569;
@@ -230,12 +233,12 @@ a:focus-visible {
 }
 
 .nav-link.active {
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
 .app-content {
   min-width: 0;
-  padding: var(--space-5) var(--space-6);
+  padding: var(--space-4) var(--space-5);
 }
 
 .page-header {
@@ -676,6 +679,11 @@ a:focus-visible {
   align-items: start;
 }
 
+.op-timeline li > div {
+  display: grid;
+  gap: 3px;
+}
+
 .op-timeline-dot {
   width: 9px;
   height: 9px;
@@ -872,8 +880,8 @@ h3 {
 }
 
 .page-frame {
-  border-radius: 24px;
-  padding: 24px;
+  border-radius: 18px;
+  padding: 18px;
   backdrop-filter: blur(18px);
 }
 
@@ -1920,6 +1928,120 @@ h3 {
   font-weight: 800;
 }
 
+/* Phase 16D orders, dashboard, and shell polish */
+.orders-control-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 460px);
+}
+
+.orders-kpi-row,
+.dashboard-kpi-row {
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+}
+
+.orders-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--op-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.orders-filter-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--op-border);
+  border-radius: 999px;
+  background: var(--op-surface);
+}
+
+.orders-op-table-v2 {
+  overflow: auto;
+}
+
+.orders-op-table-v2 .op-table-head,
+.orders-op-table-v2 .op-table-row {
+  min-width: 1440px;
+  grid-template-columns: 1fr 1.18fr 1fr 0.55fr 0.72fr 0.95fr 0.95fr 1.15fr 0.95fr 0.82fr;
+}
+
+.order-detail-items {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.order-detail-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid rgba(223, 229, 238, 0.82);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-raised);
+}
+
+.order-detail-item strong,
+.order-detail-item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.dashboard-command-center {
+  gap: var(--space-3);
+}
+
+.dashboard-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: var(--space-3);
+  align-items: start;
+}
+
+.dashboard-priority-list,
+.dashboard-activity-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-priority-row {
+  padding: var(--space-3);
+  border: 1px solid rgba(223, 229, 238, 0.82);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-raised);
+}
+
+.dashboard-priority-row header,
+.dashboard-signal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.dashboard-priority-row p,
+.dashboard-activity-list li {
+  margin: 3px 0 0;
+  color: var(--op-muted);
+  font-size: 0.86rem;
+}
+
+.dashboard-activity-list li {
+  margin: 0;
+  padding: 9px 0;
+  border-bottom: 1px solid rgba(223, 229, 238, 0.72);
+}
+
+.dashboard-activity-list li:last-child {
+  border-bottom: 0;
+}
+
 /* Dashboard workspace */
 .dashboard-workspace {
   gap: 14px;
@@ -2328,6 +2450,10 @@ h3 {
     grid-template-columns: 1fr;
   }
 
+  .dashboard-command-grid {
+    grid-template-columns: 1fr;
+  }
+
   .op-side-panel {
     position: static;
   }
@@ -2348,6 +2474,8 @@ h3 {
   }
 
   .sidebar {
+    position: static;
+    min-height: auto;
     border-right: 0;
     border-bottom: 1px solid var(--border);
     padding: 18px;

@@ -371,6 +371,35 @@
   - Reconciliation remains operator-triggered
   - Direct cross-links from finance/refund rows to diagnostics events remain future navigation work
 
+## Phase 16D Orders, Dashboard, and Shell Polish
+- Orders is now a production-grade operational control center:
+  - compact KPIs for vendor orders, awaiting shipment, blocked/attention items, fulfilled orders, and tracking visibility
+  - frontend filters for allocation state, fulfillment state, shipping state, and free-text search across Shopify order, customer, tracking, carrier, amount, and vendor metadata
+  - dense orders table for status, Shopify order, customer, item count, value, fulfillment, shipping, tracking/carrier, updated timestamp, and compact actions
+  - right-side detail panel backed by existing order detail data for Shopify identifiers, allocation id, customer fallback, line items, fulfillment/shipping status, carrier/tracking URL, fulfillment/shipment timestamps, and reconciliation guidance
+- Dashboard is now a command-center workspace:
+  - KPI row uses existing dashboard stats
+  - priority work appears once
+  - recent activity, finance snapshot, diagnostics summary, and workspace status are separated into compact operational sections
+  - duplicated operational-signal sections and large low-value whitespace were removed
+- Shell/sidebar polish:
+  - navigation is grouped into Workspace, Operations, and Admin tools
+  - active navigation state, session/vendor cards, page frame spacing, and top header rhythm were tightened
+  - responsive behavior preserves existing routes and auth/vendor context
+- Cross-workspace polish:
+  - customer fallback copy now uses neutral labels such as `Customer unavailable`
+  - operational timelines have clearer spacing between labels and dates
+  - side detail panels and dense tables use more consistent widths and overflow behavior
+- Finance status display correction:
+  - hold/recorded-equivalent refund ledger rows render as `Recorded`
+  - only failed/error states render as `Failed`
+  - table and detail panel use the same display normalization
+- Remaining gaps before Phase 16E:
+  - Orders still does not expose direct diagnostics deep links or explicit stale-allocation fields in the order DTO
+  - Dashboard has no realtime refresh or saved operator views
+  - Customer profile enrichment remains future backend DTO work
+  - Reconciliation remains admin/operator-triggered
+
 ## Phase 16-3C Inbound Fulfillment Sync
 - Backend now supports inbound Shopify fulfillment status refresh for:
   - `FULFILLMENTS_CREATE`

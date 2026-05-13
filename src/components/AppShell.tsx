@@ -7,14 +7,20 @@ import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { ActionFeedback } from './ActionFeedback';
 
-const navItems = [
+const workspaceNavItems = [
   { to: '/', label: 'Dashboard' },
+];
+
+const operationsNavItems = [
   { to: '/orders', label: 'Orders' },
   { to: '/returns', label: 'Returns' },
   { to: '/finance', label: 'Finance' },
   { to: '/automation', label: 'Automation' },
-  { to: '/admin/operations', label: 'Operations Queue', adminOnly: true },
-  { to: '/admin/diagnostics', label: 'Diagnostics', adminOnly: true },
+];
+
+const adminNavItems = [
+  { to: '/admin/operations', label: 'Operations Queue' },
+  { to: '/admin/diagnostics', label: 'Diagnostics' },
 ];
 
 export function AppShell() {
@@ -72,7 +78,7 @@ export function AppShell() {
         <div className="nav-group">
           <div className="nav-group-label">Workspace</div>
           <nav className="nav" aria-label="Primary">
-            {navItems.slice(0, 1).map((item) => (
+            {workspaceNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -88,8 +94,7 @@ export function AppShell() {
         <div className="nav-group">
           <div className="nav-group-label">Operations</div>
           <nav className="nav" aria-label="Operations">
-            {navItems.slice(1).map((item) => (
-              (item.adminOnly && !isAdmin) ? null : (
+            {operationsNavItems.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -97,11 +102,25 @@ export function AppShell() {
               >
                 {item.label}
               </NavLink>
-              )
             ))}
           </nav>
         </div>
-        {isAdmin ? <div className="nav-group-label admin-nav-label">Admin tools</div> : null}
+        {isAdmin ? (
+          <div className="nav-group">
+            <div className="nav-group-label admin-nav-label">Admin tools</div>
+            <nav className="nav" aria-label="Admin tools">
+              {adminNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+                >
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+        ) : null}
 
         <div className="vendor-card shell-card">
           <div>
@@ -151,10 +170,7 @@ export function AppShell() {
       </aside>
 
       <div className="app-content">
-        <PageHeader
-          title="Operational control center"
-          description="Multi-vendor Shopify operations, finance, diagnostics, and recovery workspace."
-        />
+        <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
         <div className="shell-context-bar">
           <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
           <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'admin'}</span>

@@ -118,4 +118,21 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText(/payout engine is not enabled yet/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Current vendor-scoped finance query').length).toBeGreaterThan(0);
   });
+
+  it('displays hold-equivalent refund ledger rows as Recorded instead of Failed', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          status: 'hold' as never,
+        },
+      ],
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('Recorded')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Ledger recorded').length).toBeGreaterThan(0);
+  });
 });

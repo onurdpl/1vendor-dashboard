@@ -33,11 +33,32 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function normalizeFinanceStatus(status: string) {
+  const normalized = status.trim().toLowerCase();
+  if (normalized === 'hold' || normalized === 'recorded' || normalized === 'synced' || normalized === 'posted') {
+    return 'Recorded';
+  }
+  if (normalized === 'failed' || normalized === 'error') {
+    return 'Failed';
+  }
+  if (normalized === 'reconciled') {
+    return 'Reconciled';
+  }
+  if (normalized === 'completed' || normalized === 'processed') {
+    return 'Completed';
+  }
+  if (normalized === 'pending') {
+    return 'Pending';
+  }
+  return status;
+}
+
 function getStatusTone(status: string) {
-  if (status === 'Completed' || status === 'Reconciled' || status === 'Recorded') {
+  const displayStatus = normalizeFinanceStatus(status);
+  if (displayStatus === 'Completed' || displayStatus === 'Reconciled' || displayStatus === 'Recorded') {
     return 'success' as const;
   }
-  if (status === 'Failed') {
+  if (displayStatus === 'Failed') {
     return 'danger' as const;
   }
   return 'attention' as const;
@@ -48,20 +69,22 @@ function isRefundRecord(record: FinanceTransaction) {
 }
 
 function isPendingOrHoldRecord(record: FinanceTransaction) {
-  return record.status === 'Pending' || record.status === 'Recorded';
+  const status = normalizeFinanceStatus(record.status);
+  return status === 'Pending' || status === 'Recorded';
 }
 
 function getFinanceLifecycleLabel(record: FinanceTransaction) {
-  if (record.status === 'Failed') {
+  const status = normalizeFinanceStatus(record.status);
+  if (status === 'Failed') {
     return 'Attention required';
   }
-  if (record.status === 'Recorded') {
+  if (status === 'Recorded') {
     return 'Ledger recorded';
   }
-  if (record.status === 'Pending') {
+  if (status === 'Pending') {
     return 'Pending or held';
   }
-  if (record.status === 'Reconciled') {
+  if (status === 'Reconciled') {
     return 'Reconciled';
   }
   return 'Completed';
@@ -81,7 +104,7 @@ export function FinancePage() {
 
   const financeKpis = useMemo(() => {
     const transactions = finance?.transactions ?? [];
-    const recordedRefunds = transactions.filter((record) => isRefundRecord(record) && record.status === 'Recorded').length;
+    const recordedRefunds = transactions.filter((record) => isRefundRecord(record) && normalizeFinanceStatus(record.status) === 'Recorded').length;
     const pendingOrHeld = transactions.filter(isPendingOrHoldRecord).length;
     const failed = transactions.filter((record) => record.status === 'Failed').length;
 
@@ -96,14 +119,15 @@ export function FinancePage() {
     const query = searchTerm.trim().toLowerCase();
     return (finance?.transactions ?? []).filter((record) => {
       const recordVendorId = currentVendor.vendorId;
-      const matchesStatus = statusFilter === 'all' || record.status === statusFilter;
+      const displayStatus = normalizeFinanceStatus(record.status);
+      const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
       const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
       const matchesVendor = vendorFilter === 'all' || recordVendorId === vendorFilter;
       const searchableText = [
         record.id,
         record.description,
         record.category,
-        record.status,
+        displayStatus,
         record.amount,
         record.counterparty,
         currentVendor.vendorName,
@@ -242,7 +266,7 @@ export function FinancePage() {
                   selected={selectedRecord?.id === record.id}
                   onSelect={() => setSelectedRecordId(record.id)}
                 >
-                  <StatusBadge tone={getStatusTone(record.status)}>{record.status}</StatusBadge>
+                  <StatusBadge tone={getStatusTone(record.status)}>{normalizeFinanceStatus(record.status)}</StatusBadge>
                   <ShopifyEntityDisplay label={record.category} primary={record.description} secondary={record.id} />
                   <ShopifyEntityDisplay label="Vendor" primary={currentVendor.vendorName} secondary={currentVendor.vendorId} />
                   <ShopifyEntityDisplay
@@ -278,7 +302,7 @@ export function FinancePage() {
           {selectedRecord ? (
             <>
               <div className="op-detail-status-row">
-                <StatusBadge tone={getStatusTone(selectedRecord.status)}>{selectedRecord.status}</StatusBadge>
+                <StatusBadge tone={getStatusTone(selectedRecord.status)}>{normalizeFinanceStatus(selectedRecord.status)}</StatusBadge>
                 <strong
                   className={
                     isRefundRecord(selectedRecord) || selectedRecord.category === 'Adjustment'

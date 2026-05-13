@@ -286,7 +286,7 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     fulfillmentStatus,
     shippingStatus,
     date: dto.createdAt,
-    customer: 'Customer details available in order view',
+    customer: 'Customer unavailable',
     amount: formatCurrency(dto.totalAmount),
     channel: 'Shopify',
   };
