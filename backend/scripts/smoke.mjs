@@ -364,6 +364,22 @@ async function runSmoke() {
       throw new Error(`/auth/login preflight missing allow headers: ${allowHeaders}`);
     }
 
+    const financeProfilePreflightResponse = await fetch(`${baseUrl}/admin/vendors/yalispor/financial-profile`, {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://127.0.0.1:5173',
+        'Access-Control-Request-Method': 'PUT',
+        'Access-Control-Request-Headers': 'authorization,content-type,x-vendor-id',
+      },
+    });
+    if (!financeProfilePreflightResponse.ok) {
+      throw new Error(`/admin/vendors/:vendorId/financial-profile preflight expected success, got ${financeProfilePreflightResponse.status}`);
+    }
+    const financeAllowMethods = financeProfilePreflightResponse.headers.get('access-control-allow-methods') ?? '';
+    if (!financeAllowMethods.toUpperCase().includes('PUT')) {
+      throw new Error(`/admin/vendors/:vendorId/financial-profile preflight missing PUT method: ${financeAllowMethods}`);
+    }
+
     const vendorMappingYaliResponse = await fetch(
       `${baseUrl}/debug/shopify/vendor-mapping?value=${encodeURIComponent('Yalı Spor')}`,
     );
