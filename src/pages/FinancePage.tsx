@@ -20,7 +20,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
-import { getFinanceDashboard, updateVendorFinancialProfile } from '../features/finance/api';
+import { getFinanceDashboard, preparePayoutBatch, updateVendorFinancialProfile } from '../features/finance/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
@@ -151,6 +151,18 @@ export function FinancePage() {
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Financial profile could not be saved.', 'error'),
+    },
+  );
+  const preparePayoutBatchMutation = useMutationAction(
+    () => preparePayoutBatch(currentVendor.vendorId),
+    {
+      invalidateQueryKeys: [queryKeys.finance.summary()],
+      onSuccess: async (batch) => {
+        await refetch();
+        showFeedback(`Draft payout batch ${batch.id} prepared for review.`, 'success');
+      },
+      onError: (mutationError) =>
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Payout batch could not be prepared.', 'error'),
     },
   );
 
@@ -357,6 +369,46 @@ export function FinancePage() {
         )}
       </section>
 
+      <section className="operational-card finance-payout-prep-card">
+        <div>
+          <p className="eyebrow">Payout preparation</p>
+          <h3>{currentVendor.vendorName} upcoming payout</h3>
+          <p className="page-description">
+            Draft batches group payable ledger rows for admin review only. No payment execution is performed here.
+          </p>
+        </div>
+        <div className="finance-profile-summary">
+          <MetadataRow label="Eligible rows" value={finance.payoutBatchSummary?.eligibleRowCount ?? 0} />
+          <MetadataRow label="Eligible net" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} />
+          <MetadataRow label="Blocked rows" value={finance.payoutBatchSummary?.blockedRowCount ?? 0} />
+          <MetadataRow
+            label="Latest draft"
+            value={
+              finance.payoutBatchSummary?.latestBatch
+                ? `${finance.payoutBatchSummary.latestBatch.status} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
+                : 'No draft prepared'
+            }
+          />
+        </div>
+        {isAdmin ? (
+          <div className="finance-payout-prep-actions">
+            <button
+              type="button"
+              className="button button-primary button-compact"
+              disabled={preparePayoutBatchMutation.isPending || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
+              onClick={() => preparePayoutBatchMutation.mutate(undefined)}
+            >
+              {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft payout'}
+            </button>
+            <StatusBadge tone={(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
+              {(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Payable rows ready' : 'No payable rows'}
+            </StatusBadge>
+          </div>
+        ) : (
+          <StatusBadge tone="neutral">Read-only upcoming payout</StatusBadge>
+        )}
+      </section>
+
       <div className="op-control-layout finance-layout">
         <div className="op-main-column">
           <OperationalToolbar>
@@ -515,6 +567,11 @@ export function FinancePage() {
                   <MetadataRow label="Settlement note" value={selectedRecord.settlement.note} />
                 </MetadataGroup>
               ) : null}
+              <MetadataGroup title="Payout batch">
+                <MetadataRow label="Batch status" value={selectedRecord.payoutBatch ? selectedRecord.payoutBatch.status : 'Unbatched'} />
+                <MetadataRow label="Batch ID" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
+                <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
+              </MetadataGroup>
               <MetadataGroup title="Shopify identifiers">
                 <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
                 <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />

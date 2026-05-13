@@ -80,6 +80,15 @@ enum SettlementStatus {
   DISPUTED
 }
 
+enum PayoutBatchStatus {
+  DRAFT
+  REVIEW
+  APPROVED
+  CANCELLED
+  EXECUTION_PENDING
+  PAID_PLACEHOLDER
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -104,6 +113,7 @@ model Vendor {
   assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
   financeEntries        FinanceLedgerEntry[]
   financialProfile      VendorFinancialProfile?
+  payoutBatches         PayoutBatch[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
 }
@@ -340,9 +350,44 @@ model FinanceLedgerEntry {
   updatedAt                     DateTime               @updatedAt
   vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  payoutBatchLines              PayoutBatchLine[]
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
+}
+
+model PayoutBatch {
+  id                      String            @id @default(cuid())
+  vendorId                String
+  status                  PayoutBatchStatus @default(DRAFT)
+  grossAmount             Decimal           @default(0.00) @db.Decimal(10, 2)
+  commissionAmount        Decimal           @default(0.00) @db.Decimal(10, 2)
+  commissionVatAmount     Decimal           @default(0.00) @db.Decimal(10, 2)
+  shippingDeductionAmount Decimal           @default(0.00) @db.Decimal(10, 2)
+  refundAmount            Decimal           @default(0.00) @db.Decimal(10, 2)
+  netAmount               Decimal           @default(0.00) @db.Decimal(10, 2)
+  currency                String            @default("TRY")
+  createdByUserId         String?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+  vendor                  Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  lines                   PayoutBatchLine[]
+
+  @@index([vendorId, status])
+  @@index([createdAt])
+}
+
+model PayoutBatchLine {
+  id                   String             @id @default(cuid())
+  payoutBatchId        String
+  financeLedgerEntryId String
+  amountSnapshot       Decimal            @db.Decimal(10, 2)
+  createdAt            DateTime           @default(now())
+  payoutBatch          PayoutBatch        @relation(fields: [payoutBatchId], references: [id], onDelete: Cascade)
+  financeLedgerEntry   FinanceLedgerEntry @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([payoutBatchId, financeLedgerEntryId])
+  @@index([financeLedgerEntryId])
 }
 
 model WebhookEvent {

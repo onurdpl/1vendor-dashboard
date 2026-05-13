@@ -17,3 +17,7 @@ export function updateVendorFinancialProfile(
 ) {
   return runtimeServices.finance.updateProfile(vendorId, input);
 }
+
+export function preparePayoutBatch(vendorId: string) {
+  return runtimeServices.finance.preparePayoutBatch(vendorId);
+}

@@ -9,12 +9,14 @@ import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
 const updateVendorFinancialProfileMock = vi.fn();
+const preparePayoutBatchMock = vi.fn();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
   return {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
+    preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
 });
@@ -30,6 +32,12 @@ const financeDashboard: FinanceDashboard = {
     availableBalance: '$2,947.50',
     pendingPayouts: '$0.00',
     refundsThisMonth: '$725.00',
+  },
+  payoutBatchSummary: {
+    eligibleRowCount: 1,
+    eligibleNetAmount: '$3,059.10',
+    blockedRowCount: 1,
+    latestBatch: null,
   },
   profile: {
     vendorId: 'demo-vendor-a',
@@ -143,6 +151,7 @@ describe('FinancePage control center', () => {
     });
     getFinanceDashboardMock.mockReset();
     updateVendorFinancialProfileMock.mockReset();
+    preparePayoutBatchMock.mockReset();
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {
@@ -214,6 +223,35 @@ describe('FinancePage control center', () => {
     expect(screen.getByRole('button', { name: /save vendor profile/i })).toBeInTheDocument();
   });
 
+  it('shows admin payout preparation controls and prepares a draft batch', async () => {
+    preparePayoutBatchMock.mockResolvedValue({
+      id: 'batch-demo-vendor-a',
+      vendorId: 'demo-vendor-a',
+      status: 'draft',
+      grossAmount: '$3,399.00',
+      commissionAmount: '$339.90',
+      commissionVatAmount: '$0.00',
+      shippingDeductionAmount: '$0.00',
+      refundAmount: '$0.00',
+      netAmount: '$3,059.10',
+      currency: 'TRY',
+      createdByUserId: 'admin',
+      createdAt: '2026-05-13T12:00:00Z',
+      updatedAt: '2026-05-13T12:00:00Z',
+      lineCount: 1,
+      warning: null,
+    });
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Demo Vendor A upcoming payout')).toBeInTheDocument();
+    expect(screen.getByText('Eligible rows')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /prepare draft payout/i }));
+
+    await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('demo-vendor-a'));
+  });
+
   it('shows vendor finance profile as read-only for vendor users', async () => {
     setCurrentUser({
       email: 'vendor@demo.com',
@@ -229,7 +267,9 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
+    expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
 
   it('refetches finance data after saving the vendor profile', async () => {

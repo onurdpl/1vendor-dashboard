@@ -878,3 +878,38 @@ Frontend note:
   - hold reason
   - operational note
 - Phase 18B still does not execute payouts, create payout batches, integrate bank transfers, export ERP/accounting data, generate invoices, or ingest external provider shipping costs.
+
+## Payout Batch Preparation (Phase 18C)
+- `PayoutBatch` stores vendor-scoped draft payout totals for admin review:
+  - gross amount
+  - commission amount
+  - commission VAT amount
+  - shipping deduction amount
+  - refund amount
+  - net amount
+  - currency
+  - status
+- `PayoutBatchLine` links finance ledger rows to a draft and snapshots each row's net contribution.
+- Batch statuses are preparation/review states only:
+  - `DRAFT`
+  - `REVIEW`
+  - `APPROVED`
+  - `CANCELLED`
+  - `EXECUTION_PENDING`
+  - `PAID_PLACEHOLDER`
+- Eligibility is deterministic:
+  - row belongs to the selected vendor
+  - row is a sale or refund finance ledger entry
+  - settlement is payable or partially refunded
+  - row is not already linked to an active payout batch
+  - row is not held, disputed, settled, or paid
+- Refund rows fully reduce the draft net amount and may create negative drafts for operator review.
+- Cancelled batches release rows for future preparation because active-batch checks ignore `CANCELLED`.
+- Admin-only endpoints:
+  - `GET /admin/payout-batches`
+  - `POST /admin/payout-batches/prepare`
+  - `GET /admin/payout-batches/:id`
+  - `POST /admin/payout-batches/:id/cancel`
+  - `POST /admin/payout-batches/:id/mark-review`
+- `GET /finance` includes `payoutBatchSummary` and per-record payout batch references for the Finance workspace.
+- Phase 18C does not execute bank transfers, mark real payments complete, export ERP/accounting data, generate invoices, or integrate external providers.

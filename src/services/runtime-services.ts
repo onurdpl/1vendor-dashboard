@@ -158,6 +158,26 @@ export const runtimeServices = {
             active: true,
             source: 'configured' as const,
           }),
+    preparePayoutBatch: (vendorId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.preparePayoutBatch(vendorId)
+        : Promise.resolve({
+            id: `mock-payout-batch-${vendorId}`,
+            vendorId,
+            status: 'draft' as const,
+            grossAmount: '$0.00',
+            commissionAmount: '$0.00',
+            commissionVatAmount: '$0.00',
+            shippingDeductionAmount: '$0.00',
+            refundAmount: '$0.00',
+            netAmount: '$0.00',
+            currency: 'TRY',
+            createdByUserId: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            lineCount: 0,
+            warning: null,
+          }),
   },
   automation: {
     dashboard: () =>

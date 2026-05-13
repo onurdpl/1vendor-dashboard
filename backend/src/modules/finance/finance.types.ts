@@ -14,6 +14,21 @@ export type FinanceSummaryDto = {
   pendingSettlement: string;
 };
 
+export type PayoutBatchStatusDto =
+  | 'draft'
+  | 'review'
+  | 'approved'
+  | 'cancelled'
+  | 'execution_pending'
+  | 'paid_placeholder';
+
+export type PayoutBatchSummaryDto = {
+  eligibleRowCount: number;
+  eligibleNetAmount: string;
+  blockedRowCount: number;
+  latestBatch: PayoutBatchDto | null;
+};
+
 export type VendorFinancialProfileDto = {
   vendorId: string;
   commissionPercent: string;
@@ -50,6 +65,13 @@ export type SettlementDto = {
   note: string;
 };
 
+export type PayoutBatchReferenceDto = {
+  id: string;
+  status: PayoutBatchStatusDto;
+  netAmount: string;
+  createdAt: string;
+};
+
 export type FinanceRecordDto = {
   id: string;
   type: string;
@@ -63,11 +85,13 @@ export type FinanceRecordDto = {
   createdAt: string;
   payoutCalculation: PayoutCalculationDto | null;
   settlement: SettlementDto;
+  payoutBatch: PayoutBatchReferenceDto | null;
 };
 
 export type FinanceDashboardDto = {
   summary: FinanceSummaryDto;
   profile: VendorFinancialProfileDto;
+  payoutBatchSummary: PayoutBatchSummaryDto;
   records: FinanceRecordDto[];
 };
 
@@ -78,4 +102,34 @@ export type VendorFinancialProfileUpdateDto = {
   shippingMode?: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee?: number | null;
   active?: boolean;
+};
+
+export type PayoutBatchLineDto = {
+  id: string;
+  financeLedgerEntryId: string;
+  amountSnapshot: string;
+  createdAt: string;
+};
+
+export type PayoutBatchDto = {
+  id: string;
+  vendorId: string;
+  status: PayoutBatchStatusDto;
+  grossAmount: string;
+  commissionAmount: string;
+  commissionVatAmount: string;
+  shippingDeductionAmount: string;
+  refundAmount: string;
+  netAmount: string;
+  currency: string;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lineCount: number;
+  warning: string | null;
+  lines?: PayoutBatchLineDto[];
+};
+
+export type PreparePayoutBatchDto = {
+  vendorId: string;
 };

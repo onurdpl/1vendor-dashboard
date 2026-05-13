@@ -127,6 +127,24 @@ function buildVendorFinance(vendorId: VendorId): VendorFinanceDashboard {
       availableBalance: formatMoneyFromCents(payoutEstimateCents),
       pendingPayouts: formatMoneyFromCents(pendingPayoutsCents),
       refundsThisMonth: formatMoneyFromCents(refundsCents),
+      payableBalance: formatMoneyFromCents(payoutEstimateCents),
+      accruedBalance: formatMoneyFromCents(pendingPayoutsCents),
+    },
+    profile: {
+      vendorId,
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+      deductShippingEnabled: false,
+      shippingMode: 'disabled',
+      fixedShippingFee: null,
+      active: true,
+      source: 'default',
+    },
+    payoutBatchSummary: {
+      eligibleRowCount: orders.filter((order) => order.status === 'Delivered' || order.status === 'Shipped').length,
+      eligibleNetAmount: formatMoneyFromCents(payoutEstimateCents),
+      blockedRowCount: orders.filter((order) => order.status !== 'Delivered' && order.status !== 'Shipped').length,
+      latestBatch: null,
     },
     transactions: [...orderTransactions, ...refundTransactions, feeTransaction, payoutTransaction].sort(
       (left, right) => new Date(right.date).getTime() - new Date(left.date).getTime(),
@@ -140,6 +158,8 @@ export function getMockFinanceDashboard(vendorId?: VendorId): FinanceDashboard {
 
   return {
     summary: dashboard.summary,
+    profile: dashboard.profile,
+    payoutBatchSummary: dashboard.payoutBatchSummary,
     transactions: dashboard.transactions,
   };
 }

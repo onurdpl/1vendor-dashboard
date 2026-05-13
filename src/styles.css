@@ -2871,6 +2871,13 @@ h3 {
   align-items: start;
 }
 
+.finance-payout-prep-card {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.2fr) minmax(260px, 1fr) minmax(220px, 0.75fr);
+  gap: 12px;
+  align-items: start;
+}
+
 .finance-profile-card h3 {
   margin: 2px 0 4px;
   font-size: 1rem;
@@ -2879,6 +2886,14 @@ h3 {
 .finance-profile-summary {
   display: grid;
   gap: 6px;
+}
+
+.finance-payout-prep-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .op-form-grid {

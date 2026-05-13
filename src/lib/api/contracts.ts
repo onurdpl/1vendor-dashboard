@@ -211,6 +211,39 @@ export type FinanceSummary = {
   pendingSettlement?: string;
 };
 
+export type PayoutBatchStatus =
+  | 'draft'
+  | 'review'
+  | 'approved'
+  | 'cancelled'
+  | 'execution_pending'
+  | 'paid_placeholder';
+
+export type PayoutBatch = {
+  id: string;
+  vendorId: string;
+  status: PayoutBatchStatus;
+  grossAmount: string;
+  commissionAmount: string;
+  commissionVatAmount: string;
+  shippingDeductionAmount: string;
+  refundAmount: string;
+  netAmount: string;
+  currency: string;
+  createdByUserId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lineCount: number;
+  warning: string | null;
+};
+
+export type PayoutBatchSummary = {
+  eligibleRowCount: number;
+  eligibleNetAmount: string;
+  blockedRowCount: number;
+  latestBatch: PayoutBatch | null;
+};
+
 export type VendorFinancialProfile = {
   vendorId: string;
   commissionPercent: string;
@@ -258,11 +291,18 @@ export type FinanceTransaction = {
     holdReason: string | null;
     note: string;
   };
+  payoutBatch?: {
+    id: string;
+    status: PayoutBatchStatus;
+    netAmount: string;
+    createdAt: string;
+  } | null;
 };
 
 export type FinanceDashboard = {
   summary: FinanceSummary;
   profile?: VendorFinancialProfile;
+  payoutBatchSummary?: PayoutBatchSummary;
   transactions: FinanceTransaction[];
 };
 

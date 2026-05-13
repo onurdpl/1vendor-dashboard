@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const prismaMock = vi.hoisted(() => ({
+  payoutBatch: {
+    findFirst: vi.fn(),
+  },
   financeLedgerEntry: {
     findMany: vi.fn(),
   },
@@ -154,9 +157,11 @@ describe('persisted vendor finance calculations', () => {
       },
     ];
     prismaMock.financeLedgerEntry.findMany.mockReset();
+    prismaMock.payoutBatch.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.findFirst.mockReset();
     prismaMock.vendorFinancialProfile.upsert.mockReset();
 
+    prismaMock.payoutBatch.findFirst.mockResolvedValue(null);
     prismaMock.vendorFinancialProfile.findFirst.mockImplementation(async () => activeProfile);
     prismaMock.vendorFinancialProfile.upsert.mockImplementation(async ({ create, update }) => {
       const next = activeProfile ? update : create;

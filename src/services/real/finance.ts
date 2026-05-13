@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { FinanceDashboard, FinanceTransaction, VendorFinancialProfile } from '../../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, PayoutBatch, VendorFinancialProfile } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
 
 type FinanceDashboardDto = {
@@ -19,6 +19,7 @@ type FinanceDashboardDto = {
     pendingSettlement?: string;
   };
   profile?: VendorFinancialProfile;
+  payoutBatchSummary?: FinanceDashboard['payoutBatchSummary'];
   records: Array<{
     id: string;
     type: string;
@@ -32,6 +33,7 @@ type FinanceDashboardDto = {
     createdAt: string;
     payoutCalculation?: FinanceTransaction['payoutCalculation'];
     settlement?: FinanceTransaction['settlement'];
+    payoutBatch?: FinanceTransaction['payoutBatch'];
   }>;
 };
 
@@ -121,6 +123,23 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       pendingSettlement: response.summary.pendingSettlement ? formatCurrency(response.summary.pendingSettlement) : undefined,
     },
     profile: response.profile,
+    payoutBatchSummary: response.payoutBatchSummary
+      ? {
+          ...response.payoutBatchSummary,
+          eligibleNetAmount: formatCurrency(response.payoutBatchSummary.eligibleNetAmount),
+          latestBatch: response.payoutBatchSummary.latestBatch
+            ? {
+                ...response.payoutBatchSummary.latestBatch,
+                grossAmount: formatCurrency(response.payoutBatchSummary.latestBatch.grossAmount),
+                commissionAmount: formatCurrency(response.payoutBatchSummary.latestBatch.commissionAmount),
+                commissionVatAmount: formatCurrency(response.payoutBatchSummary.latestBatch.commissionVatAmount),
+                shippingDeductionAmount: formatCurrency(response.payoutBatchSummary.latestBatch.shippingDeductionAmount),
+                refundAmount: formatCurrency(response.payoutBatchSummary.latestBatch.refundAmount),
+                netAmount: formatCurrency(response.payoutBatchSummary.latestBatch.netAmount),
+              }
+            : null,
+        }
+      : undefined,
     transactions: response.records.map((record) => ({
       id: record.id,
       date: record.createdAt,
@@ -135,6 +154,12 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
       shopifyOrderId: record.relatedOrderId ?? undefined,
       shopifyRefundId: record.relatedRefundId ?? undefined,
       settlement: record.settlement,
+      payoutBatch: record.payoutBatch
+        ? {
+            ...record.payoutBatch,
+            netAmount: formatCurrency(record.payoutBatch.netAmount),
+          }
+        : null,
       payoutCalculation: record.payoutCalculation
         ? {
             grossAmount: formatCurrency(record.payoutCalculation.grossAmount),
@@ -165,4 +190,8 @@ export async function updateVendorFinancialProfile(
   },
 ): Promise<VendorFinancialProfile> {
   return apiClient.put<VendorFinancialProfile>(`/admin/vendors/${encodeURIComponent(vendorId)}/financial-profile`, input);
+}
+
+export function preparePayoutBatch(vendorId: string): Promise<PayoutBatch> {
+  return apiClient.post<PayoutBatch>('/admin/payout-batches/prepare', { vendorId });
 }

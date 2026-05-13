@@ -4,12 +4,17 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
+  cancelPayoutBatch,
+  getPayoutBatch,
   getVendorFinanceDashboard,
   getVendorFinancialProfile,
+  listPayoutBatches,
+  markPayoutBatchReview,
+  preparePayoutBatch,
   upsertVendorFinancialProfile,
 } from './finance.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
-import type { VendorFinancialProfileUpdateDto } from './finance.types.js';
+import type { PreparePayoutBatchDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -62,6 +67,91 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         const message = error instanceof Error ? error.message : 'Vendor financial profile could not be saved.';
         return reply.code(400).send({ message });
       }
+    },
+  );
+
+  app.get(
+    '/admin/payout-batches',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const vendorId = typeof (request.query as { vendorId?: unknown }).vendorId === 'string'
+        ? (request.query as { vendorId: string }).vendorId
+        : undefined;
+      return listPayoutBatches(vendorId);
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/prepare',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await preparePayoutBatch((request.body ?? {}) as PreparePayoutBatchDto, request.authUser.id);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Payout batch could not be prepared.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.get(
+    '/admin/payout-batches/:id',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      const batch = await getPayoutBatch(id);
+      if (!batch) {
+        return reply.code(404).send({ message: 'Payout batch not found.' });
+      }
+      return batch;
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/:id/cancel',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return cancelPayoutBatch(id);
+    },
+  );
+
+  app.post(
+    '/admin/payout-batches/:id/mark-review',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { id } = request.params as { id: string };
+      return markPayoutBatchReview(id);
     },
   );
 }

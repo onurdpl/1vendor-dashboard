@@ -8,11 +8,16 @@ import {
 import type {
   FinanceDashboardDto,
   FinanceRecordDto,
+  PayoutBatchDto,
+  PayoutBatchReferenceDto,
   PayoutCalculationDto,
+  PreparePayoutBatchDto,
   SettlementDto,
   VendorFinancialProfileDto,
   VendorFinancialProfileUpdateDto,
 } from './finance.types.js';
+
+const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -37,6 +42,10 @@ function mapStatus(status: string) {
 
 function toIso(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function mapPayoutBatchStatus(status: string) {
+  return status.trim().toLowerCase() as PayoutBatchDto['status'];
 }
 
 function mapShippingMode(mode: string): ShippingMode {
@@ -314,16 +323,171 @@ function buildSettlement(entry: {
   };
 }
 
+function isEntryEligibleForPayoutBatch(entry: {
+  entryType: string;
+  payoutStatus?: string | null;
+  settlementStatus?: string | null;
+  settlementEligibleAt?: Date | null;
+  accruedAt?: Date | null;
+  payableAt?: Date | null;
+  settledAt?: Date | null;
+  settlementHoldReason?: string | null;
+  createdAt?: Date;
+  payoutBatchLines?: Array<unknown>;
+  vendorAllocation?: {
+    allocationStatus?: string;
+    fulfillmentStatus?: string | null;
+    shippingStatus?: string | null;
+    fulfillment?: { fulfilledAt: Date | null } | null;
+    refundRecords?: Array<{ amount?: unknown }>;
+  } | null;
+}) {
+  const type = normalizeType(entry.entryType);
+  if (type !== 'sale' && type !== 'refund') {
+    return false;
+  }
+  if ((entry.payoutBatchLines?.length ?? 0) > 0) {
+    return false;
+  }
+  if (mapStatus(entry.payoutStatus ?? '') === 'paid') {
+    return false;
+  }
+
+  const settlement = buildSettlement(entry);
+  return settlement.status === 'payable' || settlement.status === 'partially_refunded';
+}
+
+function calculateEntryBatchAmounts(
+  entry: {
+    entryType: string;
+    amount: unknown;
+    commissionPercentSnapshot?: unknown;
+    commissionVatPercentSnapshot?: unknown;
+    deductShippingEnabledSnapshot?: boolean | null;
+    shippingModeSnapshot?: string | null;
+    fixedShippingFeeSnapshot?: unknown;
+    vendorAllocation?: {
+      allocationStatus?: string;
+      fulfillmentStatus?: string | null;
+      shippingStatus?: string | null;
+      fulfillment?: { fulfilledAt: Date | null } | null;
+      refundRecords?: Array<{ amount?: unknown }>;
+    } | null;
+  },
+  activeProfile: VendorFinancialProfileDto,
+) {
+  const type = normalizeType(entry.entryType);
+  if (type === 'refund') {
+    const refundAmount = toNumber(entry.amount);
+    return {
+      grossAmount: 0,
+      commissionAmount: 0,
+      commissionVatAmount: 0,
+      shippingDeductionAmount: 0,
+      refundAmount,
+      netAmount: -refundAmount,
+    };
+  }
+
+  const entryProfile = resolveCalculationProfile(entry, activeProfile);
+  const calculation = calculateVendorPayout({
+    grossAmount: toNumber(entry.amount),
+    refundAmount: 0,
+    fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+    profile: entryProfile,
+  });
+
+  return {
+    grossAmount: calculation.grossAmount,
+    commissionAmount: calculation.commission,
+    commissionVatAmount: calculation.commissionVat,
+    shippingDeductionAmount: calculation.shippingDeduction,
+    refundAmount: 0,
+    netAmount: calculation.estimatedPayout,
+  };
+}
+
+function mapPayoutBatch(batch: {
+  id: string;
+  vendorId: string;
+  status: string;
+  grossAmount: unknown;
+  commissionAmount: unknown;
+  commissionVatAmount: unknown;
+  shippingDeductionAmount: unknown;
+  refundAmount: unknown;
+  netAmount: unknown;
+  currency: string;
+  createdByUserId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  lines?: Array<{
+    id: string;
+    financeLedgerEntryId: string;
+    amountSnapshot: unknown;
+    createdAt: Date;
+  }>;
+  _count?: { lines: number };
+}): PayoutBatchDto {
+  const lineCount = batch._count?.lines ?? batch.lines?.length ?? 0;
+  const netAmount = toNumber(batch.netAmount);
+
+  return {
+    id: batch.id,
+    vendorId: batch.vendorId,
+    status: mapPayoutBatchStatus(batch.status),
+    grossAmount: toAmountString(toNumber(batch.grossAmount)),
+    commissionAmount: toAmountString(toNumber(batch.commissionAmount)),
+    commissionVatAmount: toAmountString(toNumber(batch.commissionVatAmount)),
+    shippingDeductionAmount: toAmountString(toNumber(batch.shippingDeductionAmount)),
+    refundAmount: toAmountString(toNumber(batch.refundAmount)),
+    netAmount: toAmountString(netAmount),
+    currency: batch.currency,
+    createdByUserId: batch.createdByUserId,
+    createdAt: batch.createdAt.toISOString(),
+    updatedAt: batch.updatedAt.toISOString(),
+    lineCount,
+    warning: netAmount < 0 ? 'Negative payout draft requires operator review.' : null,
+    lines: batch.lines?.map((line) => ({
+      id: line.id,
+      financeLedgerEntryId: line.financeLedgerEntryId,
+      amountSnapshot: toAmountString(toNumber(line.amountSnapshot)),
+      createdAt: line.createdAt.toISOString(),
+    })),
+  };
+}
+
+function mapPayoutBatchReference(line?: {
+  payoutBatch: {
+    id: string;
+    status: string;
+    netAmount: unknown;
+    createdAt: Date;
+  };
+}): PayoutBatchReferenceDto | null {
+  if (!line) {
+    return null;
+  }
+
+  return {
+    id: line.payoutBatch.id,
+    status: mapPayoutBatchStatus(line.payoutBatch.status),
+    netAmount: toAmountString(toNumber(line.payoutBatch.netAmount)),
+    createdAt: line.payoutBatch.createdAt.toISOString(),
+  };
+}
+
 export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<FinanceDashboardDto> {
-  const [summaryEntries, entries, storedProfile] = await Promise.all([
+  const [summaryEntries, entries, storedProfile, latestBatch] = await Promise.all([
     prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
       },
       select: {
+        id: true,
         entryType: true,
         amount: true,
         payoutStatus: true,
@@ -357,6 +521,19 @@ export async function getVendorFinanceDashboard(
             },
           },
         },
+        payoutBatchLines: {
+          where: {
+            payoutBatch: {
+              status: {
+                in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+              },
+            },
+          },
+          select: {
+            id: true,
+          },
+          take: 1,
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -383,6 +560,22 @@ export async function getVendorFinanceDashboard(
             },
           },
         },
+        payoutBatchLines: {
+          where: {
+            payoutBatch: {
+              status: {
+                in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+              },
+            },
+          },
+          include: {
+            payoutBatch: true,
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
       },
       orderBy: {
         createdAt: 'desc',
@@ -394,6 +587,21 @@ export async function getVendorFinanceDashboard(
       where: {
         vendorId,
         active: true,
+      },
+    }),
+    prisma.payoutBatch.findFirst({
+      where: {
+        vendorId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      include: {
+        _count: {
+          select: {
+            lines: true,
+          },
+        },
       },
     }),
   ]);
@@ -492,6 +700,33 @@ export async function getVendorFinanceDashboard(
     },
   );
   const payoutStatus = summaryEntries[0]?.payoutStatus?.toLowerCase() ?? 'pending';
+  const payoutBatchEligibility = summaryEntries.reduce(
+    (summary, entry) => {
+      if (!isEntryEligibleForPayoutBatch(entry)) {
+        const settlement = buildSettlement(entry);
+        const type = normalizeType(entry.entryType);
+        return {
+          ...summary,
+          blockedRowCount:
+            type === 'sale' || type === 'refund' || settlement.status === 'held' || settlement.status === 'disputed'
+              ? summary.blockedRowCount + 1
+              : summary.blockedRowCount,
+        };
+      }
+
+      const amounts = calculateEntryBatchAmounts(entry, profile);
+      return {
+        eligibleRowCount: summary.eligibleRowCount + 1,
+        eligibleNetAmount: summary.eligibleNetAmount + amounts.netAmount,
+        blockedRowCount: summary.blockedRowCount,
+      };
+    },
+    {
+      eligibleRowCount: 0,
+      eligibleNetAmount: 0,
+      blockedRowCount: 0,
+    },
+  );
 
   const records: FinanceRecordDto[] = entries.map((entry) => {
     const references = mapRelatedReferences(entry);
@@ -521,6 +756,7 @@ export async function getVendorFinanceDashboard(
       createdAt: entry.createdAt.toISOString(),
       payoutCalculation: mapCalculation(payoutCalculation, entryProfile),
       settlement,
+      payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
     };
   });
 
@@ -541,6 +777,12 @@ export async function getVendorFinanceDashboard(
       pendingSettlement: toAmountString(balanceSummary.pendingSettlement),
     },
     profile,
+    payoutBatchSummary: {
+      eligibleRowCount: payoutBatchEligibility.eligibleRowCount,
+      eligibleNetAmount: toAmountString(payoutBatchEligibility.eligibleNetAmount),
+      blockedRowCount: payoutBatchEligibility.blockedRowCount,
+      latestBatch: latestBatch ? mapPayoutBatch(latestBatch) : null,
+    },
     records,
   };
 }
@@ -554,6 +796,192 @@ export async function getVendorFinancialProfile(vendorId: string): Promise<Vendo
   });
 
   return mapProfile(profile, vendorId);
+}
+
+export async function listPayoutBatches(vendorId?: string): Promise<PayoutBatchDto[]> {
+  const batches = await prisma.payoutBatch.findMany({
+    where: vendorId ? { vendorId } : undefined,
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 50,
+    include: {
+      _count: {
+        select: {
+          lines: true,
+        },
+      },
+    },
+  });
+
+  return batches.map(mapPayoutBatch);
+}
+
+export async function getPayoutBatch(batchId: string): Promise<PayoutBatchDto | null> {
+  const batch = await prisma.payoutBatch.findUnique({
+    where: {
+      id: batchId,
+    },
+    include: {
+      lines: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+
+  return batch ? mapPayoutBatch(batch) : null;
+}
+
+export async function preparePayoutBatch(
+  input: PreparePayoutBatchDto,
+  createdByUserId: string | null,
+): Promise<PayoutBatchDto> {
+  if (!input.vendorId) {
+    throw new Error('vendorId is required.');
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const [storedProfile, entries] = await Promise.all([
+      tx.vendorFinancialProfile.findFirst({
+        where: {
+          vendorId: input.vendorId,
+          active: true,
+        },
+      }),
+      tx.financeLedgerEntry.findMany({
+        where: {
+          vendorId: input.vendorId,
+          entryType: {
+            in: ['sale', 'refund'],
+          },
+        },
+        include: {
+          vendorAllocation: {
+            include: {
+              fulfillment: true,
+              refundRecords: true,
+            },
+          },
+          payoutBatchLines: {
+            where: {
+              payoutBatch: {
+                status: {
+                  in: [...ACTIVE_PAYOUT_BATCH_STATUSES],
+                },
+              },
+            },
+            select: {
+              id: true,
+            },
+            take: 1,
+          },
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      }),
+    ]);
+    const profile = mapProfile(storedProfile, input.vendorId);
+    const eligibleEntries = entries.filter(isEntryEligibleForPayoutBatch);
+
+    if (eligibleEntries.length === 0) {
+      throw new Error('No eligible payable ledger rows are available for payout batch preparation.');
+    }
+
+    const totals = eligibleEntries.reduce(
+      (summary, entry) => {
+        const amounts = calculateEntryBatchAmounts(entry, profile);
+        return {
+          grossAmount: summary.grossAmount + amounts.grossAmount,
+          commissionAmount: summary.commissionAmount + amounts.commissionAmount,
+          commissionVatAmount: summary.commissionVatAmount + amounts.commissionVatAmount,
+          shippingDeductionAmount: summary.shippingDeductionAmount + amounts.shippingDeductionAmount,
+          refundAmount: summary.refundAmount + amounts.refundAmount,
+          netAmount: summary.netAmount + amounts.netAmount,
+        };
+      },
+      {
+        grossAmount: 0,
+        commissionAmount: 0,
+        commissionVatAmount: 0,
+        shippingDeductionAmount: 0,
+        refundAmount: 0,
+        netAmount: 0,
+      },
+    );
+
+    const batch = await tx.payoutBatch.create({
+      data: {
+        vendorId: input.vendorId,
+        status: 'DRAFT',
+        grossAmount: totals.grossAmount,
+        commissionAmount: totals.commissionAmount,
+        commissionVatAmount: totals.commissionVatAmount,
+        shippingDeductionAmount: totals.shippingDeductionAmount,
+        refundAmount: totals.refundAmount,
+        netAmount: totals.netAmount,
+        currency: 'TRY',
+        createdByUserId,
+        lines: {
+          create: eligibleEntries.map((entry) => ({
+            financeLedgerEntryId: entry.id,
+            amountSnapshot: calculateEntryBatchAmounts(entry, profile).netAmount,
+          })),
+        },
+      },
+      include: {
+        lines: {
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
+      },
+    });
+
+    return mapPayoutBatch(batch);
+  });
+}
+
+export async function cancelPayoutBatch(batchId: string): Promise<PayoutBatchDto> {
+  const batch = await prisma.payoutBatch.update({
+    where: {
+      id: batchId,
+    },
+    data: {
+      status: 'CANCELLED',
+    },
+    include: {
+      lines: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+
+  return mapPayoutBatch(batch);
+}
+
+export async function markPayoutBatchReview(batchId: string): Promise<PayoutBatchDto> {
+  const batch = await prisma.payoutBatch.update({
+    where: {
+      id: batchId,
+    },
+    data: {
+      status: 'REVIEW',
+    },
+    include: {
+      lines: {
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+
+  return mapPayoutBatch(batch);
 }
 
 function normalizePercent(value: number | undefined, fallback: number) {
