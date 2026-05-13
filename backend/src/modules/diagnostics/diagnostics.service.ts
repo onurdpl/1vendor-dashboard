@@ -19,6 +19,7 @@ import {
   markOperationalJobCompleted,
   markOperationalJobFailed,
   markOperationalJobProcessing,
+  markOperationalJobRetrying,
   serializeOperationalJob,
 } from '../operational-jobs/operational-jobs.service.js';
 import type {
@@ -31,6 +32,7 @@ import type {
   SyncDiagnosticsResponse,
   SyncDiagnosticSeverity,
   WebhookRecoverResponse,
+  OperationalJobRetryResponse,
   WebhookReplayResponse,
 } from './diagnostics.types.js';
 
@@ -811,6 +813,24 @@ async function markDiagnosticsJobProcessing(jobId: string | null | undefined) {
   }
 }
 
+function buildBlockedOperationalJobRetry(input: {
+  jobId?: string;
+  webhookEventId?: string | null;
+  jobStatus?: string | null;
+  reason: string;
+}): OperationalJobRetryResponse {
+  return {
+    ok: false,
+    operationalJobId: input.jobId,
+    webhookEventId: input.webhookEventId ?? null,
+    jobStatus: input.jobStatus ?? null,
+    retryStatus: 'not_retryable',
+    processingStatus: 'not_retryable',
+    skippedReason: input.reason,
+    message: input.reason,
+  };
+}
+
 export async function replayWebhookEvent(
   env: AppEnv,
   webhookEventId: string,
@@ -894,6 +914,149 @@ export async function replayWebhookEvent(
       afterStatus,
       replayStatus,
       errorSummary,
+    },
+  };
+}
+
+export async function retryOperationalJob(
+  env: AppEnv,
+  operationalJobId: string,
+): Promise<
+  | { ok: false; statusCode: 404 | 409; response: OperationalJobRetryResponse }
+  | { ok: true; response: OperationalJobRetryResponse }
+> {
+  const job = await prisma.operationalJob.findUnique({
+    where: { id: operationalJobId },
+    include: {
+      webhookEvent: true,
+    },
+  });
+
+  if (!job) {
+    return {
+      ok: false,
+      statusCode: 404,
+      response: buildBlockedOperationalJobRetry({
+        jobId: operationalJobId,
+        reason: 'Operational job not found.',
+      }),
+    };
+  }
+
+  if (job.status === 'COMPLETED') {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: 'Completed operational jobs are not retryable.',
+      }),
+    };
+  }
+
+  if (job.status === 'PROCESSING' || job.status === 'RETRYING') {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: 'Operational job is already processing.',
+      }),
+    };
+  }
+
+  if (!job.webhookEvent) {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: 'Only webhook-linked operational jobs can be retried by this endpoint.',
+      }),
+    };
+  }
+
+  const replayBlockedReason = getReplayBlockedReason(job.webhookEvent);
+  const recoverBlockedReason = getRecoverBlockedReason(job.webhookEvent);
+  if (replayBlockedReason && recoverBlockedReason) {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: recoverBlockedReason,
+      }),
+    };
+  }
+
+  const parsedPayload = parseStoredPayload(job.webhookEvent.rawPayload);
+  if (!parsedPayload.ok) {
+    return {
+      ok: false,
+      statusCode: 409,
+      response: buildBlockedOperationalJobRetry({
+        jobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: job.status,
+        reason: parsedPayload.message,
+      }),
+    };
+  }
+
+  await markOperationalJobRetrying(job.id);
+  await markWebhookProcessing(job.webhookEvent.id);
+
+  let response: WebhookReplayResponse;
+  try {
+    response = await processWebhookEvent(env, job.webhookEvent, parsedPayload.payload);
+  } catch (error) {
+    const failedJob = await markOperationalJobFailed(job.id, error);
+    return {
+      ok: true,
+      response: {
+        ok: true,
+        operationalJobId: job.id,
+        webhookEventId: job.webhookEventId,
+        jobStatus: failedJob?.status ?? null,
+        retryStatus: 'failed',
+        processingStatus: 'failed',
+        errorSummary: error instanceof Error ? error.message : 'Operational job retry failed.',
+        message: error instanceof Error ? error.message : 'Operational job retry failed.',
+      },
+    };
+  }
+
+  const failedReason = response.message ?? 'Retry did not complete.';
+  const finalJob =
+    response.processingStatus === 'processed'
+      ? await markOperationalJobCompleted(job.id)
+      : await markOperationalJobFailed(job.id, failedReason);
+  const { afterStatus, errorSummary } = await getWebhookStatus(job.webhookEvent.id);
+  const retryStatus: OperationalJobRetryResponse['retryStatus'] =
+    response.processingStatus === 'processed' ? 'retried' : 'failed';
+
+  return {
+    ok: true,
+    response: {
+      ok: true,
+      operationalJobId: job.id,
+      webhookEventId: job.webhookEventId,
+      jobStatus: finalJob?.status ?? null,
+      retryStatus,
+      processingStatus: response.processingStatus,
+      errorSummary,
+      message:
+        retryStatus === 'retried'
+          ? `Operational job retry completed. Webhook status is ${afterStatus ?? 'unknown'}.`
+          : failedReason,
     },
   };
 }

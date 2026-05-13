@@ -248,6 +248,17 @@ export const runtimeServices = {
             recoveryStatus: 'not_recoverable' as const,
             message: `Recover is not available in mock mode for ${webhookEventId}.`,
           }),
+    retryOperationalJob: (operationalJobId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.retryOperationalJob(operationalJobId)
+        : Promise.resolve({
+            ok: true as const,
+            operationalJobId,
+            jobStatus: 'mock_only',
+            retryStatus: 'not_retryable' as const,
+            processingStatus: 'mock_only',
+            message: `Operational job retry is not available in mock mode for ${operationalJobId}.`,
+          }),
     reconcileAllocation: (allocationId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.reconcileAllocation(allocationId)

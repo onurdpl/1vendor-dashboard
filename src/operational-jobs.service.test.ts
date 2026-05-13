@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  classifyOperationalFailure,
+  getRetryDelayMs,
   inferOperationalJobTypeForWebhookTopic,
   runBestEffortOperationalJobMutation,
 } from '../backend/src/modules/operational-jobs/operational-jobs.service.js';
@@ -22,5 +24,18 @@ describe('operational jobs service', () => {
 
     expect(result).toBeNull();
     expect(onError).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('classifies transient and deterministic failures for retry policy', () => {
+    expect(classifyOperationalFailure(new Error('Shopify Admin timeout'))).toBe('transient');
+    expect(classifyOperationalFailure(new Error('Shopify order id was missing'))).toBe('validation');
+    expect(classifyOperationalFailure(new Error('seller_info mapping unresolved'))).toBe('reconciliation_required');
+    expect(classifyOperationalFailure(new Error('already processed duplicate'))).toBe('duplicate_noop');
+  });
+
+  it('backs off retry delay without exceeding the operational cap', () => {
+    expect(getRetryDelayMs({ retryCount: 0, retryBackoffMs: 60_000 })).toBe(60_000);
+    expect(getRetryDelayMs({ retryCount: 2, retryBackoffMs: 60_000 })).toBe(240_000);
+    expect(getRetryDelayMs({ retryCount: 10, retryBackoffMs: 60_000 })).toBe(1_800_000);
   });
 });

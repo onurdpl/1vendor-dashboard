@@ -12,7 +12,16 @@ export type OperationalJobStatusLabel =
   | 'completed'
   | 'failed'
   | 'retry_scheduled'
-  | 'dead_letter_ready';
+  | 'retrying'
+  | 'dead_letter_ready'
+  | 'permanently_failed';
+
+export type OperationalJobFailureCategory =
+  | 'transient'
+  | 'validation'
+  | 'reconciliation_required'
+  | 'permanent'
+  | 'duplicate_noop';
 
 export type OperationalJobTypeLabel =
   | 'webhook_processing'
@@ -37,10 +46,15 @@ export type OperationalJobDto = {
   retryCount: number;
   maxRetries: number;
   scheduledAt: string;
+  nextRetryAt: string | null;
+  lastAttemptAt: string | null;
+  retryBackoffMs: number | null;
   startedAt: string | null;
   completedAt: string | null;
   failedAt: string | null;
   errorSummary: string | null;
+  failureCategory: OperationalJobFailureCategory | null;
+  escalationReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -65,7 +79,9 @@ const statusToPrisma = {
   completed: OperationalJobStatus.COMPLETED,
   failed: OperationalJobStatus.FAILED,
   retry_scheduled: OperationalJobStatus.RETRY_SCHEDULED,
+  retrying: OperationalJobStatus.RETRYING,
   dead_letter_ready: OperationalJobStatus.DEAD_LETTER_READY,
+  permanently_failed: OperationalJobStatus.PERMANENTLY_FAILED,
 } satisfies Record<OperationalJobStatusLabel, OperationalJobStatus>;
 
 const statusFromPrisma = {
@@ -74,7 +90,9 @@ const statusFromPrisma = {
   [OperationalJobStatus.COMPLETED]: 'completed',
   [OperationalJobStatus.FAILED]: 'failed',
   [OperationalJobStatus.RETRY_SCHEDULED]: 'retry_scheduled',
+  [OperationalJobStatus.RETRYING]: 'retrying',
   [OperationalJobStatus.DEAD_LETTER_READY]: 'dead_letter_ready',
+  [OperationalJobStatus.PERMANENTLY_FAILED]: 'permanently_failed',
 } satisfies Record<OperationalJobStatus, OperationalJobStatusLabel>;
 
 const typeToPrisma = {
@@ -104,6 +122,70 @@ function toIsoString(value: Date | null) {
 function summarizeOperationalError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error || 'Operational job failed.');
   return message.length > 500 ? `${message.slice(0, 497)}...` : message;
+}
+
+function isFailureCategory(value: string | null): value is OperationalJobFailureCategory {
+  return (
+    value === 'transient' ||
+    value === 'validation' ||
+    value === 'reconciliation_required' ||
+    value === 'permanent' ||
+    value === 'duplicate_noop'
+  );
+}
+
+export function classifyOperationalFailure(error: unknown): OperationalJobFailureCategory {
+  const message = summarizeOperationalError(error).toLowerCase();
+
+  if (message.includes('duplicate') || message.includes('already processed') || message.includes('no-op')) {
+    return 'duplicate_noop';
+  }
+
+  if (
+    message.includes('timeout') ||
+    message.includes('timed out') ||
+    message.includes('rate limit') ||
+    message.includes('429') ||
+    message.includes('503') ||
+    message.includes('502') ||
+    message.includes('network') ||
+    message.includes('econn') ||
+    message.includes('temporar')
+  ) {
+    return 'transient';
+  }
+
+  if (
+    message.includes('seller_info') ||
+    message.includes('canonical') ||
+    message.includes('mapping') ||
+    message.includes('reconciliation')
+  ) {
+    return 'reconciliation_required';
+  }
+
+  if (
+    message.includes('missing') ||
+    message.includes('invalid') ||
+    message.includes('unknown vendor') ||
+    message.includes('unresolved') ||
+    message.includes('did not include') ||
+    message.includes('not found')
+  ) {
+    return 'validation';
+  }
+
+  if (message.includes('permanent') || message.includes('not recoverable')) {
+    return 'permanent';
+  }
+
+  return 'transient';
+}
+
+export function getRetryDelayMs(input: { retryCount: number; retryBackoffMs?: number | null }) {
+  const baseDelayMs = input.retryBackoffMs ?? 60_000;
+  const exponent = Math.max(0, input.retryCount);
+  return Math.min(baseDelayMs * 2 ** exponent, 30 * 60_000);
 }
 
 export async function runBestEffortOperationalJobMutation<T>(
@@ -153,10 +235,15 @@ export function serializeOperationalJob(job: OperationalJob): OperationalJobDto 
     retryCount: job.retryCount,
     maxRetries: job.maxRetries,
     scheduledAt: job.scheduledAt.toISOString(),
+    nextRetryAt: toIsoString(job.nextRetryAt),
+    lastAttemptAt: toIsoString(job.lastAttemptAt),
+    retryBackoffMs: job.retryBackoffMs,
     startedAt: toIsoString(job.startedAt),
     completedAt: toIsoString(job.completedAt),
     failedAt: toIsoString(job.failedAt),
     errorSummary: job.errorSummary,
+    failureCategory: isFailureCategory(job.failureCategory) ? job.failureCategory : null,
+    escalationReason: job.escalationReason,
     createdAt: job.createdAt.toISOString(),
     updatedAt: job.updatedAt.toISOString(),
   };
@@ -177,6 +264,7 @@ export async function createOperationalJob(input: CreateOperationalJobInput) {
       priority: input.priority ?? 0,
       scheduledAt: input.scheduledAt ?? new Date(),
       maxRetries: input.maxRetries ?? 3,
+      retryBackoffMs: 60_000,
     },
   });
 }
@@ -205,7 +293,26 @@ export async function markOperationalJobProcessing(jobId: string | null | undefi
     data: {
       status: statusToPrisma.processing,
       startedAt: new Date(),
+      lastAttemptAt: new Date(),
       errorSummary: null,
+      escalationReason: null,
+    },
+  });
+}
+
+export async function markOperationalJobRetrying(jobId: string | null | undefined) {
+  if (!jobId) {
+    return null;
+  }
+
+  return prisma.operationalJob.update({
+    where: { id: jobId },
+    data: {
+      status: statusToPrisma.retrying,
+      startedAt: new Date(),
+      lastAttemptAt: new Date(),
+      nextRetryAt: null,
+      escalationReason: null,
     },
   });
 }
@@ -222,24 +329,86 @@ export async function markOperationalJobCompleted(jobId: string | null | undefin
       completedAt: new Date(),
       failedAt: null,
       errorSummary: null,
+      failureCategory: null,
+      escalationReason: null,
+      nextRetryAt: null,
     },
   });
 }
 
-export async function markOperationalJobFailed(jobId: string | null | undefined, error: unknown) {
+export async function markOperationalJobFailed(
+  jobId: string | null | undefined,
+  error: unknown,
+  options: {
+    category?: OperationalJobFailureCategory;
+    retryable?: boolean;
+  } = {},
+) {
   if (!jobId) {
     return null;
   }
 
+  const job = await prisma.operationalJob.findUnique({
+    where: { id: jobId },
+    select: {
+      retryCount: true,
+      maxRetries: true,
+      retryBackoffMs: true,
+    },
+  });
+
+  if (!job) {
+    return null;
+  }
+
+  const category = options.category ?? classifyOperationalFailure(error);
+  const nextRetryCount = job.retryCount + 1;
+  const canRetry =
+    options.retryable !== false &&
+    category === 'transient' &&
+    nextRetryCount < job.maxRetries;
+  const exhaustedRetries =
+    options.retryable !== false &&
+    category === 'transient' &&
+    nextRetryCount >= job.maxRetries;
+  const failedAt = new Date();
+  const retryDelayMs = getRetryDelayMs({
+    retryCount: job.retryCount,
+    retryBackoffMs: job.retryBackoffMs,
+  });
+  const nextRetryAt = new Date(failedAt.getTime() + retryDelayMs);
+  const status = exhaustedRetries
+    ? statusToPrisma.dead_letter_ready
+    : category === 'permanent'
+      ? statusToPrisma.permanently_failed
+      : canRetry
+        ? statusToPrisma.retry_scheduled
+        : statusToPrisma.failed;
+
   return prisma.operationalJob.update({
     where: { id: jobId },
     data: {
-      status: statusToPrisma.failed,
+      status,
       retryCount: {
         increment: 1,
       },
-      failedAt: new Date(),
+      failedAt,
+      lastAttemptAt: failedAt,
+      nextRetryAt: canRetry ? nextRetryAt : null,
+      retryBackoffMs: retryDelayMs,
       errorSummary: summarizeOperationalError(error),
+      failureCategory: category,
+      escalationReason: exhaustedRetries
+        ? `Retry attempts exhausted after ${nextRetryCount}/${job.maxRetries}. Manual intervention required.`
+        : canRetry
+          ? `Transient failure scheduled for retry at ${nextRetryAt.toISOString()}.`
+          : category === 'reconciliation_required'
+            ? 'Canonical Shopify reconciliation or mapping review is required before retry.'
+            : category === 'validation'
+              ? 'Validation failure is not automatically retryable.'
+              : category === 'duplicate_noop'
+                ? 'Duplicate/no-op outcome is not automatically retryable.'
+                : null,
     },
   });
 }
@@ -256,10 +425,14 @@ export async function markOperationalJobRetryScheduled(
     data: {
       status: statusToPrisma.retry_scheduled,
       scheduledAt: input.scheduledAt,
+      nextRetryAt: input.scheduledAt,
+      lastAttemptAt: new Date(),
       retryCount: {
         increment: 1,
       },
       failedAt: new Date(),
+      failureCategory: 'transient',
+      escalationReason: `Retry scheduled for ${input.scheduledAt.toISOString()}.`,
       errorSummary: input.error ? summarizeOperationalError(input.error) : undefined,
     },
   });
@@ -275,6 +448,9 @@ export async function markOperationalJobDeadLetterReady(jobId: string, error: un
       },
       failedAt: new Date(),
       errorSummary: summarizeOperationalError(error),
+      failureCategory: classifyOperationalFailure(error),
+      escalationReason: 'Manual intervention required before another retry.',
+      nextRetryAt: null,
     },
   });
 }

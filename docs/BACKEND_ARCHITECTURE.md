@@ -255,7 +255,27 @@ Alternative for quick schema sync without migration history:
   - use an explicit shell override for deterministic local validation:
     - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_dev npm run backend:smoke`
   - if `backend/.env` has duplicate `DATABASE_URL` entries, the later value can override the intended local database for Prisma/dotenv consumers
-  - Render production must run `prisma migrate deploy` against Render Postgres before operational job persistence is considered production-verified
+- Render production must run `prisma migrate deploy` against Render Postgres before operational job persistence is considered production-verified
+
+## Phase 17B Retry and Dead-letter Foundation
+- The retry and dead-letter lifecycle is documented in [PHASE_17B_RETRY_AND_DEADLETTER.md](/Users/onur/Documents/New project 4/docs/PHASE_17B_RETRY_AND_DEADLETTER.md).
+- `OperationalJob` now models retry execution and escalation metadata:
+  - `retrying`
+  - `dead_letter_ready`
+  - `permanently_failed`
+  - `nextRetryAt`
+  - `lastAttemptAt`
+  - `retryBackoffMs`
+  - `failureCategory`
+  - `escalationReason`
+- Failure categories are lightweight and operational:
+  - transient failures can schedule retries with capped exponential backoff
+  - validation and reconciliation-required failures do not loop automatically
+  - exhausted transient failures become `dead_letter_ready`
+- Admin-only retry endpoint:
+  - `POST /admin/diagnostics/jobs/:operationalJobId/retry`
+- Current retry execution is limited to webhook-linked operational jobs with stored payloads and reuses existing idempotent webhook processors.
+- This phase still does not add daemon workers, polling schedulers, Redis, BullMQ, Kafka, RabbitMQ, websocket infrastructure, or external DLQ infrastructure.
 
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.

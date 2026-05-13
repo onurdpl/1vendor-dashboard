@@ -12,6 +12,7 @@ const diagnosticsMocks = vi.hoisted(() => ({
   reconciliation: vi.fn(),
   replay: vi.fn(),
   recover: vi.fn(),
+  retryOperationalJob: vi.fn(),
   reconcileAllocation: vi.fn(),
   reconcileShopifyOrder: vi.fn(),
 }));
@@ -73,10 +74,15 @@ const blockedEvent = {
       retryCount: 1,
       maxRetries: 3,
       scheduledAt: '2026-05-12T10:00:00Z',
+      nextRetryAt: '2026-05-12T10:05:00Z',
+      lastAttemptAt: '2026-05-12T10:01:00Z',
+      retryBackoffMs: 300000,
       startedAt: '2026-05-12T10:00:30Z',
       completedAt: null,
       failedAt: '2026-05-12T10:01:00Z',
       errorSummary: 'Payload missing',
+      failureCategory: 'validation',
+      escalationReason: 'Validation failure is not automatically retryable.',
       createdAt: '2026-05-12T10:00:00Z',
       updatedAt: '2026-05-12T10:01:00Z',
     },
@@ -142,6 +148,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.reconciliation.mockReset();
     diagnosticsMocks.replay.mockReset();
     diagnosticsMocks.recover.mockReset();
+    diagnosticsMocks.retryOperationalJob.mockReset();
     diagnosticsMocks.reconcileAllocation.mockReset();
     diagnosticsMocks.reconcileShopifyOrder.mockReset();
 
@@ -204,6 +211,15 @@ describe('AdminDiagnosticsPage control center', () => {
       processingStatus: 'processed',
       message: 'Replay accepted',
     });
+    diagnosticsMocks.retryOperationalJob.mockResolvedValue({
+      ok: true,
+      operationalJobId: 'job-failed-refund',
+      webhookEventId: 'webhook-blocked',
+      jobStatus: 'retry_scheduled',
+      retryStatus: 'failed',
+      processingStatus: 'needs_attention',
+      message: 'Retry scheduled after transient failure.',
+    });
   });
 
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {
@@ -214,7 +230,18 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getAllByText(/Recover blocked: Already processed/i).length).toBeGreaterThan(0);
     expect(screen.getByText('Refund Sync')).toBeInTheDocument();
     expect(screen.getByText(/Retry 1\/3/i)).toBeInTheDocument();
+    expect(screen.getByText('Validation')).toBeInTheDocument();
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
+  });
+
+  it('shows operational retry action feedback for retryable jobs', async () => {
+    renderDiagnosticsPage();
+
+    expect(await screen.findByText('Refund Sync')).toBeInTheDocument();
+    await userEvent.click(screen.getAllByRole('button', { name: 'Retry' })[0]);
+
+    expect(await screen.findByText('Retry scheduled after transient failure.')).toBeInTheDocument();
+    expect(diagnosticsMocks.retryOperationalJob).toHaveBeenCalledWith('job-failed-refund');
   });
 
   it('renders webhook detail when older diagnostics responses omit related job records', async () => {
@@ -233,14 +260,14 @@ describe('AdminDiagnosticsPage control center', () => {
 
     renderDiagnosticsPage();
 
-    expect(await screen.findByText('Payload unavailable')).toBeInTheDocument();
-    expect(screen.getByText('Use manual Shopify reconciliation.')).toBeInTheDocument();
+    expect((await screen.findAllByText('Payload unavailable')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Use manual Shopify reconciliation.').length).toBeGreaterThan(0);
   });
 
   it('shows replay action feedback without changing the backend action contract', async () => {
     renderDiagnosticsPage();
 
-    await screen.findByText('event-replayable');
+    expect((await screen.findAllByText('event-replayable')).length).toBeGreaterThan(0);
     await userEvent.click(screen.getAllByRole('button', { name: 'Replay' })[1]);
 
     expect(await screen.findByText('Replay accepted')).toBeInTheDocument();

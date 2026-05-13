@@ -73,7 +73,7 @@
 - No background worker, scheduler, external queue, payout engine, ERP/cargo integration, invoice generation, label generation, analytics engine, or realtime socket infrastructure was added.
 
 ## Future Evolution
-- Phase 17B can add an operator-safe retry executor for jobs in `failed` or `retry_scheduled`.
+- Phase 17B adds an operator-safe retry executor for webhook-linked jobs in retryable states, plus explicit retry/dead-letter metadata.
 - Later infrastructure hardening can add scheduled reconciliation scans and dead-letter review workflows.
 - If throughput requires it, external queue infrastructure can be introduced behind the `OperationalJob` lifecycle without changing webhook HMAC/idempotency contracts.
 - Alerting can use `failed`, `retry_scheduled`, and `dead_letter_ready` job states once observability is expanded.

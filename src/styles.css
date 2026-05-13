@@ -390,6 +390,13 @@ a:focus-visible {
   font-size: 0.75rem;
 }
 
+.diagnostics-job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .diagnostics-wrap {
   overflow-wrap: anywhere;
   word-break: break-word;

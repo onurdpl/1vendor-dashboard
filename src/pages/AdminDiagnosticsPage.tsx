@@ -55,16 +55,21 @@ function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'norma
 }
 
 function getStatusTone(status: string) {
-  if (status === 'FAILED') {
+  const normalized = status.toLowerCase();
+  if (normalized === 'failed' || normalized === 'dead_letter_ready' || normalized === 'permanently_failed') {
     return 'danger' as const;
   }
-  if (status === 'PROCESSED') {
+  if (normalized === 'processed' || normalized === 'completed') {
     return 'success' as const;
   }
-  if (status === 'PROCESSING') {
+  if (normalized === 'processing' || normalized === 'retrying' || normalized === 'retry_scheduled') {
     return 'info' as const;
   }
   return 'attention' as const;
+}
+
+function canRetryOperationalJob(status: string) {
+  return ['failed', 'retry_scheduled', 'dead_letter_ready'].includes(status.toLowerCase());
 }
 
 function formatWebhookTopic(topic: string) {
@@ -184,6 +189,17 @@ export function AdminDiagnosticsPage() {
         showFeedback(result.message ?? `Recover finished with ${result.recoveryStatus}.`, result.recoveryStatus === 'recovered' ? 'success' : 'info');
       },
       onError: (error) => showFeedback(error instanceof Error ? error.message : 'Recover request failed.', 'error'),
+    },
+  );
+
+  const retryOperationalJobMutation = useMutationAction(
+    async (operationalJobId: string) => runtimeServices.diagnostics.retryOperationalJob(operationalJobId),
+    {
+      invalidateQueryKeys: invalidateDiagnostics,
+      onSuccess: (result) => {
+        showFeedback(result.message ?? `Retry finished with ${result.retryStatus}.`, result.retryStatus === 'retried' ? 'success' : 'info');
+      },
+      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Operational job retry failed.', 'error'),
     },
   );
 
@@ -593,11 +609,25 @@ export function AdminDiagnosticsPage() {
                       <div>
                         <strong>{toTitleCaseLabel(job.jobType)}</strong>
                         <small>
-                          Retry {job.retryCount}/{job.maxRetries} · Scheduled {formatDate(job.scheduledAt)}
+                          Retry {job.retryCount}/{job.maxRetries} · Next {formatDate(job.nextRetryAt ?? job.scheduledAt)}
                         </small>
+                        {job.failureCategory ? <small>{toTitleCaseLabel(job.failureCategory)}</small> : null}
+                        {job.escalationReason ? <small>{job.escalationReason}</small> : null}
                         {job.errorSummary ? <small>{job.errorSummary}</small> : null}
                       </div>
-                      <StatusBadge tone={getStatusTone(job.status)}>{toTitleCaseLabel(job.status)}</StatusBadge>
+                      <div className="diagnostics-job-actions">
+                        <StatusBadge tone={getStatusTone(job.status)}>{toTitleCaseLabel(job.status)}</StatusBadge>
+                        {canRetryOperationalJob(job.status) ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={retryOperationalJobMutation.isPending}
+                            onClick={() => retryOperationalJobMutation.mutate(job.id)}
+                          >
+                            Retry
+                          </button>
+                        ) : null}
+                      </div>
                     </div>
                   ))}
                 </MetadataGroup>

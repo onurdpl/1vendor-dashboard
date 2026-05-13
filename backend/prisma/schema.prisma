@@ -49,7 +49,9 @@ enum OperationalJobStatus {
   COMPLETED
   FAILED
   RETRY_SCHEDULED
+  RETRYING
   DEAD_LETTER_READY
+  PERMANENTLY_FAILED
 }
 
 enum OperationalJobType {
@@ -329,10 +331,15 @@ model OperationalJob {
   retryCount           Int                  @default(0)
   maxRetries           Int                  @default(3)
   scheduledAt          DateTime             @default(now())
+  nextRetryAt          DateTime?
+  lastAttemptAt        DateTime?
+  retryBackoffMs       Int?
   startedAt            DateTime?
   completedAt          DateTime?
   failedAt             DateTime?
   errorSummary         String?
+  failureCategory      String?
+  escalationReason     String?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
   webhookEvent         WebhookEvent?        @relation(fields: [webhookEventId], references: [id], onDelete: SetNull)
@@ -341,6 +348,7 @@ model OperationalJob {
   returnRecord         ReturnRecord?        @relation(fields: [returnRecordId], references: [id], onDelete: SetNull)
 
   @@index([status, scheduledAt])
+  @@index([status, nextRetryAt])
   @@index([jobType])
   @@index([webhookEventId])
   @@index([vendorAllocationId])

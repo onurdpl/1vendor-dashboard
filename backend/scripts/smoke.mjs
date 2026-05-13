@@ -2101,6 +2101,20 @@ async function runSmoke() {
         throw new Error(`/operational-jobs duplicate delivery expected one job, got ${firstOrderJobCount}`);
       }
     }
+    const completedJobRetryResponse = await fetch(
+      `${baseUrl}/admin/diagnostics/jobs/${firstOrderWebhookEvent.relatedJobs[0].id}/retry`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (completedJobRetryResponse.status !== 409) {
+      throw new Error(
+        `/admin/diagnostics/jobs/:operationalJobId/retry completed job expected 409, got ${completedJobRetryResponse.status}`,
+      );
+    }
     const failedWebhookEvent = adminWebhookDiagnostics.events.find(
       (event) => event?.status === 'FAILED' && event?.payloadAvailable === true,
     );

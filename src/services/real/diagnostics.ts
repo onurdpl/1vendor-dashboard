@@ -23,10 +23,15 @@ export type DiagnosticsOperationalJob = {
   retryCount: number;
   maxRetries: number;
   scheduledAt: string;
+  nextRetryAt: string | null;
+  lastAttemptAt: string | null;
+  retryBackoffMs: number | null;
   startedAt: string | null;
   completedAt: string | null;
   failedAt: string | null;
   errorSummary: string | null;
+  failureCategory: string | null;
+  escalationReason: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -206,6 +211,18 @@ export type RecoverWebhookResponse = ReplayWebhookResponse & {
   recoveryStatus: 'recovered' | 'failed' | 'not_recoverable';
 };
 
+export type RetryOperationalJobResponse = {
+  ok: boolean;
+  operationalJobId?: string;
+  webhookEventId?: string | null;
+  jobStatus?: string | null;
+  retryStatus: 'retried' | 'failed' | 'not_retryable';
+  processingStatus: string;
+  skippedReason?: string;
+  errorSummary?: string | null;
+  message?: string;
+};
+
 export async function listWebhookDiagnostics() {
   return apiClient.get<WebhooksResponseDto>('/admin/diagnostics/webhooks');
 }
@@ -228,6 +245,10 @@ export async function replayWebhook(webhookEventId: string) {
 
 export async function recoverWebhook(webhookEventId: string) {
   return apiClient.post<RecoverWebhookResponse>(`/admin/diagnostics/webhooks/${webhookEventId}/recover`);
+}
+
+export async function retryOperationalJob(operationalJobId: string) {
+  return apiClient.post<RetryOperationalJobResponse>(`/admin/diagnostics/jobs/${operationalJobId}/retry`);
 }
 
 export async function reconcileAllocation(allocationId: string) {

@@ -9,6 +9,7 @@ import {
   listWebhookDiagnostics,
   recoverWebhookEvent,
   replayWebhookEvent,
+  retryOperationalJob,
 } from './diagnostics.service.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
@@ -106,6 +107,25 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const result = await recoverWebhookEvent(env, request.params.webhookEventId);
+      if (!result.ok) {
+        return reply.code(result.statusCode).send(result.response);
+      }
+
+      return reply.code(202).send(result.response);
+    },
+  );
+
+  app.post<{ Params: { operationalJobId: string } }>(
+    '/admin/diagnostics/jobs/:operationalJobId/retry',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const result = await retryOperationalJob(env, request.params.operationalJobId);
       if (!result.ok) {
         return reply.code(result.statusCode).send(result.response);
       }
