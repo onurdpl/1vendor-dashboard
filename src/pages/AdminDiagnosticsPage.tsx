@@ -293,6 +293,7 @@ export function AdminDiagnosticsPage() {
       fulfillmentFailures: reconciliationQuery.data?.summary.fulfillmentSyncFailures ?? 0,
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
       staleAllocations: reconciliationQuery.data?.summary.staleAllocations ?? 0,
+      scheduledReconciliationJobs: reconciliationQuery.data?.summary.scheduledReconciliationJobs ?? 0,
       replayable: webhooksQuery.data?.events.filter((event) => event.replayEligible).length ?? 0,
       recoverable: webhooksQuery.data?.events.filter((event) => event.recoverEligible).length ?? 0,
     };
@@ -347,6 +348,7 @@ export function AdminDiagnosticsPage() {
         <div className="op-heading-meta">
           <StatusBadge tone="danger">Failed {webhooksQuery.data.summary.failed}</StatusBadge>
           <StatusBadge tone="attention">Stuck {combinedCounts.stuck}</StatusBadge>
+          <StatusBadge tone="info">Scheduled {combinedCounts.scheduledReconciliationJobs}</StatusBadge>
           <StatusBadge tone="success">Processed {webhooksQuery.data.summary.processed}</StatusBadge>
         </div>
       </div>
@@ -510,8 +512,11 @@ export function AdminDiagnosticsPage() {
                         <div className="reconciliation-meta">
                           <span>{toTitleCaseLabel(item.type)}</span>
                           <span>{item.status === 'processed' ? 'No-op / processed' : item.status}</span>
+                          {item.operationalJobId ? <span>Job {item.operationalJobId}</span> : null}
+                          {item.reconciliationReason ? <span>{toTitleCaseLabel(item.reconciliationReason)}</span> : null}
                           {item.relatedAllocationId ? <span>Allocation {item.relatedAllocationId}</span> : null}
                           {item.relatedShopifyOrderId ? <span>Order {item.relatedShopifyOrderId}</span> : null}
+                          {item.nextAttemptAt ? <span>Next {formatDate(item.nextAttemptAt)}</span> : null}
                         </div>
                       </div>
                       <OperationalActionGroup>

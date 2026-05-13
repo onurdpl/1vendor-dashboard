@@ -19,6 +19,11 @@ export type AppEnv = {
   SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: number;
   SHOPIFY_MOCK_FULFILLMENT_ORDERS?: string;
   SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS?: string;
+  SCHEDULED_RECONCILIATION_ENABLED: boolean;
+  SCHEDULED_RECONCILIATION_EXECUTE_DUE: boolean;
+  SCHEDULED_RECONCILIATION_INTERVAL_MS: number;
+  SCHEDULED_RECONCILIATION_COOLDOWN_MS: number;
+  SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT: number;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -53,6 +58,23 @@ function parsePositiveInteger(value: string | undefined, fallback: number) {
   }
 
   return parsed;
+}
+
+function parseBoolean(value: string | undefined, fallback: boolean) {
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+
+  throw new Error('Expected a boolean configuration value.');
 }
 
 function parseCorsOrigins(value: string | undefined, nodeEnv: NodeEnv) {
@@ -118,5 +140,19 @@ export function loadEnv(): AppEnv {
     SHOPIFY_MOCK_FULFILLMENT_ORDERS: process.env.SHOPIFY_MOCK_FULFILLMENT_ORDERS || undefined,
     SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS:
       process.env.SHOPIFY_MOCK_FULFILLMENT_FAIL_ALLOCATION_IDS || undefined,
+    SCHEDULED_RECONCILIATION_ENABLED: parseBoolean(process.env.SCHEDULED_RECONCILIATION_ENABLED, false),
+    SCHEDULED_RECONCILIATION_EXECUTE_DUE: parseBoolean(process.env.SCHEDULED_RECONCILIATION_EXECUTE_DUE, false),
+    SCHEDULED_RECONCILIATION_INTERVAL_MS: parsePositiveInteger(
+      process.env.SCHEDULED_RECONCILIATION_INTERVAL_MS,
+      30 * 60 * 1000,
+    ),
+    SCHEDULED_RECONCILIATION_COOLDOWN_MS: parsePositiveInteger(
+      process.env.SCHEDULED_RECONCILIATION_COOLDOWN_MS,
+      30 * 60 * 1000,
+    ),
+    SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT: parsePositiveInteger(
+      process.env.SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT,
+      25,
+    ),
   };
 }

@@ -165,12 +165,19 @@ export type ReconciliationSummary = {
   fulfillmentSyncFailures: number;
   missingPayload: number;
   staleAllocations: number;
+  scheduledReconciliationJobs: number;
   total: number;
 };
 
 export type ReconciliationItem = {
   id: string;
-  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload' | 'stale_allocation';
+  type:
+    | 'stuck_webhook'
+    | 'failed_webhook'
+    | 'fulfillment_sync_failed'
+    | 'missing_payload'
+    | 'stale_allocation'
+    | 'scheduled_reconciliation';
   severity: SyncDiagnosticSeverity;
   title: string;
   description: string;
@@ -181,6 +188,10 @@ export type ReconciliationItem = {
   createdAt: string;
   suggestedAction: string;
   payloadAvailable: boolean | null;
+  operationalJobId?: string | null;
+  nextAttemptAt?: string | null;
+  lastAttemptAt?: string | null;
+  reconciliationReason?: string | null;
 };
 
 export type ReconciliationResponse = {

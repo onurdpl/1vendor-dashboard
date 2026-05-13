@@ -277,6 +277,27 @@ Alternative for quick schema sync without migration history:
 - Current retry execution is limited to webhook-linked operational jobs with stored payloads and reuses existing idempotent webhook processors.
 - This phase still does not add daemon workers, polling schedulers, Redis, BullMQ, Kafka, RabbitMQ, websocket infrastructure, or external DLQ infrastructure.
 
+## Phase 17C Scheduled Reconciliation Foundation
+- The scheduled reconciliation foundation is documented in [PHASE_17C_SCHEDULED_RECONCILIATION.md](/Users/onur/Documents/New project 4/docs/PHASE_17C_SCHEDULED_RECONCILIATION.md).
+- Backend now includes an opt-in in-process reconciliation scan that creates `reconciliation` operational jobs for stale candidates.
+- Scheduler env controls:
+  - `SCHEDULED_RECONCILIATION_ENABLED` defaults to `false`
+  - `SCHEDULED_RECONCILIATION_EXECUTE_DUE` defaults to `false`
+  - `SCHEDULED_RECONCILIATION_INTERVAL_MS` defaults to 30 minutes
+  - `SCHEDULED_RECONCILIATION_COOLDOWN_MS` defaults to 30 minutes
+  - `SCHEDULED_RECONCILIATION_CANDIDATE_LIMIT` defaults to 25
+- Candidate heuristics cover stale allocation state, missing refund ledger rows, tracking mismatches, cancelled fulfillment/local fulfilled conflicts, stale shipment timestamps, and retry/dead-letter jobs linked to orders or allocations.
+- Duplicate protection:
+  - active reconciliation jobs block new scheduled jobs for the same allocation/order
+  - recently terminal reconciliation jobs enforce cooldown before another scheduled job can be created
+- Canonical refresh execution reuses the existing admin reconciliation service:
+  - fetch Shopify Admin GraphQL state
+  - compare local operational state
+  - repair only existing safe reconciliation fields
+  - record completion/failure on the operational job
+- Admin diagnostics reconciliation now surfaces scheduled reconciliation jobs with job id, candidate reason, current status, related order/allocation, and next/last attempt metadata.
+- This phase still does not add Redis, BullMQ, Kafka, RabbitMQ, Kubernetes cron, distributed workers, websocket infrastructure, or event-sourcing changes.
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.

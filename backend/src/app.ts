@@ -17,6 +17,7 @@ import { resolveVendorFromMetafield } from './modules/shopify/vendor-mapping.ser
 import { registerShopifyWebhookRoutes } from './modules/shopify/webhook.routes.js';
 import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.routes.js';
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.routes.js';
+import { registerScheduledReconciliationScheduler } from './modules/reconciliation/scheduled-reconciliation.service.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -103,6 +104,7 @@ export function createApp() {
   registerDiagnosticsRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
+  registerScheduledReconciliationScheduler(app, env);
 
   if (env.NODE_ENV !== 'production') {
     const authService = createAuthService(env);

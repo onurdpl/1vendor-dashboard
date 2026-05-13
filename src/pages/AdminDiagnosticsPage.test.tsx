@@ -185,6 +185,7 @@ describe('AdminDiagnosticsPage control center', () => {
         fulfillmentSyncFailures: 1,
         missingPayload: 1,
         staleAllocations: 1,
+        scheduledReconciliationJobs: 0,
         total: 2,
       },
       items: [

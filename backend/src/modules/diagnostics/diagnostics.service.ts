@@ -1,4 +1,4 @@
-import type { OperationalJob, WebhookEvent } from '@prisma/client';
+import { OperationalJobStatus, OperationalJobType, type OperationalJob, type WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
@@ -1063,7 +1063,14 @@ export async function retryOperationalJob(
 
 export async function getReconciliationDiagnostics(): Promise<ReconciliationResponse> {
   const olderThan = new Date(Date.now() - 5 * 60 * 1000);
-  const [stuckReceived, failedWebhookEvents, fulfillmentFailures, payloadUnknownEvents, staleAllocations] = await Promise.all([
+  const [
+    stuckReceived,
+    failedWebhookEvents,
+    fulfillmentFailures,
+    payloadUnknownEvents,
+    staleAllocations,
+    scheduledReconciliationJobs,
+  ] = await Promise.all([
     prisma.webhookEvent.findMany({
       where: {
         status: 'RECEIVED',
@@ -1163,6 +1170,36 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
         updatedAt: 'desc',
       },
     }),
+    prisma.operationalJob.findMany({
+      where: {
+        jobType: OperationalJobType.RECONCILIATION,
+        status: {
+          in: [
+            OperationalJobStatus.PENDING,
+            OperationalJobStatus.PROCESSING,
+            OperationalJobStatus.RETRY_SCHEDULED,
+            OperationalJobStatus.RETRYING,
+            OperationalJobStatus.FAILED,
+            OperationalJobStatus.DEAD_LETTER_READY,
+          ],
+        },
+      },
+      include: {
+        vendorAllocation: {
+          include: {
+            order: {
+              select: {
+                sourceShopifyOrderId: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      take: 25,
+    }),
   ]);
 
   const stuckItems: ReconciliationItem[] = stuckReceived.map((event) => ({
@@ -1244,7 +1281,45 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     payloadAvailable: null,
   }));
 
-  const items = [...stuckItems, ...failedItems, ...fulfillmentItems, ...missingPayloadItems, ...staleAllocationItems].sort((a, b) => {
+  const scheduledReconciliationItems: ReconciliationItem[] = scheduledReconciliationJobs.map((job) => {
+    const payload = typeof job.payload === 'object' && job.payload !== null && !Array.isArray(job.payload)
+      ? job.payload as Record<string, unknown>
+      : {};
+    const reason = typeof payload.reason === 'string' ? payload.reason : job.escalationReason;
+    const candidateType = typeof payload.candidateType === 'string' ? payload.candidateType : 'scheduled_reconciliation';
+
+    return {
+      id: `reconciliation-job-${job.id}`,
+      type: 'scheduled_reconciliation',
+      severity: job.status === OperationalJobStatus.DEAD_LETTER_READY || job.status === OperationalJobStatus.FAILED
+        ? 'warning'
+        : 'attention',
+      title: 'Scheduled reconciliation job pending',
+      description: reason ?? 'A scheduled reconciliation job is waiting for operator review or execution.',
+      relatedWebhookEventId: job.webhookEventId,
+      relatedShopifyOrderId: job.sourceShopifyOrderId ?? job.vendorAllocation?.order.sourceShopifyOrderId ?? null,
+      relatedAllocationId: job.vendorAllocationId,
+      status: job.status,
+      createdAt: job.updatedAt.toISOString(),
+      suggestedAction: job.vendorAllocationId || job.sourceShopifyOrderId
+        ? 'Run admin reconciliation to refresh canonical Shopify state.'
+        : 'Inspect job metadata before reconciliation can run.',
+      payloadAvailable: null,
+      operationalJobId: job.id,
+      nextAttemptAt: toIsoString(job.nextRetryAt ?? job.scheduledAt),
+      lastAttemptAt: toIsoString(job.lastAttemptAt),
+      reconciliationReason: candidateType,
+    };
+  });
+
+  const items = [
+    ...stuckItems,
+    ...failedItems,
+    ...fulfillmentItems,
+    ...missingPayloadItems,
+    ...staleAllocationItems,
+    ...scheduledReconciliationItems,
+  ].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
@@ -1255,6 +1330,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       fulfillmentSyncFailures: fulfillmentItems.length,
       missingPayload: missingPayloadItems.length,
       staleAllocations: staleAllocationItems.length,
+      scheduledReconciliationJobs: scheduledReconciliationItems.length,
       total: items.length,
     },
     items,

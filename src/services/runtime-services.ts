@@ -223,6 +223,7 @@ export const runtimeServices = {
               fulfillmentSyncFailures: 0,
               missingPayload: 0,
               staleAllocations: 0,
+              scheduledReconciliationJobs: 0,
               total: 0,
             },
             items: [],
