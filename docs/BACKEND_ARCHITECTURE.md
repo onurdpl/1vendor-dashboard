@@ -1073,3 +1073,23 @@ Frontend note:
   - `POST /notifications/:notificationId/dismiss`
 - Dashboard includes a compact in-app Notification Center with unread/high-priority summary, latest notification cards, source metadata, and read/dismiss controls.
 - Phase 19B does not send real email, Slack, SMS, push, webhook, or external alert-provider messages.
+
+## SLA and Escalation Rules (Phase 19C)
+- Phase 19C adds static SLA thresholds and escalation aging to the existing operational rules engine.
+- Threshold constants are code-defined in the rules service. There is no admin rule builder yet.
+- SLA thresholds:
+  - return request aging: warning at 24h, high at 48h, critical at 72h
+  - fulfillment stuck: warning at 24h, high at 48h, critical at 72h
+  - payout review stale: warning at 24h, high at 48h, critical at 96h
+  - refund-heavy vendor ratio: warning above 8 percent, high above 15 percent, critical above 25 percent, with a minimum 20 orders in a 30-day window
+- SLA-backed rule keys:
+  - `return.request_sla_aging`
+  - `fulfillment.stale_awaiting_shipment`
+  - `payout.review_sla_aging`
+  - `refund.vendor_ratio_sla`
+- Existing signal ids remain deterministic, so repeated evaluation updates the current signal severity instead of creating duplicate attention rows.
+- Signal metadata includes compact explainability fields such as elapsed hours, threshold crossed, evaluation timestamp, Shopify identifiers where safe, payout status, or refund ratio details.
+- Admin users can see SLA operations signals through the existing signals and operations queue endpoints.
+- Vendor users only see vendor-safe, vendor-scoped business SLA signals. Diagnostics and reconciliation internals remain admin-only.
+- Notification integration remains in-app only through Phase 19B `NotificationIntent` generation. No external email, Slack, SMS, webhook, or auto-remediation behavior was added.
+- Phase 19C does not mutate finance snapshots, payout batches, fulfillment state, reconciliation truth, or Shopify state.

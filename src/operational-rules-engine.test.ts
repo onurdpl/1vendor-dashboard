@@ -15,6 +15,12 @@ const prismaMock = vi.hoisted(() => ({
   payoutBatch: {
     findMany: vi.fn(),
   },
+  refundRecord: {
+    findMany: vi.fn(),
+  },
+  returnRecord: {
+    findMany: vi.fn(),
+  },
   vendor: {
     findMany: vi.fn(),
   },
@@ -70,6 +76,8 @@ describe('operational rules engine foundation', () => {
     prismaMock.vendorAllocation.findMany.mockReset();
     prismaMock.financeLedgerEntry.findMany.mockReset();
     prismaMock.payoutBatch.findMany.mockReset();
+    prismaMock.refundRecord.findMany.mockReset();
+    prismaMock.returnRecord.findMany.mockReset();
     prismaMock.operationalJob.findMany.mockReset();
     prismaMock.operationalSignal.findMany.mockReset();
     prismaMock.operationalSignal.upsert.mockReset();
@@ -80,6 +88,8 @@ describe('operational rules engine foundation', () => {
     prismaMock.vendorAllocation.findMany.mockResolvedValue([]);
     prismaMock.financeLedgerEntry.findMany.mockResolvedValue([]);
     prismaMock.payoutBatch.findMany.mockResolvedValue([]);
+    prismaMock.refundRecord.findMany.mockResolvedValue([]);
+    prismaMock.returnRecord.findMany.mockResolvedValue([]);
     prismaMock.operationalJob.findMany.mockResolvedValue([]);
     prismaMock.operationalSignal.upsert.mockImplementation(async ({ create, update, where }) =>
       buildSignal({
@@ -125,7 +135,8 @@ describe('operational rules engine foundation', () => {
         payableBalance: '0.00',
       },
     });
-    prismaMock.vendorAllocation.findMany.mockResolvedValue([
+    prismaMock.vendorAllocation.findMany
+      .mockResolvedValueOnce([
       {
         id: 'alloc-1',
         assignedVendorId: 'sporjinal',
@@ -138,7 +149,8 @@ describe('operational rules engine foundation', () => {
           sourceShopifyOrderId: '7616544244049',
         },
       },
-    ]);
+    ])
+      .mockResolvedValueOnce([]);
     prismaMock.financeLedgerEntry.findMany
       .mockResolvedValueOnce([
       {
@@ -185,6 +197,204 @@ describe('operational rules engine foundation', () => {
         }),
       }),
     );
+  });
+
+  it('escalates return request SLA at 24, 48, and 72 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00.000Z'));
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal', name: 'Sporjinal' }]);
+    getVendorFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        payableBalance: '0.00',
+      },
+    });
+    prismaMock.returnRecord.findMany.mockResolvedValue([
+      {
+        id: 'return-warning',
+        vendorAllocationId: 'alloc-warning',
+        sourceShopifyOrderId: 'order-warning',
+        sourceShopifyReturnId: 'ret-warning',
+        status: 'pending',
+        requestCreatedAt: new Date('2026-05-12T11:00:00.000Z'),
+        createdAt: new Date('2026-05-12T11:00:00.000Z'),
+        vendorAllocation: {
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          order: { sourceShopifyOrderId: 'order-warning' },
+        },
+      },
+      {
+        id: 'return-high',
+        vendorAllocationId: 'alloc-high',
+        sourceShopifyOrderId: 'order-high',
+        sourceShopifyReturnId: 'ret-high',
+        status: 'open',
+        requestCreatedAt: new Date('2026-05-11T11:00:00.000Z'),
+        createdAt: new Date('2026-05-11T11:00:00.000Z'),
+        vendorAllocation: {
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          order: { sourceShopifyOrderId: 'order-high' },
+        },
+      },
+      {
+        id: 'return-critical',
+        vendorAllocationId: 'alloc-critical',
+        sourceShopifyOrderId: 'order-critical',
+        sourceShopifyReturnId: 'ret-critical',
+        status: 'needs_review',
+        requestCreatedAt: new Date('2026-05-10T11:00:00.000Z'),
+        createdAt: new Date('2026-05-10T11:00:00.000Z'),
+        vendorAllocation: {
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          order: { sourceShopifyOrderId: 'order-critical' },
+        },
+      },
+    ]);
+
+    const signals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+    const returnSignals = signals.filter((signal) => signal.type === 'return_request_sla_aging');
+
+    expect(returnSignals.map((signal) => signal.severity)).toEqual(['warning', 'high', 'critical']);
+    expect(returnSignals[1].description).toContain('49 hours');
+    expect(prismaMock.operationalSignal.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'signal-return-request-sla-aging-return-high',
+        },
+      }),
+    );
+  });
+
+  it('escalates fulfillment stuck SLA at 24, 48, and 72 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00.000Z'));
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal', name: 'Sporjinal' }]);
+    getVendorFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        payableBalance: '0.00',
+      },
+    });
+    prismaMock.vendorAllocation.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'alloc-warning',
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          fulfillmentStatus: 'Pending',
+          shippingStatus: 'Awaiting Shipment',
+          updatedAt: new Date('2026-05-12T11:00:00.000Z'),
+          order: { sourceShopifyOrderId: 'order-warning' },
+        },
+        {
+          id: 'alloc-high',
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          fulfillmentStatus: 'Processing',
+          shippingStatus: 'Awaiting Shipment',
+          updatedAt: new Date('2026-05-11T11:00:00.000Z'),
+          order: { sourceShopifyOrderId: 'order-high' },
+        },
+        {
+          id: 'alloc-critical',
+          assignedVendorId: 'sporjinal',
+          assignedVendor: { name: 'Sporjinal' },
+          fulfillmentStatus: 'Pending',
+          shippingStatus: 'Awaiting Shipment',
+          updatedAt: new Date('2026-05-10T11:00:00.000Z'),
+          order: { sourceShopifyOrderId: 'order-critical' },
+        },
+      ])
+      .mockResolvedValueOnce([]);
+
+    const signals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+    const fulfillmentSignals = signals.filter((signal) => signal.type === 'stale_fulfillment');
+
+    expect(fulfillmentSignals.map((signal) => signal.severity)).toEqual(['warning', 'high', 'critical']);
+    expect(fulfillmentSignals[2].description).toContain('73 hours');
+  });
+
+  it('escalates payout review SLA at 24, 48, and 96 hours', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-05-13T12:00:00.000Z'));
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal', name: 'Sporjinal' }]);
+    getVendorFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        payableBalance: '0.00',
+      },
+    });
+    prismaMock.payoutBatch.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'batch-warning',
+          vendorId: 'sporjinal',
+          status: 'DRAFT',
+          updatedAt: new Date('2026-05-12T11:00:00.000Z'),
+          netAmount: 100,
+          vendor: { name: 'Sporjinal' },
+        },
+        {
+          id: 'batch-high',
+          vendorId: 'sporjinal',
+          status: 'REVIEW',
+          updatedAt: new Date('2026-05-11T11:00:00.000Z'),
+          netAmount: 100,
+          vendor: { name: 'Sporjinal' },
+        },
+        {
+          id: 'batch-critical',
+          vendorId: 'sporjinal',
+          status: 'REVIEW',
+          updatedAt: new Date('2026-05-09T11:00:00.000Z'),
+          netAmount: 100,
+          vendor: { name: 'Sporjinal' },
+        },
+      ]);
+
+    const signals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+    const payoutSignals = signals.filter((signal) => signal.type === 'payout_review_sla_aging');
+
+    expect(payoutSignals.map((signal) => signal.severity)).toEqual(['warning', 'high', 'critical']);
+    expect(payoutSignals[2].description).toContain('97 hours');
+  });
+
+  it('generates refund-heavy vendor signals only after minimum order volume', async () => {
+    prismaMock.vendor.findMany.mockResolvedValue([{ id: 'sporjinal', name: 'Sporjinal' }]);
+    getVendorFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        payableBalance: '0.00',
+      },
+    });
+    prismaMock.vendorAllocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(Array.from({ length: 20 }, (_, index) => ({ sourceShopifyOrderId: `order-${index}` })));
+    prismaMock.refundRecord.findMany.mockResolvedValue(
+      Array.from({ length: 4 }, (_, index) => ({ sourceShopifyOrderId: `order-${index}` })),
+    );
+
+    const signals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+    const refundSignal = signals.find((signal) => signal.type === 'refund_heavy_vendor');
+
+    expect(refundSignal).toMatchObject({
+      severity: 'high',
+      sourceArea: 'refund',
+      vendorId: 'sporjinal',
+    });
+    expect(refundSignal?.description).toContain('20% refund ratio');
+
+    prismaMock.operationalSignal.upsert.mockClear();
+    prismaMock.vendorAllocation.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce(Array.from({ length: 19 }, (_, index) => ({ sourceShopifyOrderId: `low-order-${index}` })));
+    prismaMock.refundRecord.findMany.mockResolvedValue(
+      Array.from({ length: 10 }, (_, index) => ({ sourceShopifyOrderId: `low-order-${index}` })),
+    );
+
+    const lowVolumeSignals = await evaluateOperationalSignals({ vendorId: 'sporjinal' });
+
+    expect(lowVolumeSignals.some((signal) => signal.type === 'refund_heavy_vendor')).toBe(false);
   });
 
   it('updates signal lifecycle to resolved', async () => {

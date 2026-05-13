@@ -35,6 +35,31 @@ type SignalDefinition = {
   metadata?: Prisma.InputJsonValue;
 };
 
+export const SLA_THRESHOLDS = {
+  returnRequestAgingHours: {
+    warning: 24,
+    high: 48,
+    critical: 72,
+  },
+  fulfillmentStuckHours: {
+    warning: 24,
+    high: 48,
+    critical: 72,
+  },
+  payoutReviewStaleHours: {
+    warning: 24,
+    high: 48,
+    critical: 96,
+  },
+  refundHeavyVendorRatio: {
+    warning: 0.08,
+    high: 0.15,
+    critical: 0.25,
+    minimumOrders: 20,
+    windowDays: 30,
+  },
+} as const;
+
 const ACTIVE_PAYOUT_BATCH_STATUSES = [
   PayoutBatchStatus.DRAFT,
   PayoutBatchStatus.REVIEW,
@@ -42,6 +67,8 @@ const ACTIVE_PAYOUT_BATCH_STATUSES = [
   PayoutBatchStatus.EXECUTION_PENDING,
   PayoutBatchStatus.PAID_PLACEHOLDER,
 ];
+const PAYOUT_REVIEW_STATUSES = [PayoutBatchStatus.DRAFT, PayoutBatchStatus.REVIEW];
+const UNRESOLVED_RETURN_STATUSES = new Set(['pending', 'open', 'needs_review', 'requested', 'in review', 'in_review']);
 
 function sanitizeSignalPart(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'unknown';
@@ -58,6 +85,46 @@ function toNumber(value: string | number | null | undefined) {
 
   const numeric = Number(String(value ?? '0').replace(/[^0-9.-]/g, '') || 0);
   return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function getElapsedHours(startedAt: Date, now = new Date()) {
+  return Math.max(0, Math.floor((now.getTime() - startedAt.getTime()) / (60 * 60 * 1000)));
+}
+
+function getSeverityForHours(
+  elapsedHours: number,
+  thresholds: { warning: number; high: number; critical: number },
+): OperationalSignalSeverity | null {
+  if (elapsedHours >= thresholds.critical) {
+    return OperationalSignalSeverity.CRITICAL;
+  }
+  if (elapsedHours >= thresholds.high) {
+    return OperationalSignalSeverity.HIGH;
+  }
+  if (elapsedHours >= thresholds.warning) {
+    return OperationalSignalSeverity.WARNING;
+  }
+  return null;
+}
+
+function getSeverityForRatio(
+  ratio: number,
+  thresholds: { warning: number; high: number; critical: number },
+): OperationalSignalSeverity | null {
+  if (ratio > thresholds.critical) {
+    return OperationalSignalSeverity.CRITICAL;
+  }
+  if (ratio > thresholds.high) {
+    return OperationalSignalSeverity.HIGH;
+  }
+  if (ratio > thresholds.warning) {
+    return OperationalSignalSeverity.WARNING;
+  }
+  return null;
+}
+
+function formatPercent(value: number) {
+  return `${Math.round(value * 1000) / 10}%`;
 }
 
 function mapSignal(signal: OperationalSignal): OperationalSignalDto {
@@ -177,6 +244,7 @@ async function upsertSignals(definitions: SignalDefinition[]) {
 
 export async function evaluateOperationalSignals(options: { vendorId?: string | null } = {}): Promise<OperationalSignalDto[]> {
   const definitions: SignalDefinition[] = [];
+  const evaluatedAt = new Date();
   const vendorWhere = options.vendorId ? { id: options.vendorId } : undefined;
   const vendors = await prisma.vendor.findMany({
     where: vendorWhere,
@@ -208,8 +276,72 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
   }
 
   const now = Date.now();
-  const staleFulfillmentCutoff = new Date(now - 48 * 60 * 60 * 1000);
+  const staleFulfillmentCutoff = new Date(now - SLA_THRESHOLDS.fulfillmentStuckHours.warning * 60 * 60 * 1000);
   const stalePayableCutoff = new Date(now - 7 * 24 * 60 * 60 * 1000);
+  const returnAgingCutoff = new Date(now - SLA_THRESHOLDS.returnRequestAgingHours.warning * 60 * 60 * 1000);
+  const payoutReviewCutoff = new Date(now - SLA_THRESHOLDS.payoutReviewStaleHours.warning * 60 * 60 * 1000);
+  const refundRatioWindowStart = new Date(now - SLA_THRESHOLDS.refundHeavyVendorRatio.windowDays * 24 * 60 * 60 * 1000);
+
+  const agingReturns = await prisma.returnRecord.findMany({
+    where: {
+      vendorAllocation: {
+        assignedVendorId: options.vendorId ?? undefined,
+      },
+      OR: [
+        {
+          requestCreatedAt: {
+            lt: returnAgingCutoff,
+          },
+        },
+        {
+          requestCreatedAt: null,
+          createdAt: {
+            lt: returnAgingCutoff,
+          },
+        },
+      ],
+    },
+    include: {
+      vendorAllocation: {
+        include: {
+          assignedVendor: true,
+          order: true,
+        },
+      },
+    },
+    take: 100,
+  });
+
+  for (const returnRecord of agingReturns.filter((record) => UNRESOLVED_RETURN_STATUSES.has(record.status.trim().toLowerCase()))) {
+    const startedAt = returnRecord.requestCreatedAt ?? returnRecord.createdAt;
+    const elapsedHours = getElapsedHours(startedAt, evaluatedAt);
+    const severity = getSeverityForHours(elapsedHours, SLA_THRESHOLDS.returnRequestAgingHours);
+    if (!severity) {
+      continue;
+    }
+
+    const ruleKey = 'return.request_sla_aging';
+    definitions.push({
+      id: buildSignalId(ruleKey, returnRecord.id),
+      type: 'return_request_sla_aging',
+      severity,
+      sourceArea: OperationalSignalSourceArea.REFUND,
+      vendorId: returnRecord.vendorAllocation.assignedVendorId,
+      allocationId: returnRecord.vendorAllocationId,
+      title: 'Return request is aging',
+      description: `Return request ${returnRecord.id} has been pending for ${elapsedHours} hours.`,
+      suggestedAction: 'Review the return request and approve, decline, or reconcile it before it breaches the next SLA tier.',
+      ruleKey,
+      metadata: {
+        elapsedHours,
+        thresholdCrossed: severity.toLowerCase(),
+        sourceShopifyOrderId: returnRecord.sourceShopifyOrderId,
+        sourceShopifyReturnId: returnRecord.sourceShopifyReturnId,
+        status: returnRecord.status,
+        evaluatedAt: evaluatedAt.toISOString(),
+      },
+    });
+  }
 
   const staleAllocations = await prisma.vendorAllocation.findMany({
     where: {
@@ -226,22 +358,31 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
   });
 
   for (const allocation of staleAllocations.filter(isAwaitingShipment)) {
+    const elapsedHours = getElapsedHours(allocation.updatedAt, evaluatedAt);
+    const severity = getSeverityForHours(elapsedHours, SLA_THRESHOLDS.fulfillmentStuckHours);
+    if (!severity) {
+      continue;
+    }
+
     const ruleKey = 'fulfillment.stale_awaiting_shipment';
     definitions.push({
       id: buildSignalId(ruleKey, allocation.id),
       type: 'stale_fulfillment',
-      severity: OperationalSignalSeverity.WARNING,
+      severity,
       sourceArea: OperationalSignalSourceArea.FULFILLMENT,
       vendorId: allocation.assignedVendorId,
       allocationId: allocation.id,
       title: 'Fulfillment is stale',
-      description: `Allocation ${allocation.id} has not moved past ${allocation.shippingStatus} since ${allocation.updatedAt.toISOString()}.`,
+      description: `Allocation ${allocation.id} has not moved past ${allocation.shippingStatus} for ${elapsedHours} hours.`,
       suggestedAction: 'Check vendor shipment progress or run reconciliation before contacting the vendor.',
       ruleKey,
       metadata: {
+        elapsedHours,
+        thresholdCrossed: severity.toLowerCase(),
         sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
         shippingStatus: allocation.shippingStatus,
         fulfillmentStatus: allocation.fulfillmentStatus,
+        evaluatedAt: evaluatedAt.toISOString(),
       },
     });
   }
@@ -303,6 +444,51 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
     take: 100,
   });
 
+  const stalePayoutBatches = await prisma.payoutBatch.findMany({
+    where: {
+      vendorId: options.vendorId ?? undefined,
+      status: {
+        in: PAYOUT_REVIEW_STATUSES,
+      },
+      updatedAt: {
+        lt: payoutReviewCutoff,
+      },
+    },
+    include: {
+      vendor: true,
+    },
+    take: 100,
+  });
+
+  for (const batch of stalePayoutBatches) {
+    const elapsedHours = getElapsedHours(batch.updatedAt, evaluatedAt);
+    const severity = getSeverityForHours(elapsedHours, SLA_THRESHOLDS.payoutReviewStaleHours);
+    if (!severity) {
+      continue;
+    }
+
+    const ruleKey = 'payout.review_sla_aging';
+    definitions.push({
+      id: buildSignalId(ruleKey, batch.id),
+      type: 'payout_review_sla_aging',
+      severity,
+      sourceArea: OperationalSignalSourceArea.PAYOUT,
+      vendorId: batch.vendorId,
+      payoutBatchId: batch.id,
+      title: 'Payout batch review is stale',
+      description: `Payout batch ${batch.id} has been waiting review for ${elapsedHours} hours.`,
+      suggestedAction: 'Review, cancel, or move the payout batch forward before it breaches the next SLA tier.',
+      ruleKey,
+      metadata: {
+        elapsedHours,
+        thresholdCrossed: severity.toLowerCase(),
+        status: batch.status,
+        netAmount: String(batch.netAmount),
+        evaluatedAt: evaluatedAt.toISOString(),
+      },
+    });
+  }
+
   for (const batch of negativeBatches) {
     const ruleKey = 'payout.negative_batch_net';
     definitions.push({
@@ -319,6 +505,70 @@ export async function evaluateOperationalSignals(options: { vendorId?: string | 
       metadata: {
         netAmount: String(batch.netAmount),
         status: batch.status,
+      },
+    });
+  }
+
+  for (const vendor of vendors) {
+    const [allocationsInWindow, refundsInWindow] = await Promise.all([
+      prisma.vendorAllocation.findMany({
+        where: {
+          assignedVendorId: vendor.id,
+          createdAt: {
+            gte: refundRatioWindowStart,
+          },
+        },
+        select: {
+          sourceShopifyOrderId: true,
+        },
+        take: 1000,
+      }),
+      prisma.refundRecord.findMany({
+        where: {
+          createdAt: {
+            gte: refundRatioWindowStart,
+          },
+          vendorAllocation: {
+            assignedVendorId: vendor.id,
+          },
+        },
+        select: {
+          sourceShopifyOrderId: true,
+        },
+        take: 1000,
+      }),
+    ]);
+    const orderCount = new Set(allocationsInWindow.map((allocation) => allocation.sourceShopifyOrderId)).size;
+    if (orderCount < SLA_THRESHOLDS.refundHeavyVendorRatio.minimumOrders) {
+      continue;
+    }
+
+    const refundCount = new Set(refundsInWindow.map((refund) => refund.sourceShopifyOrderId)).size;
+    const refundRatio = orderCount > 0 ? refundCount / orderCount : 0;
+    const severity = getSeverityForRatio(refundRatio, SLA_THRESHOLDS.refundHeavyVendorRatio);
+    if (!severity) {
+      continue;
+    }
+
+    const ruleKey = 'refund.vendor_ratio_sla';
+    definitions.push({
+      id: buildSignalId(ruleKey, vendor.id),
+      type: 'refund_heavy_vendor',
+      severity,
+      sourceArea: OperationalSignalSourceArea.REFUND,
+      vendorId: vendor.id,
+      title: 'Refund-heavy vendor risk',
+      description: `${vendor.name} has a ${formatPercent(refundRatio)} refund ratio across ${orderCount} orders in the last ${SLA_THRESHOLDS.refundHeavyVendorRatio.windowDays} days.`,
+      suggestedAction: 'Review recent return/refund reasons and fulfillment quality before preparing payout or vendor follow-up.',
+      ruleKey,
+      metadata: {
+        refundRatio,
+        refundCount,
+        orderCount,
+        minimumOrders: SLA_THRESHOLDS.refundHeavyVendorRatio.minimumOrders,
+        windowDays: SLA_THRESHOLDS.refundHeavyVendorRatio.windowDays,
+        thresholdCrossed: severity.toLowerCase(),
+        evaluatedAt: evaluatedAt.toISOString(),
       },
     });
   }
