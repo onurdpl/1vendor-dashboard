@@ -7,6 +7,7 @@ import { listMockReturns } from './mockReturns';
 import type {
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
+  DashboardNotificationSummary,
   DashboardOverview,
   DashboardObservabilitySummary,
   DashboardPriorityItem,
@@ -127,6 +128,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     automationResult,
     operationsResult,
     signalsResult,
+    notificationsResult,
     diagnosticsResult,
     observabilityResult,
   ] = await Promise.allSettled([
@@ -136,6 +138,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     runtimeServices.automation.dashboard(),
     currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
     runtimeServices.signals.list(),
+    runtimeServices.notifications.list(),
     currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
     currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
   ]);
@@ -168,6 +171,11 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
   const signals = signalsResult.status === 'fulfilled' ? signalsResult.value : null;
   if (signalsResult.status === 'rejected') {
     partialDataWarnings.push('Operational rules signals are temporarily unavailable.');
+  }
+
+  const notifications = notificationsResult.status === 'fulfilled' ? notificationsResult.value : null;
+  if (notificationsResult.status === 'rejected') {
+    partialDataWarnings.push('In-app notifications are temporarily unavailable.');
   }
 
   const diagnostics = diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null;
@@ -245,6 +253,18 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
           note: observability.notes[0] ?? 'No active observability note.',
         }
       : undefined;
+  const notificationSummary: DashboardNotificationSummary | undefined = notifications
+    ? {
+        unread: notifications.summary.unread,
+        highPriority: notifications.summary.critical + notifications.summary.high,
+        latest: notifications.notifications.slice(0, 3).map((notification) => ({
+          id: notification.id,
+          title: notification.title,
+          severity: notification.severity,
+          status: notification.status,
+        })),
+      }
+    : undefined;
 
   return {
     vendorId: currentVendorId,
@@ -264,6 +284,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     financeSnapshot,
     diagnosticsSummary,
     observabilitySummary,
+    notificationSummary,
     partialDataWarnings,
   };
 }

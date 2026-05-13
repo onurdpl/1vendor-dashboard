@@ -126,6 +126,25 @@ enum OperationalSignalSourceArea {
   SETTLEMENT
 }
 
+enum NotificationChannel {
+  IN_APP
+  EMAIL_PLACEHOLDER
+  SLACK_PLACEHOLDER
+}
+
+enum NotificationStatus {
+  PENDING
+  DELIVERED
+  READ
+  DISMISSED
+  SKIPPED
+}
+
+enum NotificationRecipientRole {
+  ADMIN
+  VENDOR
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -153,6 +172,7 @@ model Vendor {
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
   operationalSignals    OperationalSignal[]
+  notifications         NotificationIntent[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
 }
@@ -545,10 +565,35 @@ model OperationalSignal {
   financeLedgerEntry   FinanceLedgerEntry?         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
   payoutBatch          PayoutBatch?                @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
   operationalJob       OperationalJob?             @relation(fields: [operationalJobId], references: [id], onDelete: SetNull)
+  notifications        NotificationIntent[]
 
   @@index([status, severity])
   @@index([vendorId, status])
   @@index([sourceArea, status])
   @@index([ruleKey])
   @@index([triggeredAt])
+}
+
+model NotificationIntent {
+  id            String                    @id
+  signalId      String?
+  vendorId      String?
+  recipientRole NotificationRecipientRole
+  channel       NotificationChannel       @default(IN_APP)
+  status        NotificationStatus        @default(PENDING)
+  title         String
+  message       String
+  severity      OperationalSignalSeverity
+  deliveredAt   DateTime?
+  readAt        DateTime?
+  metadata      Json?
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+  signal        OperationalSignal?        @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  vendor        Vendor?                   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([recipientRole, status])
+  @@index([vendorId, status])
+  @@index([signalId])
+  @@index([createdAt])
 }

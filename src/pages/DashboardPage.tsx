@@ -140,6 +140,25 @@ export function DashboardPage() {
           )}
         </OperationalSection>
 
+        <OperationalSection title="Notifications" description="In-app signal notifications for this role.">
+          {dashboard.notificationSummary ? (
+            <div className="op-meta-grid">
+              <MetadataRow label="Unread" value={dashboard.notificationSummary.unread} />
+              <MetadataRow label="High priority" value={dashboard.notificationSummary.highPriority} />
+              <MetadataRow
+                label="Latest"
+                value={
+                  dashboard.notificationSummary.latest.length
+                    ? dashboard.notificationSummary.latest.map((item) => item.title).join(', ')
+                    : 'No notifications'
+                }
+              />
+            </div>
+          ) : (
+            <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
+          )}
+        </OperationalSection>
+
         {currentUser?.role === 'admin' ? (
           <OperationalSection title="Diagnostics summary" description="Admin-only webhook and reconciliation attention.">
             {dashboard.diagnosticsSummary ? (

@@ -16,6 +16,7 @@ import * as realOperations from './real/operations';
 import * as realDiagnostics from './real/diagnostics';
 import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
+import * as realNotifications from './real/notifications';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -220,6 +221,57 @@ export const runtimeServices = {
               info: 0,
             },
             signals: [],
+          }),
+  },
+  notifications: {
+    list: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realNotifications.listNotifications()
+        : Promise.resolve({
+            summary: {
+              total: 0,
+              unread: 0,
+              critical: 0,
+              high: 0,
+              warning: 0,
+            },
+            notifications: [],
+          }),
+    markRead: (notificationId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realNotifications.markNotificationRead(notificationId)
+        : Promise.resolve({
+            id: notificationId,
+            signalId: null,
+            vendorId: null,
+            recipientRole: 'vendor' as const,
+            channel: 'in_app' as const,
+            status: 'read' as const,
+            title: 'Notification',
+            message: 'Mock notification read.',
+            severity: 'info' as const,
+            deliveredAt: new Date().toISOString(),
+            readAt: new Date().toISOString(),
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+    dismiss: (notificationId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realNotifications.dismissNotification(notificationId)
+        : Promise.resolve({
+            id: notificationId,
+            signalId: null,
+            vendorId: null,
+            recipientRole: 'vendor' as const,
+            channel: 'in_app' as const,
+            status: 'dismissed' as const,
+            title: 'Notification',
+            message: 'Mock notification dismissed.',
+            severity: 'info' as const,
+            deliveredAt: new Date().toISOString(),
+            readAt: null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           }),
   },
   diagnostics: {

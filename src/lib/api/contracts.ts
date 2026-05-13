@@ -411,6 +411,48 @@ export type OperationalSignalsResponse = {
   signals: OperationalSignal[];
 };
 
+export type NotificationStatus = 'pending' | 'delivered' | 'read' | 'dismissed' | 'skipped';
+export type NotificationRecipientRole = 'admin' | 'vendor';
+export type NotificationChannel = 'in_app' | 'email_placeholder' | 'slack_placeholder';
+
+export type NotificationIntent = {
+  id: string;
+  signalId: string | null;
+  vendorId: string | null;
+  recipientRole: NotificationRecipientRole;
+  channel: NotificationChannel;
+  status: NotificationStatus;
+  title: string;
+  message: string;
+  severity: OperationalSignalSeverity;
+  deliveredAt: string | null;
+  readAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type NotificationsResponse = {
+  summary: {
+    total: number;
+    unread: number;
+    critical: number;
+    high: number;
+    warning: number;
+  };
+  notifications: NotificationIntent[];
+};
+
+export type DashboardNotificationSummary = {
+  unread: number;
+  highPriority: number;
+  latest: Array<{
+    id: string;
+    title: string;
+    severity: OperationalSignalSeverity;
+    status: NotificationStatus;
+  }>;
+};
+
 export type DashboardOverview = {
   vendorId: string;
   vendorName: string;
@@ -423,6 +465,7 @@ export type DashboardOverview = {
   financeSnapshot?: DashboardFinanceSnapshot;
   diagnosticsSummary?: DashboardDiagnosticsSummary;
   observabilitySummary?: DashboardObservabilitySummary;
+  notificationSummary?: DashboardNotificationSummary;
   partialDataWarnings?: string[];
 };
 

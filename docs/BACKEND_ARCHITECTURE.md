@@ -1042,3 +1042,34 @@ Frontend note:
 - Vendor responses are scoped to the selected vendor and exclude internal diagnostics/reconciliation signal areas.
 - Admin operations queue now includes active rules signals as `operational_signal` items so critical/high rule output influences operator prioritization.
 - Phase 19A does not send notifications, trigger auto-remediation, call external alerting tools, or mutate operational/finance truth.
+
+## Notification Foundation (Phase 19B)
+- `NotificationIntent` stores in-app notification records generated from active operational signals.
+- Notification channels:
+  - `IN_APP`
+  - `EMAIL_PLACEHOLDER`
+  - `SLACK_PLACEHOLDER`
+- Notification lifecycle statuses:
+  - `PENDING`
+  - `DELIVERED`
+  - `READ`
+  - `DISMISSED`
+  - `SKIPPED`
+- Recipient roles:
+  - `ADMIN`
+  - `VENDOR`
+- Routing rules:
+  - critical/high signals create admin in-app notifications
+  - vendor notifications require a vendor-scoped signal
+  - vendor-safe areas are payout, refund, fulfillment, shipping cost, and settlement
+  - diagnostics/reconciliation details are not routed to vendors
+- Notification ids include channel, recipient role, recipient scope, and signal id so generation is duplicate-safe.
+- Signal lifecycle and notification lifecycle are intentionally separate:
+  - resolving a signal does not delete notification history
+  - reading/dismissing a notification does not resolve the signal
+- User-facing endpoints:
+  - `GET /notifications`
+  - `POST /notifications/:notificationId/read`
+  - `POST /notifications/:notificationId/dismiss`
+- Dashboard includes a compact in-app notification summary.
+- Phase 19B does not send real email, Slack, SMS, push, webhook, or external alert-provider messages.
