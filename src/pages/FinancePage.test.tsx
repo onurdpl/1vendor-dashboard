@@ -61,6 +61,9 @@ const financeDashboard: FinanceDashboard = {
         estimatedPayout: '$3,059.10',
         shippingApplied: false,
         shippingMode: 'disabled',
+        profileSource: 'snapshot',
+        commissionPercent: '10.00',
+        commissionVatPercent: '0.00',
       },
     },
     {
@@ -83,6 +86,9 @@ const financeDashboard: FinanceDashboard = {
         estimatedPayout: '-$425.00',
         shippingApplied: false,
         shippingMode: 'disabled',
+        profileSource: 'snapshot',
+        commissionPercent: '10.00',
+        commissionVatPercent: '0.00',
       },
     },
     {
@@ -162,6 +168,22 @@ describe('FinancePage control center', () => {
     expect((await screen.findAllByText('gid://shopify/Refund/502')).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Payout execution is not enabled yet/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Current vendor-scoped finance query').length).toBeGreaterThan(0);
+  });
+
+  it('shows applied snapshot commission and VAT rates in compact ledger detail', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+
+    expect(await screen.findByText('Commission (10.00%)')).toBeInTheDocument();
+    expect(screen.getByText('Commission VAT (0.00%)')).toBeInTheDocument();
+    expect(screen.getByText('Snapshot at sale creation')).toBeInTheDocument();
+    expect(screen.getByText('Applied commission')).toBeInTheDocument();
+    expect(screen.getByText('Applied commission VAT')).toBeInTheDocument();
+    expect(screen.getByText('Current vendor profile')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
   });
 
   it('displays hold-equivalent refund ledger rows as Recorded instead of Failed', async () => {
@@ -309,7 +331,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     await userEvent.click(await screen.findByText('Shopify order sale recorded'));
-    expect(await screen.findByText('$339.90')).toBeInTheDocument();
+    expect(await screen.findByText('-$339.90')).toBeInTheDocument();
     expect((await screen.findAllByText('$0.00')).length).toBeGreaterThan(0);
 
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
@@ -335,7 +357,7 @@ describe('FinancePage control center', () => {
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
     expect((await screen.findAllByText('$509.85')).length).toBeGreaterThan(0);
-    expect(await screen.findByText('$91.77')).toBeInTheDocument();
+    expect(await screen.findByText('-$91.77')).toBeInTheDocument();
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$2,797.38')).length).toBeGreaterThan(0);
   });
@@ -429,7 +451,7 @@ describe('FinancePage control center', () => {
     );
     expect(await screen.findByText('12.00% vendor profile')).toBeInTheDocument();
     expect((await screen.findAllByText('$407.88')).length).toBeGreaterThan(0);
-    expect(await screen.findByText('$81.58')).toBeInTheDocument();
+    expect(await screen.findByText('-$81.58')).toBeInTheDocument();
     expect((await screen.findAllByText('$2,909.54')).length).toBeGreaterThan(0);
   });
 

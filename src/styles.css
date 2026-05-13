@@ -1957,19 +1957,23 @@ h3 {
 }
 
 /* Phase 16C finance and diagnostics control centers */
-.finance-layout,
 .diagnostics-layout-redesign {
   grid-template-columns: minmax(0, 1fr) minmax(318px, 372px);
 }
 
+.finance-layout {
+  grid-template-columns: minmax(0, 1.16fr) minmax(286px, 330px);
+}
+
 .finance-kpi-row {
-  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(122px, 1fr));
 }
 
 .finance-op-table-v2 .op-table-head,
 .finance-op-table-v2 .op-table-row {
-  min-width: 1020px;
-  grid-template-columns: 0.7fr 1.12fr 0.76fr 0.9fr 0.9fr 0.68fr 0.82fr 0.76fr 0.58fr;
+  min-width: 0;
+  grid-template-columns: minmax(58px, 0.55fr) minmax(118px, 1fr) minmax(78px, 0.58fr) minmax(72px, 0.52fr) minmax(82px, 0.62fr) minmax(74px, 0.58fr) minmax(82px, 0.62fr) minmax(78px, 0.58fr) 42px;
+  gap: 6px;
 }
 
 .finance-op-table-v2,
@@ -2012,6 +2016,121 @@ h3 {
 .finance-amount-emphasis {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.finance-control-center {
+  gap: var(--space-3);
+}
+
+.finance-control-center .op-kpi {
+  min-height: 58px;
+  padding: 8px 10px;
+}
+
+.finance-control-center .op-toolbar {
+  padding: 6px;
+}
+
+.finance-op-table-v2 .op-table-head {
+  min-height: 26px;
+  padding: 0 7px;
+  font-size: 0.58rem;
+}
+
+.finance-op-table-v2 .op-table-row {
+  min-height: 38px;
+  padding: 5px 7px;
+  font-size: 0.74rem;
+}
+
+.finance-op-table-v2 .shopify-entity {
+  gap: 1px;
+  min-width: 0;
+}
+
+.finance-op-table-v2 .shopify-entity span,
+.finance-op-table-v2 .op-table-row small {
+  font-size: 0.58rem;
+  line-height: 1.2;
+}
+
+.finance-op-table-v2 .shopify-entity strong,
+.finance-op-table-v2 .op-table-row strong {
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.finance-op-table-v2 .op-badge {
+  padding: 2px 6px;
+  font-size: 0.56rem;
+}
+
+.finance-op-table-v2 .op-action-group {
+  justify-content: end;
+}
+
+.finance-op-table-v2 .button-compact {
+  min-height: 24px;
+  padding: 3px 6px;
+  font-size: 0.58rem;
+}
+
+.finance-control-center .op-side-panel {
+  max-height: calc(100vh - 92px);
+  padding: 10px;
+  border-radius: var(--radius-sm);
+}
+
+.finance-control-center .op-side-panel-header {
+  padding-bottom: 6px;
+}
+
+.finance-control-center .op-side-panel-body,
+.finance-control-center .op-meta-group {
+  gap: 7px;
+}
+
+.finance-control-center .op-side-panel h3 {
+  font-size: 0.92rem;
+}
+
+.finance-control-center .op-meta-group h4,
+.finance-control-center .op-panel-section h4 {
+  font-size: 0.78rem;
+}
+
+.finance-control-center .op-meta-row {
+  grid-template-columns: minmax(86px, 0.54fr) minmax(0, 1fr);
+  gap: 7px;
+  padding: 3px 0;
+}
+
+.finance-control-center .op-meta-row span {
+  font-size: 0.56rem;
+}
+
+.finance-control-center .op-meta-row strong {
+  font-size: 0.72rem;
+  line-height: 1.25;
+}
+
+.finance-control-center .op-panel-section {
+  gap: 5px;
+}
+
+.finance-control-center .op-panel-section .page-description {
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.finance-deduction-value {
+  color: var(--op-danger);
+  font-variant-numeric: tabular-nums;
+}
+
+.finance-payout-value {
+  color: var(--op-success);
+  font-variant-numeric: tabular-nums;
 }
 
 .diagnostics-filter-summary {

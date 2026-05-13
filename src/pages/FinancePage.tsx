@@ -99,6 +99,30 @@ function getFinanceLifecycleLabel(record: FinanceTransaction) {
   return 'Completed';
 }
 
+function getCalculationProfileSourceLabel(source?: string) {
+  if (source === 'snapshot') {
+    return 'Snapshot at sale creation';
+  }
+  if (source === 'current') {
+    return 'Current vendor profile';
+  }
+  if (source === 'default') {
+    return 'Default profile';
+  }
+  return 'Default profile';
+}
+
+function isZeroCurrencyValue(value: string) {
+  return !/[1-9]/.test(value.replace(/[^\d]/g, ''));
+}
+
+function formatDeductionValue(value: string) {
+  if (value.startsWith('-') || isZeroCurrencyValue(value)) {
+    return value;
+  }
+  return `-${value}`;
+}
+
 export function FinancePage() {
   const { data: finance, isLoading, isError, error, refetch } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
   const { message, tone, showFeedback } = useActionFeedback();
@@ -394,7 +418,7 @@ export function FinancePage() {
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Source', 'Vendor', 'Shopify order', 'Refund ID', 'Amount', 'Lifecycle', 'Updated', 'Actions']}
+              columns={['Status', 'Source', 'Vendor', 'Order', 'Refund', 'Amount', 'Life', 'Updated', 'Action']}
               className="finance-op-table finance-op-table-v2"
             >
               {filteredRecords.map((record) => (
@@ -405,11 +429,10 @@ export function FinancePage() {
                 >
                   <StatusBadge tone={getStatusTone(record.status)}>{normalizeFinanceStatus(record.status)}</StatusBadge>
                   <ShopifyEntityDisplay label={record.category} primary={record.description} secondary={record.id} />
-                  <ShopifyEntityDisplay label="Vendor" primary={currentVendor.vendorName} secondary={currentVendor.vendorId} />
+                  <ShopifyEntityDisplay label="Vendor" primary={currentVendor.vendorName} />
                   <ShopifyEntityDisplay
                     label="Shopify Order"
                     primary={record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : 'Not synced'}
-                    secondary={record.shopifyOrderId ? `ID ${record.shopifyOrderId}` : undefined}
                   />
                   <ShopifyEntityDisplay label="Shopify Refund" primary={record.shopifyRefundId ?? 'Not synced'} />
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
@@ -425,7 +448,7 @@ export function FinancePage() {
                     <small>{record.category}</small>
                   </span>
                   <OperationalActionGroup>
-                    <button type="button" className="button button-secondary" onClick={() => setSelectedRecordId(record.id)}>
+                    <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
                       View
                     </button>
                   </OperationalActionGroup>
@@ -461,11 +484,26 @@ export function FinancePage() {
               {selectedRecord.payoutCalculation ? (
                 <MetadataGroup title="Payout estimate">
                   <MetadataRow label="Gross amount" value={selectedRecord.payoutCalculation.grossAmount} />
-                  <MetadataRow label="Commission" value={selectedRecord.payoutCalculation.commission} />
-                  <MetadataRow label="Commission VAT" value={selectedRecord.payoutCalculation.commissionVat} />
-                  <MetadataRow label="Shipping deduction" value={selectedRecord.payoutCalculation.shippingDeduction} />
-                  <MetadataRow label="Refund impact" value={selectedRecord.payoutCalculation.refundImpact} />
-                  <MetadataRow label="Estimated payout" value={selectedRecord.payoutCalculation.estimatedPayout} />
+                  <MetadataRow
+                    label={`Commission (${selectedRecord.payoutCalculation.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%)`}
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.commission)}</span>}
+                  />
+                  <MetadataRow
+                    label={`Commission VAT (${selectedRecord.payoutCalculation.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%)`}
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.commissionVat)}</span>}
+                  />
+                  <MetadataRow
+                    label="Shipping deduction"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.shippingDeduction)}</span>}
+                  />
+                  <MetadataRow
+                    label="Refund impact"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.refundImpact)}</span>}
+                  />
+                  <MetadataRow
+                    label="Estimated payout"
+                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation.estimatedPayout}</span>}
+                  />
                 </MetadataGroup>
               ) : null}
               {selectedRecord.settlement ? (
@@ -487,11 +525,11 @@ export function FinancePage() {
                 <MetadataRow label="Vendor ID" value={currentVendor.vendorId} />
                 <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
               </MetadataGroup>
-              <MetadataGroup title="Vendor financial profile">
-                <MetadataRow label="Profile used" value={selectedRecord.payoutCalculation?.profileSource ?? finance.profile?.source ?? 'default'} />
-                <MetadataRow label="Commission used" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Commission VAT used" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Current profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
+              <MetadataGroup title="Calculation profile">
+                <MetadataRow label="Calculation profile" value={getCalculationProfileSourceLabel(selectedRecord.payoutCalculation?.profileSource)} />
+                <MetadataRow label="Applied commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label="Applied commission VAT" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Current vendor profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
                 <MetadataRow label="Shipping mode" value={selectedRecord.payoutCalculation?.shippingMode ?? finance.profile?.shippingMode ?? 'disabled'} />
                 <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
               </MetadataGroup>
