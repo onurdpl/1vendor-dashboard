@@ -1,12 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './DashboardPage';
-import type { DashboardOverview } from '../lib/api/contracts';
+import type { DashboardOverview, NotificationIntent, NotificationsResponse } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getDashboardOverviewMock = vi.fn<() => Promise<DashboardOverview>>();
+const listNotificationsMock = vi.fn<() => Promise<NotificationsResponse>>();
+const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
+const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 
 vi.mock('../lib/api/dashboard', async () => {
   const actual = await vi.importActual<typeof import('../lib/api/dashboard')>('../lib/api/dashboard');
@@ -15,6 +19,16 @@ vi.mock('../lib/api/dashboard', async () => {
     getDashboardOverview: () => getDashboardOverviewMock(),
   };
 });
+
+vi.mock('../services/runtime-services', () => ({
+  runtimeServices: {
+    notifications: {
+      list: () => listNotificationsMock(),
+      markRead: (notificationId: string) => markNotificationReadMock(notificationId),
+      dismiss: (notificationId: string) => dismissNotificationMock(notificationId),
+    },
+  },
+}));
 
 const dashboardOverview: DashboardOverview = {
   vendorId: 'demo-vendor-a',
@@ -55,6 +69,30 @@ const dashboardOverview: DashboardOverview = {
     staleStateCount: 4,
     note: '1 operational job is dead-letter ready.',
   },
+  notificationSummary: {
+    unread: 1,
+    highPriority: 1,
+    latest: [{ id: 'notif-1', title: 'Shipping cost is pending', severity: 'warning', status: 'delivered' }],
+  },
+};
+
+const notification: NotificationIntent = {
+  id: 'notif-1',
+  signalId: 'signal-1',
+  vendorId: 'demo-vendor-a',
+  recipientRole: 'vendor',
+  channel: 'in_app',
+  status: 'delivered',
+  title: 'Shipping cost is pending',
+  message: 'External-provider shipping cost is missing.',
+  severity: 'warning',
+  deliveredAt: '2026-05-13T10:00:00.000Z',
+  readAt: null,
+  metadata: {
+    signalSourceArea: 'SHIPPING_COST',
+  },
+  createdAt: '2026-05-13T10:00:00.000Z',
+  updatedAt: '2026-05-13T10:00:00.000Z',
 };
 
 function renderDashboardPage() {
@@ -89,6 +127,28 @@ describe('DashboardPage command center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getDashboardOverviewMock.mockReset();
+    listNotificationsMock.mockReset();
+    markNotificationReadMock.mockReset();
+    dismissNotificationMock.mockReset();
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 1,
+        unread: 1,
+        critical: 0,
+        high: 0,
+        warning: 1,
+      },
+      notifications: [notification],
+    });
+    markNotificationReadMock.mockResolvedValue({
+      ...notification,
+      status: 'read',
+      readAt: '2026-05-13T10:05:00.000Z',
+    });
+    dismissNotificationMock.mockResolvedValue({
+      ...notification,
+      status: 'dismissed',
+    });
   });
 
   it('renders dashboard command center without duplicated operational signal sections', async () => {
@@ -102,5 +162,64 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
+  });
+
+  it('renders the notification center list with compact metadata', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('Notification center')).toBeInTheDocument();
+    expect(screen.getByText('Shipping cost is pending')).toBeInTheDocument();
+    expect(screen.getByText('External-provider shipping cost is missing.')).toBeInTheDocument();
+    expect(screen.getByText('shipping cost')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
+  });
+
+  it('renders an empty notification state', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 0,
+        unread: 0,
+        critical: 0,
+        high: 0,
+        warning: 0,
+      },
+      notifications: [],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('No active notifications')).toBeInTheDocument();
+  });
+
+  it('marks notifications as read and refreshes dashboard state', async () => {
+    const user = userEvent.setup();
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    const readButtons = await screen.findAllByRole('button', { name: /mark as read/i });
+    await user.click(readButtons[0]);
+
+    expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
+    await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('dismisses notifications and refreshes dashboard state', async () => {
+    const user = userEvent.setup();
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    const dismissButtons = await screen.findAllByRole('button', { name: /dismiss/i });
+    await user.click(dismissButtons[0]);
+
+    expect(dismissNotificationMock).toHaveBeenCalledWith('notif-1');
+    await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 });

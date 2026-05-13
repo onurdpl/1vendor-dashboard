@@ -12,7 +12,10 @@ import { useActionFeedback } from '../lib/ui';
 import { getDashboardOverview } from '../lib/api/dashboard';
 import { getCurrentUser, getCurrentVendorContext, onVendorChange } from '../lib/auth';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useMutationAction } from '../hooks/useMutationAction';
 import { queryKeys } from '../lib/api/queryKeys';
+import { runtimeServices } from '../services/runtime-services';
+import type { NotificationIntent } from '../lib/api/contracts';
 
 function getPriorityValue(items: { label: string; value: string }[], label: string) {
   return Number.parseInt(items.find((item) => item.label === label)?.value ?? '0', 10) || 0;
@@ -35,13 +38,63 @@ function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
 }
 
+function getNotificationTone(severity: string): 'success' | 'warning' | 'danger' | 'attention' | 'info' {
+  if (severity === 'critical') {
+    return 'danger';
+  }
+  if (severity === 'high') {
+    return 'warning';
+  }
+  if (severity === 'warning') {
+    return 'attention';
+  }
+  return 'info';
+}
+
+function readNotificationMetadata(notification: NotificationIntent, key: string) {
+  if (!notification.metadata || typeof notification.metadata !== 'object' || !(key in notification.metadata)) {
+    return null;
+  }
+
+  const value = Reflect.get(notification.metadata, key);
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function formatNotificationSource(notification: NotificationIntent) {
+  return readNotificationMetadata(notification, 'signalSourceArea')?.toLowerCase().replaceAll('_', ' ') ?? 'signal';
+}
+
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
-  const { message, tone } = useActionFeedback();
-  const { data: dashboard, isLoading, isError, error } = useQueryResource(
+  const { message, tone, showFeedback } = useActionFeedback();
+  const { data: dashboard, isLoading, isError, error, refetch: refetchDashboard } = useQueryResource(
     queryKeys.dashboard.overview(),
     () => getDashboardOverview(vendorId),
+  );
+  const {
+    data: notifications,
+    refetch: refetchNotifications,
+  } = useQueryResource(queryKeys.notifications.list(), () => runtimeServices.notifications.list());
+  const markNotificationReadMutation = useMutationAction(
+    (notificationId: string) => runtimeServices.notifications.markRead(notificationId),
+    {
+      onSuccess: async () => {
+        await Promise.all([refetchNotifications(), refetchDashboard()]);
+        showFeedback('Notification marked as read.', 'success');
+      },
+      onError: () => showFeedback('Notification could not be marked as read.', 'error'),
+    },
+  );
+  const dismissNotificationMutation = useMutationAction(
+    (notificationId: string) => runtimeServices.notifications.dismiss(notificationId),
+    {
+      onSuccess: async () => {
+        await Promise.all([refetchNotifications(), refetchDashboard()]);
+        showFeedback('Notification dismissed.', 'success');
+      },
+      onError: () => showFeedback('Notification could not be dismissed.', 'error'),
+    },
   );
 
   useEffect(() => {
@@ -140,19 +193,63 @@ export function DashboardPage() {
           )}
         </OperationalSection>
 
-        <OperationalSection title="Notifications" description="In-app signal notifications for this role.">
-          {dashboard.notificationSummary ? (
+        <OperationalSection title="Notification center" description="In-app signal notifications for this role.">
+          {notifications ? (
+            <div className="notification-center">
+              <div className="notification-summary-row">
+                <MetadataRow label="Unread" value={notifications.summary.unread} />
+                <MetadataRow label="High priority" value={notifications.summary.critical + notifications.summary.high} />
+                <MetadataRow label="Total" value={notifications.summary.total} />
+              </div>
+              {notifications.notifications.length === 0 ? (
+                <EmptyStatePanel title="No active notifications" description="No active notifications." />
+              ) : (
+                <div className="notification-list">
+                  {notifications.notifications.slice(0, 6).map((notification) => (
+                    <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
+                      <header>
+                        <div>
+                          <div className="notification-title-row">
+                            <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
+                            <strong>{notification.title}</strong>
+                          </div>
+                          <p>{notification.message}</p>
+                        </div>
+                        <span className="notification-status">{notification.status}</span>
+                      </header>
+                      <div className="notification-meta">
+                        <span>{formatNotificationSource(notification)}</span>
+                        <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                        {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
+                      </div>
+                      <div className="notification-actions">
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          disabled={notification.status === 'read' || markNotificationReadMutation.isPending}
+                          onClick={() => markNotificationReadMutation.mutate(notification.id)}
+                        >
+                          Mark as read
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          disabled={notification.status === 'dismissed' || dismissNotificationMutation.isPending}
+                          onClick={() => dismissNotificationMutation.mutate(notification.id)}
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : dashboard.notificationSummary ? (
             <div className="op-meta-grid">
               <MetadataRow label="Unread" value={dashboard.notificationSummary.unread} />
               <MetadataRow label="High priority" value={dashboard.notificationSummary.highPriority} />
-              <MetadataRow
-                label="Latest"
-                value={
-                  dashboard.notificationSummary.latest.length
-                    ? dashboard.notificationSummary.latest.map((item) => item.title).join(', ')
-                    : 'No notifications'
-                }
-              />
+              <MetadataRow label="Latest" value={dashboard.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
             </div>
           ) : (
             <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />

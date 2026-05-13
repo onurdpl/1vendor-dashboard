@@ -73,12 +73,20 @@ Admin users see admin-targeted notifications. Vendor users see only notification
 
 ## UI Integration
 
-Dashboard now includes a compact in-app notification summary:
+Dashboard includes a compact in-app Notification Center:
 - unread count
 - high-priority count
-- latest notification titles
+- total count
+- latest notification cards
+- severity/status display
+- source area metadata when present
+- read and dismiss actions
 
-This keeps Phase 19B lightweight and avoids a broad shell redesign.
+The read/dismiss controls call the existing notification lifecycle endpoints and refresh the dashboard/notification state. This keeps Phase 19B lightweight and avoids a broad shell redesign.
+
+Empty notification state uses:
+
+`No active notifications.`
 
 ## Future Direction
 

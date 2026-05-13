@@ -1071,5 +1071,5 @@ Frontend note:
   - `GET /notifications`
   - `POST /notifications/:notificationId/read`
   - `POST /notifications/:notificationId/dismiss`
-- Dashboard includes a compact in-app notification summary.
+- Dashboard includes a compact in-app Notification Center with unread/high-priority summary, latest notification cards, source metadata, and read/dismiss controls.
 - Phase 19B does not send real email, Slack, SMS, push, webhook, or external alert-provider messages.

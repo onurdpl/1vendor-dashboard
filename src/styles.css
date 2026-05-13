@@ -2962,6 +2962,70 @@ h3 {
   align-items: center;
 }
 
+.notification-center {
+  display: grid;
+  gap: 10px;
+}
+
+.notification-summary-row {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.notification-list {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-card {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.notification-card.is-read {
+  background: var(--surface-subtle);
+}
+
+.notification-card header,
+.notification-title-row,
+.notification-meta,
+.notification-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.notification-card header {
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.notification-card p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.notification-status,
+.notification-meta {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.notification-meta {
+  flex-wrap: wrap;
+}
+
+.notification-actions {
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .finance-profile-card {
     grid-template-columns: 1fr;

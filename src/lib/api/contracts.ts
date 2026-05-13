@@ -427,6 +427,7 @@ export type NotificationIntent = {
   severity: OperationalSignalSeverity;
   deliveredAt: string | null;
   readAt: string | null;
+  metadata?: unknown;
   createdAt: string;
   updatedAt: string;
 };

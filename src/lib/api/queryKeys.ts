@@ -39,4 +39,7 @@ export const queryKeys = {
     alerts: () => ['automation', 'alerts', getCurrentVendorContext().vendorId] as const,
     actions: () => ['automation', 'actions', getCurrentVendorContext().vendorId] as const,
   },
+  notifications: {
+    list: () => ['notifications', 'list', getCurrentVendorContext().vendorId] as const,
+  },
 } as const;
