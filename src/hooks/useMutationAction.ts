@@ -7,7 +7,7 @@ type MutationActionOptions<TData, TVariables> = Omit<
   'mutationFn' | 'onSuccess' | 'onError'
 > & {
   invalidateQueryKeys?: readonly QueryKey[];
-  onSuccess?: (data: TData, variables: TVariables) => void;
+  onSuccess?: (data: TData, variables: TVariables) => void | Promise<void>;
   onError?: (error: unknown, variables: TVariables) => void;
 };
 
@@ -20,9 +20,9 @@ export function useMutationAction<TData, TVariables>(
   const mutation = useMutation({
     mutationFn,
     ...mutationOptions,
-    onSuccess: (data, variables) => {
-      void Promise.all(invalidateQueryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
-      onSuccess?.(data, variables);
+    onSuccess: async (data, variables) => {
+      await Promise.all(invalidateQueryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })));
+      await onSuccess?.(data, variables);
     },
     onError: (error, variables) => {
       onError?.(error, variables);

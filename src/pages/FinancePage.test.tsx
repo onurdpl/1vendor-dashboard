@@ -43,6 +43,27 @@ const financeDashboard: FinanceDashboard = {
   },
   transactions: [
     {
+      id: 'ledger-sale-recorded',
+      date: '2026-05-10T09:15:00Z',
+      description: 'Shopify order sale recorded',
+      counterparty: 'gid://shopify/Order/1021',
+      category: 'Invoice',
+      amount: '$3,399.00',
+      status: 'Recorded',
+      shopifyOrderNumber: '1021',
+      shopifyOrderId: '7616544244049',
+      payoutCalculation: {
+        grossAmount: '$3,399.00',
+        commission: '$339.90',
+        commissionVat: '$0.00',
+        shippingDeduction: '$0.00',
+        refundImpact: '$0.00',
+        estimatedPayout: '$3,059.10',
+        shippingApplied: false,
+        shippingMode: 'disabled',
+      },
+    },
+    {
       id: 'ledger-refund-recorded',
       date: '2026-05-11T10:30:00Z',
       description: 'Shopify refund recorded',
@@ -208,15 +229,16 @@ describe('FinancePage control center', () => {
           commissionPercent: '15.00',
         },
         transactions: [
+          financeDashboard.transactions[0],
           {
-            ...financeDashboard.transactions[0],
+            ...financeDashboard.transactions[1],
             payoutCalculation: {
-              ...financeDashboard.transactions[0].payoutCalculation!,
+              ...financeDashboard.transactions[1].payoutCalculation!,
               commission: '$63.75',
               estimatedPayout: '-$488.75',
             },
           },
-          financeDashboard.transactions[1],
+          financeDashboard.transactions[2],
         ],
       });
 
@@ -234,5 +256,87 @@ describe('FinancePage control center', () => {
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
     expect(await screen.findByText('-$488.75')).toBeInTheDocument();
+  });
+
+  it('refreshes selected invoice payout detail after saving commission and VAT profile changes', async () => {
+    updateVendorFinancialProfileMock.mockResolvedValue({
+      ...financeDashboard.profile,
+      commissionPercent: '15.00',
+      commissionVatPercent: '18.00',
+      deductShippingEnabled: true,
+      shippingMode: 'external_provider',
+      fixedShippingFee: '88.00',
+      source: 'configured',
+    });
+    getFinanceDashboardMock
+      .mockResolvedValueOnce(financeDashboard)
+      .mockResolvedValueOnce({
+        ...financeDashboard,
+        summary: {
+          ...financeDashboard.summary,
+          platformFee: '$509.85',
+          commissionVat: '$91.77',
+          shippingDeductions: '$0.00',
+          payoutEstimate: '$2,797.38',
+        },
+        profile: {
+          ...financeDashboard.profile!,
+          commissionPercent: '15.00',
+          commissionVatPercent: '18.00',
+          deductShippingEnabled: true,
+          shippingMode: 'external_provider',
+          fixedShippingFee: '88.00',
+          source: 'configured',
+        },
+        transactions: [
+          {
+            ...financeDashboard.transactions[0],
+            payoutCalculation: {
+              ...financeDashboard.transactions[0].payoutCalculation!,
+              commission: '$509.85',
+              commissionVat: '$91.77',
+              shippingDeduction: '$0.00',
+              estimatedPayout: '$2,797.38',
+              shippingApplied: false,
+              shippingMode: 'external_provider',
+            },
+          },
+          financeDashboard.transactions[1],
+          financeDashboard.transactions[2],
+        ],
+      });
+
+    renderFinancePage();
+
+    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    expect(await screen.findByText('$339.90')).toBeInTheDocument();
+    expect((await screen.findAllByText('$0.00')).length).toBeGreaterThan(0);
+
+    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
+    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '15');
+    await userEvent.clear(within(profilePanel).getByLabelText(/commission VAT %/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/commission VAT %/i), '18');
+    await userEvent.selectOptions(within(profilePanel).getByLabelText(/shipping mode/i), 'external_provider');
+    await userEvent.clear(within(profilePanel).getByLabelText(/fixed shipping fee/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/fixed shipping fee/i), '88');
+    await userEvent.click(within(profilePanel).getByLabelText(/deduct shipping after fulfillment/i));
+    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
+
+    await waitFor(() =>
+      expect(updateVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', {
+        commissionPercent: 15,
+        commissionVatPercent: 18,
+        deductShippingEnabled: true,
+        shippingMode: 'external_provider',
+        fixedShippingFee: 88,
+      }),
+    );
+    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
+    expect((await screen.findAllByText('$509.85')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('$91.77')).toBeInTheDocument();
+    expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('$2,797.38')).length).toBeGreaterThan(0);
   });
 });

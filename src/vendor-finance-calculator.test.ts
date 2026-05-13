@@ -96,4 +96,21 @@ describe('vendor payout calculation foundation', () => {
     expect(result.shippingDeduction).toBe(0);
     expect(result.shippingApplied).toBe(false);
   });
+
+  it('does not deduct fixed shipping while shipping mode waits for an external provider cost', () => {
+    const result = calculateVendorPayout({
+      grossAmount: 1000,
+      refundAmount: 0,
+      fulfilled: true,
+      profile: {
+        ...baseProfile,
+        shippingMode: 'external_provider',
+        fixedShippingFee: 88,
+      },
+    });
+
+    expect(result.shippingDeduction).toBe(0);
+    expect(result.shippingApplied).toBe(false);
+    expect(result.estimatedPayout).toBe(856);
+  });
 });
