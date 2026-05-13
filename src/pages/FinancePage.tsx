@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -23,6 +23,14 @@ import { useActionFeedback } from '../lib/ui';
 import { getFinanceDashboard, updateVendorFinancialProfile } from '../features/finance/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
+
+type VendorProfileFormInput = {
+  commissionPercent: number;
+  commissionVatPercent: number;
+  deductShippingEnabled: boolean;
+  shippingMode: 'disabled' | 'fixed' | 'external_provider';
+  fixedShippingFee: number | null;
+};
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -109,14 +117,8 @@ export function FinancePage() {
   const availableVendors = getAvailableVendors();
   const isAdmin = currentUser?.role === 'admin';
   const saveProfileMutation = useMutationAction(
-    () =>
-      updateVendorFinancialProfile(currentVendor.vendorId, {
-        commissionPercent: Number(commissionPercent || 0),
-        commissionVatPercent: Number(commissionVatPercent || 0),
-        deductShippingEnabled,
-        shippingMode,
-        fixedShippingFee: fixedShippingFee.trim() ? Number(fixedShippingFee) : null,
-      }),
+    (input: VendorProfileFormInput) =>
+      updateVendorFinancialProfile(currentVendor.vendorId, input),
     {
       invalidateQueryKeys: [queryKeys.finance.summary()],
       onSuccess: async () => {
@@ -140,8 +142,24 @@ export function FinancePage() {
     setFixedShippingFee(finance.profile.fixedShippingFee ?? '');
   }, [finance?.profile]);
 
-  async function handleSaveVendorProfile() {
-    await saveProfileMutation.mutateAsync(undefined);
+  async function handleSaveVendorProfile(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formData = new FormData(event.currentTarget);
+    const nextShippingMode = String(formData.get('shippingMode') ?? 'disabled') as VendorProfileFormInput['shippingMode'];
+
+    try {
+      await saveProfileMutation.mutateAsync({
+        commissionPercent: Number(formData.get('commissionPercent') || 0),
+        commissionVatPercent: Number(formData.get('commissionVatPercent') || 0),
+        deductShippingEnabled: formData.has('deductShippingEnabled'),
+        shippingMode: nextShippingMode,
+        fixedShippingFee: String(formData.get('fixedShippingFee') ?? '').trim()
+          ? Number(formData.get('fixedShippingFee'))
+          : null,
+      });
+    } catch {
+      // The mutation onError handler renders the compact save failure message.
+    }
   }
 
   const financeKpis = useMemo(() => {
@@ -254,19 +272,29 @@ export function FinancePage() {
           <MetadataRow label="Shipping deduction" value={finance.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
         </div>
         {isAdmin ? (
-          <div className="finance-profile-form" aria-label="Vendor finance profile settings">
+          <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
             <div className="op-form-grid">
               <label>
                 <span>Commission %</span>
-                <input value={commissionPercent} onChange={(event) => setCommissionPercent(event.target.value)} inputMode="decimal" />
+                <input
+                  name="commissionPercent"
+                  value={commissionPercent}
+                  onChange={(event) => setCommissionPercent(event.target.value)}
+                  inputMode="decimal"
+                />
               </label>
               <label>
                 <span>Commission VAT %</span>
-                <input value={commissionVatPercent} onChange={(event) => setCommissionVatPercent(event.target.value)} inputMode="decimal" />
+                <input
+                  name="commissionVatPercent"
+                  value={commissionVatPercent}
+                  onChange={(event) => setCommissionVatPercent(event.target.value)}
+                  inputMode="decimal"
+                />
               </label>
               <label>
                 <span>Shipping mode</span>
-                <select value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
+                <select name="shippingMode" value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
                   <option value="disabled">Disabled</option>
                   <option value="fixed">Fixed</option>
                   <option value="external_provider">External provider</option>
@@ -274,11 +302,17 @@ export function FinancePage() {
               </label>
               <label>
                 <span>Fixed shipping fee</span>
-                <input value={fixedShippingFee} onChange={(event) => setFixedShippingFee(event.target.value)} inputMode="decimal" />
+                <input
+                  name="fixedShippingFee"
+                  value={fixedShippingFee}
+                  onChange={(event) => setFixedShippingFee(event.target.value)}
+                  inputMode="decimal"
+                />
               </label>
             </div>
             <label className="op-checkbox-row">
               <input
+                name="deductShippingEnabled"
                 type="checkbox"
                 checked={deductShippingEnabled}
                 onChange={(event) => setDeductShippingEnabled(event.target.checked)}
@@ -286,14 +320,13 @@ export function FinancePage() {
               <span>Deduct shipping after fulfillment</span>
             </label>
             <button
-              type="button"
+              type="submit"
               className="button button-primary"
               disabled={saveProfileMutation.isPending}
-              onClick={() => void handleSaveVendorProfile()}
             >
               {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
             </button>
-          </div>
+          </form>
         ) : (
           <StatusBadge tone="neutral">Read-only vendor profile</StatusBadge>
         )}

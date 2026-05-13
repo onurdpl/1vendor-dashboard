@@ -339,4 +339,111 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$2,797.38')).length).toBeGreaterThan(0);
   });
+
+  it('sends edited form values when changing a persisted profile from 15/18 to 12/20', async () => {
+    const configuredDashboard: FinanceDashboard = {
+      ...financeDashboard,
+      summary: {
+        ...financeDashboard.summary,
+        platformFee: '$509.85',
+        commissionVat: '$91.77',
+        payoutEstimate: '$2,797.38',
+      },
+      profile: {
+        ...financeDashboard.profile!,
+        commissionPercent: '15.00',
+        commissionVatPercent: '18.00',
+        deductShippingEnabled: true,
+        shippingMode: 'external_provider',
+        fixedShippingFee: '88.00',
+        source: 'configured',
+      },
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutCalculation: {
+            ...financeDashboard.transactions[0].payoutCalculation!,
+            commission: '$509.85',
+            commissionVat: '$91.77',
+            estimatedPayout: '$2,797.38',
+            shippingMode: 'external_provider',
+          },
+        },
+        financeDashboard.transactions[1],
+        financeDashboard.transactions[2],
+      ],
+    };
+    updateVendorFinancialProfileMock.mockResolvedValue({
+      ...configuredDashboard.profile!,
+      commissionPercent: '12.00',
+      commissionVatPercent: '20.00',
+    });
+    getFinanceDashboardMock
+      .mockResolvedValueOnce(configuredDashboard)
+      .mockResolvedValueOnce({
+        ...configuredDashboard,
+        summary: {
+          ...configuredDashboard.summary,
+          platformFee: '$407.88',
+          commissionVat: '$81.58',
+          payoutEstimate: '$2,909.54',
+        },
+        profile: {
+          ...configuredDashboard.profile!,
+          commissionPercent: '12.00',
+          commissionVatPercent: '20.00',
+        },
+        transactions: [
+          {
+            ...configuredDashboard.transactions[0],
+            payoutCalculation: {
+              ...configuredDashboard.transactions[0].payoutCalculation!,
+              commission: '$407.88',
+              commissionVat: '$81.58',
+              estimatedPayout: '$2,909.54',
+            },
+          },
+          configuredDashboard.transactions[1],
+          configuredDashboard.transactions[2],
+        ],
+      });
+
+    renderFinancePage();
+
+    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
+    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '12');
+    await userEvent.clear(within(profilePanel).getByLabelText(/commission VAT %/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/commission VAT %/i), '20');
+    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
+
+    await waitFor(() =>
+      expect(updateVendorFinancialProfileMock).toHaveBeenCalledWith('demo-vendor-a', {
+        commissionPercent: 12,
+        commissionVatPercent: 20,
+        deductShippingEnabled: true,
+        shippingMode: 'external_provider',
+        fixedShippingFee: 88,
+      }),
+    );
+    expect(await screen.findByText('12.00% vendor profile')).toBeInTheDocument();
+    expect((await screen.findAllByText('$407.88')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('$81.58')).toBeInTheDocument();
+    expect((await screen.findAllByText('$2,909.54')).length).toBeGreaterThan(0);
+  });
+
+  it('surfaces vendor profile save failures', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    updateVendorFinancialProfileMock.mockRejectedValue(new Error('Profile save failed'));
+
+    renderFinancePage();
+
+    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
+    await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
+    await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '12');
+    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
+
+    expect(await screen.findByText('Profile save failed')).toBeInTheDocument();
+  });
 });
