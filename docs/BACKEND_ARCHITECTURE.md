@@ -975,3 +975,29 @@ Frontend note:
 - Existing finance ledger snapshots are not rewritten when a provider cost is attached later.
 - `GET /finance` exposes shipping deduction source, provider, snapshot, and pending-provider-cost state for Finance detail views.
 - Phase 18E does not call carrier/provider APIs, create shipment labels, integrate ERP/accounting systems, or execute payouts.
+
+## Finance Closure Audit (Phase 18F)
+- Phase 18F is a documentation and production-smoke closure checkpoint for the finance subsystem.
+- No new finance runtime architecture is introduced in this phase.
+- The finance foundation is considered complete for:
+  - vendor-scoped ledger visibility
+  - immutable sale calculation snapshots
+  - immutable shipping cost snapshots
+  - refund full-impact payout behavior
+  - settlement readiness and accrued/payable balances
+  - payout batch draft preparation
+  - vendor read-only payout visibility
+  - external-provider shipping cost readiness
+- Production read-only verification confirmed:
+  - `npm run real-api:dry-run` passes against the Render backend
+  - `/finance` returns profile, settlement, payout batch summary, and shipping cost status fields
+  - admin profile and payout batch listing routes are deployed
+  - the shipping cost ingestion route is deployed and validation-protected
+- Mutable production checks, such as preparing payout batches or attaching shipment costs, should only be run in an approved operator smoke window.
+- Future phases must still define:
+  - real payout execution
+  - payout confirmation/settlement completion
+  - payout statements
+  - ERP/accounting export
+  - live shipping provider imports
+  - provider cost correction and adjustment policy
