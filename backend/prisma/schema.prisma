@@ -102,6 +102,30 @@ enum ShippingCostStatus {
   IGNORED
 }
 
+enum OperationalSignalSeverity {
+  INFO
+  WARNING
+  HIGH
+  CRITICAL
+}
+
+enum OperationalSignalStatus {
+  ACTIVE
+  ACKNOWLEDGED
+  RESOLVED
+  IGNORED
+}
+
+enum OperationalSignalSourceArea {
+  PAYOUT
+  REFUND
+  FULFILLMENT
+  DIAGNOSTICS
+  RECONCILIATION
+  SHIPPING_COST
+  SETTLEMENT
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -128,6 +152,7 @@ model Vendor {
   shippingCosts         ShipmentShippingCost[]
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
+  operationalSignals    OperationalSignal[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
 }
@@ -219,6 +244,7 @@ model VendorAllocation {
   financeEntries           FinanceLedgerEntry[]
   operationalJobs          OperationalJob[]
   shippingCosts            ShipmentShippingCost[]
+  operationalSignals       OperationalSignal[]
 }
 
 model VendorAllocationLineItem {
@@ -371,6 +397,7 @@ model FinanceLedgerEntry {
   vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   payoutBatchLines              PayoutBatchLine[]
+  operationalSignals            OperationalSignal[]
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
@@ -415,6 +442,7 @@ model PayoutBatch {
   updatedAt               DateTime          @updatedAt
   vendor                  Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                   PayoutBatchLine[]
+  operationalSignals      OperationalSignal[]
 
   @@index([vendorId, status])
   @@index([createdAt])
@@ -482,6 +510,7 @@ model OperationalJob {
   vendorAllocation     VendorAllocation?    @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   refundRecord         RefundRecord?        @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
   returnRecord         ReturnRecord?        @relation(fields: [returnRecordId], references: [id], onDelete: SetNull)
+  operationalSignals   OperationalSignal[]
 
   @@index([status, scheduledAt])
   @@index([status, nextRetryAt])
@@ -489,4 +518,37 @@ model OperationalJob {
   @@index([webhookEventId])
   @@index([vendorAllocationId])
   @@index([sourceShopifyOrderId])
+}
+
+model OperationalSignal {
+  id                   String                      @id
+  type                 String
+  severity             OperationalSignalSeverity
+  sourceArea           OperationalSignalSourceArea
+  vendorId             String?
+  allocationId         String?
+  financeLedgerEntryId String?
+  payoutBatchId        String?
+  operationalJobId     String?
+  title                String
+  description          String
+  suggestedAction      String?
+  status               OperationalSignalStatus     @default(ACTIVE)
+  ruleKey              String
+  triggeredAt          DateTime                    @default(now())
+  resolvedAt           DateTime?
+  metadata             Json?
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  vendor               Vendor?                     @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  allocation           VendorAllocation?           @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  financeLedgerEntry   FinanceLedgerEntry?         @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
+  payoutBatch          PayoutBatch?                @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
+  operationalJob       OperationalJob?             @relation(fields: [operationalJobId], references: [id], onDelete: SetNull)
+
+  @@index([status, severity])
+  @@index([vendorId, status])
+  @@index([sourceArea, status])
+  @@index([ruleKey])
+  @@index([triggeredAt])
 }

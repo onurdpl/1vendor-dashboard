@@ -370,6 +370,47 @@ export type DashboardObservabilitySummary = {
   note: string;
 };
 
+export type OperationalSignalSeverity = 'info' | 'warning' | 'high' | 'critical';
+export type OperationalSignalStatus = 'active' | 'acknowledged' | 'resolved' | 'ignored';
+export type OperationalSignalSourceArea =
+  | 'payout'
+  | 'refund'
+  | 'fulfillment'
+  | 'diagnostics'
+  | 'reconciliation'
+  | 'shipping_cost'
+  | 'settlement';
+
+export type OperationalSignal = {
+  id: string;
+  type: string;
+  severity: OperationalSignalSeverity;
+  sourceArea: OperationalSignalSourceArea;
+  vendorId: string | null;
+  allocationId: string | null;
+  financeLedgerEntryId: string | null;
+  payoutBatchId: string | null;
+  operationalJobId: string | null;
+  title: string;
+  description: string;
+  suggestedAction: string | null;
+  status: OperationalSignalStatus;
+  ruleKey: string;
+  triggeredAt: string;
+  resolvedAt: string | null;
+};
+
+export type OperationalSignalsResponse = {
+  summary: {
+    total: number;
+    critical: number;
+    high: number;
+    warning: number;
+    info: number;
+  };
+  signals: OperationalSignal[];
+};
+
 export type DashboardOverview = {
   vendorId: string;
   vendorName: string;
@@ -385,7 +426,12 @@ export type DashboardOverview = {
   partialDataWarnings?: string[];
 };
 
-export type OperationsQueueItemType = 'pending_reassignment' | 'vendor_blocked' | 'awaiting_shipment' | 'refund_attention';
+export type OperationsQueueItemType =
+  | 'pending_reassignment'
+  | 'vendor_blocked'
+  | 'awaiting_shipment'
+  | 'refund_attention'
+  | 'operational_signal';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export type OperationsQueueItem = {

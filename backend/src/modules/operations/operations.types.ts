@@ -2,7 +2,8 @@ export type OperationsQueueItemType =
   | 'pending_reassignment'
   | 'vendor_blocked'
   | 'awaiting_shipment'
-  | 'refund_attention';
+  | 'refund_attention'
+  | 'operational_signal';
 
 export type OperationsQueueSeverity = 'critical' | 'warning' | 'attention' | 'normal';
 
@@ -34,6 +35,7 @@ export type OperationsQueueSummaryDto = {
   vendorBlocked: number;
   awaitingShipment: number;
   refundAttention: number;
+  operationalSignals: number;
 };
 
 export type OperationsQueueDashboardDto = {

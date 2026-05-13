@@ -19,6 +19,7 @@ import { registerDiagnosticsRoutes } from './modules/diagnostics/diagnostics.rou
 import { registerReconciliationRoutes } from './modules/reconciliation/reconciliation.routes.js';
 import { registerScheduledReconciliationScheduler } from './modules/reconciliation/scheduled-reconciliation.service.js';
 import { registerObservabilityRoutes } from './modules/observability/observability.routes.js';
+import { registerRulesRoutes } from './modules/rules/rules.routes.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -104,6 +105,7 @@ export function createApp() {
   registerFulfillmentRoutes(app, env);
   registerDiagnosticsRoutes(app, env);
   registerObservabilityRoutes(app, env);
+  registerRulesRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
   registerScheduledReconciliationScheduler(app, env);

@@ -126,6 +126,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     financeResult,
     automationResult,
     operationsResult,
+    signalsResult,
     diagnosticsResult,
     observabilityResult,
   ] = await Promise.allSettled([
@@ -134,6 +135,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     runtimeServices.finance.dashboard(),
     runtimeServices.automation.dashboard(),
     currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
+    runtimeServices.signals.list(),
     currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
     currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
   ]);
@@ -163,6 +165,11 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     partialDataWarnings.push('Operations queue context is temporarily unavailable.');
   }
 
+  const signals = signalsResult.status === 'fulfilled' ? signalsResult.value : null;
+  if (signalsResult.status === 'rejected') {
+    partialDataWarnings.push('Operational rules signals are temporarily unavailable.');
+  }
+
   const diagnostics = diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null;
   if (diagnosticsResult.status === 'rejected') {
     partialDataWarnings.push('Diagnostics summary is temporarily unavailable.');
@@ -179,6 +186,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
   ).length;
   const activeRefundCount = returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
   const unresolvedAlerts = (automation?.alerts ?? []).filter((alert) => alert.status !== 'Resolved').length;
+  const activeSignalCount = signals?.summary.total ?? 0;
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
   const refundAmount = returns.reduce((total, item) => total + toMoneyValue(item.amount), 0);
 
@@ -186,10 +194,11 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     blockedCount,
     awaitingShipmentCount,
     refundAttentionCount: activeRefundCount,
-    automationSignalCount: unresolvedAlerts,
+    automationSignalCount: unresolvedAlerts + activeSignalCount,
   });
 
   const recentActivity = [
+    ...((signals?.signals ?? []).slice(0, 2).map((signal) => `${signal.title}: ${signal.description}`)),
     ...(orders[0]
       ? [`${orders[0].id} is ${orders[0].shippingStatus.toLowerCase()} for Shopify order #${orders[0].sourceShopifyOrderNumber}`]
       : []),
@@ -201,7 +210,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     )),
   ];
 
-  let workspaceStatus = `${currentVendor.vendorName} has ${orders.length} vendor-scoped orders, ${activeRefundCount} refunds needing attention, and ${unresolvedAlerts} active automation signals.`;
+  let workspaceStatus = `${currentVendor.vendorName} has ${orders.length} vendor-scoped orders, ${activeRefundCount} refunds needing attention, and ${unresolvedAlerts + activeSignalCount} active automation/rules signals.`;
   if (currentUser?.role === 'admin' && operations) {
     workspaceStatus = `${workspaceStatus} Admin queue currently tracks ${operations.length} operational items for the selected vendor scope.`;
   }

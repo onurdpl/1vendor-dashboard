@@ -4,6 +4,8 @@ import type {
   OperationsQueueItemDto,
   OperationsQueueSeverity,
 } from './operations.types.js';
+import { listOperationalSignals } from '../rules/rules.service.js';
+import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
 
 function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   const fulfillment = fulfillmentStatus.trim().toLowerCase();
@@ -31,6 +33,7 @@ function createSummary(items: OperationsQueueItemDto[]): OperationsQueueDashboar
     vendorBlocked: items.filter((item) => item.type === 'vendor_blocked').length,
     awaitingShipment: items.filter((item) => item.type === 'awaiting_shipment').length,
     refundAttention: items.filter((item) => item.type === 'refund_attention').length,
+    operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
   };
 }
 
@@ -45,6 +48,19 @@ function getSeverityRank(severity: OperationsQueueSeverity) {
     return 2;
   }
   return 3;
+}
+
+function mapSignalSeverity(severity: OperationalSignalSeverityDto): OperationsQueueSeverity {
+  if (severity === 'critical') {
+    return 'critical';
+  }
+  if (severity === 'high') {
+    return 'warning';
+  }
+  if (severity === 'warning') {
+    return 'attention';
+  }
+  return 'normal';
 }
 
 export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
@@ -177,6 +193,34 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       createdAt: returnRecord.createdAt.toISOString(),
       actionLabel: 'Review return',
       destinationPath: `/admin/orders/${returnRecord.vendorAllocation.order.sourceShopifyOrderId}`,
+    });
+  }
+
+  const signalDashboard = await listOperationalSignals({
+    includeInternal: true,
+    limit: 100,
+  });
+  for (const signal of signalDashboard.signals) {
+    const relatedShopifyOrderId =
+      typeof signal.metadata === 'object' && signal.metadata !== null && 'sourceShopifyOrderId' in signal.metadata
+        ? String(signal.metadata.sourceShopifyOrderId ?? '')
+        : null;
+    items.push({
+      id: `op-signal-${signal.id}`,
+      type: 'operational_signal',
+      severity: mapSignalSeverity(signal.severity),
+      title: signal.title,
+      description: signal.description,
+      vendorId: signal.vendorId ?? 'platform',
+      vendorName: signal.vendorId ?? 'Platform',
+      relatedOrderId: signal.allocationId,
+      relatedShopifyOrderId,
+      relatedReturnId: null,
+      relatedRefundId: null,
+      status: signal.status,
+      createdAt: signal.triggeredAt,
+      actionLabel: signal.suggestedAction ? 'Review signal' : 'Inspect signal',
+      destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
     });
   }
 

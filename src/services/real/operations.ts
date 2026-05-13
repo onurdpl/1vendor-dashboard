@@ -12,6 +12,7 @@ type OperationsResponseDto = {
     vendorBlocked: number;
     awaitingShipment: number;
     refundAttention: number;
+    operationalSignals?: number;
   };
   items: Array<{
     id: string;

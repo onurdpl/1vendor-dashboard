@@ -1001,3 +1001,44 @@ Frontend note:
   - ERP/accounting export
   - live shipping provider imports
   - provider cost correction and adjustment policy
+
+## Operational Rules Engine (Phase 19A)
+- `OperationalSignal` stores deterministic attention signals generated from operational and finance state.
+- Signal severities:
+  - `INFO`
+  - `WARNING`
+  - `HIGH`
+  - `CRITICAL`
+- Signal lifecycle statuses:
+  - `ACTIVE`
+  - `ACKNOWLEDGED`
+  - `RESOLVED`
+  - `IGNORED`
+- Signal source areas:
+  - `PAYOUT`
+  - `REFUND`
+  - `FULFILLMENT`
+  - `DIAGNOSTICS`
+  - `RECONCILIATION`
+  - `SHIPPING_COST`
+  - `SETTLEMENT`
+- Initial deterministic rules cover:
+  - negative vendor payable balance
+  - stale awaiting-shipment fulfillment
+  - missing external-provider shipping cost after fulfillment
+  - negative payout batch net
+  - old payout-ready rows not yet batched
+  - dead-letter/permanently failed operational jobs
+- Signals use deterministic ids based on rule key and related entity, so repeated evaluation updates the existing signal rather than creating duplicates.
+- Evaluation runs opportunistically through:
+  - `GET /signals`
+  - `GET /admin/signals`
+  - `GET /admin/operations`
+- Admin endpoints:
+  - `GET /admin/signals`
+  - `POST /admin/signals/:signalId/lifecycle`
+- Vendor-safe endpoint:
+  - `GET /signals`
+- Vendor responses are scoped to the selected vendor and exclude internal diagnostics/reconciliation signal areas.
+- Admin operations queue now includes active rules signals as `operational_signal` items so critical/high rule output influences operator prioritization.
+- Phase 19A does not send notifications, trigger auto-remediation, call external alerting tools, or mutate operational/finance truth.

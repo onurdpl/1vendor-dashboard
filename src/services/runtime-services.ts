@@ -15,6 +15,7 @@ import * as realAutomation from './real/automation';
 import * as realOperations from './real/operations';
 import * as realDiagnostics from './real/diagnostics';
 import * as realObservability from './real/observability';
+import * as realSignals from './real/signals';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -205,6 +206,21 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realOperations.listAdminOperationsQueue()
         : Promise.resolve(listMockAdminOperationsQueue()),
+  },
+  signals: {
+    list: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realSignals.listOperationalSignals()
+        : Promise.resolve({
+            summary: {
+              total: 0,
+              critical: 0,
+              high: 0,
+              warning: 0,
+              info: 0,
+            },
+            signals: [],
+          }),
   },
   diagnostics: {
     webhooks: () =>
