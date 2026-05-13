@@ -119,6 +119,13 @@
 ### Phase 16B Returns Control Center
 - Use `OperationalTable`, `OperationalTableRow`, `SideDetailPanel`, `MetadataGroup`, and `TimelineBlock` as the base page architecture.
 - Keep pending return request and processed refund states visually distinct through `StatusBadge` and tone rules.
+- Phase 16B implementation update:
+  - Returns is now the first full operational workspace built on the foundation.
+  - The page uses compact KPIs, an operational toolbar, frontend search/filtering, a dense table, and a right-side detail panel.
+  - The table is optimized for scanning status, vendor, customer, Shopify order, Shopify return/refund identifiers, item preview, amount, lifecycle source, updated timestamp, and quick indicators.
+  - The detail panel uses existing return detail data for returned item rows, lifecycle timeline, Shopify metadata, refund context, and diagnostics/reconciliation helper context.
+  - Pending return requests remain explicitly finance-neutral until `refunds/create`; processed refunds are labeled as refund-ledger records.
+  - No backend workflow or route changes were required.
 
 ### Phase 16C Finance + Diagnostics
 - Use `KPIStatCard`, `OperationalSection`, `StatusBadge`, `SeverityBadge`, and panel metadata primitives.
@@ -134,3 +141,4 @@
 - No mobile-specific table card pattern was created yet; current behavior relies on horizontal table overflow.
 - No Storybook or component catalog exists yet.
 - No realtime status updates or background refresh architecture was added.
+- After Phase 16B, Returns still depends on currently available backend fields; real product thumbnails, richer customer fields, and direct diagnostics links remain future DTO/workflow improvements.

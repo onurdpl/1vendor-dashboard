@@ -561,7 +561,7 @@ a:focus-visible {
 
 .returns-op-table .op-table-head,
 .returns-op-table .op-table-row {
-  grid-template-columns: 1fr 1.05fr 1.05fr 1.05fr 0.8fr 1fr 0.7fr;
+  grid-template-columns: 0.82fr 0.95fr 1.05fr 1.05fr 1.08fr 1.15fr 0.8fr 1fr 0.95fr 1.05fr;
 }
 
 .finance-op-table .op-table-head,
@@ -1743,6 +1743,97 @@ h3 {
 .return-line-items .line-item-head,
 .return-line-items .line-item-row {
   grid-template-columns: 0.8fr 0.9fr 1.4fr 0.5fr 0.8fr 0.7fr;
+}
+
+/* Phase 16B returns control center */
+.returns-control-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 420px);
+}
+
+.returns-kpi-row {
+  grid-template-columns: repeat(auto-fit, minmax(155px, 1fr));
+}
+
+.returns-filter-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  color: var(--op-muted);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.returns-filter-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--op-border);
+  border-radius: 999px;
+  background: var(--op-surface);
+}
+
+.returns-op-table-v2 .op-table-head,
+.returns-op-table-v2 .op-table-row {
+  min-width: 1380px;
+}
+
+.return-item-preview {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.return-item-thumb {
+  width: 34px;
+  height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--op-border);
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+  color: var(--op-muted);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.04em;
+}
+
+.return-detail-items {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.return-detail-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2);
+  border: 1px solid rgba(223, 229, 238, 0.82);
+  border-radius: var(--radius-sm);
+  background: var(--op-surface-raised);
+}
+
+.return-detail-item strong,
+.return-detail-item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.return-detail-item small,
+.return-detail-item-meta {
+  color: var(--op-muted);
+  font-size: 0.78rem;
+}
+
+.return-detail-item-meta {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+  font-weight: 800;
+  white-space: nowrap;
 }
 
 /* Dashboard workspace */

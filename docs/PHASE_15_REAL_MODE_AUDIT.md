@@ -320,6 +320,25 @@
   - advanced automation tooling
   - admin reassignment and return lifecycle mutation workflows
 
+## Phase 16B Returns Control Center
+- Returns is now a production-grade operational workspace rather than a lightweight list/detail surface.
+- The workspace uses:
+  - compact KPI summary row for pending requests, approved items, processed refunds, cancelled/declined outcomes, posted refund amount, and attention load
+  - operational search and filters for order number, Shopify return/refund id, SKU, customer, lifecycle status, source type, and visible vendor rows
+  - dense table-first scanning with status, vendor, customer, Shopify order, source entity, item preview, amount, lifecycle/source, update timestamp, and quick indicators
+  - right-side detail panel backed by the existing return detail endpoint for item rows, lifecycle timeline, Shopify metadata, refund context, and diagnostics/reconciliation helper context
+- Pending Shopify return requests are visually and semantically separated from processed refunds:
+  - pending return request: no finance ledger, no refund-posted assumption
+  - processed refund: refund webhook allocation, vendor-scoped finance visibility
+- Vendor isolation remains unchanged:
+  - list/detail data still comes from existing vendor-scoped runtime services and backend contracts
+  - no cross-vendor data aggregation was added to the Returns page
+- Remaining gaps before deeper returns automation:
+  - no approve/decline/close frontend mutation actions yet
+  - no product image thumbnails from backend yet; placeholder thumbnails are used
+  - no direct diagnostics event deep-linking from a return record yet
+  - richer customer fields depend on future backend DTO expansion
+
 ## Phase 16-3C Inbound Fulfillment Sync
 - Backend now supports inbound Shopify fulfillment status refresh for:
   - `FULFILLMENTS_CREATE`
