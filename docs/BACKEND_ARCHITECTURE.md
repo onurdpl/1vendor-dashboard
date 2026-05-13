@@ -224,6 +224,33 @@ Alternative for quick schema sync without migration history:
   - deployment-readiness direction
   - operational UX and reliability-hardening workstreams
 
+## Phase 17A Async Processing Foundation
+- The lightweight async operational foundation is documented in [PHASE_17A_ASYNC_FOUNDATION.md](/Users/onur/Documents/New project 4/docs/PHASE_17A_ASYNC_FOUNDATION.md).
+- Backend now includes an `OperationalJob` model for internal processing lifecycle persistence.
+- Current execution remains inline after the existing safety boundaries:
+  1. Shopify HMAC verification
+  2. webhook idempotency
+  3. operational job creation for first accepted deliveries/operator actions
+  4. existing ingestion/replay/recover/reconciliation execution
+  5. job completion/failure recording
+- Job statuses are retry-ready:
+  - `pending`
+  - `processing`
+  - `completed`
+  - `failed`
+  - `retry_scheduled`
+  - `dead_letter_ready`
+- Job categories cover:
+  - webhook processing
+  - reconciliation
+  - replay
+  - recovery
+  - fulfillment sync
+  - refund sync
+  - return sync
+- No external queue infrastructure was added. There is still no Redis, BullMQ, RabbitMQ, Kafka, daemon worker, scheduler, websocket layer, or event-sourcing rewrite.
+- Operational jobs are observability and retry-preparation metadata. They do not replace Shopify Admin GraphQL as canonical truth and do not weaken HMAC, idempotency, vendor isolation, or admin-only recovery rules.
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.
@@ -424,6 +451,7 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - `GET /admin/diagnostics/sync-events`
 - Observability strategy:
   - use persisted `WebhookEvent` rows for webhook receipt, processing, and failure visibility
+  - use persisted `OperationalJob` rows for retry-ready internal processing lifecycle visibility
   - use persisted `Fulfillment` sync state for fulfillment tracking failures
   - consolidate operational failures into an admin-only sync-events feed
 - Current visibility includes:
@@ -468,6 +496,11 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - blocked actions return `409` with `skippedReason`, before/after status, topic, and `not_replayable` / `not_recoverable` status
   - successful operator actions return `202` with `webhookEventId`, `beforeStatus`, `afterStatus`, explicit replay/recovery status, affected counts when available, and a safe error summary when processing still fails
   - `PROCESSED` events remain protected from recovery; replay remains deliberate and topic-gated for idempotent ingestion paths
+- Operational job integration:
+  - accepted webhook deliveries create a related job after idempotency accepts the event
+  - replay/recover actions create `replay` / `recovery` jobs after eligibility checks pass
+  - diagnostics webhook list/detail responses include related job summaries with status, retry count, schedule, and safe error summary
+  - job persistence failure is logged and does not block the existing inline processing path
 - Reconciliation strategy:
   - surfaces `RECEIVED` webhook events older than 5 minutes
   - surfaces failed webhook events
@@ -480,7 +513,7 @@ Frontend will never call Shopify directly or hold Shopify credentials.
 - Backend now includes admin-only reconciliation endpoints for explicit operator recovery:
   - `POST /admin/reconciliation/orders/:allocationId`
   - `POST /admin/reconciliation/shopify-order/:shopifyOrderId`
-- These endpoints do not add queue workers and do not mutate Shopify.
+- These endpoints create lightweight `reconciliation` operational jobs for lifecycle visibility, but do not add queue workers and do not mutate Shopify.
 - Reconciliation flow:
   - locate the local Shopify order/allocation
   - fetch canonical Shopify fulfillment state through Admin GraphQL

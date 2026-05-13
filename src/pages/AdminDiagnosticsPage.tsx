@@ -586,6 +586,22 @@ export function AdminDiagnosticsPage() {
                 <MetadataRow label="Processing status" value={selectedWebhook.processingStatus ?? selectedWebhook.status} />
                 <MetadataRow label="Last safe error" value={selectedWebhook.lastErrorSummary ?? selectedWebhook.errorMessage ?? 'No error recorded'} />
               </MetadataGroup>
+              {(selectedWebhook.relatedJobs ?? []).length > 0 ? (
+                <MetadataGroup title="Operational jobs">
+                  {(selectedWebhook.relatedJobs ?? []).slice(0, 4).map((job) => (
+                    <div key={job.id} className="diagnostics-job-row">
+                      <div>
+                        <strong>{toTitleCaseLabel(job.jobType)}</strong>
+                        <small>
+                          Retry {job.retryCount}/{job.maxRetries} · Scheduled {formatDate(job.scheduledAt)}
+                        </small>
+                        {job.errorSummary ? <small>{job.errorSummary}</small> : null}
+                      </div>
+                      <StatusBadge tone={getStatusTone(job.status)}>{toTitleCaseLabel(job.status)}</StatusBadge>
+                    </div>
+                  ))}
+                </MetadataGroup>
+              ) : null}
               <MetadataGroup title="Affected entities">
                 <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not synced'} />
                 <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not synced'} />

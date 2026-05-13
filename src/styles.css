@@ -366,6 +366,30 @@ a:focus-visible {
   word-break: break-word;
 }
 
+.diagnostics-job-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--op-border);
+}
+
+.diagnostics-job-row:last-child {
+  border-bottom: 0;
+}
+
+.diagnostics-job-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.diagnostics-job-row small {
+  color: var(--op-muted);
+  font-size: 0.75rem;
+}
+
 .diagnostics-wrap {
   overflow-wrap: anywhere;
   word-break: break-word;

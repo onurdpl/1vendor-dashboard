@@ -7,6 +7,28 @@ export type AdminWebhookDiagnosticsSummary = {
   needsAttention: number;
 };
 
+export type OperationalJobDiagnostic = {
+  id: string;
+  jobType: string;
+  status: string;
+  payloadRef: string | null;
+  webhookEventId: string | null;
+  sourceShopifyOrderId: string | null;
+  vendorAllocationId: string | null;
+  refundRecordId: string | null;
+  returnRecordId: string | null;
+  priority: number;
+  retryCount: number;
+  maxRetries: number;
+  scheduledAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  failedAt: string | null;
+  errorSummary: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AdminWebhookDiagnosticsEvent = {
   id: string;
   topic: string;
@@ -29,6 +51,7 @@ export type AdminWebhookDiagnosticsEvent = {
   recoverBlockedReason: string | null;
   recommendedAction: string;
   affectedEntities: WebhookAffectedEntities;
+  relatedJobs: OperationalJobDiagnostic[];
   createdAt: string | null;
   updatedAt: string | null;
 };
@@ -59,6 +82,7 @@ export type AdminWebhookDiagnosticDetail = {
   recoverBlockedReason: string | null;
   recommendedAction: string;
   affectedEntities: WebhookAffectedEntities;
+  relatedJobs: OperationalJobDiagnostic[];
   receivedAt: string;
   processedAt: string | null;
   createdAt: string | null;

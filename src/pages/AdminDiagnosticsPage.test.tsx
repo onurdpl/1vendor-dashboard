@@ -58,6 +58,29 @@ const blockedEvent = {
     shopifyFulfillmentId: null,
     vendorId: 'demo-vendor-a',
   },
+  relatedJobs: [
+    {
+      id: 'job-failed-refund',
+      jobType: 'refund_sync',
+      status: 'failed',
+      payloadRef: 'sha256:refund',
+      webhookEventId: 'webhook-blocked',
+      sourceShopifyOrderId: 'gid://shopify/Order/1001',
+      vendorAllocationId: null,
+      refundRecordId: null,
+      returnRecordId: null,
+      priority: 0,
+      retryCount: 1,
+      maxRetries: 3,
+      scheduledAt: '2026-05-12T10:00:00Z',
+      startedAt: '2026-05-12T10:00:30Z',
+      completedAt: null,
+      failedAt: '2026-05-12T10:01:00Z',
+      errorSummary: 'Payload missing',
+      createdAt: '2026-05-12T10:00:00Z',
+      updatedAt: '2026-05-12T10:01:00Z',
+    },
+  ],
   createdAt: '2026-05-12T10:00:00Z',
   updatedAt: '2026-05-12T10:01:00Z',
 };
@@ -189,6 +212,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(await screen.findByRole('heading', { name: /webhook recovery command center/i })).toBeInTheDocument();
     expect((await screen.findAllByText(/Replay blocked: Payload unavailable/i)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Recover blocked: Already processed/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund Sync')).toBeInTheDocument();
+    expect(screen.getByText(/Retry 1\/3/i)).toBeInTheDocument();
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
   });
 

@@ -200,6 +200,7 @@ export const runtimeServices = {
               shopifyFulfillmentId: null,
               vendorId: null,
             },
+            relatedJobs: [],
             receivedAt: new Date().toISOString(),
             processedAt: null,
             createdAt: new Date().toISOString(),

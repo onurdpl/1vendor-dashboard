@@ -1,4 +1,4 @@
-import type { WebhookEvent } from '@prisma/client';
+import type { OperationalJob, WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
@@ -14,6 +14,13 @@ import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingesti
 import type { ShopifyRefundsCreateWebhookPayload } from '../shopify/refund-ingestion.types.js';
 import type { ReturnLifecycleWebhookPayload } from '../shopify/return-lifecycle-ingestion.types.js';
 import type { FulfillmentWebhookPayload, FulfillmentWebhookTopic } from '../shopify/fulfillment-ingestion.types.js';
+import {
+  createOperationalJob,
+  markOperationalJobCompleted,
+  markOperationalJobFailed,
+  markOperationalJobProcessing,
+  serializeOperationalJob,
+} from '../operational-jobs/operational-jobs.service.js';
 import type {
   AdminWebhookDiagnosticDetail,
   AdminWebhookDiagnosticsEvent,
@@ -304,6 +311,7 @@ function buildWebhookDiagnosticsEvent(event: {
   processedAt: Date | null;
   errorMessage: string | null;
   shopifyOrder?: { sourceShopifyOrderId: string; sourceShopifyOrderNumber?: string | number | null } | null;
+  operationalJobs?: OperationalJob[];
 }): AdminWebhookDiagnosticsEvent {
   const replayBlockedReason = getReplayBlockedReason(event);
   const recoverBlockedReason = getRecoverBlockedReason(event);
@@ -330,6 +338,7 @@ function buildWebhookDiagnosticsEvent(event: {
     recoverBlockedReason,
     recommendedAction: getRecommendedAction(event),
     affectedEntities: inferAffectedEntities(event),
+    relatedJobs: (event.operationalJobs ?? []).map(serializeOperationalJob),
     createdAt: toIsoString(event.receivedAt),
     updatedAt: toIsoString(event.processedAt ?? event.receivedAt),
   };
@@ -343,6 +352,12 @@ export async function listWebhookDiagnostics(): Promise<AdminWebhookDiagnosticsR
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
         },
+      },
+      operationalJobs: {
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 5,
       },
     },
     orderBy: {
@@ -368,6 +383,11 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
         select: {
           sourceShopifyOrderId: true,
           sourceShopifyOrderNumber: true,
+        },
+      },
+      operationalJobs: {
+        orderBy: {
+          createdAt: 'desc',
         },
       },
     },
@@ -401,6 +421,7 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
     recoverBlockedReason,
     recommendedAction: getRecommendedAction(event),
     affectedEntities: inferAffectedEntities(event),
+    relatedJobs: event.operationalJobs.map(serializeOperationalJob),
     receivedAt: event.receivedAt.toISOString(),
     processedAt: toIsoString(event.processedAt),
     createdAt: toIsoString(event.receivedAt),
@@ -747,6 +768,49 @@ function buildBlockedReplayResponse(input: {
   } satisfies WebhookReplayResponse;
 }
 
+async function createDiagnosticsOperationalJob(input: {
+  jobType: 'replay' | 'recovery';
+  webhookEventId: string;
+  payloadRef: string | null;
+  sourceShopifyOrderId?: string | null;
+}) {
+  try {
+    return await createOperationalJob({
+      jobType: input.jobType,
+      webhookEventId: input.webhookEventId,
+      payloadRef: input.payloadRef,
+      sourceShopifyOrderId: input.sourceShopifyOrderId ?? null,
+      priority: 10,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function markDiagnosticsJobCompleted(jobId: string | null | undefined) {
+  try {
+    await markOperationalJobCompleted(jobId);
+  } catch {
+    // Diagnostics action execution remains canonical; job persistence is retry metadata only.
+  }
+}
+
+async function markDiagnosticsJobFailed(jobId: string | null | undefined, error: unknown) {
+  try {
+    await markOperationalJobFailed(jobId, error);
+  } catch {
+    // Diagnostics action execution remains canonical; job persistence is retry metadata only.
+  }
+}
+
+async function markDiagnosticsJobProcessing(jobId: string | null | undefined) {
+  try {
+    await markOperationalJobProcessing(jobId);
+  } catch {
+    // Diagnostics action execution remains canonical; job persistence is retry metadata only.
+  }
+}
+
 export async function replayWebhookEvent(
   env: AppEnv,
   webhookEventId: string,
@@ -799,10 +863,27 @@ export async function replayWebhookEvent(
   }
 
   const beforeStatus = event.status;
-  const response = await processWebhookEvent(env, event, parsedPayload.payload);
+  const operationalJob = await createDiagnosticsOperationalJob({
+    jobType: 'replay',
+    webhookEventId: event.id,
+    payloadRef: event.payloadHash,
+  });
+  await markDiagnosticsJobProcessing(operationalJob?.id);
+  let response: WebhookReplayResponse;
+  try {
+    response = await processWebhookEvent(env, event, parsedPayload.payload);
+  } catch (error) {
+    await markDiagnosticsJobFailed(operationalJob?.id, error);
+    throw error;
+  }
   const { afterStatus, errorSummary } = await getWebhookStatus(event.id);
   const replayStatus: WebhookReplayResponse['replayStatus'] =
     response.processingStatus === 'processed' ? 'replayed' : 'failed';
+  if (replayStatus === 'replayed') {
+    await markDiagnosticsJobCompleted(operationalJob?.id);
+  } else {
+    await markDiagnosticsJobFailed(operationalJob?.id, response.message ?? errorSummary ?? 'Replay did not complete.');
+  }
 
   return {
     ok: true,
@@ -1076,12 +1157,29 @@ export async function recoverWebhookEvent(
   }
 
   const beforeStatus = event.status;
+  const operationalJob = await createDiagnosticsOperationalJob({
+    jobType: 'recovery',
+    webhookEventId: event.id,
+    payloadRef: event.payloadHash,
+  });
+  await markDiagnosticsJobProcessing(operationalJob?.id);
   await markWebhookProcessing(event.id);
 
-  const response = await processWebhookEvent(env, event, parsedPayload.payload);
+  let response: WebhookReplayResponse;
+  try {
+    response = await processWebhookEvent(env, event, parsedPayload.payload);
+  } catch (error) {
+    await markDiagnosticsJobFailed(operationalJob?.id, error);
+    throw error;
+  }
   const { afterStatus, errorSummary } = await getWebhookStatus(event.id);
   const recoveryStatus: WebhookRecoverResponse['recoveryStatus'] =
     response.processingStatus === 'processed' ? 'recovered' : 'failed';
+  if (recoveryStatus === 'recovered') {
+    await markDiagnosticsJobCompleted(operationalJob?.id);
+  } else {
+    await markDiagnosticsJobFailed(operationalJob?.id, response.message ?? errorSummary ?? 'Recovery did not complete.');
+  }
 
   return {
     ok: true,

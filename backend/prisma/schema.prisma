@@ -43,28 +43,47 @@ enum PayoutStatus {
   HOLD
 }
 
+enum OperationalJobStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+  RETRY_SCHEDULED
+  DEAD_LETTER_READY
+}
+
+enum OperationalJobType {
+  WEBHOOK_PROCESSING
+  RECONCILIATION
+  REPLAY
+  RECOVERY
+  FULFILLMENT_SYNC
+  REFUND_SYNC
+  RETURN_SYNC
+}
+
 model User {
-  id          String             @id @default(cuid())
-  email       String             @unique
-  name        String
-  role        UserRole
-  status      String             @default("active")
+  id           String                        @id @default(cuid())
+  email        String                        @unique
+  name         String
+  role         UserRole
+  status       String                        @default("active")
   passwordHash String
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  vendorLinks UserVendorAccess[]
-  assignments AllocationAssignmentHistory[] @relation("assignmentActor")
+  createdAt    DateTime                      @default(now())
+  updatedAt    DateTime                      @updatedAt
+  vendorLinks  UserVendorAccess[]
+  assignments  AllocationAssignmentHistory[] @relation("assignmentActor")
 }
 
 model Vendor {
-  id                    String                   @id
+  id                    String                        @id
   name                  String
-  status                String                   @default("active")
-  createdAt             DateTime                 @default(now())
-  updatedAt             DateTime                 @updatedAt
+  status                String                        @default("active")
+  createdAt             DateTime                      @default(now())
+  updatedAt             DateTime                      @updatedAt
   users                 UserVendorAccess[]
-  originalAllocations   VendorAllocation[]       @relation("originalVendor")
-  assignedAllocations   VendorAllocation[]       @relation("assignedVendor")
+  originalAllocations   VendorAllocation[]            @relation("originalVendor")
+  assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
   financeEntries        FinanceLedgerEntry[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
@@ -82,14 +101,14 @@ model UserVendorAccess {
 }
 
 model ShopifyOrder {
-  id                       String                    @id @default(cuid())
-  sourceShopifyOrderId     String                    @unique
+  id                       String                 @id @default(cuid())
+  sourceShopifyOrderId     String                 @unique
   sourceShopifyOrderNumber String
   customerName             String?
   customerEmail            String?
-  totalPrice               Decimal?                  @db.Decimal(10, 2)
-  createdAt                DateTime                  @default(now())
-  updatedAt                DateTime                  @updatedAt
+  totalPrice               Decimal?               @db.Decimal(10, 2)
+  createdAt                DateTime               @default(now())
+  updatedAt                DateTime               @updatedAt
   lineItems                ShopifyOrderLineItem[]
   allocations              VendorAllocation[]
   webhookEvents            WebhookEvent[]
@@ -97,18 +116,18 @@ model ShopifyOrder {
 }
 
 model ShopifyOrderLineItem {
-  id                  String       @id @default(cuid())
+  id                  String                     @id @default(cuid())
   shopifyOrderId      String
   sourceLineItemId    String
   sourceVariantId     String?
   sku                 String?
   title               String?
-  quantity            Int          @default(1)
-  unitPrice           Decimal?     @db.Decimal(10, 2)
+  quantity            Int                        @default(1)
+  unitPrice           Decimal?                   @db.Decimal(10, 2)
   originalVendorId    String?
-  createdAt           DateTime     @default(now())
-  updatedAt           DateTime     @updatedAt
-  order               ShopifyOrder @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+  order               ShopifyOrder               @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
   allocationLineItems VendorAllocationLineItem[]
   refundLineItems     ShopifyRefundLineItem[]
 
@@ -116,127 +135,130 @@ model ShopifyOrderLineItem {
 }
 
 model VendorAllocation {
-  id                       String                         @id @default(cuid())
+  id                       String                        @id @default(cuid())
   sourceShopifyOrderId     String
   sourceShopifyOrderNumber String
   originalVendorId         String
   assignedVendorId         String
-  allocationStatus         AllocationStatus               @default(ACTIVE)
+  allocationStatus         AllocationStatus              @default(ACTIVE)
   cancellationReason       CancellationReason?
-  reassignmentRequired     Boolean                        @default(false)
-  fulfillmentStatus        String                         @default("Pending")
-  shippingStatus           String                         @default("Awaiting Shipment")
+  reassignmentRequired     Boolean                       @default(false)
+  fulfillmentStatus        String                        @default("Pending")
+  shippingStatus           String                        @default("Awaiting Shipment")
   trackingNumber           String?
   carrier                  String?
-  createdAt                DateTime                       @default(now())
-  updatedAt                DateTime                       @updatedAt
-  order                    ShopifyOrder                   @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
-  originalVendor           Vendor                         @relation("originalVendor", fields: [originalVendorId], references: [id])
-  assignedVendor           Vendor                         @relation("assignedVendor", fields: [assignedVendorId], references: [id])
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  order                    ShopifyOrder                  @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
+  originalVendor           Vendor                        @relation("originalVendor", fields: [originalVendorId], references: [id])
+  assignedVendor           Vendor                        @relation("assignedVendor", fields: [assignedVendorId], references: [id])
   lineItems                VendorAllocationLineItem[]
   assignmentHistory        AllocationAssignmentHistory[]
   fulfillment              Fulfillment?
   returnRecords            ReturnRecord[]
   refundRecords            RefundRecord[]
   financeEntries           FinanceLedgerEntry[]
+  operationalJobs          OperationalJob[]
 }
 
 model VendorAllocationLineItem {
-  id                    String       @id @default(cuid())
-  vendorAllocationId    String
-  shopifyLineItemId     String
-  quantity              Int          @default(1)
-  lineAmount            Decimal?     @db.Decimal(10, 2)
-  createdAt             DateTime     @default(now())
-  updatedAt             DateTime     @updatedAt
-  vendorAllocation      VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  shopifyOrderLineItem  ShopifyOrderLineItem @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
+  id                   String               @id @default(cuid())
+  vendorAllocationId   String
+  shopifyLineItemId    String
+  quantity             Int                  @default(1)
+  lineAmount           Decimal?             @db.Decimal(10, 2)
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  vendorAllocation     VendorAllocation     @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  shopifyOrderLineItem ShopifyOrderLineItem @relation(fields: [shopifyLineItemId], references: [id], onDelete: Cascade)
 
   @@unique([vendorAllocationId, shopifyLineItemId])
 }
 
 model AllocationAssignmentHistory {
-  id                 String            @id @default(cuid())
+  id                 String           @id @default(cuid())
   vendorAllocationId String
   action             String
   fromVendorId       String?
   toVendorId         String
   reason             String?
   actorUserId        String?
-  createdAt          DateTime          @default(now())
-  vendorAllocation   VendorAllocation  @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  fromVendor         Vendor?           @relation("assignmentFromVendor", fields: [fromVendorId], references: [id])
-  toVendor           Vendor            @relation("assignmentToVendor", fields: [toVendorId], references: [id])
-  actorUser          User?             @relation("assignmentActor", fields: [actorUserId], references: [id])
+  createdAt          DateTime         @default(now())
+  vendorAllocation   VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  fromVendor         Vendor?          @relation("assignmentFromVendor", fields: [fromVendorId], references: [id])
+  toVendor           Vendor           @relation("assignmentToVendor", fields: [toVendorId], references: [id])
+  actorUser          User?            @relation("assignmentActor", fields: [actorUserId], references: [id])
 }
 
 model Fulfillment {
-  id                 String   @id @default(cuid())
-  vendorAllocationId String   @unique
-  fulfillmentStatus  String
-  trackingNumber     String?
-  carrier            String?
-  trackingUrl        String?
-  notifyCustomer     Boolean  @default(true)
-  shopifyFulfillmentId String?
+  id                        String           @id @default(cuid())
+  vendorAllocationId        String           @unique
+  fulfillmentStatus         String
+  trackingNumber            String?
+  carrier                   String?
+  trackingUrl               String?
+  notifyCustomer            Boolean          @default(true)
+  shopifyFulfillmentId      String?
   shopifyFulfillmentOrderId String?
-  fulfilledAt        DateTime?
-  shipmentCreatedAt  DateTime?
-  shipmentUpdatedAt  DateTime?
-  syncStatus         String?
-  errorMessage       String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
-  vendorAllocation   VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  fulfilledAt               DateTime?
+  shipmentCreatedAt         DateTime?
+  shipmentUpdatedAt         DateTime?
+  syncStatus                String?
+  errorMessage              String?
+  createdAt                 DateTime         @default(now())
+  updatedAt                 DateTime         @updatedAt
+  vendorAllocation          VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
 }
 
 model ReturnRecord {
-  id                    String   @id @default(cuid())
-  vendorAllocationId    String
-  sourceShopifyOrderId  String
+  id                       String           @id @default(cuid())
+  vendorAllocationId       String
+  sourceShopifyOrderId     String
   sourceShopifyOrderNumber String
-  sourceShopifyRefundId String?
-  sourceShopifyReturnId String?
-  sourceShopifyReturnGid String?
-  sourceShopifyLineItemId String?
-  returnLifecycleStatus String?
-  returnRequestSource   String?
-  requestCreatedAt      DateTime?
-  requestUpdatedAt      DateTime?
-  status                String
-  reason                String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  sourceShopifyRefundId    String?
+  sourceShopifyReturnId    String?
+  sourceShopifyReturnGid   String?
+  sourceShopifyLineItemId  String?
+  returnLifecycleStatus    String?
+  returnRequestSource      String?
+  requestCreatedAt         DateTime?
+  requestUpdatedAt         DateTime?
+  status                   String
+  reason                   String?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  vendorAllocation         VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  operationalJobs          OperationalJob[]
 
   @@index([sourceShopifyReturnGid])
   @@index([sourceShopifyReturnId])
 }
 
 model RefundRecord {
-  id                    String   @id @default(cuid())
-  vendorAllocationId    String
-  sourceShopifyOrderId  String
+  id                       String                  @id @default(cuid())
+  vendorAllocationId       String
+  sourceShopifyOrderId     String
   sourceShopifyOrderNumber String
-  sourceShopifyRefundId String
-  amount                Decimal? @db.Decimal(10, 2)
-  status                String
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-  vendorAllocation      VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
-  lineItems             ShopifyRefundLineItem[]
+  sourceShopifyRefundId    String
+  amount                   Decimal?                @db.Decimal(10, 2)
+  status                   String
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+  lineItems                ShopifyRefundLineItem[]
+  operationalJobs          OperationalJob[]
 }
 
 model ShopifyRefund {
-  id                      String                 @id @default(cuid())
-  shopifyOrderId          String
-  sourceShopifyOrderId    String
+  id                       String                  @id @default(cuid())
+  shopifyOrderId           String
+  sourceShopifyOrderId     String
   sourceShopifyOrderNumber String
-  sourceShopifyRefundId   String                 @unique
-  createdAt               DateTime               @default(now())
-  updatedAt               DateTime               @updatedAt
-  order                   ShopifyOrder           @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
-  lineItems               ShopifyRefundLineItem[]
+  sourceShopifyRefundId    String                  @unique
+  createdAt                DateTime                @default(now())
+  updatedAt                DateTime                @updatedAt
+  order                    ShopifyOrder            @relation(fields: [shopifyOrderId], references: [id], onDelete: Cascade)
+  lineItems                ShopifyRefundLineItem[]
 }
 
 model ShopifyRefundLineItem {
@@ -260,33 +282,67 @@ model ShopifyRefundLineItem {
 }
 
 model FinanceLedgerEntry {
-  id                 String       @id @default(cuid())
+  id                 String            @id @default(cuid())
   vendorAllocationId String?
   vendorId           String
   entryType          String
-  amount             Decimal      @db.Decimal(10, 2)
-  payoutStatus       PayoutStatus @default(PENDING)
+  amount             Decimal           @db.Decimal(10, 2)
+  payoutStatus       PayoutStatus      @default(PENDING)
   description        String?
-  createdAt          DateTime     @default(now())
-  updatedAt          DateTime     @updatedAt
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
   vendorAllocation   VendorAllocation? @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
-  vendor             Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  vendor             Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 }
 
 model WebhookEvent {
-  id               String        @id @default(cuid())
+  id               String           @id @default(cuid())
   sourceShopDomain String
   topic            String
   webhookId        String?
-  idempotencyKey   String?       @unique
+  idempotencyKey   String?          @unique
   payloadHash      String?
   rawPayload       String?
-  status           WebhookStatus @default(RECEIVED)
-  receivedAt       DateTime      @default(now())
+  status           WebhookStatus    @default(RECEIVED)
+  receivedAt       DateTime         @default(now())
   processedAt      DateTime?
   errorMessage     String?
   shopifyOrderId   String?
-  shopifyOrder     ShopifyOrder? @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+  shopifyOrder     ShopifyOrder?    @relation(fields: [shopifyOrderId], references: [id], onDelete: SetNull)
+  operationalJobs  OperationalJob[]
 
   @@unique([sourceShopDomain, topic, webhookId])
+}
+
+model OperationalJob {
+  id                   String               @id @default(cuid())
+  jobType              OperationalJobType
+  status               OperationalJobStatus @default(PENDING)
+  priority             Int                  @default(0)
+  payload              Json?
+  payloadRef           String?
+  webhookEventId       String?
+  sourceShopifyOrderId String?
+  vendorAllocationId   String?
+  refundRecordId       String?
+  returnRecordId       String?
+  retryCount           Int                  @default(0)
+  maxRetries           Int                  @default(3)
+  scheduledAt          DateTime             @default(now())
+  startedAt            DateTime?
+  completedAt          DateTime?
+  failedAt             DateTime?
+  errorSummary         String?
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+  webhookEvent         WebhookEvent?        @relation(fields: [webhookEventId], references: [id], onDelete: SetNull)
+  vendorAllocation     VendorAllocation?    @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
+  refundRecord         RefundRecord?        @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
+  returnRecord         ReturnRecord?        @relation(fields: [returnRecordId], references: [id], onDelete: SetNull)
+
+  @@index([status, scheduledAt])
+  @@index([jobType])
+  @@index([webhookEventId])
+  @@index([vendorAllocationId])
+  @@index([sourceShopifyOrderId])
 }

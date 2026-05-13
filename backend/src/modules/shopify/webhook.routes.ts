@@ -24,6 +24,12 @@ import type {
   FulfillmentWebhookTopic,
 } from './fulfillment-ingestion.types.js';
 import { prisma } from '../../db/prisma.js';
+import {
+  createWebhookOperationalJob,
+  markOperationalJobCompleted,
+  markOperationalJobFailed,
+  markOperationalJobProcessing,
+} from '../operational-jobs/operational-jobs.service.js';
 
 export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
@@ -92,6 +98,51 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     });
   };
 
+  const createWebhookJob = async (input: {
+    topic: string;
+    webhookEventId: string;
+    payloadRef?: string | null;
+    sourceShopifyOrderId?: string | null;
+  }) => {
+    try {
+      return await createWebhookOperationalJob(input);
+    } catch (error) {
+      app.log.error(
+        {
+          error,
+          webhookTopic: input.topic,
+          webhookEventId: input.webhookEventId,
+        },
+        'Operational job persistence failed; continuing inline webhook processing.',
+      );
+      return null;
+    }
+  };
+
+  const markJobProcessing = async (jobId: string | null | undefined) => {
+    try {
+      await markOperationalJobProcessing(jobId);
+    } catch (error) {
+      app.log.error({ error, operationalJobId: jobId }, 'Failed to mark operational job processing.');
+    }
+  };
+
+  const markJobCompleted = async (jobId: string | null | undefined) => {
+    try {
+      await markOperationalJobCompleted(jobId);
+    } catch (error) {
+      app.log.error({ error, operationalJobId: jobId }, 'Failed to mark operational job completed.');
+    }
+  };
+
+  const markJobFailed = async (jobId: string | null | undefined, error: unknown) => {
+    try {
+      await markOperationalJobFailed(jobId, error);
+    } catch (jobError) {
+      app.log.error({ error: jobError, operationalJobId: jobId }, 'Failed to mark operational job failed.');
+    }
+  };
+
   const registerSkeletonReturnLifecycleRoute = (
     path: string,
     topic: ReturnLifecycleTopic,
@@ -143,9 +194,15 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      const operationalJob = await createWebhookJob({
+        topic,
+        webhookEventId: idempotencyResult.event.id,
+        payloadRef: idempotencyResult.event.payloadHash,
+      });
       const payload = (request.body ?? {}) as ReturnLifecycleWebhookPayload;
       let ingestionResult;
       try {
+        await markJobProcessing(operationalJob?.id);
         await markWebhookProcessing(idempotencyResult.event.id);
         ingestionResult =
           topic === 'returns/request'
@@ -159,6 +216,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
               });
       } catch (error) {
         const message = error instanceof Error ? error.message : `Shopify ${topic} lifecycle ingestion failed.`;
+        await markJobFailed(operationalJob?.id, message);
         await markWebhookFailed(idempotencyResult.event.id, message);
         return reply.code(202).send({
           ok: true,
@@ -171,6 +229,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       if (!ingestionResult.ok) {
+        await markJobFailed(operationalJob?.id, ingestionResult.error);
         return reply.code(202).send({
           ok: true,
           duplicate: false,
@@ -181,6 +240,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      await markJobCompleted(operationalJob?.id);
       return reply.code(202).send({
         ok: true,
         duplicate: false,
@@ -245,8 +305,14 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      const operationalJob = await createWebhookJob({
+        topic,
+        webhookEventId: idempotencyResult.event.id,
+        payloadRef: idempotencyResult.event.payloadHash,
+      });
       let ingestionResult;
       try {
+        await markJobProcessing(operationalJob?.id);
         await markWebhookProcessing(idempotencyResult.event.id);
         ingestionResult = await ingestFulfillmentWebhook(env, {
           event: idempotencyResult.event,
@@ -255,6 +321,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : `Shopify ${topic} fulfillment sync failed.`;
+        await markJobFailed(operationalJob?.id, message);
         await markWebhookFailed(idempotencyResult.event.id, message);
         return reply.code(202).send({
           ok: true,
@@ -267,6 +334,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       }
 
       if (!ingestionResult.ok) {
+        await markJobFailed(operationalJob?.id, ingestionResult.error);
         return reply.code(202).send({
           ok: true,
           duplicate: false,
@@ -277,6 +345,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      await markJobCompleted(operationalJob?.id);
       return reply.code(202).send({
         ok: true,
         duplicate: false,
@@ -337,13 +406,21 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
+    const sourceShopifyOrderId =
+      payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
+    const operationalJob = await createWebhookJob({
+      topic: headers.topic,
+      webhookEventId: idempotencyResult.event.id,
+      payloadRef: idempotencyResult.event.payloadHash,
+      sourceShopifyOrderId,
+    });
     let ingestionResult;
     try {
+      await markJobProcessing(operationalJob?.id);
       await markWebhookProcessing(idempotencyResult.event.id);
-      const sourceShopifyOrderId =
-        payload.id !== undefined && payload.id !== null ? String(payload.id) : null;
 
       if (!sourceShopifyOrderId) {
+        await markJobFailed(operationalJob?.id, 'Shopify orders/create payload did not include an order id.');
         await markWebhookFailed(idempotencyResult.event.id, 'Shopify orders/create payload did not include an order id.');
         return reply.code(202).send({
           ok: true,
@@ -361,6 +438,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
 
       if (!sellerInfoResult.ok) {
+        await markJobFailed(operationalJob?.id, sellerInfoResult.error);
         await markWebhookFailed(idempotencyResult.event.id, sellerInfoResult.error);
         return reply.code(202).send({
           ok: true,
@@ -378,6 +456,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify orders/create ingestion failed.';
+      await markJobFailed(operationalJob?.id, message);
       await markWebhookFailed(idempotencyResult.event.id, message);
       return reply.code(202).send({
         ok: true,
@@ -389,6 +468,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     }
 
     if (!ingestionResult.ok) {
+      await markJobFailed(operationalJob?.id, ingestionResult.error);
       return reply.code(202).send({
         ok: true,
         duplicate: false,
@@ -398,6 +478,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
+    await markJobCompleted(operationalJob?.id);
     return reply.code(202).send({
       ok: true,
       duplicate: false,
@@ -456,8 +537,16 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
+    const operationalJob = await createWebhookJob({
+      topic: headers.topic,
+      webhookEventId: idempotencyResult.event.id,
+      payloadRef: idempotencyResult.event.payloadHash,
+      sourceShopifyOrderId:
+        payload.order_id !== undefined && payload.order_id !== null ? String(payload.order_id) : null,
+    });
     let ingestionResult;
     try {
+      await markJobProcessing(operationalJob?.id);
       await markWebhookProcessing(idempotencyResult.event.id);
       ingestionResult = await ingestShopifyRefundWebhook({
         event: idempotencyResult.event,
@@ -465,6 +554,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify refunds/create ingestion failed.';
+      await markJobFailed(operationalJob?.id, message);
       await markWebhookFailed(idempotencyResult.event.id, message);
       return reply.code(202).send({
         ok: true,
@@ -476,6 +566,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
     }
 
     if (!ingestionResult.ok) {
+      await markJobFailed(operationalJob?.id, ingestionResult.error);
       return reply.code(202).send({
         ok: true,
         duplicate: false,
@@ -485,6 +576,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       });
     }
 
+    await markJobCompleted(operationalJob?.id);
     return reply.code(202).send({
       ok: true,
       duplicate: false,
