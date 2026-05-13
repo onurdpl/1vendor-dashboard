@@ -1,9 +1,7 @@
-import { useEffect, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
 import { canPerformAction, getCurrentUserRole, getCurrentVendorContext } from '../lib/auth';
@@ -24,37 +22,9 @@ export function AutomationPage() {
     getAutomationDashboard,
   );
   const { message, tone, showFeedback } = useActionFeedback();
-  const [queuedActionMessage, setQueuedActionMessage] = useState<string | null>(null);
-  const primaryActionTitle = automation?.suggestions[0]?.title ?? null;
   const canRunAutomationAction = canPerformAction('automation:write');
   const currentVendor = getCurrentVendorContext();
   const currentRole = getCurrentUserRole();
-  const { mutateAsync: queueAction, isPending: isQueueingAction } = useMutationAction(
-    async (title: string) => {
-      await new Promise((resolve) => {
-        globalThis.setTimeout(resolve, 300);
-      });
-
-      return title;
-    },
-    {
-      invalidateQueryKeys: [queryKeys.automation.alerts(), queryKeys.automation.actions()],
-    },
-  );
-
-  useEffect(() => {
-    if (!queuedActionMessage) {
-      return;
-    }
-
-    const timeout = globalThis.setTimeout(() => {
-      setQueuedActionMessage(null);
-    }, 2200);
-
-    return () => {
-      globalThis.clearTimeout(timeout);
-    };
-  }, [queuedActionMessage]);
 
   if (isLoading) {
     return (
@@ -195,54 +165,23 @@ export function AutomationPage() {
                       Requires permission: <strong>automation:write</strong>
                     </span>
                   </div>
-                  {item.title === primaryActionTitle ? (
-                    <div className="automation-action-stack">
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => {
-                          if (!canRunAutomationAction) {
-                            showFeedback('You do not have permission to run this automation action.', 'error');
-                            return;
-                          }
-
-                          setQueuedActionMessage(`${item.title} queued.`);
-                          void queueAction(item.title).catch(() => {
-                            setQueuedActionMessage(`${item.title} could not be queued.`);
-                            showFeedback(`${item.title} could not be queued.`, 'error');
-                          });
-                          showFeedback(`${item.title} queued.`, 'success');
-                        }}
-                        disabled={isQueueingAction || !canRunAutomationAction}
-                        title={canRunAutomationAction ? undefined : 'Automation actions require write access.'}
-                      >
-                        {item.actionLabel}
-                      </button>
-                      {!canRunAutomationAction ? (
-                        <p className="automation-permission-note">Action unavailable: read-only role.</p>
-                      ) : null}
-                      {queuedActionMessage ? (
-                        <ActionFeedback tone={queuedActionMessage.includes('could not') ? 'error' : 'success'} message={queuedActionMessage} />
-                      ) : null}
-                    </div>
-                  ) : (
+                  <div className="automation-action-stack">
                     <button
                       type="button"
                       className="button button-secondary"
-                      onClick={() => {
-                        if (!canRunAutomationAction) {
-                          showFeedback('You do not have permission to run automation actions.', 'error');
-                          return;
-                        }
-
-                        showFeedback(`${item.title} queued.`, 'success');
-                      }}
-                      disabled={!canRunAutomationAction}
-                      title={canRunAutomationAction ? undefined : 'Automation actions require write access.'}
+                      disabled
+                      title="Action execution coming in a future phase."
+                      onClick={() => showFeedback('Action execution coming in a future phase.', 'info')}
                     >
                       {item.actionLabel}
                     </button>
-                  )}
+                    <p className="automation-permission-note">
+                      Action execution coming in a future phase. Safe automation actions are available through admin operations controls only.
+                    </p>
+                    {!canRunAutomationAction ? (
+                      <p className="automation-permission-note">Action unavailable: read-only role.</p>
+                    ) : null}
+                  </div>
                 </article>
               ))
             )}

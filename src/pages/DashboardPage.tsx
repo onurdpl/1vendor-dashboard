@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -68,6 +68,8 @@ export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
   const { message, tone, showFeedback } = useActionFeedback();
+  const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
+  const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
   const { data: dashboard, isLoading, isError, error, refetch: refetchDashboard } = useQueryResource(
     queryKeys.dashboard.overview(),
     () => getDashboardOverview(vendorId),
@@ -79,7 +81,15 @@ export function DashboardPage() {
   const markNotificationReadMutation = useMutationAction(
     (notificationId: string) => runtimeServices.notifications.markRead(notificationId),
     {
-      onSuccess: async () => {
+      onSuccess: async (updated) => {
+        setNotificationOverrides((current) => ({
+          ...current,
+          [updated.id]: {
+            status: updated.status,
+            readAt: updated.readAt,
+            updatedAt: updated.updatedAt,
+          },
+        }));
         await Promise.all([refetchNotifications(), refetchDashboard()]);
         showFeedback('Notification marked as read.', 'success');
       },
@@ -89,13 +99,75 @@ export function DashboardPage() {
   const dismissNotificationMutation = useMutationAction(
     (notificationId: string) => runtimeServices.notifications.dismiss(notificationId),
     {
-      onSuccess: async () => {
+      onSuccess: async (updated) => {
+        setNotificationOverrides((current) => ({
+          ...current,
+          [updated.id]: {
+            status: updated.status,
+            updatedAt: updated.updatedAt,
+          },
+        }));
         await Promise.all([refetchNotifications(), refetchDashboard()]);
         showFeedback('Notification dismissed.', 'success');
       },
       onError: () => showFeedback('Notification could not be dismissed.', 'error'),
     },
   );
+  const notificationView = useMemo(() => {
+    const merged = (notifications?.notifications ?? [])
+      .map((notification) => ({
+        ...notification,
+        ...notificationOverrides[notification.id],
+      }))
+      .filter((notification) => notification.status !== 'dismissed');
+    const unread = merged.filter((notification) => notification.status !== 'read' && notification.status !== 'dismissed').length;
+
+    return {
+      summary: {
+        total: merged.length,
+        unread,
+        highPriority: merged.filter((notification) => notification.severity === 'critical' || notification.severity === 'high').length,
+      },
+      notifications: merged,
+    };
+  }, [notifications, notificationOverrides]);
+
+  async function handleMarkNotificationRead(notificationId: string) {
+    setPendingNotificationAction(`read:${notificationId}`);
+    try {
+      const updated = await markNotificationReadMutation.mutateAsync(notificationId);
+      setNotificationOverrides((current) => ({
+        ...current,
+        [notificationId]: {
+          status: updated.status,
+          readAt: updated.readAt,
+          updatedAt: updated.updatedAt,
+        },
+      }));
+    } catch {
+      // Error feedback is handled by the shared mutation hook.
+    } finally {
+      setPendingNotificationAction(null);
+    }
+  }
+
+  async function handleDismissNotification(notificationId: string) {
+    setPendingNotificationAction(`dismiss:${notificationId}`);
+    try {
+      const updated = await dismissNotificationMutation.mutateAsync(notificationId);
+      setNotificationOverrides((current) => ({
+        ...current,
+        [notificationId]: {
+          status: updated.status,
+          updatedAt: updated.updatedAt,
+        },
+      }));
+    } catch {
+      // Error feedback is handled by the shared mutation hook.
+    } finally {
+      setPendingNotificationAction(null);
+    }
+  }
 
   useEffect(() => {
     return onVendorChange(() => {
@@ -197,15 +269,15 @@ export function DashboardPage() {
           {notifications ? (
             <div className="notification-center">
               <div className="notification-summary-row">
-                <MetadataRow label="Unread" value={notifications.summary.unread} />
-                <MetadataRow label="High priority" value={notifications.summary.critical + notifications.summary.high} />
-                <MetadataRow label="Total" value={notifications.summary.total} />
+                <MetadataRow label="Unread" value={notificationView.summary.unread} />
+                <MetadataRow label="High priority" value={notificationView.summary.highPriority} />
+                <MetadataRow label="Total" value={notificationView.summary.total} />
               </div>
-              {notifications.notifications.length === 0 ? (
+              {notificationView.notifications.length === 0 ? (
                 <EmptyStatePanel title="No active notifications" description="No active notifications." />
               ) : (
                 <div className="notification-list">
-                  {notifications.notifications.slice(0, 6).map((notification) => (
+                  {notificationView.notifications.slice(0, 6).map((notification) => (
                     <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
                       <header>
                         <div>
@@ -226,18 +298,22 @@ export function DashboardPage() {
                         <button
                           type="button"
                           className="button button-secondary button-compact"
-                          disabled={notification.status === 'read' || markNotificationReadMutation.isPending}
-                          onClick={() => markNotificationReadMutation.mutate(notification.id)}
+                          disabled={notification.status === 'read' || Boolean(pendingNotificationAction)}
+                          onClick={() => {
+                            void handleMarkNotificationRead(notification.id);
+                          }}
                         >
-                          Mark as read
+                          {pendingNotificationAction === `read:${notification.id}` ? 'Marking...' : 'Mark as read'}
                         </button>
                         <button
                           type="button"
                           className="button button-secondary button-compact"
-                          disabled={notification.status === 'dismissed' || dismissNotificationMutation.isPending}
-                          onClick={() => dismissNotificationMutation.mutate(notification.id)}
+                          disabled={Boolean(pendingNotificationAction)}
+                          onClick={() => {
+                            void handleDismissNotification(notification.id);
+                          }}
                         >
-                          Dismiss
+                          {pendingNotificationAction === `dismiss:${notification.id}` ? 'Dismissing...' : 'Dismiss'}
                         </button>
                       </div>
                     </article>

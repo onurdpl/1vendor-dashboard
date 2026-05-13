@@ -205,6 +205,8 @@ describe('DashboardPage command center', () => {
     await user.click(readButtons[0]);
 
     expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
+    expect(await screen.findByText('Notification marked as read.')).toBeInTheDocument();
+    expect(screen.getByText('read')).toBeInTheDocument();
     await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
@@ -219,7 +221,23 @@ describe('DashboardPage command center', () => {
     await user.click(dismissButtons[0]);
 
     expect(dismissNotificationMock).toHaveBeenCalledWith('notif-1');
+    expect(await screen.findByText('Notification dismissed.')).toBeInTheDocument();
+    expect(screen.getAllByText('No active notifications').length).toBeGreaterThan(0);
     await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+  });
+
+  it('shows a compact error when notification actions fail', async () => {
+    const user = userEvent.setup();
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    markNotificationReadMock.mockRejectedValue(new Error('Network failed'));
+
+    renderDashboardPage();
+
+    const readButtons = await screen.findAllByRole('button', { name: /mark as read/i });
+    await user.click(readButtons[0]);
+
+    expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
+    expect(await screen.findByText('Notification could not be marked as read.')).toBeInTheDocument();
   });
 });
