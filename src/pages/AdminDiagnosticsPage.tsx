@@ -175,6 +175,34 @@ export function AdminDiagnosticsPage() {
     },
   );
 
+  const reconcileAllocationMutation = useMutationAction(
+    async (allocationId: string) => runtimeServices.diagnostics.reconcileAllocation(allocationId),
+    {
+      invalidateQueryKeys: invalidateDiagnostics,
+      onSuccess: (result) => {
+        showFeedback(
+          `Reconciliation ${result.reconciliationStatus}: repaired ${result.repairedFields.length} field(s).`,
+          result.reconciliationStatus === 'needs_attention' ? 'info' : 'success',
+        );
+      },
+      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Reconciliation failed.', 'error'),
+    },
+  );
+
+  const reconcileShopifyOrderMutation = useMutationAction(
+    async (shopifyOrderId: string) => runtimeServices.diagnostics.reconcileShopifyOrder(shopifyOrderId),
+    {
+      invalidateQueryKeys: invalidateDiagnostics,
+      onSuccess: (result) => {
+        showFeedback(
+          `Order reconciliation ${result.reconciliationStatus}: repaired ${result.repairedFields.length} field(s).`,
+          result.reconciliationStatus === 'needs_attention' ? 'info' : 'success',
+        );
+      },
+      onError: (error) => showFeedback(error instanceof Error ? error.message : 'Order reconciliation failed.', 'error'),
+    },
+  );
+
   const selectedWebhook = webhookDetailQuery.data;
   const visibleWebhooks = webhooksQuery.data?.events.slice(0, 12) ?? [];
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
@@ -189,6 +217,7 @@ export function AdminDiagnosticsPage() {
       failed: webhooksQuery.data?.summary.failed ?? 0,
       fulfillmentFailures: reconciliationQuery.data?.summary.fulfillmentSyncFailures ?? 0,
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
+      staleAllocations: reconciliationQuery.data?.summary.staleAllocations ?? 0,
     };
   }, [reconciliationQuery.data, webhooksQuery.data]);
 
@@ -251,6 +280,7 @@ export function AdminDiagnosticsPage() {
         <KPISummaryCard label="Reconciliation" value={reconciliationQuery.data.summary.total} detail="Operator candidates" tone="attention" />
         <KPISummaryCard label="Missing payload" value={combinedCounts.missingPayload} detail="Manual recovery required" tone="warning" />
         <KPISummaryCard label="Fulfillment failures" value={combinedCounts.fulfillmentFailures} detail="Sync failure signals" tone="danger" />
+        <KPISummaryCard label="Stale allocations" value={combinedCounts.staleAllocations} detail="Reconcile against Shopify" tone="attention" />
       </div>
 
       <div className="op-control-layout diagnostics-layout-redesign">
@@ -342,7 +372,29 @@ export function AdminDiagnosticsPage() {
                         <p>{item.description}</p>
                         <small>{item.suggestedAction}</small>
                       </div>
-                      <span>{item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}</span>
+                      <OperationalActionGroup>
+                        <span>{item.payloadAvailable === null ? 'No payload needed' : item.payloadAvailable ? 'Payload available' : 'Payload missing'}</span>
+                        {item.relatedAllocationId ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={reconcileAllocationMutation.isPending}
+                            onClick={() => reconcileAllocationMutation.mutate(item.relatedAllocationId as string)}
+                          >
+                            Reconcile allocation
+                          </button>
+                        ) : null}
+                        {!item.relatedAllocationId && item.relatedShopifyOrderId ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={reconcileShopifyOrderMutation.isPending}
+                            onClick={() => reconcileShopifyOrderMutation.mutate(item.relatedShopifyOrderId as string)}
+                          >
+                            Reconcile order
+                          </button>
+                        ) : null}
+                      </OperationalActionGroup>
                     </article>
                   ))}
                 </div>

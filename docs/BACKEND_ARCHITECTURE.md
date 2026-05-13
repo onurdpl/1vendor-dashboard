@@ -475,6 +475,36 @@ Frontend will never call Shopify directly or hold Shopify credentials.
   - surfaces events missing replayable payload content
   - provides a `suggestedAction` per item rather than attempting silent recovery
   - recommends recovery for stuck `RECEIVED` events with payload, recover/replay review for `FAILED` events with payload, manual investigation for missing payload, and no action for processed/duplicate-safe outcomes
+
+## Admin Shopify State Reconciliation (Phase 16-3J)
+- Backend now includes admin-only reconciliation endpoints for explicit operator recovery:
+  - `POST /admin/reconciliation/orders/:allocationId`
+  - `POST /admin/reconciliation/shopify-order/:shopifyOrderId`
+- These endpoints do not add queue workers and do not mutate Shopify.
+- Reconciliation flow:
+  - locate the local Shopify order/allocation
+  - fetch canonical Shopify fulfillment state through Admin GraphQL
+  - compare canonical line-item scoped fulfillment/cancellation/tracking state with local allocation state
+  - repair only safe operational fields when Shopify state is clear
+  - return a structured result with stale fields, repaired fields, skipped fields, affected vendors, warnings, and manual-review flag
+- Repair-safe fields:
+  - allocation fulfillment/shipping status
+  - allocation tracking number/carrier
+  - fulfillment tracking URL
+  - fulfillment fulfilled/shipment timestamps
+  - fulfillment sync status
+  - stale local refund/return operational status for already persisted records
+  - missing finance ledger entry for an already persisted processed refund
+- Reconciliation guardrails:
+  - no raw webhook history is modified
+  - no historical finance records are deleted
+  - no manual notes are overwritten
+  - no Shopify state is invented
+  - multi-vendor updates remain scoped by Shopify line item id
+- Stale visibility:
+  - diagnostics reconciliation now includes lightweight stale-allocation heuristics
+  - heuristics are advisory and do not trigger automatic repair
+  - admin UI can trigger allocation/order reconciliation from the diagnostics workspace
 - Operational guardrail:
   - this phase does not change Shopify ingestion assumptions
   - this phase does not add queue workers

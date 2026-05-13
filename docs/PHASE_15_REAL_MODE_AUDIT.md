@@ -306,6 +306,11 @@
   - replay/recover actions now show backend-computed eligibility and blocked reasons
   - replay/recover responses include before/after status, explicit result status, affected counts where available, and safe error summaries
   - reconciliation guidance now distinguishes recover recommended, replay available, manual investigation, and no-action states
+- Phase 16-3J adds admin-triggered Shopify state reconciliation:
+  - diagnostics can surface stale allocation heuristics
+  - admins can reconcile one allocation or a full Shopify order against canonical Shopify fulfillment state
+  - safe repairs cover fulfillment/shipping status, tracking metadata, shipment timestamps, stale refund/return status, and missing refund ledger entries
+  - reconciliation remains admin-only, line-item scoped, and operator-triggered; no queue worker was introduced
 - Admin operations queue now uses a denser queue table with source, lifecycle, urgency, and action context.
 - App shell styling was tightened toward the operational control-center baseline while preserving existing routes and session/vendor behavior.
 - Remaining future direction:

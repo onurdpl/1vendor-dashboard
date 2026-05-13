@@ -819,7 +819,7 @@ export async function replayWebhookEvent(
 
 export async function getReconciliationDiagnostics(): Promise<ReconciliationResponse> {
   const olderThan = new Date(Date.now() - 5 * 60 * 1000);
-  const [stuckReceived, failedWebhookEvents, fulfillmentFailures, payloadUnknownEvents] = await Promise.all([
+  const [stuckReceived, failedWebhookEvents, fulfillmentFailures, payloadUnknownEvents, staleAllocations] = await Promise.all([
     prisma.webhookEvent.findMany({
       where: {
         status: 'RECEIVED',
@@ -885,6 +885,38 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       },
       orderBy: {
         receivedAt: 'desc',
+      },
+    }),
+    prisma.vendorAllocation.findMany({
+      where: {
+        OR: [
+          {
+            fulfillmentStatus: {
+              in: ['fulfilled', 'partially_fulfilled', 'fulfillment_submitted'],
+            },
+            fulfillment: null,
+          },
+          {
+            trackingNumber: {
+              not: null,
+            },
+            fulfillment: {
+              syncStatus: {
+                in: ['shopify_inbound_cancelled', 'shopify_reconciled_cancelled'],
+              },
+            },
+          },
+        ],
+      },
+      include: {
+        order: {
+          select: {
+            sourceShopifyOrderId: true,
+          },
+        },
+      },
+      orderBy: {
+        updatedAt: 'desc',
       },
     }),
   ]);
@@ -953,7 +985,22 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     payloadAvailable: false,
   }));
 
-  const items = [...stuckItems, ...failedItems, ...fulfillmentItems, ...missingPayloadItems].sort((a, b) => {
+  const staleAllocationItems: ReconciliationItem[] = staleAllocations.map((allocation) => ({
+    id: `reconciliation-stale-allocation-${allocation.id}`,
+    type: 'stale_allocation',
+    severity: 'attention',
+    title: 'Allocation may be stale against Shopify',
+    description: `Allocation ${allocation.id} has local fulfillment/tracking state that should be checked against canonical Shopify state.`,
+    relatedWebhookEventId: null,
+    relatedShopifyOrderId: allocation.order.sourceShopifyOrderId,
+    relatedAllocationId: allocation.id,
+    status: allocation.fulfillmentStatus,
+    createdAt: allocation.updatedAt.toISOString(),
+    suggestedAction: 'Run admin reconciliation to re-fetch canonical Shopify fulfillment state and repair safe local fields.',
+    payloadAvailable: null,
+  }));
+
+  const items = [...stuckItems, ...failedItems, ...fulfillmentItems, ...missingPayloadItems, ...staleAllocationItems].sort((a, b) => {
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
@@ -963,6 +1010,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       failedWebhooks: failedItems.length,
       fulfillmentSyncFailures: fulfillmentItems.length,
       missingPayload: missingPayloadItems.length,
+      staleAllocations: staleAllocationItems.length,
       total: items.length,
     },
     items,

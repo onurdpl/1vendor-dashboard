@@ -7,6 +7,7 @@ export const queryKeys = {
       webhookDetail: (webhookEventId: string) => ['admin', 'diagnostics', 'webhooks', webhookEventId] as const,
       syncEvents: () => ['admin', 'diagnostics', 'sync-events'] as const,
       reconciliation: () => ['admin', 'diagnostics', 'reconciliation'] as const,
+      reconciliationAction: (id: string) => ['admin', 'diagnostics', 'reconciliation-action', id] as const,
     },
     operations: {
       queue: () => ['admin', 'operations', 'queue'] as const,

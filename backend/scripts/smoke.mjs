@@ -1384,6 +1384,183 @@ async function runSmoke() {
       );
     }
 
+    if (prisma) {
+      await prisma.vendorAllocation.update({
+        where: { id: `alloc-yalispor-${cancellationOrderId}` },
+        data: {
+          fulfillmentStatus: 'fulfilled',
+          shippingStatus: 'shipped',
+          trackingNumber: `STALE-YALI-${runId}`,
+          carrier: 'Stale Carrier',
+        },
+      });
+      await prisma.fulfillment.upsert({
+        where: { vendorAllocationId: `alloc-yalispor-${cancellationOrderId}` },
+        update: {
+          fulfillmentStatus: 'fulfilled',
+          trackingNumber: `STALE-YALI-${runId}`,
+          carrier: 'Stale Carrier',
+          trackingUrl: `https://tracking.example/STALE-YALI-${runId}`,
+          fulfilledAt: new Date('2026-05-11T11:00:00.000Z'),
+          shipmentCreatedAt: new Date('2026-05-11T11:00:00.000Z'),
+          shipmentUpdatedAt: new Date('2026-05-11T11:10:00.000Z'),
+          syncStatus: 'stale_smoke_fixture',
+        },
+        create: {
+          vendorAllocationId: `alloc-yalispor-${cancellationOrderId}`,
+          fulfillmentStatus: 'fulfilled',
+          trackingNumber: `STALE-YALI-${runId}`,
+          carrier: 'Stale Carrier',
+          trackingUrl: `https://tracking.example/STALE-YALI-${runId}`,
+          notifyCustomer: false,
+          fulfilledAt: new Date('2026-05-11T11:00:00.000Z'),
+          shipmentCreatedAt: new Date('2026-05-11T11:00:00.000Z'),
+          shipmentUpdatedAt: new Date('2026-05-11T11:10:00.000Z'),
+          syncStatus: 'stale_smoke_fixture',
+        },
+      });
+    }
+
+    const reconcileCancelledAllocationResponse = await fetch(
+      `${baseUrl}/admin/reconciliation/orders/alloc-yalispor-${cancellationOrderId}`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${adminToken}`,
+        },
+      },
+    );
+    if (reconcileCancelledAllocationResponse.status !== 200) {
+      throw new Error(
+        `/admin/reconciliation/orders/:allocationId cancellation expected 200, got ${reconcileCancelledAllocationResponse.status}`,
+      );
+    }
+    const reconcileCancelledAllocationJson = await reconcileCancelledAllocationResponse.json();
+    if (
+      !['repaired', 'needs_attention'].includes(reconcileCancelledAllocationJson?.reconciliationStatus) ||
+      !Array.isArray(reconcileCancelledAllocationJson?.repairedFields) ||
+      reconcileCancelledAllocationJson.repairedFields.length === 0
+    ) {
+      throw new Error(
+        `/admin/reconciliation/orders/:allocationId cancellation returned invalid result: ${JSON.stringify(reconcileCancelledAllocationJson)}`,
+      );
+    }
+
+    const reconciledCancelledDetailResponse = await fetch(`${baseUrl}/orders/${cancelledYaliAllocation.id}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'yalispor',
+      },
+    });
+    const reconciledCancelledDetail = await reconciledCancelledDetailResponse.json();
+    if (
+      reconciledCancelledDetail.fulfillmentStatus !== 'pending' ||
+      reconciledCancelledDetail.shippingStatus !== 'awaiting_shipment' ||
+      reconciledCancelledDetail.trackingNumber !== null ||
+      reconciledCancelledDetail.carrier !== null
+    ) {
+      throw new Error(
+        `/admin/reconciliation/orders/:allocationId should repair stale cancelled fulfillment: ${JSON.stringify(reconciledCancelledDetail)}`,
+      );
+    }
+
+    if (prisma) {
+      await prisma.vendorAllocation.update({
+        where: { id: `alloc-sporjinal-${smokeOrderId}` },
+        data: {
+          fulfillmentStatus: 'pending',
+          shippingStatus: 'awaiting_shipment',
+          trackingNumber: 'STALE-TRACKING',
+          carrier: 'Stale Carrier',
+        },
+      });
+      await prisma.fulfillment.update({
+        where: { vendorAllocationId: `alloc-sporjinal-${smokeOrderId}` },
+        data: {
+          trackingNumber: 'STALE-TRACKING',
+          carrier: 'Stale Carrier',
+          trackingUrl: 'https://tracking.example/stale',
+          syncStatus: 'stale_smoke_fixture',
+        },
+      });
+    }
+
+    const reconcileTrackingResponse = await fetch(`${baseUrl}/admin/reconciliation/orders/alloc-sporjinal-${smokeOrderId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (reconcileTrackingResponse.status !== 200) {
+      throw new Error(`/admin/reconciliation/orders/:allocationId tracking expected 200, got ${reconcileTrackingResponse.status}`);
+    }
+    const reconcileTrackingJson = await reconcileTrackingResponse.json();
+    if (
+      reconcileTrackingJson?.reconciliationStatus !== 'repaired' ||
+      !reconcileTrackingJson.repairedFields?.some((field) => field.field === 'trackingNumber')
+    ) {
+      throw new Error(
+        `/admin/reconciliation/orders/:allocationId tracking did not repair tracking: ${JSON.stringify(reconcileTrackingJson)}`,
+      );
+    }
+
+    const reconciledTrackingDetailResponse = await fetch(`${baseUrl}/orders/alloc-sporjinal-${smokeOrderId}`, {
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+        'X-Vendor-Id': 'sporjinal',
+      },
+    });
+    const reconciledTrackingDetail = await reconciledTrackingDetailResponse.json();
+    if (
+      reconciledTrackingDetail.trackingNumber !== `TRACK-INBOUND-${runId}` ||
+      reconciledTrackingDetail.carrier !== 'MNG Kargo' ||
+      reconciledTrackingDetail.trackingUrl !== `https://tracking.example/TRACK-INBOUND-${runId}`
+    ) {
+      throw new Error(
+        `/admin/reconciliation/orders/:allocationId tracking should refresh from canonical Shopify state: ${JSON.stringify(reconciledTrackingDetail)}`,
+      );
+    }
+
+    if (prisma) {
+      await prisma.refundRecord.update({
+        where: { id: `refund-yalispor-rf-${runId}` },
+        data: { status: 'failed' },
+      });
+      await prisma.financeLedgerEntry.deleteMany({
+        where: { id: `fin-yalispor-refund-rf-${runId}` },
+      });
+    }
+
+    const reconcileOrderResponse = await fetch(`${baseUrl}/admin/reconciliation/shopify-order/${smokeOrderId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${adminToken}`,
+      },
+    });
+    if (reconcileOrderResponse.status !== 200) {
+      throw new Error(`/admin/reconciliation/shopify-order/:shopifyOrderId expected 200, got ${reconcileOrderResponse.status}`);
+    }
+    const reconcileOrderJson = await reconcileOrderResponse.json();
+    if (
+      !['repaired', 'needs_attention'].includes(reconcileOrderJson?.reconciliationStatus) ||
+      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'refund.status') ||
+      !reconcileOrderJson.repairedFields?.some((field) => field.field === 'financeLedgerEntry')
+    ) {
+      throw new Error(
+        `/admin/reconciliation/shopify-order/:shopifyOrderId should repair refund state and missing ledger: ${JSON.stringify(reconcileOrderJson)}`,
+      );
+    }
+
+    const vendorReconcileResponse = await fetch(`${baseUrl}/admin/reconciliation/orders/alloc-yalispor-${smokeOrderId}`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${vendorToken}`,
+      },
+    });
+    if (vendorReconcileResponse.status !== 403) {
+      throw new Error(`/admin/reconciliation/orders/:allocationId vendor forbidden expected 403, got ${vendorReconcileResponse.status}`);
+    }
+
     const invalidFulfillmentWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/fulfillments-update`, {
       method: 'POST',
       headers: {

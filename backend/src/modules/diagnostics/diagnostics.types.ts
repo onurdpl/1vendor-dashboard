@@ -123,12 +123,13 @@ export type ReconciliationSummary = {
   failedWebhooks: number;
   fulfillmentSyncFailures: number;
   missingPayload: number;
+  staleAllocations: number;
   total: number;
 };
 
 export type ReconciliationItem = {
   id: string;
-  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload';
+  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload' | 'stale_allocation';
   severity: SyncDiagnosticSeverity;
   title: string;
   description: string;

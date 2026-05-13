@@ -221,6 +221,7 @@ export const runtimeServices = {
               failedWebhooks: 0,
               fulfillmentSyncFailures: 0,
               missingPayload: 0,
+              staleAllocations: 0,
               total: 0,
             },
             items: [],
@@ -245,6 +246,66 @@ export const runtimeServices = {
             processingStatus: 'mock_only',
             recoveryStatus: 'not_recoverable' as const,
             message: `Recover is not available in mock mode for ${webhookEventId}.`,
+          }),
+    reconcileAllocation: (allocationId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.reconcileAllocation(allocationId)
+        : Promise.resolve({
+            reconciliationStatus: 'in_sync' as const,
+            staleFields: [],
+            repairedFields: [],
+            skippedFields: [],
+            canonicalShopifySummary: {
+              source: 'mock' as const,
+              shopifyOrderId: allocationId,
+              orderName: null,
+              displayFulfillmentStatus: null,
+              fulfillmentCount: 0,
+              fulfillmentOrderCount: 0,
+              fulfilledLineItemIds: [],
+              cancelledLineItemIds: [],
+            },
+            localStateSummary: {
+              shopifyOrderId: allocationId,
+              shopifyOrderNumber: allocationId,
+              allocationCount: 0,
+              refundRecordCount: 0,
+              returnRecordCount: 0,
+            },
+            affectedAllocations: [],
+            affectedVendorIds: [],
+            warnings: [],
+            requiresManualReview: false,
+          }),
+    reconcileShopifyOrder: (shopifyOrderId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.reconcileShopifyOrder(shopifyOrderId)
+        : Promise.resolve({
+            reconciliationStatus: 'in_sync' as const,
+            staleFields: [],
+            repairedFields: [],
+            skippedFields: [],
+            canonicalShopifySummary: {
+              source: 'mock' as const,
+              shopifyOrderId,
+              orderName: null,
+              displayFulfillmentStatus: null,
+              fulfillmentCount: 0,
+              fulfillmentOrderCount: 0,
+              fulfilledLineItemIds: [],
+              cancelledLineItemIds: [],
+            },
+            localStateSummary: {
+              shopifyOrderId,
+              shopifyOrderNumber: shopifyOrderId,
+              allocationCount: 0,
+              refundRecordCount: 0,
+              returnRecordCount: 0,
+            },
+            affectedAllocations: [],
+            affectedVendorIds: [],
+            warnings: [],
+            requiresManualReview: false,
           }),
   },
 } as const;

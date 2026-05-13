@@ -246,6 +246,7 @@ Webhook processing lifecycle states:
   - `failedWebhooks`
   - `fulfillmentSyncFailures`
   - `missingPayload`
+  - `staleAllocations`
   - `total`
 - Item shape includes:
   - `id`
@@ -260,6 +261,52 @@ Webhook processing lifecycle states:
   - `createdAt`
   - `suggestedAction`
   - `payloadAvailable`
+- Current stale allocation signals are visibility-only heuristics. They may point operators to the admin reconciliation endpoints, but they do not perform background repair.
+
+### POST /admin/reconciliation/orders/:allocationId
+
+- Purpose: re-fetch canonical Shopify fulfillment state for the allocation's Shopify order and reconcile one allocation.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape:
+  - `reconciliationStatus`: `in_sync`, `repaired`, or `needs_attention`
+  - `staleFields`
+  - `repairedFields`
+  - `skippedFields`
+  - `canonicalShopifySummary`
+  - `localStateSummary`
+  - `affectedAllocations`
+  - `affectedVendorIds`
+  - `warnings`
+  - `requiresManualReview`
+- Expected `403` behavior: vendor users are forbidden.
+- Expected `404` behavior: allocation is missing or lacks Shopify order linkage.
+- Repair-safe fields:
+  - allocation `fulfillmentStatus`
+  - allocation `shippingStatus`
+  - allocation tracking number/carrier
+  - fulfillment tracking URL
+  - fulfillment timestamps
+  - fulfillment sync status
+  - local refund/return operational status when an existing processed record is stale
+  - missing finance ledger entry for an already persisted processed refund
+- Guardrails:
+  - does not mutate Shopify
+  - does not delete historical financial records
+  - does not overwrite manual notes
+  - does not alter raw webhook history
+  - only updates the requested allocation and its existing operational records
+
+### POST /admin/reconciliation/shopify-order/:shopifyOrderId
+
+- Purpose: re-fetch canonical Shopify fulfillment state and reconcile all local allocations for one ingested Shopify order.
+- Required auth: yes.
+- Vendor scoping rule: admin-only route; vendor users must not access this endpoint.
+- Expected success response shape: same as allocation reconciliation.
+- Expected `404` behavior: local Shopify order is not found.
+- Multi-vendor rule:
+  - repairs are line-item scoped by Shopify line item id
+  - unrelated vendor allocations must not inherit tracking, fulfillment, or cancellation state
 
 ### POST /admin/diagnostics/webhooks/:webhookEventId/replay
 

@@ -90,12 +90,13 @@ export type DiagnosticsReconciliationSummary = {
   failedWebhooks: number;
   fulfillmentSyncFailures: number;
   missingPayload: number;
+  staleAllocations: number;
   total: number;
 };
 
 export type DiagnosticsReconciliationItem = {
   id: string;
-  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload';
+  type: 'stuck_webhook' | 'failed_webhook' | 'fulfillment_sync_failed' | 'missing_payload' | 'stale_allocation';
   severity: 'critical' | 'warning' | 'attention' | 'normal';
   title: string;
   description: string;
@@ -120,6 +121,41 @@ type SyncEventsResponseDto = {
 type ReconciliationResponseDto = {
   summary: DiagnosticsReconciliationSummary;
   items: DiagnosticsReconciliationItem[];
+};
+
+export type OrderReconciliationResult = {
+  reconciliationStatus: 'in_sync' | 'repaired' | 'needs_attention';
+  staleFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+  repairedFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+  skippedFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+  canonicalShopifySummary: {
+    source: 'mock' | 'shopify_admin';
+    shopifyOrderId: string;
+    orderName: string | null;
+    displayFulfillmentStatus: string | null;
+    fulfillmentCount: number;
+    fulfillmentOrderCount: number;
+    fulfilledLineItemIds: string[];
+    cancelledLineItemIds: string[];
+  };
+  localStateSummary: {
+    shopifyOrderId: string;
+    shopifyOrderNumber: string;
+    allocationCount: number;
+    refundRecordCount: number;
+    returnRecordCount: number;
+  };
+  affectedAllocations: Array<{
+    allocationId: string;
+    vendorId: string;
+    staleFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+    repairedFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+    skippedFields: Array<{ scope: string; field: string; localValue: string | null; canonicalValue: string | null }>;
+    warnings: string[];
+  }>;
+  affectedVendorIds: string[];
+  warnings: string[];
+  requiresManualReview: boolean;
 };
 
 export type ReplayWebhookResponse = {
@@ -168,4 +204,12 @@ export async function replayWebhook(webhookEventId: string) {
 
 export async function recoverWebhook(webhookEventId: string) {
   return apiClient.post<RecoverWebhookResponse>(`/admin/diagnostics/webhooks/${webhookEventId}/recover`);
+}
+
+export async function reconcileAllocation(allocationId: string) {
+  return apiClient.post<OrderReconciliationResult>(`/admin/reconciliation/orders/${allocationId}`);
+}
+
+export async function reconcileShopifyOrder(shopifyOrderId: string) {
+  return apiClient.post<OrderReconciliationResult>(`/admin/reconciliation/shopify-order/${shopifyOrderId}`);
 }
