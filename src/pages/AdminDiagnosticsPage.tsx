@@ -145,6 +145,9 @@ export function AdminDiagnosticsPage() {
   const syncEventsQuery = useQueryResource(queryKeys.admin.diagnostics.syncEvents(), () =>
     runtimeServices.diagnostics.syncEvents(),
   );
+  const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), () =>
+    runtimeServices.observability.summary(),
+  );
 
   const latestWebhookEventId = selectedWebhookEventId ?? webhooksQuery.data?.events[0]?.id ?? null;
 
@@ -294,10 +297,14 @@ export function AdminDiagnosticsPage() {
       missingPayload: reconciliationQuery.data?.summary.missingPayload ?? 0,
       staleAllocations: reconciliationQuery.data?.summary.staleAllocations ?? 0,
       scheduledReconciliationJobs: reconciliationQuery.data?.summary.scheduledReconciliationJobs ?? 0,
+      retryPressure: observabilityQuery.data?.retryPressure.pressureScore ?? 0,
+      deadLetterReady: observabilityQuery.data
+        ? observabilityQuery.data.retryPressure.deadLetterReady + observabilityQuery.data.retryPressure.permanentlyFailed
+        : 0,
       replayable: webhooksQuery.data?.events.filter((event) => event.replayEligible).length ?? 0,
       recoverable: webhooksQuery.data?.events.filter((event) => event.recoverEligible).length ?? 0,
     };
-  }, [reconciliationQuery.data, webhooksQuery.data]);
+  }, [observabilityQuery.data, reconciliationQuery.data, webhooksQuery.data]);
 
   if (!isRealMode) {
     return (
@@ -349,6 +356,9 @@ export function AdminDiagnosticsPage() {
           <StatusBadge tone="danger">Failed {webhooksQuery.data.summary.failed}</StatusBadge>
           <StatusBadge tone="attention">Stuck {combinedCounts.stuck}</StatusBadge>
           <StatusBadge tone="info">Scheduled {combinedCounts.scheduledReconciliationJobs}</StatusBadge>
+          <StatusBadge tone={observabilityQuery.data?.health === 'healthy' ? 'success' : 'warning'}>
+            Health {observabilityQuery.data?.health ?? 'unknown'}
+          </StatusBadge>
           <StatusBadge tone="success">Processed {webhooksQuery.data.summary.processed}</StatusBadge>
         </div>
       </div>
@@ -359,7 +369,7 @@ export function AdminDiagnosticsPage() {
         <KPIStatCard label="Received / stuck" value={combinedCounts.stuck} detail="Not yet processed" tone="attention" />
         <KPIStatCard label="Missing payload" value={combinedCounts.missingPayload} detail="Recovery blocked" tone="warning" />
         <KPIStatCard label="Replayable" value={combinedCounts.replayable} detail="Safe idempotent retry" tone="info" />
-        <KPIStatCard label="Recoverable" value={combinedCounts.recoverable} detail="Operator action enabled" tone="success" />
+        <KPIStatCard label="Retry pressure" value={combinedCounts.retryPressure} detail={`${combinedCounts.deadLetterReady} dead-letter`} tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'} />
       </div>
 
       <div className="op-control-layout diagnostics-layout-redesign">

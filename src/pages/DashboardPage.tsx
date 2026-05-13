@@ -18,6 +18,23 @@ function getPriorityValue(items: { label: string; value: string }[], label: stri
   return Number.parseInt(items.find((item) => item.label === label)?.value ?? '0', 10) || 0;
 }
 
+function getHealthTone(health: string): 'success' | 'warning' | 'danger' | 'attention' {
+  if (health === 'healthy') {
+    return 'success';
+  }
+  if (health === 'warning') {
+    return 'warning';
+  }
+  if (health === 'critical') {
+    return 'danger';
+  }
+  return 'attention';
+}
+
+function formatRate(value: number) {
+  return `${Math.round(value * 100)}%`;
+}
+
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
@@ -139,6 +156,25 @@ export function DashboardPage() {
               </div>
             ) : (
               <EmptyStatePanel title="Diagnostics unavailable" description="Not synced for this scope." />
+            )}
+          </OperationalSection>
+        ) : null}
+
+        {currentUser?.role === 'admin' ? (
+          <OperationalSection title="Operational health" description="Lightweight observability from webhook, retry, and reconciliation metrics.">
+            {dashboard.observabilitySummary ? (
+              <div className="op-meta-grid dashboard-observability-grid">
+                <MetadataRow label="Health" value={<StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>} />
+                <MetadataRow label="Success rate 24h" value={formatRate(dashboard.observabilitySummary.successRate24h)} />
+                <MetadataRow label="Failed webhooks 24h" value={dashboard.observabilitySummary.failedWebhooks24h} />
+                <MetadataRow label="Retry pressure" value={dashboard.observabilitySummary.retryPressureScore} />
+                <MetadataRow label="Dead-letter" value={dashboard.observabilitySummary.deadLetterReady} />
+                <MetadataRow label="Reconciliation backlog" value={dashboard.observabilitySummary.reconciliationBacklog} />
+                <MetadataRow label="Stale signals" value={dashboard.observabilitySummary.staleStateCount} />
+                <MetadataRow label="Note" value={dashboard.observabilitySummary.note} />
+              </div>
+            ) : (
+              <EmptyStatePanel title="Observability unavailable" description="Not synced for this scope." />
             )}
           </OperationalSection>
         ) : null}

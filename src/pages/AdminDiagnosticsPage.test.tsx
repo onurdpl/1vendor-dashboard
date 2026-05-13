@@ -15,6 +15,7 @@ const diagnosticsMocks = vi.hoisted(() => ({
   retryOperationalJob: vi.fn(),
   reconcileAllocation: vi.fn(),
   reconcileShopifyOrder: vi.fn(),
+  observabilitySummary: vi.fn(),
 }));
 
 vi.mock('../config/runtime', () => ({
@@ -27,6 +28,9 @@ vi.mock('../config/runtime', () => ({
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     diagnostics: diagnosticsMocks,
+    observability: {
+      summary: diagnosticsMocks.observabilitySummary,
+    },
   },
 }));
 
@@ -151,6 +155,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.retryOperationalJob.mockReset();
     diagnosticsMocks.reconcileAllocation.mockReset();
     diagnosticsMocks.reconcileShopifyOrder.mockReset();
+    diagnosticsMocks.observabilitySummary.mockReset();
 
     diagnosticsMocks.webhooks.mockResolvedValue({
       summary: {
@@ -221,6 +226,42 @@ describe('AdminDiagnosticsPage control center', () => {
       processingStatus: 'needs_attention',
       message: 'Retry scheduled after transient failure.',
     });
+    diagnosticsMocks.observabilitySummary.mockResolvedValue({
+      health: 'warning',
+      generatedAt: '2026-05-12T10:05:00Z',
+      windows: [],
+      retryPressure: {
+        retryScheduled: 2,
+        retrying: 0,
+        deadLetterReady: 1,
+        permanentlyFailed: 0,
+        pressureScore: 5,
+      },
+      reconciliation: {
+        pending: 1,
+        processing: 0,
+        completed24h: 2,
+        failed24h: 0,
+        scheduled: 1,
+        staleStateCount: 3,
+      },
+      webhookHealth: {
+        received: 1,
+        processing: 0,
+        processed24h: 10,
+        failed24h: 1,
+        successRate24h: 0.91,
+      },
+      staleStates: {
+        stuckReceived: 1,
+        fulfillmentSyncFailures: 1,
+        missingPayload: 1,
+        staleAllocations: 1,
+        scheduledReconciliationJobs: 1,
+        total: 4,
+      },
+      notes: ['1 operational job is dead-letter ready.'],
+    });
   });
 
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {
@@ -233,6 +274,8 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText(/Retry 1\/3/i)).toBeInTheDocument();
     expect(screen.getByText('Validation')).toBeInTheDocument();
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
+    expect(screen.getByText('Health warning')).toBeInTheDocument();
+    expect(screen.getByText('Retry pressure')).toBeInTheDocument();
   });
 
   it('shows operational retry action feedback for retryable jobs', async () => {

@@ -8,6 +8,7 @@ import type {
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
   DashboardOverview,
+  DashboardObservabilitySummary,
   DashboardPriorityItem,
 } from './contracts';
 import { runtimeServices } from '../../services/runtime-services';
@@ -126,6 +127,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     automationResult,
     operationsResult,
     diagnosticsResult,
+    observabilityResult,
   ] = await Promise.allSettled([
     runtimeServices.orders.list(),
     runtimeServices.returns.list(),
@@ -133,6 +135,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     runtimeServices.automation.dashboard(),
     currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
     currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
+    currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
   ]);
 
   const orders = ordersResult.status === 'fulfilled' ? ordersResult.value : [];
@@ -163,6 +166,11 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
   const diagnostics = diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null;
   if (diagnosticsResult.status === 'rejected') {
     partialDataWarnings.push('Diagnostics summary is temporarily unavailable.');
+  }
+
+  const observability = observabilityResult.status === 'fulfilled' ? observabilityResult.value : null;
+  if (observabilityResult.status === 'rejected') {
+    partialDataWarnings.push('Operational observability is temporarily unavailable.');
   }
 
   const awaitingShipmentCount = orders.filter((order) => order.shippingStatus === 'Awaiting Shipment').length;
@@ -215,6 +223,19 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
         payoutEstimate: finance.summary.payoutEstimate,
       }
     : undefined;
+  const observabilitySummary: DashboardObservabilitySummary | undefined =
+    currentUser?.role === 'admin' && observability
+      ? {
+          health: observability.health,
+          retryPressureScore: observability.retryPressure.pressureScore,
+          deadLetterReady: observability.retryPressure.deadLetterReady + observability.retryPressure.permanentlyFailed,
+          failedWebhooks24h: observability.webhookHealth.failed24h,
+          successRate24h: observability.webhookHealth.successRate24h,
+          reconciliationBacklog: observability.reconciliation.pending + observability.reconciliation.processing,
+          staleStateCount: observability.staleStates.total,
+          note: observability.notes[0] ?? 'No active observability note.',
+        }
+      : undefined;
 
   return {
     vendorId: currentVendorId,
@@ -233,6 +254,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     priorityWork,
     financeSnapshot,
     diagnosticsSummary,
+    observabilitySummary,
     partialDataWarnings,
   };
 }

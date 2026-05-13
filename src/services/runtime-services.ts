@@ -14,6 +14,7 @@ import * as realFinance from './real/finance';
 import * as realAutomation from './real/automation';
 import * as realOperations from './real/operations';
 import * as realDiagnostics from './real/diagnostics';
+import * as realObservability from './real/observability';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -319,6 +320,71 @@ export const runtimeServices = {
             affectedVendorIds: [],
             warnings: [],
             requiresManualReview: false,
+          }),
+  },
+  observability: {
+    summary: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realObservability.getObservabilitySummary()
+        : Promise.resolve({
+            health: 'healthy' as const,
+            generatedAt: new Date().toISOString(),
+            windows: [
+              {
+                window: 'last24h' as const,
+                since: new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString(),
+                webhookThroughput: 0,
+                processedWebhooks: 0,
+                failedWebhooks: 0,
+                successRate: 1,
+                failureRate: 0,
+                retryCount: 0,
+                deadLetterReady: 0,
+                permanentlyFailed: 0,
+                reconciliationJobs: 0,
+                replayJobs: 0,
+                recoveryJobs: 0,
+                staleStateCount: 0,
+              },
+            ],
+            retryPressure: {
+              retryScheduled: 0,
+              retrying: 0,
+              deadLetterReady: 0,
+              permanentlyFailed: 0,
+              pressureScore: 0,
+            },
+            reconciliation: {
+              pending: 0,
+              processing: 0,
+              completed24h: 0,
+              failed24h: 0,
+              scheduled: 0,
+              staleStateCount: 0,
+            },
+            webhookHealth: {
+              received: 0,
+              processing: 0,
+              processed24h: 0,
+              failed24h: 0,
+              successRate24h: 1,
+            },
+            staleStates: {
+              stuckReceived: 0,
+              fulfillmentSyncFailures: 0,
+              missingPayload: 0,
+              staleAllocations: 0,
+              scheduledReconciliationJobs: 0,
+              total: 0,
+            },
+            notes: ['No active retry, dead-letter, or stale-state pressure detected.'],
+          }),
+    metrics: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realObservability.getObservabilityMetrics()
+        : Promise.resolve({
+            generatedAt: new Date().toISOString(),
+            windows: [],
           }),
   },
 } as const;

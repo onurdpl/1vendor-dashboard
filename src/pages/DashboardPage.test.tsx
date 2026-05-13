@@ -45,6 +45,16 @@ const dashboardOverview: DashboardOverview = {
     stuckReceived: 0,
     fulfillmentSyncFailures: 0,
   },
+  observabilitySummary: {
+    health: 'warning',
+    retryPressureScore: 5,
+    deadLetterReady: 1,
+    failedWebhooks24h: 1,
+    successRate24h: 0.91,
+    reconciliationBacklog: 2,
+    staleStateCount: 4,
+    note: '1 operational job is dead-letter ready.',
+  },
 };
 
 function renderDashboardPage() {
@@ -90,5 +100,7 @@ describe('DashboardPage command center', () => {
     expect(screen.getAllByText('Priority work')).toHaveLength(1);
     expect(screen.queryByText('Operational signals')).not.toBeInTheDocument();
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
+    expect(screen.getByText('Operational health')).toBeInTheDocument();
+    expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
   });
 });

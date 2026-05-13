@@ -270,6 +270,17 @@ export type DashboardDiagnosticsSummary = {
   fulfillmentSyncFailures: number;
 };
 
+export type DashboardObservabilitySummary = {
+  health: 'healthy' | 'warning' | 'degraded' | 'critical';
+  retryPressureScore: number;
+  deadLetterReady: number;
+  failedWebhooks24h: number;
+  successRate24h: number;
+  reconciliationBacklog: number;
+  staleStateCount: number;
+  note: string;
+};
+
 export type DashboardOverview = {
   vendorId: string;
   vendorName: string;
@@ -281,6 +292,7 @@ export type DashboardOverview = {
   priorityWork: DashboardPriorityItem[];
   financeSnapshot?: DashboardFinanceSnapshot;
   diagnosticsSummary?: DashboardDiagnosticsSummary;
+  observabilitySummary?: DashboardObservabilitySummary;
   partialDataWarnings?: string[];
 };
 

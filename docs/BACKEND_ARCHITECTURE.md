@@ -298,6 +298,30 @@ Alternative for quick schema sync without migration history:
 - Admin diagnostics reconciliation now surfaces scheduled reconciliation jobs with job id, candidate reason, current status, related order/allocation, and next/last attempt metadata.
 - This phase still does not add Redis, BullMQ, Kafka, RabbitMQ, Kubernetes cron, distributed workers, websocket infrastructure, or event-sourcing changes.
 
+## Phase 17D Operational Observability and Metrics
+- The lightweight observability layer is documented in [PHASE_17D_OBSERVABILITY.md](/Users/onur/Documents/New project 4/docs/PHASE_17D_OBSERVABILITY.md).
+- Admin-only observability endpoints:
+  - `GET /admin/observability/summary`
+  - `GET /admin/observability/metrics`
+- Metrics are DB-backed aggregation queries over existing operational records:
+  - webhook events
+  - operational jobs
+  - retry/dead-letter lifecycle
+  - replay/recover jobs
+  - reconciliation jobs
+  - scheduled reconciliation/stale-state jobs
+- Supported windows:
+  - last hour
+  - last 24h
+  - last 7d
+- Health states are lightweight operational guidance:
+  - `healthy`
+  - `warning`
+  - `degraded`
+  - `critical`
+- Dashboard and diagnostics now surface admin-only health, retry pressure, dead-letter, reconciliation backlog, stale-state, and webhook success-rate signals.
+- This phase does not add Prometheus, Grafana, OpenTelemetry, external metrics storage, distributed tracing, websocket infrastructure, or realtime delivery.
+
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.
 2. Frontend sends request to backend API.
