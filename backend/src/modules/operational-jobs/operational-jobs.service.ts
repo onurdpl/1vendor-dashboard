@@ -106,6 +106,18 @@ function summarizeOperationalError(error: unknown) {
   return message.length > 500 ? `${message.slice(0, 497)}...` : message;
 }
 
+export async function runBestEffortOperationalJobMutation<T>(
+  operation: () => Promise<T>,
+  onError?: (error: unknown) => void,
+) {
+  try {
+    return await operation();
+  } catch (error) {
+    onError?.(error);
+    return null;
+  }
+}
+
 export function inferOperationalJobTypeForWebhookTopic(topic: string): OperationalJobTypeLabel {
   if (topic === 'refunds/create') {
     return 'refund_sync';

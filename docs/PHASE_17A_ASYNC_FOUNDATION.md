@@ -83,3 +83,14 @@
 - There is no scheduler for stale reconciliation jobs yet.
 - Dead-letter readiness is modeled but not automatically advanced by a worker.
 - Retry execution remains operator-driven through current diagnostics/replay/recover/reconciliation surfaces.
+
+## Phase 17A-Fix Runtime Stabilization Notes
+- Local smoke must run against a reachable local database with the Phase 17A migration applied:
+  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_dev ./backend/node_modules/.bin/prisma migrate deploy --schema backend/prisma/schema.prisma`
+  - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_dev npm run backend:smoke`
+- If `backend/.env` contains multiple `DATABASE_URL` entries, Prisma/dotenv may use the later value. Use an explicit shell-level `DATABASE_URL=...` override for deterministic local smoke.
+- Render deployment must run the same Prisma migration against the Render Postgres external/internal production connection before relying on operational job persistence in production.
+- Operational job persistence remains best-effort beside the core workflows:
+  - HMAC and idempotency still gate webhook processing.
+  - Job persistence failure is logged and should not become the reason a core webhook/replay/recover/reconciliation request fails.
+  - Diagnostics handles missing related job records for older events or pre-migration responses.

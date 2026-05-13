@@ -250,6 +250,12 @@ Alternative for quick schema sync without migration history:
   - return sync
 - No external queue infrastructure was added. There is still no Redis, BullMQ, RabbitMQ, Kafka, daemon worker, scheduler, websocket layer, or event-sourcing rewrite.
 - Operational jobs are observability and retry-preparation metadata. They do not replace Shopify Admin GraphQL as canonical truth and do not weaken HMAC, idempotency, vendor isolation, or admin-only recovery rules.
+- Runtime verification note:
+  - local smoke requires a reachable local Postgres `DATABASE_URL` and the Phase 17A migration applied
+  - use an explicit shell override for deterministic local validation:
+    - `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vendor_dashboard_dev npm run backend:smoke`
+  - if `backend/.env` has duplicate `DATABASE_URL` entries, the later value can override the intended local database for Prisma/dotenv consumers
+  - Render production must run `prisma migrate deploy` against Render Postgres before operational job persistence is considered production-verified
 
 ## Fulfillment and Tracking Flow (Planned)
 1. Vendor submits tracking data in dashboard.

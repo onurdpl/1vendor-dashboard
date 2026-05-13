@@ -217,6 +217,26 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Stale allocation detected')).toBeInTheDocument();
   });
 
+  it('renders webhook detail when older diagnostics responses omit related job records', async () => {
+    diagnosticsMocks.webhooks.mockResolvedValueOnce({
+      summary: {
+        total: 1,
+        received: 0,
+        processed: 0,
+        failed: 1,
+        duplicates: 0,
+        needsAttention: 1,
+      },
+      events: [{ ...blockedEvent, relatedJobs: undefined }],
+    });
+    diagnosticsMocks.webhookDetail.mockResolvedValueOnce({ ...blockedDetail, relatedJobs: undefined });
+
+    renderDiagnosticsPage();
+
+    expect(await screen.findByText('Payload unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Use manual Shopify reconciliation.')).toBeInTheDocument();
+  });
+
   it('shows replay action feedback without changing the backend action contract', async () => {
     renderDiagnosticsPage();
 

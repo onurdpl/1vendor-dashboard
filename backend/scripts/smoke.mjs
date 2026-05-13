@@ -2079,6 +2079,28 @@ async function runSmoke() {
     if (!processedWebhookEvent) {
       throw new Error('/admin/diagnostics/webhooks missing processed webhook event.');
     }
+    const firstOrderWebhookEvent = adminWebhookDiagnostics.events.find((event) => event?.shopifyWebhookId === uniqueWebhookId);
+    if (!firstOrderWebhookEvent) {
+      throw new Error('/admin/diagnostics/webhooks missing first accepted orders/create event.');
+    }
+    if (!Array.isArray(firstOrderWebhookEvent.relatedJobs) || firstOrderWebhookEvent.relatedJobs.length !== 1) {
+      throw new Error('/admin/diagnostics/webhooks expected one operational job for first accepted orders/create event.');
+    }
+    if (firstOrderWebhookEvent.relatedJobs[0]?.status !== 'completed') {
+      throw new Error(
+        `/admin/diagnostics/webhooks expected completed operational job, got ${JSON.stringify(firstOrderWebhookEvent.relatedJobs[0])}`,
+      );
+    }
+    if (prisma) {
+      const firstOrderJobCount = await prisma.operationalJob.count({
+        where: {
+          webhookEventId: firstOrderWebhookEvent.id,
+        },
+      });
+      if (firstOrderJobCount !== 1) {
+        throw new Error(`/operational-jobs duplicate delivery expected one job, got ${firstOrderJobCount}`);
+      }
+    }
     const failedWebhookEvent = adminWebhookDiagnostics.events.find(
       (event) => event?.status === 'FAILED' && event?.payloadAvailable === true,
     );
@@ -2109,6 +2131,7 @@ async function runSmoke() {
       typeof adminWebhookDiagnosticsDetail?.payloadAvailable !== 'boolean' ||
       typeof adminWebhookDiagnosticsDetail?.replayEligible !== 'boolean' ||
       typeof adminWebhookDiagnosticsDetail?.recoverEligible !== 'boolean' ||
+      !Array.isArray(adminWebhookDiagnosticsDetail?.relatedJobs) ||
       adminWebhookDiagnosticsDetail?.rawPayload !== undefined
     ) {
       throw new Error('/admin/diagnostics/webhooks/:webhookEventId returned invalid shape.');
