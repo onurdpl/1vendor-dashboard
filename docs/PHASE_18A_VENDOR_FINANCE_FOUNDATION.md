@@ -105,6 +105,21 @@ Duplicate webhook delivery, replay, or recovery reuses the deterministic ledger 
 
 Reconciliation can also repair missing sale ledger rows for already-ingested orders. This is intentionally scoped to local allocation state and does not invent Shopify state.
 
+## Phase 18A Fix 2 — Profile UX and Return Mapping
+
+Vendor finance profile controls now live once at the vendor finance workspace level instead of inside each ledger row detail panel.
+- Admins can edit the selected vendor profile once.
+- Vendors see the same profile read-only.
+- Saving a profile refetches finance data so commission and payout estimates reflect the current profile without a full reload.
+
+Return request attribution now prefers local ingested order line-item vendor mapping before falling back to Shopify `seller_info`.
+This stabilizes cases where a real order was already allocated correctly, but later return-request processing cannot re-fetch or parse the original `seller_info` metafield. Return visibility remains vendor-scoped and line-item scoped.
+
+Finance refund ledger behavior remains unchanged:
+- pending return requests appear in Returns
+- refund ledger rows are created only after `refunds/create`
+- refunds fully reduce payout estimates once posted
+
 ## Future Evolution
 
 Future phases can build on this foundation with:

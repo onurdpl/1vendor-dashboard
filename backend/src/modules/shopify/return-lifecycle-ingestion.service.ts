@@ -117,10 +117,10 @@ export async function ingestReturnRequestWebhook(
         throw new Error('Shopify return detail did not include a usable order id.');
       }
 
-      const sellerInfoResult = await shopifyAdminService.fetchOrderSellerInfo(sourceShopifyOrderId);
-      if (!sellerInfoResult.sellerInfo) {
-        throw new Error('Shopify seller_info mapping is missing for return request attribution.');
-      }
+      const sellerInfoResult = await shopifyAdminService.fetchOrderSellerInfo(sourceShopifyOrderId).catch(() => ({
+        sellerInfo: null,
+        source: 'shopify_admin' as const,
+      }));
 
       const shopifyOrder = await tx.shopifyOrder.findUnique({
         where: {
@@ -142,9 +142,21 @@ export async function ingestReturnRequestWebhook(
           throw new Error(`Return line item ${lineItem.returnLineItemGid} is missing SKU.`);
         }
 
-        const vendorSlug = sellerInfoResult.sellerInfo?.[lineItem.sku]?.trim().toLowerCase() ?? null;
+        const sourceLineItemId = lineItem.lineItemGid
+          ? extractShopifyGidTail(lineItem.lineItemGid) ?? lineItem.lineItemGid
+          : extractShopifyGidTail(lineItem.returnLineItemGid) ?? lineItem.returnLineItemGid;
+        const matchingOrderLineItems = shopifyOrder.lineItems.filter((orderLineItem) => orderLineItem.sku === lineItem.sku);
+        const matchedOrderLineItem = sourceLineItemId
+          ? matchingOrderLineItems.find((orderLineItem) => orderLineItem.sourceLineItemId === sourceLineItemId)
+          : matchingOrderLineItems.length === 1
+            ? matchingOrderLineItems[0]
+            : null;
+        const vendorSlug =
+          matchedOrderLineItem?.originalVendorId?.trim().toLowerCase() ??
+          sellerInfoResult.sellerInfo?.[lineItem.sku]?.trim().toLowerCase() ??
+          null;
         if (!vendorSlug) {
-          throw new Error(`seller_info mapping not found for return SKU ${lineItem.sku}.`);
+          throw new Error(`No local or seller_info vendor mapping found for return SKU ${lineItem.sku}.`);
         }
 
         if (!vendorIds.has(vendorSlug)) {
@@ -157,10 +169,6 @@ export async function ingestReturnRequestWebhook(
         if (!allocation) {
           throw new Error(`No allocation found for return SKU ${lineItem.sku} and vendor ${vendorSlug}.`);
         }
-
-        const sourceLineItemId = lineItem.lineItemGid
-          ? extractShopifyGidTail(lineItem.lineItemGid) ?? lineItem.lineItemGid
-          : extractShopifyGidTail(lineItem.returnLineItemGid) ?? lineItem.returnLineItemGid;
 
         return {
           lineItem,
@@ -312,4 +320,3 @@ export async function applyReturnLifecycleStatusWebhook(
     );
   }
 }
-

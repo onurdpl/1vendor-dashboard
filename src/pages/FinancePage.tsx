@@ -92,7 +92,7 @@ function getFinanceLifecycleLabel(record: FinanceTransaction) {
 }
 
 export function FinancePage() {
-  const { data: finance, isLoading, isError, error } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
+  const { data: finance, isLoading, isError, error, refetch } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -107,6 +107,7 @@ export function FinancePage() {
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const availableVendors = getAvailableVendors();
+  const isAdmin = currentUser?.role === 'admin';
   const saveProfileMutation = useMutationAction(
     () =>
       updateVendorFinancialProfile(currentVendor.vendorId, {
@@ -118,7 +119,10 @@ export function FinancePage() {
       }),
     {
       invalidateQueryKeys: [queryKeys.finance.summary()],
-      onSuccess: () => showFeedback('Vendor financial profile saved.', 'success'),
+      onSuccess: () => {
+        showFeedback('Vendor financial profile saved.', 'success');
+        void refetch();
+      },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Financial profile could not be saved.', 'error'),
     },
@@ -230,6 +234,66 @@ export function FinancePage() {
         <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
         <KPIStatCard label="Vendor payable" value={finance.summary.payoutEstimate} detail="Estimated before settlement engine" tone="neutral" />
       </div>
+
+      <section className="operational-card finance-profile-card">
+        <div>
+          <p className="eyebrow">Vendor finance profile</p>
+          <h3>{currentVendor.vendorName} payout settings</h3>
+          <p className="page-description">
+            This vendor-level profile applies to all current and future payout estimates for the selected vendor.
+          </p>
+        </div>
+        <div className="finance-profile-summary">
+          <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
+          <MetadataRow label="Commission VAT" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+          <MetadataRow label="Shipping mode" value={finance.profile?.shippingMode ?? 'disabled'} />
+          <MetadataRow label="Shipping deduction" value={finance.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
+        </div>
+        {isAdmin ? (
+          <div className="finance-profile-form" aria-label="Vendor finance profile settings">
+            <div className="op-form-grid">
+              <label>
+                <span>Commission %</span>
+                <input value={commissionPercent} onChange={(event) => setCommissionPercent(event.target.value)} inputMode="decimal" />
+              </label>
+              <label>
+                <span>Commission VAT %</span>
+                <input value={commissionVatPercent} onChange={(event) => setCommissionVatPercent(event.target.value)} inputMode="decimal" />
+              </label>
+              <label>
+                <span>Shipping mode</span>
+                <select value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
+                  <option value="disabled">Disabled</option>
+                  <option value="fixed">Fixed</option>
+                  <option value="external_provider">External provider</option>
+                </select>
+              </label>
+              <label>
+                <span>Fixed shipping fee</span>
+                <input value={fixedShippingFee} onChange={(event) => setFixedShippingFee(event.target.value)} inputMode="decimal" />
+              </label>
+            </div>
+            <label className="op-checkbox-row">
+              <input
+                type="checkbox"
+                checked={deductShippingEnabled}
+                onChange={(event) => setDeductShippingEnabled(event.target.checked)}
+              />
+              <span>Deduct shipping after fulfillment</span>
+            </label>
+            <button
+              type="button"
+              className="button button-primary"
+              disabled={saveProfileMutation.isPending}
+              onClick={() => void saveProfileMutation.mutateAsync(undefined)}
+            >
+              {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
+            </button>
+          </div>
+        ) : (
+          <StatusBadge tone="neutral">Read-only vendor profile</StatusBadge>
+        )}
+      </section>
 
       <div className="op-control-layout finance-layout">
         <div className="op-main-column">
@@ -383,49 +447,6 @@ export function FinancePage() {
                 <MetadataRow label="Shipping mode" value={finance.profile?.shippingMode ?? 'disabled'} />
                 <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
               </MetadataGroup>
-              {currentUser?.role === 'admin' ? (
-                <div className="op-panel-section finance-profile-form">
-                  <h4>Profile settings</h4>
-                  <div className="op-form-grid">
-                    <label>
-                      <span>Commission %</span>
-                      <input value={commissionPercent} onChange={(event) => setCommissionPercent(event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label>
-                      <span>Commission VAT %</span>
-                      <input value={commissionVatPercent} onChange={(event) => setCommissionVatPercent(event.target.value)} inputMode="decimal" />
-                    </label>
-                    <label>
-                      <span>Shipping mode</span>
-                      <select value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
-                        <option value="disabled">Disabled</option>
-                        <option value="fixed">Fixed</option>
-                        <option value="external_provider">External provider</option>
-                      </select>
-                    </label>
-                    <label>
-                      <span>Fixed shipping fee</span>
-                      <input value={fixedShippingFee} onChange={(event) => setFixedShippingFee(event.target.value)} inputMode="decimal" />
-                    </label>
-                  </div>
-                  <label className="op-checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={deductShippingEnabled}
-                      onChange={(event) => setDeductShippingEnabled(event.target.checked)}
-                    />
-                    <span>Deduct shipping after fulfillment</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={saveProfileMutation.isPending}
-                    onClick={() => void saveProfileMutation.mutateAsync(undefined)}
-                  >
-                    {saveProfileMutation.isPending ? 'Saving...' : 'Save profile'}
-                  </button>
-                </div>
-              ) : null}
               <div className="op-panel-section">
                 <h4>Related return / refund context</h4>
                 <p className="page-description">

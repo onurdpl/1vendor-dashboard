@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,12 +8,14 @@ import type { FinanceDashboard } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
+const updateVendorFinancialProfileMock = vi.fn();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
   return {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
+    updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
 });
 
@@ -28,6 +30,16 @@ const financeDashboard: FinanceDashboard = {
     availableBalance: '$2,947.50',
     pendingPayouts: '$0.00',
     refundsThisMonth: '$725.00',
+  },
+  profile: {
+    vendorId: 'demo-vendor-a',
+    commissionPercent: '10.00',
+    commissionVatPercent: '0.00',
+    deductShippingEnabled: false,
+    shippingMode: 'disabled',
+    fixedShippingFee: null,
+    active: true,
+    source: 'default',
   },
   transactions: [
     {
@@ -77,6 +89,7 @@ function renderFinancePage() {
 
 describe('FinancePage control center', () => {
   beforeEach(() => {
+    cleanup();
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -92,6 +105,7 @@ describe('FinancePage control center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getFinanceDashboardMock.mockReset();
+    updateVendorFinancialProfileMock.mockReset();
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {
@@ -134,5 +148,67 @@ describe('FinancePage control center', () => {
 
     expect((await screen.findAllByText('Recorded')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Ledger recorded').length).toBeGreaterThan(0);
+  });
+
+  it('shows editable vendor profile controls once for admins', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
+    expect(screen.getByText('Demo Vendor A payout settings')).toBeInTheDocument();
+    expect(within(profilePanel).getAllByLabelText(/commission %/i)).toHaveLength(1);
+    expect(screen.getByRole('button', { name: /save vendor profile/i })).toBeInTheDocument();
+  });
+
+  it('shows vendor finance profile as read-only for vendor users', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
+  });
+
+  it('refetches finance data after saving the vendor profile', async () => {
+    updateVendorFinancialProfileMock.mockResolvedValue({
+      ...financeDashboard.profile,
+      commissionPercent: '15.00',
+    });
+    getFinanceDashboardMock
+      .mockResolvedValueOnce(financeDashboard)
+      .mockResolvedValueOnce({
+        ...financeDashboard,
+        summary: {
+          ...financeDashboard.summary,
+          platformFee: '$491.25',
+          payoutEstimate: '$2,783.75',
+        },
+        profile: {
+          ...financeDashboard.profile!,
+          commissionPercent: '15.00',
+        },
+      });
+
+    renderFinancePage();
+
+    const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
+    const commissionInput = within(profilePanel).getByLabelText(/commission %/i);
+    await userEvent.clear(commissionInput);
+    await userEvent.type(commissionInput, '15');
+    await userEvent.click(screen.getByRole('button', { name: /save vendor profile/i }));
+
+    await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
+    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
   });
 });

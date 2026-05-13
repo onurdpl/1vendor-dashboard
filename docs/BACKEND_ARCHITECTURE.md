@@ -829,6 +829,9 @@ Frontend note:
   - `amount`: summed vendor allocation line amount
   - duplicate webhook delivery updates the same row rather than creating another ledger record
 - Shopify reconciliation repairs missing sale ledger rows for already-ingested allocations without changing canonical Shopify state.
+- Return request ingestion uses local ingested order line-item vendor mapping first and falls back to Shopify `seller_info` only when local mapping is unavailable.
+  - This keeps real return requests visible when the original order allocation exists but Shopify metafield re-fetch is unavailable later.
+  - Pending return requests do not create finance refund ledger rows; `refunds/create` remains the source for posted refund finance impact.
 - `GET /finance` remains vendor-scoped and now includes:
   - `profile`
   - summary commission VAT and shipping deduction totals
