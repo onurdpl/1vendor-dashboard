@@ -475,7 +475,8 @@ export type OperationsQueueItemType =
   | 'vendor_blocked'
   | 'awaiting_shipment'
   | 'refund_attention'
-  | 'operational_signal';
+  | 'operational_signal'
+  | 'automation_action';
 export type OperationsQueueSeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export type OperationsQueueItem = {

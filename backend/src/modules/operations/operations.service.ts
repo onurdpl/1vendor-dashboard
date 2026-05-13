@@ -6,6 +6,7 @@ import type {
 } from './operations.types.js';
 import { listOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
+import { listAutomationActions } from '../automation/automation-actions.service.js';
 
 function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   const fulfillment = fulfillmentStatus.trim().toLowerCase();
@@ -34,6 +35,7 @@ function createSummary(items: OperationsQueueItemDto[]): OperationsQueueDashboar
     awaitingShipment: items.filter((item) => item.type === 'awaiting_shipment').length,
     refundAttention: items.filter((item) => item.type === 'refund_attention').length,
     operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
+    automationActions: items.filter((item) => item.type === 'automation_action').length,
   };
 }
 
@@ -221,6 +223,31 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       createdAt: signal.triggeredAt,
       actionLabel: signal.suggestedAction ? 'Review signal' : 'Inspect signal',
       destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
+    });
+  }
+
+  const automationDashboard = await listAutomationActions();
+  for (const action of automationDashboard.actions) {
+    if (action.status !== 'suggested' && action.status !== 'pending' && action.status !== 'failed') {
+      continue;
+    }
+
+    items.push({
+      id: `op-automation-${action.id}`,
+      type: 'automation_action',
+      severity: action.executionMode === 'auto_safe' ? 'attention' : 'normal',
+      title: action.title,
+      description: action.description,
+      vendorId: action.vendorId ?? 'platform',
+      vendorName: action.vendorId ?? 'Platform',
+      relatedOrderId: action.allocationId,
+      relatedShopifyOrderId: null,
+      relatedReturnId: null,
+      relatedRefundId: null,
+      status: action.status,
+      createdAt: action.createdAt,
+      actionLabel: action.executionMode === 'auto_safe' ? 'Review safe action' : 'Review suggestion',
+      destinationPath: '/admin/operations',
     });
   }
 

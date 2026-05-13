@@ -10,6 +10,7 @@ import {
 import { prisma } from '../../db/prisma.js';
 import { listOperationalSignals } from '../rules/rules.service.js';
 import type { AuthRole } from '../auth/auth.types.js';
+import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import type { NotificationIntentDto, NotificationsResponseDto } from './notifications.types.js';
 
 const VENDOR_SAFE_SOURCE_AREAS = new Set<OperationalSignalSourceArea>([
@@ -125,6 +126,9 @@ async function upsertNotification(input: {
 
 async function generateNotificationsForSignals(options: { role: AuthRole; vendorId?: string | null }) {
   if (options.role === 'admin') {
+    await generateAutomationActionsForSignals({
+      includeNotifications: true,
+    });
     await listOperationalSignals({ includeInternal: true });
     const signals = await prisma.operationalSignal.findMany({
       where: {

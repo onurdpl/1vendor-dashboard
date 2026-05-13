@@ -22,6 +22,10 @@ vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
   listOperationalSignals: listOperationalSignalsMock,
 }));
 
+vi.mock('../backend/src/modules/automation/automation-actions.service.js', () => ({
+  generateAutomationActionsForSignals: vi.fn(),
+}));
+
 const { listNotificationsForUser, updateNotificationLifecycle } = await import(
   '../backend/src/modules/notifications/notifications.service.js'
 );

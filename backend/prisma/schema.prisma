@@ -145,6 +145,35 @@ enum NotificationRecipientRole {
   VENDOR
 }
 
+enum AutomationActionStatus {
+  PENDING
+  SUGGESTED
+  EXECUTED
+  SKIPPED
+  FAILED
+  CANCELLED
+}
+
+enum AutomationExecutionMode {
+  MANUAL
+  ASSISTED
+  AUTO_SAFE
+}
+
+enum AutomationActionType {
+  SUGGEST_REPLAY_WEBHOOK
+  SUGGEST_RECONCILIATION
+  SUGGEST_PAYOUT_BATCH_REVIEW
+  SUGGEST_SHIPPING_COST_ATTACHMENT
+  SUGGEST_STALE_FULFILLMENT_REVIEW
+  SUGGEST_PAYOUT_REVIEW
+  SUGGEST_NEGATIVE_PAYOUT_INVESTIGATION
+  SUGGEST_DEAD_LETTER_INVESTIGATION
+  AUTO_CREATE_RECONCILIATION_CANDIDATE
+  AUTO_GENERATE_REMINDER_NOTIFICATION
+  AUTO_PRIORITIZE_STALE_QUEUE_ITEM
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -172,6 +201,7 @@ model Vendor {
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
   operationalSignals    OperationalSignal[]
+  automationActions     AutomationAction[]
   notifications         NotificationIntent[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
@@ -265,6 +295,7 @@ model VendorAllocation {
   operationalJobs          OperationalJob[]
   shippingCosts            ShipmentShippingCost[]
   operationalSignals       OperationalSignal[]
+  automationActions        AutomationAction[]
 }
 
 model VendorAllocationLineItem {
@@ -418,6 +449,7 @@ model FinanceLedgerEntry {
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   payoutBatchLines              PayoutBatchLine[]
   operationalSignals            OperationalSignal[]
+  automationActions             AutomationAction[]
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
@@ -463,6 +495,7 @@ model PayoutBatch {
   vendor                  Vendor            @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   lines                   PayoutBatchLine[]
   operationalSignals      OperationalSignal[]
+  automationActions       AutomationAction[]
 
   @@index([vendorId, status])
   @@index([createdAt])
@@ -531,6 +564,7 @@ model OperationalJob {
   refundRecord         RefundRecord?        @relation(fields: [refundRecordId], references: [id], onDelete: SetNull)
   returnRecord         ReturnRecord?        @relation(fields: [returnRecordId], references: [id], onDelete: SetNull)
   operationalSignals   OperationalSignal[]
+  automationActions    AutomationAction[]
 
   @@index([status, scheduledAt])
   @@index([status, nextRetryAt])
@@ -566,6 +600,7 @@ model OperationalSignal {
   payoutBatch          PayoutBatch?                @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
   operationalJob       OperationalJob?             @relation(fields: [operationalJobId], references: [id], onDelete: SetNull)
   notifications        NotificationIntent[]
+  automationActions    AutomationAction[]
 
   @@index([status, severity])
   @@index([vendorId, status])
@@ -593,6 +628,37 @@ model NotificationIntent {
   vendor        Vendor?                   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([recipientRole, status])
+  @@index([vendorId, status])
+  @@index([signalId])
+  @@index([createdAt])
+}
+
+model AutomationAction {
+  id                   String                  @id
+  signalId             String?
+  type                 AutomationActionType
+  status               AutomationActionStatus  @default(SUGGESTED)
+  executionMode        AutomationExecutionMode @default(MANUAL)
+  vendorId             String?
+  allocationId         String?
+  financeLedgerEntryId String?
+  payoutBatchId        String?
+  operationalJobId     String?
+  title                String
+  description          String
+  resultSummary        String?
+  executedAt           DateTime?
+  metadata             Json?
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  signal               OperationalSignal?      @relation(fields: [signalId], references: [id], onDelete: SetNull)
+  vendor               Vendor?                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  allocation           VendorAllocation?       @relation(fields: [allocationId], references: [id], onDelete: SetNull)
+  financeLedgerEntry   FinanceLedgerEntry?     @relation(fields: [financeLedgerEntryId], references: [id], onDelete: SetNull)
+  payoutBatch          PayoutBatch?            @relation(fields: [payoutBatchId], references: [id], onDelete: SetNull)
+  operationalJob       OperationalJob?         @relation(fields: [operationalJobId], references: [id], onDelete: SetNull)
+
+  @@index([status, type])
   @@index([vendorId, status])
   @@index([signalId])
   @@index([createdAt])

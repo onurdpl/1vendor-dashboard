@@ -3,7 +3,8 @@ export type OperationsQueueItemType =
   | 'vendor_blocked'
   | 'awaiting_shipment'
   | 'refund_attention'
-  | 'operational_signal';
+  | 'operational_signal'
+  | 'automation_action';
 
 export type OperationsQueueSeverity = 'critical' | 'warning' | 'attention' | 'normal';
 
@@ -36,6 +37,7 @@ export type OperationsQueueSummaryDto = {
   awaitingShipment: number;
   refundAttention: number;
   operationalSignals: number;
+  automationActions: number;
 };
 
 export type OperationsQueueDashboardDto = {

@@ -1093,3 +1093,40 @@ Frontend note:
 - Vendor users only see vendor-safe, vendor-scoped business SLA signals. Diagnostics and reconciliation internals remain admin-only.
 - Notification integration remains in-app only through Phase 19B `NotificationIntent` generation. No external email, Slack, SMS, webhook, or auto-remediation behavior was added.
 - Phase 19C does not mutate finance snapshots, payout batches, fulfillment state, reconciliation truth, or Shopify state.
+
+## Automation Actions Foundation (Phase 19D)
+- `AutomationAction` stores safe operator-assist suggestions generated from active operational signals.
+- Automation action statuses:
+  - `PENDING`
+  - `SUGGESTED`
+  - `EXECUTED`
+  - `SKIPPED`
+  - `FAILED`
+  - `CANCELLED`
+- Execution modes:
+  - `MANUAL`
+  - `ASSISTED`
+  - `AUTO_SAFE`
+- Starter action types cover:
+  - replay/recover investigation suggestions
+  - reconciliation suggestions
+  - payout batch review suggestions
+  - shipping cost attachment suggestions
+  - stale fulfillment review suggestions
+  - negative payout investigation suggestions
+  - dead-letter investigation suggestions
+  - bounded auto-safe reconciliation candidate creation
+  - reminder notification and queue prioritization intents
+- Action ids are deterministic from action type and source signal id, so repeated signal evaluation updates the same automation action instead of creating duplicates.
+- Admin endpoints:
+  - `GET /admin/automation-actions`
+  - `POST /admin/automation-actions/:actionId/execute`
+- Supported execution requests:
+  - `execute_safe`
+  - `mark_handled`
+  - `skip`
+  - `cancel`
+- Phase 19D `execute_safe` is intentionally narrow. It can create a reconciliation `OperationalJob` candidate for an action with allocation/job linkage. It does not run payout execution, refunds, cancellations, Shopify mutation, or finance snapshot mutation.
+- Automation actions are folded into the admin operations queue as `automation_action` items and can create admin in-app notification reminders.
+- Vendor users do not execute automation actions. Vendor-safe business visibility remains controlled by existing signal and notification routing rules.
+- Phase 19D does not add external integrations, AI decisioning, destructive automation, or customer-facing actions.

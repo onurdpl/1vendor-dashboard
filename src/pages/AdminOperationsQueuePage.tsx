@@ -45,6 +45,9 @@ function classifyOperationalSource(item: OperationsQueueItem) {
       ? 'Pending return request'
       : 'Refund attention';
   }
+  if (item.type === 'automation_action') {
+    return 'Automation suggestion';
+  }
   if (haystack.includes('webhook') || haystack.includes('reconciliation') || haystack.includes('sync failed')) {
     return 'Webhook/reconciliation issue';
   }
@@ -61,6 +64,9 @@ function getLifecycleLabel(type: string) {
   }
   if (type === 'pending_reassignment' || type === 'vendor_blocked') {
     return 'Allocation lifecycle';
+  }
+  if (type === 'automation_action') {
+    return 'Operator assist';
   }
   return 'Operational lifecycle';
 }
@@ -84,6 +90,9 @@ function getActionLabel(type: string, fallback?: string) {
   }
   if (type === 'awaiting_shipment' || type === 'refund_attention') {
     return 'View Shopify order';
+  }
+  if (type === 'automation_action') {
+    return 'Review suggestion';
   }
   return fallback ?? 'View details';
 }

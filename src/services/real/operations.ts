@@ -13,6 +13,7 @@ type OperationsResponseDto = {
     awaitingShipment: number;
     refundAttention: number;
     operationalSignals?: number;
+    automationActions?: number;
   };
   items: Array<{
     id: string;
