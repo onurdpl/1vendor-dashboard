@@ -106,6 +106,10 @@ function getDashboardKpiHelper(label: string) {
   return 'Current scope';
 }
 
+function formatPriorityLabel(tone: string) {
+  return tone.replace(/^severity-/, '').replaceAll('-', ' ');
+}
+
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
@@ -270,7 +274,6 @@ export function DashboardPage() {
     );
   }
 
-  const awaitingShipment = getPriorityValue(dashboard.priorityWork, 'Awaiting shipment');
   const blockedAllocations = getPriorityValue(dashboard.priorityWork, 'Blocked allocations');
   const refundAttention = getPriorityValue(dashboard.priorityWork, 'Refund attention');
   const needsAttention = blockedAllocations + refundAttention;
@@ -316,19 +319,36 @@ export function DashboardPage() {
             title="Operational priority queue"
             description="High priority operational items that require attention."
           >
-            <div className="dashboard-priority-list dashboard-table-like-list">
-              {dashboard.priorityWork.map((item) => (
-                <article key={item.label} className="dashboard-priority-row">
-                  <header>
+            {dashboard.priorityWork.length === 0 ? (
+              <EmptyStatePanel title="No records available" description="No records available." />
+            ) : (
+              <div className="dashboard-priority-table">
+                <div className="dashboard-priority-head" aria-hidden="true">
+                  <span>Priority</span>
+                  <span>Type</span>
+                  <span>Count</span>
+                  <span>Oldest</span>
+                  <span>Status</span>
+                  <span>Action</span>
+                </div>
+                {dashboard.priorityWork.map((item) => (
+                  <article key={item.label} className="dashboard-priority-row">
+                    <div className="dashboard-priority-cell">
+                      <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
+                      <span>{formatPriorityLabel(item.tone)}</span>
+                    </div>
                     <div>
                       <strong>{item.label}</strong>
                       {item.description ? <p>{item.description}</p> : null}
                     </div>
-                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
-                  </header>
-                </article>
-              ))}
-            </div>
+                    <strong className="dashboard-count-value">{item.value}</strong>
+                    <span className="dashboard-muted-value">—</span>
+                    <span className="dashboard-muted-value">—</span>
+                    <span className="dashboard-muted-value">—</span>
+                  </article>
+                ))}
+              </div>
+            )}
           </OperationalSection>
 
           <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
@@ -339,7 +359,14 @@ export function DashboardPage() {
                 {dashboard.recentActivity.map((item) => (
                   <li key={item}>
                     <span className="dashboard-event-dot" aria-hidden="true" />
-                    <span>{item}</span>
+                    <div className="dashboard-event-copy">
+                      <strong>{item}</strong>
+                      <span>—</span>
+                    </div>
+                    <div className="dashboard-event-meta">
+                      <StatusBadge tone="info">—</StatusBadge>
+                      <span>—</span>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -357,23 +384,23 @@ export function DashboardPage() {
                 {notificationView.notifications.length === 0 ? (
                   <EmptyStatePanel title="No active notifications" description="No active notifications." />
                 ) : (
-                  <div className="notification-list">
+                  <div className="notification-list dashboard-notification-list">
                     {notificationView.notifications.slice(0, 6).map((notification) => (
                       <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
-                        <header>
-                          <div>
-                            <div className="notification-title-row">
-                              <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
-                              <strong>{notification.title}</strong>
-                            </div>
-                            <p>{notification.message}</p>
+                        <div className="dashboard-notification-severity">
+                          <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
+                        </div>
+                        <div className="dashboard-notification-copy">
+                          <strong>{notification.title}</strong>
+                          <p>{notification.message}</p>
+                          <div className="notification-meta">
+                            <span>{formatNotificationSource(notification)}</span>
+                            {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
                           </div>
-                          <span className="notification-status">{notification.status}</span>
-                        </header>
-                        <div className="notification-meta">
-                          <span>{formatNotificationSource(notification)}</span>
+                        </div>
+                        <div className="dashboard-notification-state">
                           <span>{new Date(notification.createdAt).toLocaleString()}</span>
-                          {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
+                          <span className="notification-status">{notification.status}</span>
                         </div>
                         <div className="notification-actions">
                           <button

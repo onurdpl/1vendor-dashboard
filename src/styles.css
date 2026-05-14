@@ -3298,10 +3298,6 @@ h3 {
   font-size: 0.78rem;
 }
 
-.dashboard-table-like-list .dashboard-priority-row {
-  border-radius: 10px;
-}
-
 .dashboard-attention-row {
   display: flex;
   justify-content: space-between;
@@ -3318,12 +3314,108 @@ h3 {
   font-size: 0.76rem;
 }
 
+.dashboard-priority-table {
+  display: grid;
+  overflow-x: auto;
+}
+
+.dashboard-priority-head,
+.dashboard-priority-row {
+  display: grid;
+  grid-template-columns: minmax(96px, 0.72fr) minmax(190px, 1.7fr) minmax(52px, 0.42fr) minmax(70px, 0.52fr) minmax(70px, 0.52fr) minmax(62px, 0.45fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 680px;
+}
+
+.dashboard-priority-head {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px 10px 0 0;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dashboard-priority-row {
+  min-height: 58px;
+  padding: 10px;
+  border-right: 1px solid #e2e8f0;
+  border-bottom: 1px solid #e2e8f0;
+  border-left: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.dashboard-priority-row:last-child {
+  border-radius: 0 0 10px 10px;
+}
+
+.dashboard-priority-row strong {
+  color: #0f172a;
+  font-size: 0.86rem;
+}
+
+.dashboard-priority-row p {
+  margin: 3px 0 0;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.dashboard-priority-cell {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.dashboard-priority-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.14);
+}
+
+.dashboard-priority-dot.severity-warning {
+  background: #f97316;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.14);
+}
+
+.dashboard-priority-dot.severity-attention {
+  background: #f59e0b;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.14);
+}
+
+.dashboard-priority-dot.severity-normal {
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.14);
+}
+
+.dashboard-count-value {
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-muted-value {
+  color: #94a3b8;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .dashboard-event-list li {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  min-height: 42px;
+  grid-template-columns: 30px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: flex-start;
+  min-height: 54px;
+  padding: 10px 0;
 }
 
 .dashboard-event-dot {
@@ -3334,7 +3426,38 @@ h3 {
   box-shadow: inset 0 0 0 8px #eff6ff;
 }
 
+.dashboard-event-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboard-event-copy strong {
+  color: #0f172a;
+  font-size: 0.86rem;
+  line-height: 1.35;
+}
+
+.dashboard-event-copy span,
+.dashboard-event-meta span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+
+.dashboard-event-meta {
+  display: grid;
+  gap: 5px;
+  justify-items: end;
+  min-width: 84px;
+}
+
 .dashboard-enterprise-shell .notification-card {
+  display: grid;
+  grid-template-columns: minmax(78px, 0.54fr) minmax(0, 1.7fr) minmax(150px, 0.85fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
   border-color: #e2e8f0;
   border-radius: 12px;
   background: #ffffff;
@@ -3343,6 +3466,40 @@ h3 {
 
 .dashboard-enterprise-shell .notification-card.is-read {
   background: #f8fafc;
+}
+
+.dashboard-notification-list {
+  gap: 6px;
+}
+
+.dashboard-notification-copy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dashboard-notification-copy strong {
+  color: #0f172a;
+  font-size: 0.84rem;
+}
+
+.dashboard-notification-copy p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.dashboard-notification-state {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.dashboard-enterprise-shell .notification-actions {
+  justify-content: flex-end;
 }
 
 .dashboard-workspace-status-grid {
@@ -3390,6 +3547,17 @@ h3 {
 
   .dashboard-workspace-status-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-enterprise-shell .notification-card {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: start;
+  }
+
+  .dashboard-notification-state,
+  .dashboard-enterprise-shell .notification-actions {
+    justify-content: start;
+    justify-items: start;
   }
 }
 
