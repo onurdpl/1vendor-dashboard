@@ -63,6 +63,49 @@ function formatNotificationSource(notification: NotificationIntent) {
   return readNotificationMetadata(notification, 'signalSourceArea')?.toLowerCase().replaceAll('_', ' ') ?? 'signal';
 }
 
+function getDashboardKpiTone(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('order') || normalized.includes('vendor')) {
+    return 'orders';
+  }
+  if (normalized.includes('awaiting') || normalized.includes('action') || normalized.includes('payout')) {
+    return 'action';
+  }
+  if (normalized.includes('refund') || normalized.includes('healthy')) {
+    return 'healthy';
+  }
+  if (normalized.includes('blocked')) {
+    return 'blocked';
+  }
+  if (normalized.includes('attention')) {
+    return 'attention';
+  }
+  return 'scope';
+}
+
+function getDashboardKpiHelper(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('order') || normalized.includes('vendor')) {
+    return 'From vendor scope';
+  }
+  if (normalized.includes('awaiting') || normalized.includes('action')) {
+    return 'Needs attention';
+  }
+  if (normalized.includes('refund')) {
+    return 'Current refund total';
+  }
+  if (normalized.includes('blocked')) {
+    return 'Requires review';
+  }
+  if (normalized.includes('payout')) {
+    return 'Current estimate';
+  }
+  if (normalized.includes('attention')) {
+    return 'Pending review';
+  }
+  return 'Current scope';
+}
+
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
@@ -231,46 +274,9 @@ export function DashboardPage() {
   const blockedAllocations = getPriorityValue(dashboard.priorityWork, 'Blocked allocations');
   const refundAttention = getPriorityValue(dashboard.priorityWork, 'Refund attention');
   const needsAttention = blockedAllocations + refundAttention;
-  const vendorOrders = dashboard.stats.find((stat) => stat.label === 'Vendor orders')?.value ?? '—';
   const attentionItems = dashboard.priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
   const health = dashboard.observabilitySummary?.health ?? 'Unknown';
-  const dashboardKpis = [
-    {
-      label: 'Vendor orders',
-      value: vendorOrders,
-      detail: 'From vendor scope',
-      tone: 'info',
-      icon: 'O',
-    },
-    {
-      label: 'Awaiting action',
-      value: String(awaitingShipment),
-      detail: 'Needs attention',
-      tone: 'warning',
-      icon: 'A',
-    },
-    {
-      label: 'Refund amount',
-      value: dashboard.financeSnapshot?.refunds ?? '—',
-      detail: 'Across refunds',
-      tone: 'success',
-      icon: 'TRY',
-    },
-    {
-      label: 'Blocked automations',
-      value: String(blockedAllocations),
-      detail: 'Require attention',
-      tone: 'danger',
-      icon: '!',
-    },
-    {
-      label: 'Attention items',
-      value: String(needsAttention),
-      detail: 'Pending review',
-      tone: 'attention',
-      icon: '^',
-    },
-  ];
+  const dashboardKpis = dashboard.stats.slice(0, 5);
 
   return (
     <section className="op-page dashboard-command-center dashboard-enterprise-shell">
@@ -296,11 +302,10 @@ export function DashboardPage() {
 
       <div className="dashboard-enterprise-kpi-row">
         {dashboardKpis.map((stat) => (
-          <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${stat.tone}`}>
-            <div className="dashboard-kpi-icon" aria-hidden="true">{stat.icon}</div>
+          <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
             <span>{stat.label}</span>
             <strong>{stat.value}</strong>
-            <small>{stat.detail}</small>
+            <small>{getDashboardKpiHelper(stat.label)}</small>
           </article>
         ))}
       </div>
