@@ -7,6 +7,7 @@ import {
 } from './payout-calculator.js';
 import type {
   FinanceDashboardDto,
+  InvoiceExecutionReferenceDto,
   FinanceRecordDto,
   PayoutBatchDto,
   PayoutBatchReferenceDto,
@@ -552,6 +553,32 @@ function mapPayoutBatchReference(line?: {
   };
 }
 
+function mapInvoiceExecutionReference(execution?: {
+  id: string;
+  provider: string;
+  status: string;
+  providerInvoiceGuid: string | null;
+  providerInvoiceNo: string | null;
+  providerPdfUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+}): InvoiceExecutionReferenceDto | null {
+  if (!execution) {
+    return null;
+  }
+
+  return {
+    id: execution.id,
+    provider: execution.provider.trim().toLowerCase() as InvoiceExecutionReferenceDto['provider'],
+    status: execution.status.trim().toLowerCase() as InvoiceExecutionReferenceDto['status'],
+    providerInvoiceGuid: execution.providerInvoiceGuid,
+    providerInvoiceNo: execution.providerInvoiceNo,
+    providerPdfUrl: execution.providerPdfUrl,
+    createdAt: execution.createdAt.toISOString(),
+    updatedAt: execution.updatedAt.toISOString(),
+  };
+}
+
 export async function getVendorFinanceDashboard(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -650,6 +677,12 @@ export async function getVendorFinanceDashboard(
           include: {
             payoutBatch: true,
           },
+          orderBy: {
+            createdAt: 'desc',
+          },
+          take: 1,
+        },
+        invoiceExecutions: {
           orderBy: {
             createdAt: 'desc',
           },
@@ -837,6 +870,7 @@ export async function getVendorFinanceDashboard(
       payoutCalculation: mapCalculation(payoutCalculation, entryProfile, entry, fulfilled),
       settlement,
       payoutBatch: mapPayoutBatchReference(entry.payoutBatchLines?.[0]),
+      invoiceExecution: mapInvoiceExecutionReference(entry.invoiceExecutions?.[0]),
     };
   });
 

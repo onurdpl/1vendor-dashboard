@@ -237,6 +237,17 @@ export type PayoutBatch = {
   warning: string | null;
 };
 
+export type InvoiceExecutionReference = {
+  id: string;
+  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
+  providerInvoiceGuid: string | null;
+  providerInvoiceNo: string | null;
+  providerPdfUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type PayoutBatchSummary = {
   eligibleRowCount: number;
   eligibleNetAmount: string;
@@ -302,6 +313,7 @@ export type FinanceTransaction = {
     netAmount: string;
     createdAt: string;
   } | null;
+  invoiceExecution?: InvoiceExecutionReference | null;
 };
 
 export type FinanceDashboard = {

@@ -108,6 +108,17 @@ export type PayoutBatchReferenceDto = {
   createdAt: string;
 };
 
+export type InvoiceExecutionReferenceDto = {
+  id: string;
+  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
+  providerInvoiceGuid: string | null;
+  providerInvoiceNo: string | null;
+  providerPdfUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type FinanceRecordDto = {
   id: string;
   type: string;
@@ -122,6 +133,7 @@ export type FinanceRecordDto = {
   payoutCalculation: PayoutCalculationDto | null;
   settlement: SettlementDto;
   payoutBatch: PayoutBatchReferenceDto | null;
+  invoiceExecution: InvoiceExecutionReferenceDto | null;
 };
 
 export type FinanceDashboardDto = {

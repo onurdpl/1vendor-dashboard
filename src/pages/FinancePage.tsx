@@ -21,7 +21,14 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
-import { attachShippingCost, getFinanceDashboard, preparePayoutBatch, updateVendorFinancialProfile } from '../features/finance/api';
+import {
+  attachShippingCost,
+  createInvoiceExecution,
+  getFinanceDashboard,
+  preparePayoutBatch,
+  retryInvoiceExecution,
+  updateVendorFinancialProfile,
+} from '../features/finance/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
@@ -135,6 +142,17 @@ function getPayoutBatchStatusLabel(status?: string) {
     .join(' ');
 }
 
+function getInvoiceStatusLabel(status?: string) {
+  if (!status) {
+    return 'Not created';
+  }
+
+  return status
+    .split('_')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
 function getVendorTimelineItems(record: FinanceTransaction) {
   const settlement = record.settlement;
   return [
@@ -232,6 +250,40 @@ export function FinancePage() {
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
+    },
+  );
+  const createInvoiceMutation = useMutationAction(
+    (financeLedgerEntryId: string) => createInvoiceExecution(financeLedgerEntryId),
+    {
+      invalidateQueryKeys: [queryKeys.finance.summary()],
+      onSuccess: async (execution) => {
+        await refetch();
+        showFeedback(
+          execution.status === 'created'
+            ? 'Invoice execution created for this ledger row.'
+            : `Invoice execution recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
+          execution.status === 'failed' ? 'error' : 'success',
+        );
+      },
+      onError: (mutationError) =>
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Invoice execution could not be created.', 'error'),
+    },
+  );
+  const retryInvoiceMutation = useMutationAction(
+    (invoiceExecutionId: string) => retryInvoiceExecution(invoiceExecutionId),
+    {
+      invalidateQueryKeys: [queryKeys.finance.summary()],
+      onSuccess: async (execution) => {
+        await refetch();
+        showFeedback(
+          execution.status === 'created'
+            ? 'Invoice execution retry created the provider invoice.'
+            : `Invoice execution retry recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
+          execution.status === 'failed' ? 'error' : 'success',
+        );
+      },
+      onError: (mutationError) =>
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Invoice execution could not be retried.', 'error'),
     },
   );
 
@@ -620,6 +672,11 @@ export function FinancePage() {
             <>
               <div className="op-detail-status-row">
                 <StatusBadge tone={getStatusTone(selectedRecord.status)}>{normalizeFinanceStatus(selectedRecord.status)}</StatusBadge>
+                {selectedRecord.invoiceExecution ? (
+                  <StatusBadge tone={selectedRecord.invoiceExecution.status === 'created' ? 'success' : selectedRecord.invoiceExecution.status === 'failed' ? 'danger' : 'attention'}>
+                    Invoice {getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)}
+                  </StatusBadge>
+                ) : null}
                 <strong
                   className={
                     isRefundRecord(selectedRecord) || selectedRecord.category === 'Adjustment'
@@ -688,6 +745,60 @@ export function FinancePage() {
                 <MetadataRow label="Batch reference" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
                   <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
                 </MetadataGroup>
+              <MetadataGroup title="Customer invoice">
+                <MetadataRow label="Provider" value={selectedRecord.invoiceExecution?.provider ?? 'BizimHesap'} />
+                <MetadataRow label="Status" value={getInvoiceStatusLabel(selectedRecord.invoiceExecution?.status)} />
+                <MetadataRow label="Invoice GUID" value={selectedRecord.invoiceExecution?.providerInvoiceGuid ?? 'Not created'} />
+                <MetadataRow label="Invoice No" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not assigned'} />
+                <MetadataRow
+                  label="PDF"
+                  value={
+                    selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                      <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">Open invoice PDF</a>
+                    ) : (
+                      'Not available'
+                    )
+                  }
+                />
+                <MetadataRow
+                  label="Executed at"
+                  value={selectedRecord.invoiceExecution ? formatDate(selectedRecord.invoiceExecution.updatedAt) : 'Not executed'}
+                />
+              </MetadataGroup>
+              {isAdmin && selectedRecord.category === 'Invoice' ? (
+                <div className="op-panel-section">
+                  <h4>Invoice execution</h4>
+                  <p className="page-description">
+                    Customer invoice execution is merchant-of-record accounting output. Ledger snapshots remain canonical.
+                  </p>
+                  <OperationalActionGroup>
+                    <button
+                      type="button"
+                      className="button button-primary button-compact"
+                      disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
+                      onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
+                    >
+                      {createInvoiceMutation.isPending ? 'Creating...' : 'Create invoice'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      disabled={
+                        retryInvoiceMutation.isPending ||
+                        !selectedRecord.invoiceExecution ||
+                        !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
+                      }
+                      onClick={() => {
+                        if (selectedRecord.invoiceExecution) {
+                          retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
+                        }
+                      }}
+                    >
+                      {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry failed invoice'}
+                    </button>
+                  </OperationalActionGroup>
+                </div>
+              ) : null}
               {isVendorUser ? null : (
                 <>
                   <MetadataGroup title="Shopify identifiers">

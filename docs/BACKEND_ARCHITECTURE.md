@@ -1180,3 +1180,36 @@ Frontend note:
   - no Slack or real outbound email provider
   - no AI action execution
   - no destructive remediation workflows
+
+## Invoice Execution Foundation (Phase 20A)
+- Phase 20A introduces merchant-of-record customer invoice execution as a provider-backed accounting output.
+- The platform remains canonical operational and finance truth. External accounting systems execute invoice documents and return provider identifiers.
+- `InvoiceExecution` links provider execution state to immutable finance sale ledger rows.
+- Provider enum:
+  - `BIZIMHESAP`
+  - future-ready `PARASUT`
+  - future-ready `BIRFATURA`
+- Status enum:
+  - `PENDING`
+  - `CREATED`
+  - `FAILED`
+  - `CANCELLED`
+  - `UNKNOWN`
+- Duplicate prevention is enforced with a unique finance-ledger/provider key.
+- Admin invoice endpoints:
+  - `POST /admin/invoices/create`
+  - `POST /admin/invoices/:id/retry`
+- Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, status, GUID, invoice number, PDF link, and execution timestamps.
+- Invoice execution configuration is disabled by default:
+  - `INVOICE_EXECUTION_ENABLED=false`
+  - `INVOICE_PROVIDER=bizimhesap`
+  - `BIZIMHESAP_ADD_INVOICE_URL`
+  - `BIZIMHESAP_ACCESS_TOKEN`
+- Phase 20A preserves these boundaries:
+  - no automatic invoice creation
+  - no invoice cancellation execution
+  - no credit note/refund invoice flow
+  - no supplier/procurement accounting
+  - no tax engine
+  - no payment reconciliation
+  - no mutation of immutable finance snapshots, settlement state, payout batches, or Shopify truth

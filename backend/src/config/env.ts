@@ -28,6 +28,10 @@ export type AppEnv = {
   EMAIL_PROVIDER: 'noop' | 'console';
   EMAIL_FROM?: string;
   EMAIL_ADMIN_RECIPIENTS: string[];
+  INVOICE_EXECUTION_ENABLED: boolean;
+  INVOICE_PROVIDER: 'bizimhesap';
+  BIZIMHESAP_ADD_INVOICE_URL?: string;
+  BIZIMHESAP_ACCESS_TOKEN?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -105,6 +109,15 @@ function parseEmailProvider(value: string | undefined): AppEnv['EMAIL_PROVIDER']
   throw new Error('Invalid EMAIL_PROVIDER value. Expected noop or console.');
 }
 
+function parseInvoiceProvider(value: string | undefined): AppEnv['INVOICE_PROVIDER'] {
+  const normalized = (value || 'bizimhesap').trim().toLowerCase();
+  if (normalized === 'bizimhesap') {
+    return normalized;
+  }
+
+  throw new Error('Invalid INVOICE_PROVIDER value. Expected bizimhesap.');
+}
+
 function parseCommaList(value: string | undefined) {
   return (value || '')
     .split(',')
@@ -178,5 +191,9 @@ export function loadEnv(): AppEnv {
     EMAIL_PROVIDER: parseEmailProvider(process.env.EMAIL_PROVIDER),
     EMAIL_FROM: process.env.EMAIL_FROM || undefined,
     EMAIL_ADMIN_RECIPIENTS: parseCommaList(process.env.EMAIL_ADMIN_RECIPIENTS),
+    INVOICE_EXECUTION_ENABLED: parseBoolean(process.env.INVOICE_EXECUTION_ENABLED, false),
+    INVOICE_PROVIDER: parseInvoiceProvider(process.env.INVOICE_PROVIDER),
+    BIZIMHESAP_ADD_INVOICE_URL: process.env.BIZIMHESAP_ADD_INVOICE_URL || undefined,
+    BIZIMHESAP_ACCESS_TOKEN: process.env.BIZIMHESAP_ACCESS_TOKEN || undefined,
   };
 }

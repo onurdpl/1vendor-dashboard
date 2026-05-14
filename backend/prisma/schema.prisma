@@ -175,6 +175,20 @@ enum AutomationActionType {
   AUTO_PRIORITIZE_STALE_QUEUE_ITEM
 }
 
+enum InvoiceExecutionProvider {
+  BIZIMHESAP
+  PARASUT
+  BIRFATURA
+}
+
+enum InvoiceExecutionStatus {
+  PENDING
+  CREATED
+  FAILED
+  CANCELLED
+  UNKNOWN
+}
+
 model User {
   id           String                        @id @default(cuid())
   email        String                        @unique
@@ -449,11 +463,31 @@ model FinanceLedgerEntry {
   vendorAllocation              VendorAllocation?      @relation(fields: [vendorAllocationId], references: [id], onDelete: SetNull)
   vendor                        Vendor                 @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   payoutBatchLines              PayoutBatchLine[]
+  invoiceExecutions             InvoiceExecution[]
   operationalSignals            OperationalSignal[]
   automationActions             AutomationAction[]
 
   @@index([vendorId, entryType])
   @@index([vendorId, settlementStatus])
+}
+
+model InvoiceExecution {
+  id                   String                   @id @default(cuid())
+  financeLedgerEntryId String
+  provider             InvoiceExecutionProvider
+  providerInvoiceGuid  String?
+  providerInvoiceNo    String?
+  providerPdfUrl       String?
+  status               InvoiceExecutionStatus  @default(PENDING)
+  requestSnapshot      Json
+  responseSnapshot     Json?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  financeLedgerEntry   FinanceLedgerEntry       @relation(fields: [financeLedgerEntryId], references: [id], onDelete: Cascade)
+
+  @@unique([financeLedgerEntryId, provider])
+  @@index([provider, status])
+  @@index([createdAt])
 }
 
 model ShipmentShippingCost {

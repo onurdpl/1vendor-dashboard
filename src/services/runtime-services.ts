@@ -195,6 +195,38 @@ export const runtimeServices = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }),
+    createInvoiceExecution: (financeLedgerEntryId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.createInvoiceExecution(financeLedgerEntryId)
+        : Promise.resolve({
+            id: `mock-invoice-bizimhesap-${financeLedgerEntryId}`,
+            financeLedgerEntryId,
+            provider: 'bizimhesap' as const,
+            providerInvoiceGuid: `mock-guid-${financeLedgerEntryId}`,
+            providerInvoiceNo: null,
+            providerPdfUrl: null,
+            status: 'created' as const,
+            requestSnapshot: {},
+            responseSnapshot: {},
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
+    retryInvoiceExecution: (invoiceExecutionId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.retryInvoiceExecution(invoiceExecutionId)
+        : Promise.resolve({
+            id: invoiceExecutionId,
+            financeLedgerEntryId: 'mock-ledger',
+            provider: 'bizimhesap' as const,
+            providerInvoiceGuid: `mock-guid-${invoiceExecutionId}`,
+            providerInvoiceNo: null,
+            providerPdfUrl: null,
+            status: 'created' as const,
+            requestSnapshot: {},
+            responseSnapshot: {},
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          }),
   },
   automation: {
     dashboard: () =>
