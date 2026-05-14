@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './DashboardPage';
 import type { DashboardOverview, NotificationIntent, NotificationsResponse } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
@@ -113,7 +113,26 @@ function renderDashboardPage() {
   );
 }
 
+function getNotificationCenter() {
+  const headings = screen.getAllByRole('heading', { name: 'Notification center' });
+  const heading = headings[headings.length - 1];
+  const section = heading.closest('section');
+  if (!section) {
+    throw new Error('Notification center section not found.');
+  }
+  return within(section);
+}
+
+function getNotificationSummaryValue(label: string) {
+  const labelNode = getNotificationCenter().getByText(label);
+  return labelNode.nextElementSibling?.textContent ?? '';
+}
+
 describe('DashboardPage command center', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     setToken('test-token');
@@ -202,10 +221,12 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     const readButtons = await screen.findAllByRole('button', { name: /mark as read/i });
+    expect(getNotificationSummaryValue('Unread')).toBe('1');
     await user.click(readButtons[0]);
 
     expect(markNotificationReadMock).toHaveBeenCalledWith('notif-1');
     expect(await screen.findByText('Notification marked as read.')).toBeInTheDocument();
+    expect(getNotificationSummaryValue('Unread')).toBe('0');
     expect(screen.getByText('read')).toBeInTheDocument();
     await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -222,7 +243,8 @@ describe('DashboardPage command center', () => {
 
     expect(dismissNotificationMock).toHaveBeenCalledWith('notif-1');
     expect(await screen.findByText('Notification dismissed.')).toBeInTheDocument();
-    expect(screen.getAllByText('No active notifications').length).toBeGreaterThan(0);
+    expect(getNotificationSummaryValue('Unread')).toBe('0');
+    expect(getNotificationCenter().getByText('No active notifications')).toBeInTheDocument();
     await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });

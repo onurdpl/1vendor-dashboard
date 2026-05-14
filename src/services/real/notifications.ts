@@ -6,9 +6,9 @@ export async function listNotifications(): Promise<NotificationsResponse> {
 }
 
 export async function markNotificationRead(notificationId: string): Promise<NotificationIntent> {
-  return apiClient.post<NotificationIntent>(`/notifications/${encodeURIComponent(notificationId)}/read`);
+  return apiClient.post<NotificationIntent>('/notifications/read', { notificationId });
 }
 
 export async function dismissNotification(notificationId: string): Promise<NotificationIntent> {
-  return apiClient.post<NotificationIntent>(`/notifications/${encodeURIComponent(notificationId)}/dismiss`);
+  return apiClient.post<NotificationIntent>('/notifications/dismiss', { notificationId });
 }

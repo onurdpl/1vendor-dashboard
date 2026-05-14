@@ -134,6 +134,16 @@ export function DashboardPage() {
 
   async function handleMarkNotificationRead(notificationId: string) {
     setPendingNotificationAction(`read:${notificationId}`);
+    const optimisticReadAt = new Date().toISOString();
+    setNotificationOverrides((current) => ({
+      ...current,
+      [notificationId]: {
+        ...current[notificationId],
+        status: 'read',
+        readAt: optimisticReadAt,
+        updatedAt: optimisticReadAt,
+      },
+    }));
     try {
       const updated = await markNotificationReadMutation.mutateAsync(notificationId);
       setNotificationOverrides((current) => ({
@@ -146,6 +156,11 @@ export function DashboardPage() {
       }));
     } catch {
       // Error feedback is handled by the shared mutation hook.
+      setNotificationOverrides((current) => {
+        const next = { ...current };
+        delete next[notificationId];
+        return next;
+      });
     } finally {
       setPendingNotificationAction(null);
     }
@@ -153,6 +168,15 @@ export function DashboardPage() {
 
   async function handleDismissNotification(notificationId: string) {
     setPendingNotificationAction(`dismiss:${notificationId}`);
+    const optimisticUpdatedAt = new Date().toISOString();
+    setNotificationOverrides((current) => ({
+      ...current,
+      [notificationId]: {
+        ...current[notificationId],
+        status: 'dismissed',
+        updatedAt: optimisticUpdatedAt,
+      },
+    }));
     try {
       const updated = await dismissNotificationMutation.mutateAsync(notificationId);
       setNotificationOverrides((current) => ({
@@ -164,6 +188,11 @@ export function DashboardPage() {
       }));
     } catch {
       // Error feedback is handled by the shared mutation hook.
+      setNotificationOverrides((current) => {
+        const next = { ...current };
+        delete next[notificationId];
+        return next;
+      });
     } finally {
       setPendingNotificationAction(null);
     }
