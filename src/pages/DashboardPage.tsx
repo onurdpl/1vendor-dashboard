@@ -3,7 +3,6 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
-  KPIStatCard,
   MetadataRow,
   OperationalSection,
   StatusBadge,
@@ -228,181 +227,281 @@ export function DashboardPage() {
     );
   }
 
-  return (
-    <section className="op-page dashboard-command-center">
-      <div className="op-page-heading dashboard-command-heading">
-        <div>
-          <p className="eyebrow">Dashboard</p>
-          <h2>{dashboard.title}</h2>
-          <p className="page-description">{dashboard.description}</p>
-        </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone="info">Vendor {dashboard.vendorName}</StatusBadge>
-          <StatusBadge tone="attention">
-            Awaiting shipment {dashboard.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '0'}
-          </StatusBadge>
-          <StatusBadge tone="warning">
-            Needs attention {getPriorityValue(dashboard.priorityWork, 'Blocked allocations') + getPriorityValue(dashboard.priorityWork, 'Refund attention')}
-          </StatusBadge>
-        </div>
-      </div>
+  const awaitingShipment = getPriorityValue(dashboard.priorityWork, 'Awaiting shipment');
+  const blockedAllocations = getPriorityValue(dashboard.priorityWork, 'Blocked allocations');
+  const refundAttention = getPriorityValue(dashboard.priorityWork, 'Refund attention');
+  const needsAttention = blockedAllocations + refundAttention;
+  const vendorOrders = dashboard.stats.find((stat) => stat.label === 'Vendor orders')?.value ?? '—';
+  const attentionItems = dashboard.priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
+  const health = dashboard.observabilitySummary?.health ?? 'Unknown';
+  const dashboardKpis = [
+    {
+      label: 'Vendor orders',
+      value: vendorOrders,
+      detail: 'From vendor scope',
+      tone: 'info',
+      icon: 'O',
+    },
+    {
+      label: 'Awaiting action',
+      value: String(awaitingShipment),
+      detail: 'Needs attention',
+      tone: 'warning',
+      icon: 'A',
+    },
+    {
+      label: 'Refund amount',
+      value: dashboard.financeSnapshot?.refunds ?? '—',
+      detail: 'Across refunds',
+      tone: 'success',
+      icon: 'TRY',
+    },
+    {
+      label: 'Blocked automations',
+      value: String(blockedAllocations),
+      detail: 'Require attention',
+      tone: 'danger',
+      icon: '!',
+    },
+    {
+      label: 'Attention items',
+      value: String(needsAttention),
+      detail: 'Pending review',
+      tone: 'attention',
+      icon: '^',
+    },
+  ];
 
-      <div className="op-kpi-row dashboard-kpi-row">
-        {dashboard.stats.map((stat) => (
-          <KPIStatCard key={stat.label} label={stat.label} value={stat.value} detail="Current vendor scope" tone={stat.label.includes('Blocked') || stat.label.includes('Refund') ? 'attention' : 'neutral'} />
+  return (
+    <section className="op-page dashboard-command-center dashboard-enterprise-shell">
+      <header className="dashboard-enterprise-header">
+        <div className="dashboard-enterprise-title">
+          <h1>{dashboard.title}</h1>
+          <p className="page-description">{dashboard.description}</p>
+          <div className="dashboard-role-badges" aria-label="Workspace context">
+            <StatusBadge tone="info">User {currentUser?.name ?? 'Unknown'}</StatusBadge>
+            <StatusBadge tone="attention">Role {currentUser?.role ?? 'Unknown'}</StatusBadge>
+            <StatusBadge tone="info">Vendor {dashboard.vendorName ?? 'Unknown'}</StatusBadge>
+          </div>
+        </div>
+        <div className="dashboard-status-strip" aria-label="Dashboard status">
+          <StatusBadge tone={health === 'Unknown' ? 'info' : getHealthTone(health)}>API {health}</StatusBadge>
+          <div className="dashboard-sync-card">
+            <span>Last sync</span>
+            <strong>—</strong>
+          </div>
+          <StatusBadge tone={needsAttention > 0 ? 'warning' : 'success'}>{needsAttention} Attention</StatusBadge>
+        </div>
+      </header>
+
+      <div className="dashboard-enterprise-kpi-row">
+        {dashboardKpis.map((stat) => (
+          <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${stat.tone}`}>
+            <div className="dashboard-kpi-icon" aria-hidden="true">{stat.icon}</div>
+            <span>{stat.label}</span>
+            <strong>{stat.value}</strong>
+            <small>{stat.detail}</small>
+          </article>
         ))}
       </div>
 
-      <div className="dashboard-command-grid">
-        <OperationalSection
-          title="Priority work"
-          description="Current operational work sorted by fulfillment, return, refund, and automation attention."
-        >
-          <div className="dashboard-priority-list">
-            {dashboard.priorityWork.map((item) => (
-              <article key={item.label} className="dashboard-priority-row">
-                <header>
-                  <div>
-                    <strong>{item.label}</strong>
-                    {item.description ? <p>{item.description}</p> : null}
-                  </div>
-                  <span className={`severity-chip ${item.tone}`}>{item.value}</span>
-                </header>
-              </article>
-            ))}
-          </div>
-        </OperationalSection>
-
-        <OperationalSection title="Finance snapshot" description="Reporting-only finance visibility. Payout execution is not enabled yet.">
-          <div className="op-meta-grid">
-            <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? 'Not synced'} />
-            <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? 'Not synced'} />
-            <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? 'Not synced'} />
-            <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? 'Not synced'} />
-          </div>
-        </OperationalSection>
-
-        <OperationalSection title="Recent activity" description="Latest vendor-scoped operational signals.">
-          {dashboard.recentActivity.length === 0 ? (
-            <EmptyStatePanel title="No recent activity" description="No recent activity for the current vendor." />
-          ) : (
-            <ul className="dashboard-activity-list">
-              {dashboard.recentActivity.map((item) => (
-                <li key={item}>{item}</li>
+      <div className="dashboard-enterprise-grid">
+        <div className="dashboard-enterprise-main">
+          <OperationalSection
+            title="Operational priority queue"
+            description="High priority operational items that require attention."
+          >
+            <div className="dashboard-priority-list dashboard-table-like-list">
+              {dashboard.priorityWork.map((item) => (
+                <article key={item.label} className="dashboard-priority-row">
+                  <header>
+                    <div>
+                      <strong>{item.label}</strong>
+                      {item.description ? <p>{item.description}</p> : null}
+                    </div>
+                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
+                  </header>
+                </article>
               ))}
-            </ul>
-          )}
-        </OperationalSection>
+            </div>
+          </OperationalSection>
 
-        <OperationalSection title="Notification center" description="In-app signal notifications for this role.">
-          {notifications ? (
-            <div className="notification-center">
-              <div className="notification-summary-row">
-                <MetadataRow label="Unread" value={notificationView.summary.unread} />
-                <MetadataRow label="High priority" value={notificationView.summary.highPriority} />
-                <MetadataRow label="Total" value={notificationView.summary.total} />
-              </div>
-              {notificationView.notifications.length === 0 ? (
-                <EmptyStatePanel title="No active notifications" description="No active notifications." />
-              ) : (
-                <div className="notification-list">
-                  {notificationView.notifications.slice(0, 6).map((notification) => (
-                    <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
-                      <header>
-                        <div>
-                          <div className="notification-title-row">
-                            <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
-                            <strong>{notification.title}</strong>
-                          </div>
-                          <p>{notification.message}</p>
-                        </div>
-                        <span className="notification-status">{notification.status}</span>
-                      </header>
-                      <div className="notification-meta">
-                        <span>{formatNotificationSource(notification)}</span>
-                        <span>{new Date(notification.createdAt).toLocaleString()}</span>
-                        {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
-                      </div>
-                      <div className="notification-actions">
-                        <button
-                          type="button"
-                          className="button button-secondary button-compact"
-                          disabled={notification.status === 'read' || Boolean(pendingNotificationAction)}
-                          onClick={() => {
-                            void handleMarkNotificationRead(notification.id);
-                          }}
-                        >
-                          {pendingNotificationAction === `read:${notification.id}` ? 'Marking...' : 'Mark as read'}
-                        </button>
-                        <button
-                          type="button"
-                          className="button button-secondary button-compact"
-                          disabled={Boolean(pendingNotificationAction)}
-                          onClick={() => {
-                            void handleDismissNotification(notification.id);
-                          }}
-                        >
-                          {pendingNotificationAction === `dismiss:${notification.id}` ? 'Dismissing...' : 'Dismiss'}
-                        </button>
-                      </div>
-                    </article>
-                  ))}
+          <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
+            {dashboard.recentActivity.length === 0 ? (
+              <EmptyStatePanel title="No recent activity" description="No recent activity for the current vendor." />
+            ) : (
+              <ul className="dashboard-activity-list dashboard-event-list">
+                {dashboard.recentActivity.map((item) => (
+                  <li key={item}>
+                    <span className="dashboard-event-dot" aria-hidden="true" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </OperationalSection>
+
+          <OperationalSection title="Notification center" description="System notifications and operational alerts.">
+            {notifications ? (
+              <div className="notification-center">
+                <div className="notification-summary-row">
+                  <MetadataRow label="Unread" value={notificationView.summary.unread} />
+                  <MetadataRow label="High priority" value={notificationView.summary.highPriority} />
+                  <MetadataRow label="Total" value={notificationView.summary.total} />
                 </div>
-              )}
-            </div>
-          ) : dashboard.notificationSummary ? (
+                {notificationView.notifications.length === 0 ? (
+                  <EmptyStatePanel title="No active notifications" description="No active notifications." />
+                ) : (
+                  <div className="notification-list">
+                    {notificationView.notifications.slice(0, 6).map((notification) => (
+                      <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
+                        <header>
+                          <div>
+                            <div className="notification-title-row">
+                              <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
+                              <strong>{notification.title}</strong>
+                            </div>
+                            <p>{notification.message}</p>
+                          </div>
+                          <span className="notification-status">{notification.status}</span>
+                        </header>
+                        <div className="notification-meta">
+                          <span>{formatNotificationSource(notification)}</span>
+                          <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                          {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
+                        </div>
+                        <div className="notification-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={notification.status === 'read' || Boolean(pendingNotificationAction)}
+                            onClick={() => {
+                              void handleMarkNotificationRead(notification.id);
+                            }}
+                          >
+                            {pendingNotificationAction === `read:${notification.id}` ? 'Marking...' : 'Mark as read'}
+                          </button>
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            disabled={Boolean(pendingNotificationAction)}
+                            onClick={() => {
+                              void handleDismissNotification(notification.id);
+                            }}
+                          >
+                            {pendingNotificationAction === `dismiss:${notification.id}` ? 'Dismissing...' : 'Dismiss'}
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : dashboard.notificationSummary ? (
+              <div className="op-meta-grid">
+                <MetadataRow label="Unread" value={dashboard.notificationSummary.unread} />
+                <MetadataRow label="High priority" value={dashboard.notificationSummary.highPriority} />
+                <MetadataRow label="Latest" value={dashboard.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
+              </div>
+            ) : (
+              <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
+            )}
+          </OperationalSection>
+        </div>
+
+        <aside className="dashboard-enterprise-aside">
+          <OperationalSection title="Needs attention" description={`${needsAttention} items require your attention.`}>
+            {attentionItems.length === 0 ? (
+              <EmptyStatePanel title="No attention items" description="No active attention items." />
+            ) : (
+              <div className="dashboard-priority-list">
+                {attentionItems.map((item) => (
+                  <article key={item.label} className="dashboard-attention-row">
+                    <div>
+                      <strong>{item.label}</strong>
+                      {item.description ? <p>{item.description}</p> : null}
+                    </div>
+                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
+                  </article>
+                ))}
+              </div>
+            )}
+          </OperationalSection>
+
+          <OperationalSection title="Finance snapshot" description="Overview of financial performance.">
             <div className="op-meta-grid">
-              <MetadataRow label="Unread" value={dashboard.notificationSummary.unread} />
-              <MetadataRow label="High priority" value={dashboard.notificationSummary.highPriority} />
-              <MetadataRow label="Latest" value={dashboard.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
+              <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? '—'} />
+              <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? '—'} />
+              <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? '—'} />
+              <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? '—'} />
             </div>
-          ) : (
-            <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
-          )}
-        </OperationalSection>
-
-        {currentUser?.role === 'admin' ? (
-          <OperationalSection title="Diagnostics summary" description="Admin-only webhook and reconciliation attention.">
-            {dashboard.diagnosticsSummary ? (
-              <div className="dashboard-signal-row">
-                <StatusBadge tone={dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success'}>
-                  Failed webhooks {dashboard.diagnosticsSummary.failedWebhooks}
-                </StatusBadge>
-                <StatusBadge tone={dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success'}>
-                  Stuck received {dashboard.diagnosticsSummary.stuckReceived}
-                </StatusBadge>
-                <StatusBadge tone={dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success'}>
-                  Fulfillment sync failures {dashboard.diagnosticsSummary.fulfillmentSyncFailures}
-                </StatusBadge>
-              </div>
-            ) : (
-              <EmptyStatePanel title="Diagnostics unavailable" description="Not synced for this scope." />
-            )}
           </OperationalSection>
-        ) : null}
 
-        {currentUser?.role === 'admin' ? (
-          <OperationalSection title="Operational health" description="Lightweight observability from webhook, retry, and reconciliation metrics.">
-            {dashboard.observabilitySummary ? (
-              <div className="op-meta-grid dashboard-observability-grid">
-                <MetadataRow label="Health" value={<StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>} />
-                <MetadataRow label="Success rate 24h" value={formatRate(dashboard.observabilitySummary.successRate24h)} />
-                <MetadataRow label="Failed webhooks 24h" value={dashboard.observabilitySummary.failedWebhooks24h} />
-                <MetadataRow label="Retry pressure" value={dashboard.observabilitySummary.retryPressureScore} />
-                <MetadataRow label="Dead-letter" value={dashboard.observabilitySummary.deadLetterReady} />
-                <MetadataRow label="Reconciliation backlog" value={dashboard.observabilitySummary.reconciliationBacklog} />
-                <MetadataRow label="Stale signals" value={dashboard.observabilitySummary.staleStateCount} />
-                <MetadataRow label="Note" value={dashboard.observabilitySummary.note} />
-              </div>
-            ) : (
-              <EmptyStatePanel title="Observability unavailable" description="Not synced for this scope." />
-            )}
-          </OperationalSection>
-        ) : null}
+          {currentUser?.role === 'admin' ? (
+            <OperationalSection title="Diagnostics summary" description="System health and reconciliation overview.">
+              {dashboard.diagnosticsSummary ? (
+                <div className="dashboard-signal-row">
+                  <StatusBadge tone={dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success'}>
+                    Failed webhooks {dashboard.diagnosticsSummary.failedWebhooks}
+                  </StatusBadge>
+                  <StatusBadge tone={dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success'}>
+                    Stuck received {dashboard.diagnosticsSummary.stuckReceived}
+                  </StatusBadge>
+                  <StatusBadge tone={dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success'}>
+                    Fulfillment sync failures {dashboard.diagnosticsSummary.fulfillmentSyncFailures}
+                  </StatusBadge>
+                </div>
+              ) : (
+                <EmptyStatePanel title="Diagnostics unavailable" description="Not synced for this scope." />
+              )}
+            </OperationalSection>
+          ) : null}
+
+          {currentUser?.role === 'admin' ? (
+            <OperationalSection title="Operational health" description="Uptime and operational metrics.">
+              {dashboard.observabilitySummary ? (
+                <div className="op-meta-grid dashboard-observability-grid">
+                  <MetadataRow label="Health" value={<StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>} />
+                  <MetadataRow label="Success rate 24h" value={formatRate(dashboard.observabilitySummary.successRate24h)} />
+                  <MetadataRow label="Failed webhooks 24h" value={dashboard.observabilitySummary.failedWebhooks24h} />
+                  <MetadataRow label="Retry pressure" value={dashboard.observabilitySummary.retryPressureScore} />
+                  <MetadataRow label="Dead-letter" value={dashboard.observabilitySummary.deadLetterReady} />
+                  <MetadataRow label="Reconciliation backlog" value={dashboard.observabilitySummary.reconciliationBacklog} />
+                  <MetadataRow label="Stale signals" value={dashboard.observabilitySummary.staleStateCount} />
+                  <MetadataRow label="Note" value={dashboard.observabilitySummary.note} />
+                </div>
+              ) : (
+                <EmptyStatePanel title="Observability unavailable" description="Not synced for this scope." />
+              )}
+            </OperationalSection>
+          ) : null}
+        </aside>
       </div>
 
-      <OperationalSection title="Workspace status">
-        <p>{dashboard.workspaceStatus}</p>
+      <OperationalSection title="Workspace status" description="Summary of vendor-scoped operations.">
+        <div className="dashboard-workspace-status-grid">
+          <div>
+            <span>Vendor</span>
+            <strong>{dashboard.vendorName ?? 'Unknown'}</strong>
+          </div>
+          <div>
+            <span>Scope</span>
+            <strong>Vendor-scoped</strong>
+          </div>
+          <div>
+            <span>Operational items</span>
+            <strong>{dashboard.priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
+          </div>
+          <div>
+            <span>Pending attention</span>
+            <strong>{needsAttention}</strong>
+          </div>
+          <div>
+            <span>Queue items</span>
+            <strong>{dashboard.priorityWork.length}</strong>
+          </div>
+        </div>
+        <p className="dashboard-workspace-status-copy">{dashboard.workspaceStatus}</p>
         {dashboard.partialDataWarnings?.length ? (
           <ul className="dashboard-activity-list">
             {dashboard.partialDataWarnings.map((warning) => (

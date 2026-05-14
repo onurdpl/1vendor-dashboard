@@ -176,7 +176,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    expect(screen.getAllByText('Priority work')).toHaveLength(1);
+    expect(screen.getAllByText('Operational priority queue')).toHaveLength(1);
     expect(screen.queryByText('Operational signals')).not.toBeInTheDocument();
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();

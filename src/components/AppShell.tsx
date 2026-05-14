@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
 import { clearToken, getCurrentUser, getToken } from '../lib/auth';
 import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
@@ -25,9 +25,11 @@ const adminNavItems = [
 
 export function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
   const token = getToken();
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
+  const isDashboardRoute = location.pathname === '/';
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
@@ -63,7 +65,7 @@ export function AppShell() {
   }
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''}`}>
       <aside className="sidebar">
         <div className="brand shell-brand">
           <div className="brand-mark" aria-hidden="true">
@@ -170,12 +172,16 @@ export function AppShell() {
       </aside>
 
       <div className="app-content">
-        <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
-        <div className="shell-context-bar">
-          <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
-          <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'admin'}</span>
-          <span className="severity-chip severity-low">Vendor {currentVendor.vendorName}</span>
-        </div>
+        {isDashboardRoute ? null : (
+          <>
+            <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
+            <div className="shell-context-bar">
+              <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
+              <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'admin'}</span>
+              <span className="severity-chip severity-low">Vendor {currentVendor.vendorName}</span>
+            </div>
+          </>
+        )}
         <main className="page-frame">
           <Outlet />
         </main>
