@@ -66,8 +66,12 @@ Notifications and signals have related but independent lifecycles:
 
 Endpoints:
 - `GET /notifications`
+- `POST /notifications/read`
+- `POST /notifications/dismiss`
 - `POST /notifications/:id/read`
 - `POST /notifications/:id/dismiss`
+
+The body-based lifecycle routes are preferred by the frontend because deterministic notification ids can become long. The path-param routes remain for compatibility.
 
 Admin users see admin-targeted notifications. Vendor users see only notifications scoped to their selected vendor.
 

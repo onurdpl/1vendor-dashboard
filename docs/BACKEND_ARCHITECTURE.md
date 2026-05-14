@@ -1069,8 +1069,11 @@ Frontend note:
   - reading/dismissing a notification does not resolve the signal
 - User-facing endpoints:
   - `GET /notifications`
+  - `POST /notifications/read`
+  - `POST /notifications/dismiss`
   - `POST /notifications/:notificationId/read`
   - `POST /notifications/:notificationId/dismiss`
+- The body-based read/dismiss routes are preferred by the frontend because deterministic notification ids can be long enough to fail path-param routing in production edge cases.
 - Dashboard includes a compact in-app Notification Center with unread/high-priority summary, latest notification cards, source metadata, and read/dismiss controls.
 - Phase 19B does not send real email, Slack, SMS, push, webhook, or external alert-provider messages.
 
@@ -1156,3 +1159,24 @@ Frontend note:
 - Email templates are deterministic text and include severity, source area, related entity label, summary, suggested action, and dashboard path placeholder.
 - Email templates intentionally exclude raw webhook payloads, secrets, internal stack traces, and sensitive diagnostics previews.
 - Phase 19E does not add background email workers, external provider retries, notification preferences, Slack delivery, or marketing/bulk email.
+
+## Operational Intelligence Closure (Phase 19F)
+- Phase 19F closes the rules, signals, notification, SLA, automation, and email-ready foundation with an audit-only stabilization pass.
+- Closure documents:
+  - `docs/PHASE_19_OPERATIONAL_INTELLIGENCE_CLOSURE.md`
+  - `docs/PRODUCTION_OPERATIONAL_INTELLIGENCE_SMOKE.md`
+- Production smoke on May 14, 2026 confirmed:
+  - `GET /admin/signals` returns active deterministic operational signals
+  - `GET /admin/automation-actions` returns duplicate-safe suggested actions
+  - `GET /notifications` returns in-app notification summaries
+  - `POST /notifications/read` marks long-id notifications read and reduces unread count
+  - `POST /notifications/dismiss` marks long-id notifications dismissed
+  - vendor `GET /signals` and `GET /notifications` remain vendor-scoped
+  - vendor access to `GET /admin/automation-actions` is blocked with HTTP 403
+- Phase 19F preserves these boundaries:
+  - no automatic refunds
+  - no automatic payouts
+  - no automatic cancellations
+  - no Slack or real outbound email provider
+  - no AI action execution
+  - no destructive remediation workflows
