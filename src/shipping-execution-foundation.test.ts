@@ -32,6 +32,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const { createShipmentExecution, getShippingProviderGateDiagnostics, inferShipmentDesi, retryDryRunShipmentExecution } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
+const { KargoEntegratorAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -128,6 +129,19 @@ function buildAdapter(overrides: Record<string, unknown> = {}) {
     cancelShipment: vi.fn(),
     ...overrides,
   };
+}
+
+function mockProviderResponse(body: string, options: { status?: number; contentType?: string } = {}) {
+  const status = options.status ?? 200;
+  const contentType = options.contentType ?? 'application/json';
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    headers: {
+      get: (name: string) => (name.toLowerCase() === 'content-type' ? contentType : null),
+    },
+    text: async () => body,
+  } as Response;
 }
 
 describe('shipping execution foundation', () => {
@@ -782,6 +796,153 @@ describe('shipping execution foundation', () => {
       baseUrlConfigured: true,
       apiKeyConfigured: true,
       missing: [],
+    });
+  });
+
+  it('sends Kargo requests with documented bearer and JSON headers and parses data object responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse(
+        JSON.stringify({
+          data: {
+            id: 'ke-live-1028',
+            tracking_number: null,
+            status: 'created',
+            shipping_cost: 88,
+            currency: 'TRY',
+          },
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api/',
+      KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+    });
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'kargo_entegrator',
+      requestSnapshot: {
+        platform_id: 2547,
+        platform_d_id: 1774,
+      },
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://app.kargoentegrator.com/api/shipments',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+    expect(init.headers).toMatchObject({
+      Authorization: 'Bearer test-kargo-key',
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+    });
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      platform_id: 2547,
+      platform_d_id: 1774,
+    });
+    expect(result).toMatchObject({
+      providerShipmentId: 'ke-live-1028',
+      trackingNumber: null,
+      shipmentStatus: 'created',
+      shippingCost: 88,
+      currency: 'TRY',
+    });
+    expect(result.responseSnapshot).toMatchObject({
+      authHeaderMode: 'bearer',
+      acceptHeader: 'application/json',
+      detectedResponseFormat: 'json:data_object',
+      bodyKeys: expect.arrayContaining(['id', 'tracking_number']),
+    });
+    expect(JSON.stringify(result.responseSnapshot)).not.toContain('test-kargo-key');
+  });
+
+  it('parses Kargo data array responses and maps provider shipment id from the first row', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse(
+        JSON.stringify({
+          data: [
+            {
+              id: 'ke-array-1028',
+              tracking_number: 'TRACK-1028',
+              tracking_url: 'https://track.example/TRACK-1028',
+            },
+          ],
+        }),
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+    });
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'kargo_entegrator',
+      requestSnapshot: {
+        platform_id: 2547,
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerShipmentId: 'ke-array-1028',
+      trackingNumber: 'TRACK-1028',
+      trackingUrl: 'https://track.example/TRACK-1028',
+    });
+    expect(result.responseSnapshot).toMatchObject({
+      detectedResponseFormat: 'json:data_array',
+      bodyKeys: expect.arrayContaining(['id', 'tracking_number']),
+    });
+  });
+
+  it('treats HTML Kargo responses as invalid provider contract responses', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse('<html><body>Login</body></html>', {
+        contentType: 'text/html; charset=utf-8',
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        requestSnapshot: {
+          platform_id: 2547,
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Kargo Entegratör returned an invalid provider response format.',
+      responseSnapshot: expect.objectContaining({
+        status: 200,
+        ok: true,
+        contentType: 'text/html; charset=utf-8',
+        detectedResponseFormat: 'html',
+        authHeaderMode: 'bearer',
+        responseSnippet: '<html><body>Login</body></html>',
+        providerError: 'Provider returned HTML instead of JSON. Check endpoint and Bearer authentication.',
+      }),
     });
   });
 });

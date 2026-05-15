@@ -567,6 +567,14 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.parsedBodyType || '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Detected format</span>
+                              <strong>{shipmentProviderSummary.detectedResponseFormat || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Auth/header mode</span>
+                              <strong>{shipmentProviderSummary.authHeaderMode || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Response keys</span>
                               <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                             </div>
@@ -598,6 +606,12 @@ export function OrderDetailPage() {
                               <span>Label present</span>
                               <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
                             </div>
+                            {shipmentProviderSummary.responseSnippet ? (
+                              <div className="summary-row">
+                                <span>Safe response snippet</span>
+                                <strong>{shipmentProviderSummary.responseSnippet}</strong>
+                              </div>
+                            ) : null}
                             {canRetryDryRunShipment ? (
                               <button
                                 type="button"
@@ -806,6 +820,14 @@ export function OrderDetailPage() {
                           <strong>{shipmentProviderSummary.parsedBodyType || '—'}</strong>
                         </div>
                         <div className="summary-row">
+                          <span>Detected format</span>
+                          <strong>{shipmentProviderSummary.detectedResponseFormat || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Auth/header mode</span>
+                          <strong>{shipmentProviderSummary.authHeaderMode || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
                           <span>Response keys</span>
                           <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                         </div>
@@ -837,6 +859,12 @@ export function OrderDetailPage() {
                           <span>Label present</span>
                           <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
                         </div>
+                        {shipmentProviderSummary.responseSnippet ? (
+                          <div className="summary-row">
+                            <span>Safe response snippet</span>
+                            <strong>{shipmentProviderSummary.responseSnippet}</strong>
+                          </div>
+                        ) : null}
                         {canRetryDryRunShipment ? (
                           <button
                             type="button"

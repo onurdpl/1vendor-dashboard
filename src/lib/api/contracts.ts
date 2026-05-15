@@ -46,6 +46,9 @@ export type ShipmentExecution = {
     trackingNumberPresent: boolean;
     labelPresent: boolean;
     statusField: string | null;
+    detectedResponseFormat?: string | null;
+    responseSnippet?: string | null;
+    authHeaderMode?: string | null;
   };
 };
 

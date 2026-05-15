@@ -77,6 +77,63 @@ function parseResponseBody(contentType: string, responseText: string): unknown {
   }
 }
 
+function sanitizeResponseSnippet(value: string) {
+  return value
+    .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
+function getDetectedResponseFormat(contentType: string, parsedBody: unknown) {
+  if (!parsedBody) {
+    return 'empty';
+  }
+
+  if (contentType.includes('text/html')) {
+    return 'html';
+  }
+
+  if (isRecord(parsedBody)) {
+    const data = parsedBody.data;
+    if (isRecord(data)) {
+      return 'json:data_object';
+    }
+    if (Array.isArray(data)) {
+      return 'json:data_array';
+    }
+    return contentType.includes('application/json') ? 'json:object' : 'object';
+  }
+
+  if (Array.isArray(parsedBody)) {
+    return contentType.includes('application/json') ? 'json:array' : 'array';
+  }
+
+  if (contentType.includes('application/json')) {
+    return 'invalid_json';
+  }
+
+  return typeof parsedBody;
+}
+
+function getProviderResponseRecord(parsedBody: unknown) {
+  if (!isRecord(parsedBody)) {
+    return {};
+  }
+
+  const data = parsedBody.data;
+  if (isRecord(data)) {
+    return data;
+  }
+
+  if (Array.isArray(data)) {
+    const first = data.find(isRecord);
+    return first ?? {};
+  }
+
+  return parsedBody;
+}
+
 function mapShipmentStatus(value: string | null): ShipmentExecutionStatusDto {
   const normalized = value?.trim().toLowerCase() ?? '';
   if (normalized === 'in_transit' || normalized === 'in transit' || normalized === 'shipped') {
@@ -185,6 +242,7 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.env.KARGO_ENTEGRATOR_API_KEY}`,
+        Accept: 'application/json',
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(input.requestSnapshot),
@@ -192,8 +250,10 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
     const contentType = response.headers.get('content-type') ?? '';
     const responseText = await response.text();
     const parsedBody = parseResponseBody(contentType, responseText);
-    const body = isRecord(parsedBody) ? parsedBody : {};
+    const body = getProviderResponseRecord(parsedBody);
     const parsedBodyType = Array.isArray(parsedBody) ? 'array' : typeof parsedBody;
+    const detectedResponseFormat = getDetectedResponseFormat(contentType, parsedBody);
+    const responseSnippet = sanitizeResponseSnippet(responseText);
 
     const responseSnapshot = {
       status: response.status,
@@ -201,9 +261,14 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       contentType,
       parsedBodyType,
       bodyKeys: Object.keys(body).sort(),
+      topLevelKeys: isRecord(parsedBody) ? Object.keys(parsedBody).sort() : [],
       provider: 'kargo_entegrator',
       providerError: readString(body, ['error', 'message', 'errors', 'detail']),
       statusField: readString(body, ['shipmentStatus', 'status', 'cargoStatus']),
+      detectedResponseFormat,
+      responseSnippet,
+      authHeaderMode: 'bearer',
+      acceptHeader: 'application/json',
     };
 
     if (!response.ok) {
@@ -213,14 +278,27 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       );
     }
 
+    if (!contentType.includes('application/json') || !isRecord(parsedBody)) {
+      throw new ShippingProviderExecutionError(
+        'Kargo Entegratör returned an invalid provider response format.',
+        {
+          ...responseSnapshot,
+          providerError:
+            detectedResponseFormat === 'html'
+              ? 'Provider returned HTML instead of JSON. Check endpoint and Bearer authentication.'
+              : 'Provider returned a non-JSON response.',
+        },
+      );
+    }
+
     return {
       providerShipmentId: readString(body, ['providerShipmentId', 'shipmentId', 'id', 'cargoId', 'barcode']),
-      trackingNumber: readString(body, ['trackingNumber', 'trackingNo', 'cargoTrackingNo', 'barcode']),
-      trackingUrl: readString(body, ['trackingUrl', 'trackingLink', 'cargoTrackingUrl']),
-      labelUrl: readString(body, ['labelUrl', 'labelPdfUrl', 'pdfUrl', 'barcodeUrl']),
+      trackingNumber: readString(body, ['tracking_number', 'trackingNumber', 'trackingNo', 'cargoTrackingNo', 'barcode']),
+      trackingUrl: readString(body, ['tracking_url', 'trackingUrl', 'trackingLink', 'cargoTrackingUrl']),
+      labelUrl: readString(body, ['label_url', 'labelUrl', 'labelPdfUrl', 'pdfUrl', 'barcodeUrl']),
       shipmentStatus: mapShipmentStatus(readString(body, ['shipmentStatus', 'status', 'cargoStatus'])),
-      shippingCost: readNumber(body, ['shippingCost', 'cost', 'amount', 'cargoPrice']),
-      shippingVat: readNumber(body, ['shippingVat', 'shippingVatAmount', 'vat']),
+      shippingCost: readNumber(body, ['shipping_cost', 'shippingCost', 'cost', 'amount', 'cargoPrice']),
+      shippingVat: readNumber(body, ['shipping_vat', 'shippingVat', 'shippingVatAmount', 'vat']),
       currency: readString(body, ['currency']) ?? 'TRY',
       responseSnapshot,
     };

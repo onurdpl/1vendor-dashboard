@@ -80,6 +80,9 @@ function buildShipmentProviderResponseSummary(
     trackingNumberPresent: Boolean(execution.trackingNumber),
     labelPresent: Boolean(execution.labelUrl),
     statusField: readString(snapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
+    detectedResponseFormat: readString(snapshot, ['detectedResponseFormat']),
+    responseSnippet: readString(snapshot, ['responseSnippet']),
+    authHeaderMode: readString(snapshot, ['authHeaderMode']),
   };
 }
 
