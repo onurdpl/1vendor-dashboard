@@ -8,6 +8,11 @@ import {
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createInvoiceProviderAdapter, type InvoiceProviderAdapter } from './invoice-provider.adapter.js';
+import {
+  deriveEffectiveInvoiceStatus,
+  deriveInvoiceVisibility,
+  mapInvoiceProvider,
+} from './invoice-visibility.js';
 import type {
   CreateInvoiceExecutionDto,
   InvoiceExecutionDto,
@@ -55,10 +60,6 @@ function toNumber(value: unknown) {
   return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function mapProvider(provider: InvoiceExecutionProvider | string): InvoiceExecutionProviderDto {
-  return provider.trim().toLowerCase() as InvoiceExecutionProviderDto;
-}
-
 function normalizeProvider(provider?: InvoiceExecutionProviderDto): InvoiceExecutionProvider {
   const normalized = (provider ?? 'bizimhesap').trim().toLowerCase();
   if (normalized === 'bizimhesap') {
@@ -74,24 +75,12 @@ function normalizeProvider(provider?: InvoiceExecutionProviderDto): InvoiceExecu
   throw new Error('Unsupported invoice provider.');
 }
 
-function mapStatus(status: InvoiceExecutionStatus | string) {
-  return status.trim().toLowerCase() as InvoiceExecutionDto['status'];
-}
-
 function mapEffectiveInvoiceStatus(execution: {
   status: InvoiceExecutionStatus | string;
   providerInvoiceGuid: string | null;
   providerPdfUrl: string | null;
 }) {
-  if (
-    String(execution.status).trim().toUpperCase() === InvoiceExecutionStatus.CREATED &&
-    !execution.providerInvoiceGuid &&
-    !execution.providerPdfUrl
-  ) {
-    return 'unknown' as const;
-  }
-
-  return mapStatus(execution.status);
+  return deriveEffectiveInvoiceStatus(execution);
 }
 
 function isRetryableInvoiceExecution(execution: {
@@ -167,14 +156,25 @@ function truncateProviderError(value: string | null) {
 }
 
 export function mapInvoiceExecution(execution: InvoiceExecution): InvoiceExecutionDto {
-  return {
-    id: execution.id,
-    financeLedgerEntryId: execution.financeLedgerEntryId,
-    provider: mapProvider(execution.provider),
+  const provider = mapInvoiceProvider(execution.provider);
+  const status = mapEffectiveInvoiceStatus(execution);
+  const visibility = deriveInvoiceVisibility({
+    provider,
+    status,
     providerInvoiceGuid: execution.providerInvoiceGuid,
     providerInvoiceNo: execution.providerInvoiceNo,
     providerPdfUrl: execution.providerPdfUrl,
-    status: mapEffectiveInvoiceStatus(execution),
+  });
+
+  return {
+    id: execution.id,
+    financeLedgerEntryId: execution.financeLedgerEntryId,
+    provider,
+    providerInvoiceGuid: execution.providerInvoiceGuid,
+    providerInvoiceNo: execution.providerInvoiceNo,
+    providerPdfUrl: execution.providerPdfUrl,
+    status,
+    ...visibility,
     requestSnapshot: execution.requestSnapshot,
     responseSnapshot: execution.responseSnapshot,
     createdAt: execution.createdAt.toISOString(),
@@ -398,7 +398,7 @@ export async function previewInvoiceExecutionPayload(
   const requestSnapshot = buildBizimHesapAddInvoiceSnapshot(entry);
 
   return {
-    provider: mapProvider(provider),
+    provider: mapInvoiceProvider(provider),
     dryRun: true,
     executionEnabled: options.env.INVOICE_EXECUTION_ENABLED,
     providerEnabled: options.env.BIZIMHESAP_ENABLED,
@@ -494,7 +494,7 @@ export async function getInvoiceExecutionResponseSummary(invoiceExecutionId: str
 
   return {
     id: execution.id,
-    provider: mapProvider(execution.provider),
+    provider: mapInvoiceProvider(execution.provider),
     status: mapEffectiveInvoiceStatus(execution),
     providerInvoiceGuidPresent: Boolean(execution.providerInvoiceGuid),
     providerInvoiceNoPresent: Boolean(execution.providerInvoiceNo),

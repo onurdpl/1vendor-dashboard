@@ -2613,6 +2613,24 @@ h3 {
   gap: 6px;
 }
 
+.finance-provider-summary {
+  display: grid;
+  gap: 4px;
+  margin-top: 4px;
+  padding: 10px;
+  border: 1px solid #fbbf24;
+  border-radius: 12px;
+  background: #fffbeb;
+  color: #475569;
+  font-size: 0.72rem;
+  line-height: 1.35;
+}
+
+.finance-provider-summary strong {
+  color: #92400e;
+  font-size: 0.76rem;
+}
+
 .finance-actions-card .op-action-group {
   justify-content: flex-start;
 }

@@ -1181,10 +1181,11 @@ Frontend note:
   - no AI action execution
   - no destructive remediation workflows
 
-## Invoice Execution Foundation (Phase 20A)
-- Phase 20A introduces merchant-of-record customer invoice execution as a provider-backed accounting output.
-- The platform remains canonical operational and finance truth. External accounting systems execute invoice documents and return provider identifiers.
-- `InvoiceExecution` links provider execution state to immutable finance sale ledger rows.
+## Customer Invoice Visibility Foundation (Revised Phase 20A)
+- Revised Phase 20A treats merchant-of-record customer invoices as platform-owned accounting visibility, not as provider-final execution authority.
+- The platform remains canonical operational and finance truth. External accounting systems are provider visibility/sync systems that may return identifiers or PDF links.
+- BizimHesap `AddInvoice` is treated as draft/accounting sync evidence unless a future provider flow proves final invoice visibility.
+- `InvoiceExecution` links provider visibility state to immutable finance sale ledger rows.
 - Provider enum:
   - `BIZIMHESAP`
   - future-ready `PARASUT`
@@ -1195,6 +1196,14 @@ Frontend note:
   - `FAILED`
   - `CANCELLED`
   - `UNKNOWN`
+- Finance records also expose derived visibility fields:
+  - `visibilityStatus`
+  - `visibilityLabel`
+  - `reconciliationState`
+  - `finalInvoiceState`
+  - `syncSemantics`
+  - `providerCapabilities`
+- Visibility states include `invoice_missing`, `accounting_sync_pending`, `accounting_synced`, `invoice_linked`, `invoice_visibility_incomplete`, `provider_failed`, and `cancelled`.
 - Duplicate prevention is enforced with a unique finance-ledger/provider key.
 - Admin invoice endpoints:
   - `POST /admin/invoices/preview`
@@ -1203,7 +1212,8 @@ Frontend note:
   - `GET /admin/invoices/:id/response-summary`
 - Preview is dry-run only: it returns the deterministic BizimHesap payload and configuration presence booleans without creating provider records, creating `InvoiceExecution` rows, calling BizimHesap, or exposing FirmId/API keys.
 - Response summaries are admin-only and expose HTTP/content-type/body-key metadata plus persisted-field presence booleans. They do not return raw provider values or secrets.
-- Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, status, GUID, invoice number, PDF link, and execution timestamps.
+- Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, visibility status, invoice number, PDF availability, and sync semantics.
+- Admins can inspect safe provider response summaries for failed/unknown visibility states. Vendors do not see provider response internals.
 - Invoice execution configuration is disabled by default:
   - `INVOICE_EXECUTION_ENABLED=false`
   - `INVOICE_PROVIDER=bizimhesap`

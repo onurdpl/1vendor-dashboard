@@ -34,6 +34,8 @@ export const queryKeys = {
   finance: {
     summary: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'summary', vendorId] as const,
     records: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'records', vendorId] as const,
+    invoiceResponseSummary: (invoiceExecutionId: string) =>
+      ['finance', 'invoice-response-summary', invoiceExecutionId] as const,
   },
   automation: {
     alerts: () => ['automation', 'alerts', getCurrentVendorContext().vendorId] as const,

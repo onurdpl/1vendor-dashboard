@@ -224,6 +224,15 @@ describe('invoice execution foundation', () => {
     expect(execution).toMatchObject({
       provider: 'bizimhesap',
       status: 'created',
+      visibilityStatus: 'invoice_linked',
+      visibilityLabel: 'Accounting visibility linked',
+      finalInvoiceState: 'draft_or_synced',
+      syncSemantics: 'draft_accounting_sync',
+      providerCapabilities: expect.objectContaining({
+        supportsDraftSubmission: true,
+        supportsFinalInvoiceVisibility: false,
+        supportsPdfLink: true,
+      }),
       providerInvoiceGuid: 'BH-GUID-1',
       providerPdfUrl: 'https://provider.example/invoice.pdf',
     });
@@ -373,6 +382,8 @@ describe('invoice execution foundation', () => {
       }),
     );
     expect(execution.status).toBe('unknown');
+    expect(execution.visibilityStatus).toBe('invoice_visibility_incomplete');
+    expect(execution.finalInvoiceState).toBe('visibility_unknown');
   });
 
   it('preserves vendor isolation during invoice creation', async () => {
@@ -567,6 +578,7 @@ describe('invoice execution foundation', () => {
     });
 
     expect(execution.status).toBe('unknown');
+    expect(execution.visibilityLabel).toBe('Invoice visibility incomplete');
   });
 
   it('parses nested BizimHesap provider response wrappers', async () => {

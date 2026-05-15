@@ -148,6 +148,34 @@ const financeDashboard: FinanceDashboard = {
   ],
 };
 
+function buildInvoiceExecution(
+  overrides: Partial<NonNullable<FinanceDashboard['transactions'][number]['invoiceExecution']>> = {},
+): NonNullable<FinanceDashboard['transactions'][number]['invoiceExecution']> {
+  return {
+    id: 'invoice-exec-demo',
+    provider: 'bizimhesap',
+    providerInvoiceGuid: 'BH-GUID-DEMO',
+    providerInvoiceNo: null,
+    providerPdfUrl: null,
+    status: 'created',
+    visibilityStatus: 'accounting_synced',
+    visibilityLabel: 'Accounting sync recorded',
+    reconciliationState: 'invoice_visibility_incomplete',
+    finalInvoiceState: 'draft_or_synced',
+    syncSemantics: 'draft_accounting_sync',
+    providerCapabilities: {
+      supportsDraftSubmission: true,
+      supportsFinalInvoiceVisibility: false,
+      supportsPdfLink: true,
+      supportsStatusSync: false,
+      note: 'BizimHesap AddInvoice is treated as accounting draft/sync visibility; finalized invoice authority is reconciled separately.',
+    },
+    createdAt: '2026-05-13T12:00:00Z',
+    updatedAt: '2026-05-13T12:00:00Z',
+    ...overrides,
+  };
+}
+
 function renderFinancePage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -210,9 +238,9 @@ describe('FinancePage control center', () => {
     await screen.findByText('#1002');
     await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
 
-    expect(await screen.findByText('Invoice')).toBeInTheDocument();
+    expect(await screen.findByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
-    expect(screen.getByText('Payout summary')).toBeInTheDocument();
+    expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
@@ -232,22 +260,41 @@ describe('FinancePage control center', () => {
     expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
   });
 
-  it('hides provider response internals for unknown invoice executions', async () => {
+  it('shows safe provider issue details for admins on unknown invoice visibility', async () => {
+    getInvoiceExecutionResponseSummaryMock.mockResolvedValue({
+      id: 'invoice-exec-unknown',
+      provider: 'bizimhesap',
+      status: 'unknown',
+      providerInvoiceGuidPresent: false,
+      providerInvoiceNoPresent: false,
+      providerPdfUrlPresent: false,
+      response: {
+        httpStatus: 200,
+        ok: true,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['error', 'guid', 'url'],
+        nestedBodyKeys: ['error', 'guid', 'url'],
+        providerError: 'Provider did not return invoice artifacts.',
+        parsedGuidPresent: false,
+        parsedPdfUrlPresent: false,
+      },
+    });
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       transactions: [
         {
           ...financeDashboard.transactions[0],
-          invoiceExecution: {
+          invoiceExecution: buildInvoiceExecution({
             id: 'invoice-exec-unknown',
-            provider: 'bizimhesap',
             providerInvoiceGuid: null,
             providerInvoiceNo: null,
             providerPdfUrl: null,
             status: 'unknown',
-            createdAt: '2026-05-13T12:00:00Z',
-            updatedAt: '2026-05-13T12:00:00Z',
-          },
+            visibilityStatus: 'invoice_visibility_incomplete',
+            visibilityLabel: 'Invoice visibility incomplete',
+            finalInvoiceState: 'visibility_unknown',
+          }),
         },
         financeDashboard.transactions[1],
         financeDashboard.transactions[2],
@@ -256,12 +303,53 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect((await screen.findAllByText('Invoice pending')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Invoice could not be generated. Try again or contact support.')).toBeInTheDocument();
-    expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
+    expect((await screen.findAllByText('Invoice visibility incomplete')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown'));
+    expect(await screen.findByLabelText('Provider issue summary')).toBeInTheDocument();
+    expect(screen.getByText('Provider error: Provider did not return invoice artifacts.')).toBeInTheDocument();
     expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
-    expect(screen.queryByText('application/json')).not.toBeInTheDocument();
+    expect(screen.getByText('Content type: application/json')).toBeInTheDocument();
     expect(screen.queryByText('GUID present')).not.toBeInTheDocument();
+  });
+
+  it('does not show provider issue internals to vendor users', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          invoiceExecution: buildInvoiceExecution({
+            id: 'invoice-exec-unknown',
+            providerInvoiceGuid: null,
+            providerInvoiceNo: null,
+            providerPdfUrl: null,
+            status: 'unknown',
+            visibilityStatus: 'invoice_visibility_incomplete',
+            visibilityLabel: 'Invoice visibility incomplete',
+            finalInvoiceState: 'visibility_unknown',
+          }),
+        },
+        financeDashboard.transactions[1],
+        financeDashboard.transactions[2],
+      ],
+    });
+
+    renderFinancePage();
+
+    expect((await screen.findAllByText('Invoice visibility incomplete')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Invoice visibility is reconciled from the merchant accounting workflow.')).toBeInTheDocument();
+    expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Provider issue summary')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Content type:/)).not.toBeInTheDocument();
   });
 
   it('displays hold-equivalent refund ledger rows as Recorded instead of Failed', async () => {
@@ -367,7 +455,7 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Payout summary')).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    expect(screen.getByText('Invoice')).toBeInTheDocument();
+    expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
   });
 

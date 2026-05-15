@@ -19,6 +19,11 @@ import type {
   ShippingCostDto,
   ShippingCostInputDto,
 } from './finance.types.js';
+import {
+  deriveEffectiveInvoiceStatus,
+  deriveInvoiceVisibility,
+  mapInvoiceProvider,
+} from '../invoices/invoice-visibility.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
@@ -566,17 +571,21 @@ function mapInvoiceExecutionReference(execution?: {
   if (!execution) {
     return null;
   }
-  const normalizedStatus =
-    execution.status.trim().toUpperCase() === 'CREATED' &&
-    !execution.providerInvoiceGuid &&
-    !execution.providerPdfUrl
-      ? 'unknown'
-      : execution.status.trim().toLowerCase();
+  const provider = mapInvoiceProvider(execution.provider);
+  const status = deriveEffectiveInvoiceStatus(execution);
+  const visibility = deriveInvoiceVisibility({
+    provider,
+    status,
+    providerInvoiceGuid: execution.providerInvoiceGuid,
+    providerInvoiceNo: execution.providerInvoiceNo,
+    providerPdfUrl: execution.providerPdfUrl,
+  });
 
   return {
     id: execution.id,
-    provider: execution.provider.trim().toLowerCase() as InvoiceExecutionReferenceDto['provider'],
-    status: normalizedStatus as InvoiceExecutionReferenceDto['status'],
+    provider,
+    status,
+    ...visibility,
     providerInvoiceGuid: execution.providerInvoiceGuid,
     providerInvoiceNo: execution.providerInvoiceNo,
     providerPdfUrl: execution.providerPdfUrl,

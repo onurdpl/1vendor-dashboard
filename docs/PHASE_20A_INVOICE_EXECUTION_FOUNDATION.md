@@ -1,5 +1,8 @@
 # Phase 20A - Invoice Execution Foundation
 
+> Revised Phase 20A is documented in `docs/PHASE_20A_CUSTOMER_INVOICE_VISIBILITY.md`.
+> BizimHesap AddInvoice is now treated as draft/accounting sync visibility unless final invoice visibility is proven by a future provider flow.
+
 ## Purpose
 
 Phase 20A introduces the first merchant-of-record invoice execution foundation.

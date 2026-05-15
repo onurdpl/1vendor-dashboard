@@ -112,6 +112,38 @@ export type InvoiceExecutionReferenceDto = {
   id: string;
   provider: 'bizimhesap' | 'parasut' | 'birfatura';
   status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
+  visibilityStatus:
+    | 'invoice_missing'
+    | 'accounting_sync_pending'
+    | 'accounting_synced'
+    | 'invoice_linked'
+    | 'invoice_visibility_incomplete'
+    | 'provider_failed'
+    | 'cancelled';
+  visibilityLabel: string;
+  reconciliationState:
+    | 'invoice_missing'
+    | 'invoice_pending'
+    | 'accounting_sync_pending'
+    | 'invoice_linked'
+    | 'invoice_visibility_incomplete'
+    | 'provider_failed'
+    | 'cancelled';
+  finalInvoiceState:
+    | 'not_requested'
+    | 'draft_or_synced'
+    | 'finalized_visible'
+    | 'visibility_unknown'
+    | 'failed'
+    | 'cancelled';
+  syncSemantics: 'none' | 'draft_accounting_sync' | 'final_invoice_visibility';
+  providerCapabilities: {
+    supportsDraftSubmission: boolean;
+    supportsFinalInvoiceVisibility: boolean;
+    supportsPdfLink: boolean;
+    supportsStatusSync: boolean;
+    note: string;
+  };
   providerInvoiceGuid: string | null;
   providerInvoiceNo: string | null;
   providerPdfUrl: string | null;
