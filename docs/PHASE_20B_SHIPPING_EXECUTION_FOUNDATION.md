@@ -22,17 +22,17 @@ Shipping providers are accessed through a provider adapter contract:
 - `getTrackingInfo()`
 - `cancelShipment()` placeholder
 
-The initial adapter is `HepsijetAdapter`. The schema is intentionally provider-neutral and includes future-ready provider values for MNG, Yurtiçi, and Aras.
+The initial adapters are `HepsijetAdapter` and `KargoEntegratorAdapter`. The schema is intentionally provider-neutral and includes future-ready provider values for MNG, Yurtiçi, and Aras.
 
-Hepsijet execution is gated by environment flags:
+Kargo Entegratör execution is gated by environment flags. Vendor branch identifiers are not env values:
 
 - `SHIPPING_EXECUTION_ENABLED=false`
-- `SHIPPING_PROVIDER=hepsijet`
-- `HEPSIJET_ENABLED=false`
-- `HEPSIJET_BASE_URL`
-- `HEPSIJET_API_KEY`
+- `SHIPPING_PROVIDER=kargo_entegrator`
+- `KARGO_ENTEGRATOR_ENABLED=false`
+- `KARGO_ENTEGRATOR_BASE_URL`
+- `KARGO_ENTEGRATOR_API_KEY`
 
-When execution is disabled, the adapter returns a dry-run pending response and does not call Hepsijet.
+When execution is disabled, the adapter returns a dry-run pending response and does not call Kargo Entegratör.
 
 ## Vendor Carrier Configuration
 
@@ -41,9 +41,30 @@ When execution is disabled, the adapter returns a dry-run pending response and d
 - preferred provider
 - shipping enabled flag
 - default desi
+- cargo integration id
+- default warehouse id
+- shipping VAT percent
 - provider metadata for future carrier-specific settings
 
-If a vendor has no explicit config, the platform defaults to Hepsijet, shipping enabled, and 3.00 desi.
+`VendorShippingWarehouse` stores vendor-scoped warehouse/branch records:
+
+- vendor id
+- provider
+- warehouse id
+- default marker
+- optional name/address/metadata
+
+This supports one default warehouse now while allowing multiple warehouses per vendor later.
+
+Sporjinal seed configuration:
+
+- provider: `kargo_entegrator`
+- cargo integration id: `2547`
+- default warehouse id: `1774`
+- default desi: `3`
+- shipping VAT: `18%`
+
+If a vendor has no explicit config, the platform defaults to Hepsijet, shipping enabled, and 3.00 desi. Kargo Entegratör live creation is blocked until the selected vendor has a cargo integration id and default warehouse.
 
 ## Shipment Execution Records
 
@@ -55,6 +76,8 @@ If a vendor has no explicit config, the platform defaults to Hepsijet, shipping 
 - label URL when returned
 - shipment status
 - desi
+- cargo integration id used
+- warehouse id used
 - shipping cost, shipping VAT, and currency when returned
 - request and response snapshots
 
@@ -90,6 +113,7 @@ Order detail responses include the latest shipment execution for the allocation.
 - shipment status
 - tracking number and URL
 - label URL
+- selected/default warehouse
 - shipping cost linkage
 
 Vendors can create shipments for their own allocations only. Admins can inspect shipment executions and update vendor shipping configuration.

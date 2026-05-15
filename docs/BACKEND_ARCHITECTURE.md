@@ -1245,18 +1245,30 @@ Frontend note:
   - `cancelShipment()` placeholder
 - Initial provider:
   - `HEPSIJET`
+  - `KARGO_ENTEGRATOR`
   - future-ready schema values: `MNG`, `YURTICI`, `ARAS`
 - `VendorShippingConfig` stores vendor-level shipping settings:
   - preferred provider
   - shipping enabled flag
   - default desi
+  - cargo integration id
+  - default warehouse id
+  - shipping VAT percent
   - optional provider metadata
+- `VendorShippingWarehouse` stores vendor-scoped carrier warehouse/branch records:
+  - provider
+  - warehouse id
+  - default marker
+  - optional name/address/metadata
+- Sporjinal seed config uses Kargo Entegratör cargo integration `2547`, default warehouse `1774`, default desi `3`, and shipping VAT `18%`.
 - `ShipmentExecution` stores shipment execution evidence:
   - allocation and vendor scope
   - provider and provider shipment reference
   - tracking number, tracking URL, and label URL when returned
   - shipment status
   - desi
+  - cargo integration id used
+  - warehouse id used
   - shipping cost, shipping VAT, and currency when returned
   - request and safe response snapshots
 - Duplicate prevention is enforced by the allocation/provider unique key. Repeat create attempts return the existing shipment execution instead of creating duplicate carrier shipments.
@@ -1273,10 +1285,11 @@ Frontend note:
   - immutable finance ledger snapshots are not mutated retroactively
 - Shipping execution configuration is disabled by default:
   - `SHIPPING_EXECUTION_ENABLED=false`
-  - `SHIPPING_PROVIDER=hepsijet`
-  - `HEPSIJET_ENABLED=false`
-  - `HEPSIJET_BASE_URL`
-  - `HEPSIJET_API_KEY`
+  - `SHIPPING_PROVIDER=kargo_entegrator`
+  - `KARGO_ENTEGRATOR_ENABLED=false`
+  - `KARGO_ENTEGRATOR_BASE_URL`
+  - `KARGO_ENTEGRATOR_API_KEY`
+- Kargo Entegratör cargo integration ids and warehouse ids are vendor-scoped configuration, never global env values.
 - Backend endpoints:
   - `GET /shipping/config`
   - `POST /shipments/create`

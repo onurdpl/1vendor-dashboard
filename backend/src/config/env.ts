@@ -37,10 +37,10 @@ export type AppEnv = {
   BIZIMHESAP_ADD_INVOICE_URL?: string;
   BIZIMHESAP_ACCESS_TOKEN?: string;
   SHIPPING_EXECUTION_ENABLED: boolean;
-  SHIPPING_PROVIDER: 'hepsijet';
-  HEPSIJET_ENABLED: boolean;
-  HEPSIJET_BASE_URL?: string;
-  HEPSIJET_API_KEY?: string;
+  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator';
+  KARGO_ENTEGRATOR_ENABLED: boolean;
+  KARGO_ENTEGRATOR_BASE_URL?: string;
+  KARGO_ENTEGRATOR_API_KEY?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -129,11 +129,11 @@ function parseInvoiceProvider(value: string | undefined): AppEnv['INVOICE_PROVID
 
 function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROVIDER'] {
   const normalized = (value || 'hepsijet').trim().toLowerCase();
-  if (normalized === 'hepsijet') {
+  if (normalized === 'hepsijet' || normalized === 'kargo_entegrator') {
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet.');
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet or kargo_entegrator.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -219,8 +219,8 @@ export function loadEnv(): AppEnv {
     BIZIMHESAP_ACCESS_TOKEN: process.env.BIZIMHESAP_ACCESS_TOKEN || undefined,
     SHIPPING_EXECUTION_ENABLED: parseBoolean(process.env.SHIPPING_EXECUTION_ENABLED, false),
     SHIPPING_PROVIDER: parseShippingProvider(process.env.SHIPPING_PROVIDER),
-    HEPSIJET_ENABLED: parseBoolean(process.env.HEPSIJET_ENABLED, false),
-    HEPSIJET_BASE_URL: process.env.HEPSIJET_BASE_URL || undefined,
-    HEPSIJET_API_KEY: process.env.HEPSIJET_API_KEY || undefined,
+    KARGO_ENTEGRATOR_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_ENABLED, false),
+    KARGO_ENTEGRATOR_BASE_URL: process.env.KARGO_ENTEGRATOR_BASE_URL || undefined,
+    KARGO_ENTEGRATOR_API_KEY: process.env.KARGO_ENTEGRATOR_API_KEY || undefined,
   };
 }

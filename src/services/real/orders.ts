@@ -459,6 +459,5 @@ export async function submitFulfillmentTracking(
 export async function createShipmentExecution(allocationId: string) {
   return apiClient.post<CreateShipmentExecutionResult>('/shipments/create', {
     allocationId,
-    provider: 'hepsijet',
   });
 }

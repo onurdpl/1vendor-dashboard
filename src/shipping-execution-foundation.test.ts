@@ -56,9 +56,9 @@ const env = {
   BIZIMHESAP_ENABLED: false,
   SHIPPING_EXECUTION_ENABLED: true,
   SHIPPING_PROVIDER: 'hepsijet' as const,
-  HEPSIJET_ENABLED: true,
-  HEPSIJET_BASE_URL: 'https://carrier.example',
-  HEPSIJET_API_KEY: 'test-key',
+  KARGO_ENTEGRATOR_ENABLED: true,
+  KARGO_ENTEGRATOR_BASE_URL: 'https://kargo.example',
+  KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
 };
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
@@ -106,6 +106,8 @@ function buildShipmentExecution(overrides: Record<string, unknown> = {}) {
     labelUrl: null,
     shipmentStatus: 'PENDING',
     desi: 3,
+    cargoIntegrationId: null,
+    warehouseId: null,
     shippingCost: null,
     shippingVat: null,
     currency: 'TRY',
@@ -241,6 +243,10 @@ describe('shipping execution foundation', () => {
       preferredProvider: 'HEPSIJET',
       shippingEnabled: true,
       defaultDesi: 5,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      warehouses: [],
       providerMetadata: null,
     });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
@@ -294,6 +300,108 @@ describe('shipping execution foundation', () => {
         }),
       }),
     );
+  });
+
+  it('uses Sporjinal Kargo Entegratör warehouse 1774 and cargo integration 2547', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-1027',
+      trackingNumber: 'KE1027',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, bodyKeys: ['id'] },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+      },
+      {
+        env,
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'kargo_entegrator',
+      cargoIntegrationId: '2547',
+      warehouseId: '1774',
+      providerShipmentId: 'ke-1027',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kargo_entegrator',
+        requestSnapshot: expect.objectContaining({
+          cargoIntegrationId: '2547',
+          warehouseId: '1774',
+          shippingVatPercent: '18.00',
+        }),
+      }),
+    );
+  });
+
+  it('blocks Kargo Entegratör shipment creation when warehouse config is missing', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+        },
+        {
+          env,
+          vendorId: 'sporjinal',
+          adapter,
+        },
+      ),
+    ).rejects.toThrow('Vendor shipping warehouse is not configured.');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
   it('applies deterministic initial desi heuristics for shoes, bags, and apparel', () => {

@@ -1,4 +1,4 @@
-export type ShippingProviderDto = 'hepsijet' | 'mng' | 'yurtici' | 'aras';
+export type ShippingProviderDto = 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
 
 export type ShipmentExecutionStatusDto =
   | 'pending'
@@ -9,11 +9,25 @@ export type ShipmentExecutionStatusDto =
   | 'returned'
   | 'cancelled';
 
+export type VendorShippingWarehouseDto = {
+  id: string;
+  vendorId: string;
+  provider: ShippingProviderDto;
+  warehouseId: string;
+  name: string | null;
+  address: string | null;
+  isDefault: boolean;
+};
+
 export type VendorShippingConfigDto = {
   vendorId: string;
   preferredProvider: ShippingProviderDto;
   shippingEnabled: boolean;
   defaultDesi: string;
+  cargoIntegrationId: string | null;
+  defaultWarehouseId: string | null;
+  shippingVatPercent: string;
+  warehouses: VendorShippingWarehouseDto[];
   providerMetadata: unknown;
   source: 'configured' | 'default';
 };
@@ -32,6 +46,8 @@ export type ShipmentExecutionDto = {
   labelUrl: string | null;
   shipmentStatus: ShipmentExecutionStatusDto;
   desi: string;
+  cargoIntegrationId: string | null;
+  warehouseId: string | null;
   shippingCost: string | null;
   shippingVat: string | null;
   currency: string;
@@ -49,5 +65,15 @@ export type VendorShippingConfigUpdateDto = {
   preferredProvider?: ShippingProviderDto;
   shippingEnabled?: boolean;
   defaultDesi?: number;
+  cargoIntegrationId?: string | null;
+  defaultWarehouseId?: string | null;
+  shippingVatPercent?: number;
+  warehouses?: Array<{
+    warehouseId: string;
+    name?: string | null;
+    address?: string | null;
+    isDefault?: boolean;
+    provider?: ShippingProviderDto;
+  }>;
   providerMetadata?: unknown;
 };

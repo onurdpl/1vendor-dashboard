@@ -18,13 +18,15 @@ export type ShipmentExecution = {
   sourceShopifyOrderId?: string | null;
   sourceShopifyOrderNumber?: string | null;
   sourceShopifyFulfillmentId?: string | null;
-  provider: 'hepsijet' | 'mng' | 'yurtici' | 'aras';
+  provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
   providerShipmentId: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
   labelUrl: string | null;
   shipmentStatus: 'pending' | 'created' | 'failed' | 'in_transit' | 'delivered' | 'returned' | 'cancelled';
   desi: string;
+  cargoIntegrationId?: string | null;
+  warehouseId?: string | null;
   shippingCost: string | null;
   shippingVat: string | null;
   currency: string;

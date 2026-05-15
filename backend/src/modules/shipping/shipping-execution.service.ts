@@ -4,6 +4,7 @@ import {
   ShippingProvider,
   type ShipmentExecution,
   type VendorShippingConfig,
+  type VendorShippingWarehouse,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
@@ -20,6 +21,9 @@ import type {
 } from './shipping-execution.types.js';
 
 const SHIPPING_VAT_PERCENT = 18;
+type StoredShippingConfig = VendorShippingConfig & {
+  warehouses?: VendorShippingWarehouse[];
+};
 
 function toNumber(value: unknown) {
   const numeric = Number(value ?? 0);
@@ -39,6 +43,9 @@ function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
   if (normalized === 'hepsijet') {
     return ShippingProvider.HEPSIJET;
   }
+  if (normalized === 'kargo_entegrator') {
+    return ShippingProvider.KARGO_ENTEGRATOR;
+  }
   if (normalized === 'mng') {
     return ShippingProvider.MNG;
   }
@@ -56,13 +63,29 @@ function mapStatus(status: ShipmentExecutionStatus | string): ShipmentExecutionD
   return status.trim().toLowerCase() as ShipmentExecutionDto['shipmentStatus'];
 }
 
-function mapShippingConfig(config: VendorShippingConfig | null, vendorId: string): VendorShippingConfigDto {
+function mapWarehouse(warehouse: VendorShippingWarehouse): VendorShippingConfigDto['warehouses'][number] {
+  return {
+    id: warehouse.id,
+    vendorId: warehouse.vendorId,
+    provider: mapProvider(warehouse.provider),
+    warehouseId: warehouse.warehouseId,
+    name: warehouse.name,
+    address: warehouse.address,
+    isDefault: warehouse.isDefault,
+  };
+}
+
+function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string): VendorShippingConfigDto {
   if (!config) {
     return {
       vendorId,
       preferredProvider: 'hepsijet',
       shippingEnabled: true,
       defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
       providerMetadata: null,
       source: 'default',
     };
@@ -73,6 +96,10 @@ function mapShippingConfig(config: VendorShippingConfig | null, vendorId: string
     preferredProvider: mapProvider(config.preferredProvider),
     shippingEnabled: config.shippingEnabled,
     defaultDesi: toAmountString(toNumber(config.defaultDesi)),
+    cargoIntegrationId: config.cargoIntegrationId,
+    defaultWarehouseId: config.defaultWarehouseId,
+    shippingVatPercent: toAmountString(toNumber(config.shippingVatPercent)),
+    warehouses: (config.warehouses ?? []).map(mapWarehouse),
     providerMetadata: config.providerMetadata,
     source: 'configured',
   };
@@ -93,6 +120,8 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
     labelUrl: execution.labelUrl,
     shipmentStatus: mapStatus(execution.shipmentStatus),
     desi: toAmountString(toNumber(execution.desi)),
+    cargoIntegrationId: execution.cargoIntegrationId,
+    warehouseId: execution.warehouseId,
     shippingCost: execution.shippingCost === null ? null : toAmountString(toNumber(execution.shippingCost)),
     shippingVat: execution.shippingVat === null ? null : toAmountString(toNumber(execution.shippingVat)),
     currency: execution.currency,
@@ -180,10 +209,44 @@ function allocationShippingStatus(status: ShipmentExecutionDto['shipmentStatus']
   return 'awaiting_shipment';
 }
 
+function selectDefaultWarehouse(config: VendorShippingConfigDto, provider: ShippingProviderDto) {
+  return (
+    config.warehouses.find((warehouse) => warehouse.provider === provider && warehouse.warehouseId === config.defaultWarehouseId) ??
+    config.warehouses.find((warehouse) => warehouse.provider === provider && warehouse.isDefault) ??
+    config.warehouses.find((warehouse) => warehouse.provider === provider) ??
+    null
+  );
+}
+
+function requireWarehouseConfig(config: VendorShippingConfigDto, provider: ShippingProviderDto) {
+  const warehouse = selectDefaultWarehouse(config, provider);
+  const warehouseId = warehouse?.warehouseId ?? config.defaultWarehouseId;
+  if (!config.cargoIntegrationId || !warehouseId) {
+    throw new Error('Vendor shipping warehouse is not configured.');
+  }
+
+  return {
+    cargoIntegrationId: config.cargoIntegrationId,
+    warehouseId,
+  };
+}
+
 async function getStoredShippingConfig(vendorId: string) {
   return prisma.vendorShippingConfig.findUnique({
     where: {
       vendorId,
+    },
+    include: {
+      warehouses: {
+        orderBy: [
+          {
+            isDefault: 'desc',
+          },
+          {
+            createdAt: 'asc',
+          },
+        ],
+      },
     },
   });
 }
@@ -199,34 +262,104 @@ export async function upsertVendorShippingConfig(
   const defaultConfig = mapShippingConfig(null, vendorId);
   const preferredProvider = normalizeProvider(input.preferredProvider ?? defaultConfig.preferredProvider);
   const defaultDesi = input.defaultDesi ?? Number(defaultConfig.defaultDesi);
+  const shippingVatPercent = input.shippingVatPercent ?? Number(defaultConfig.shippingVatPercent);
 
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
     throw new Error('defaultDesi must be greater than zero.');
   }
+  if (!Number.isFinite(shippingVatPercent) || shippingVatPercent < 0) {
+    throw new Error('shippingVatPercent must be zero or greater.');
+  }
 
-  const config = await prisma.vendorShippingConfig.upsert({
-    where: {
-      vendorId,
-    },
-    update: {
-      preferredProvider,
-      shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
-      defaultDesi,
-      providerMetadata:
-        input.providerMetadata === undefined
-          ? undefined
-          : (input.providerMetadata as Prisma.InputJsonValue),
-    },
-    create: {
-      vendorId,
-      preferredProvider,
-      shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
-      defaultDesi,
-      providerMetadata:
-        input.providerMetadata === undefined
-          ? Prisma.JsonNull
-          : (input.providerMetadata as Prisma.InputJsonValue),
-    },
+  const config = await prisma.$transaction(async (tx) => {
+    const savedConfig = await tx.vendorShippingConfig.upsert({
+      where: {
+        vendorId,
+      },
+      update: {
+        preferredProvider: input.preferredProvider === undefined ? undefined : preferredProvider,
+        shippingEnabled: input.shippingEnabled,
+        defaultDesi: input.defaultDesi === undefined ? undefined : defaultDesi,
+        cargoIntegrationId: input.cargoIntegrationId === undefined ? undefined : input.cargoIntegrationId,
+        defaultWarehouseId: input.defaultWarehouseId === undefined ? undefined : input.defaultWarehouseId,
+        shippingVatPercent: input.shippingVatPercent === undefined ? undefined : shippingVatPercent,
+        providerMetadata:
+          input.providerMetadata === undefined
+            ? undefined
+            : (input.providerMetadata as Prisma.InputJsonValue),
+      },
+      create: {
+        vendorId,
+        preferredProvider,
+        shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
+        defaultDesi,
+        cargoIntegrationId: input.cargoIntegrationId ?? null,
+        defaultWarehouseId: input.defaultWarehouseId ?? null,
+        shippingVatPercent,
+        providerMetadata:
+          input.providerMetadata === undefined
+            ? Prisma.JsonNull
+            : (input.providerMetadata as Prisma.InputJsonValue),
+      },
+    });
+
+    const warehouseInputs = input.warehouses ?? (
+      input.defaultWarehouseId
+        ? [
+            {
+              warehouseId: input.defaultWarehouseId,
+              isDefault: true,
+              provider: mapProvider(preferredProvider),
+            },
+          ]
+        : []
+    );
+
+    for (const warehouseInput of warehouseInputs) {
+      const warehouseProvider = normalizeProvider(warehouseInput.provider ?? mapProvider(preferredProvider));
+      await tx.vendorShippingWarehouse.upsert({
+        where: {
+          vendorId_provider_warehouseId: {
+            vendorId,
+            provider: warehouseProvider,
+            warehouseId: warehouseInput.warehouseId,
+          },
+        },
+        update: {
+          configId: savedConfig.id,
+          name: warehouseInput.name ?? null,
+          address: warehouseInput.address ?? null,
+          isDefault: Boolean(warehouseInput.isDefault) || warehouseInput.warehouseId === input.defaultWarehouseId,
+        },
+        create: {
+          configId: savedConfig.id,
+          vendorId,
+          provider: warehouseProvider,
+          warehouseId: warehouseInput.warehouseId,
+          name: warehouseInput.name ?? null,
+          address: warehouseInput.address ?? null,
+          isDefault: Boolean(warehouseInput.isDefault) || warehouseInput.warehouseId === input.defaultWarehouseId,
+        },
+      });
+    }
+
+    return tx.vendorShippingConfig.findUniqueOrThrow({
+      where: {
+        vendorId,
+      },
+      include: {
+        warehouses: {
+          orderBy: [
+            {
+              isDefault: 'desc',
+            },
+            {
+              createdAt: 'asc',
+            },
+          ],
+        },
+      },
+    });
   });
 
   return mapShippingConfig(config, vendorId);
@@ -318,9 +451,12 @@ export async function createShipmentExecution(
   }
 
   const provider = normalizeProvider(input.provider ?? config.preferredProvider);
-  if (provider !== ShippingProvider.HEPSIJET) {
-    throw new Error('Only Hepsijet shipment execution is implemented in Phase 20B.');
+  const providerDto = mapProvider(provider);
+  if (provider !== ShippingProvider.HEPSIJET && provider !== ShippingProvider.KARGO_ENTEGRATOR) {
+    throw new Error('Only Hepsijet and Kargo Entegratör shipment execution are implemented.');
   }
+  const warehouseConfig =
+    provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto) : null;
 
   const existing = await prisma.shipmentExecution.findUnique({
     where: {
@@ -342,11 +478,14 @@ export async function createShipmentExecution(
   }));
   const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
   const requestSnapshot = {
-    provider: mapProvider(provider),
+    provider: providerDto,
     allocationId: allocation.id,
     vendorId: allocation.assignedVendorId,
     sourceShopifyOrderId: allocation.sourceShopifyOrderId,
     sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+    cargoIntegrationId: warehouseConfig?.cargoIntegrationId ?? null,
+    warehouseId: warehouseConfig?.warehouseId ?? null,
+    shippingVatPercent: config.shippingVatPercent,
     desi,
     lineItems,
     recipient: {
@@ -367,23 +506,26 @@ export async function createShipmentExecution(
       provider,
       shipmentStatus: ShipmentExecutionStatus.PENDING,
       desi,
+      cargoIntegrationId: warehouseConfig?.cargoIntegrationId ?? null,
+      warehouseId: warehouseConfig?.warehouseId ?? null,
       requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
     },
   });
 
   try {
-    const adapter = options.adapter ?? createShippingProviderAdapter(options.env);
+    const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
-      provider: mapProvider(provider),
+      provider: providerDto,
       requestSnapshot,
     });
     const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
     const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
+    const shippingVatPercent = Number(config.shippingVatPercent || SHIPPING_VAT_PERCENT);
     const shippingVat =
       result.shippingVat ??
-      (result.shippingCost === null ? null : Number((result.shippingCost * (SHIPPING_VAT_PERCENT / 100)).toFixed(2)));
+      (result.shippingCost === null ? null : Number((result.shippingCost * (shippingVatPercent / 100)).toFixed(2)));
 
     const updated = await prisma.$transaction(async (tx) => {
       const execution = await tx.shipmentExecution.update({

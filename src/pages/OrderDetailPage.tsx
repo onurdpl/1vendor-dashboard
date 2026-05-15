@@ -443,6 +443,12 @@ export function OrderDetailPage() {
                               <span>Carrier status</span>
                               <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
                             </div>
+                            {shipmentExecution.warehouseId ? (
+                              <div className="summary-row">
+                                <span>Warehouse</span>
+                                <strong>{shipmentExecution.warehouseId}</strong>
+                              </div>
+                            ) : null}
                           </>
                         ) : null}
                         <div className="summary-row">

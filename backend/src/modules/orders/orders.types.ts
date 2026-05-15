@@ -46,6 +46,8 @@ export type OrderShipmentExecutionDto = {
   labelUrl: string | null;
   shipmentStatus: string;
   desi: string;
+  cargoIntegrationId: string | null;
+  warehouseId: string | null;
   shippingCost: string | null;
   shippingVat: string | null;
   currency: string;

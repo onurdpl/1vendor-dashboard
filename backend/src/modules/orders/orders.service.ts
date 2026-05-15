@@ -37,6 +37,8 @@ function mapShipmentExecution(execution: {
   labelUrl: string | null;
   shipmentStatus: string;
   desi: unknown;
+  cargoIntegrationId: string | null;
+  warehouseId: string | null;
   shippingCost: unknown;
   shippingVat: unknown;
   currency: string;
@@ -59,6 +61,8 @@ function mapShipmentExecution(execution: {
     labelUrl: execution.labelUrl,
     shipmentStatus: execution.shipmentStatus.trim().toLowerCase(),
     desi: toAmountString(toNumber(execution.desi)),
+    cargoIntegrationId: execution.cargoIntegrationId,
+    warehouseId: execution.warehouseId,
     shippingCost: execution.shippingCost === null || execution.shippingCost === undefined ? null : toAmountString(toNumber(execution.shippingCost)),
     shippingVat: execution.shippingVat === null || execution.shippingVat === undefined ? null : toAmountString(toNumber(execution.shippingVat)),
     currency: execution.currency,

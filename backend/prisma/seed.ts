@@ -93,6 +93,52 @@ async function runSeed() {
     });
   }
 
+  const sporjinalShippingConfig = await prisma.vendorShippingConfig.upsert({
+    where: {
+      vendorId: 'sporjinal',
+    },
+    update: {
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: '18.00',
+    },
+    create: {
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: '18.00',
+    },
+  });
+
+  await prisma.vendorShippingWarehouse.upsert({
+    where: {
+      vendorId_provider_warehouseId: {
+        vendorId: 'sporjinal',
+        provider: 'KARGO_ENTEGRATOR',
+        warehouseId: '1774',
+      },
+    },
+    update: {
+      configId: sporjinalShippingConfig.id,
+      name: 'Sporjinal default warehouse',
+      isDefault: true,
+    },
+    create: {
+      configId: sporjinalShippingConfig.id,
+      vendorId: 'sporjinal',
+      provider: 'KARGO_ENTEGRATOR',
+      warehouseId: '1774',
+      name: 'Sporjinal default warehouse',
+      isDefault: true,
+    },
+  });
+
   const demoPasswordHash = makeDemoPasswordHash('demo123');
 
   for (const user of users) {

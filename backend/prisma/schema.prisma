@@ -104,6 +104,7 @@ enum ShippingCostStatus {
 
 enum ShippingProvider {
   HEPSIJET
+  KARGO_ENTEGRATOR
   MNG
   YURTICI
   ARAS
@@ -231,6 +232,7 @@ model Vendor {
   financeEntries        FinanceLedgerEntry[]
   shippingCosts         ShipmentShippingCost[]
   shippingConfig        VendorShippingConfig?
+  shippingWarehouses    VendorShippingWarehouse[]
   shipmentExecutions    ShipmentExecution[]
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
@@ -539,12 +541,36 @@ model VendorShippingConfig {
   preferredProvider ShippingProvider @default(HEPSIJET)
   shippingEnabled   Boolean          @default(true)
   defaultDesi       Decimal          @default(3.00) @db.Decimal(10, 2)
+  cargoIntegrationId String?
+  defaultWarehouseId String?
+  shippingVatPercent Decimal          @default(18.00) @db.Decimal(5, 2)
   providerMetadata  Json?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
   vendor            Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  warehouses        VendorShippingWarehouse[]
 
   @@index([vendorId, shippingEnabled])
+}
+
+model VendorShippingWarehouse {
+  id                String               @id @default(cuid())
+  configId          String
+  vendorId          String
+  provider          ShippingProvider
+  warehouseId       String
+  name              String?
+  address           String?
+  isDefault         Boolean              @default(false)
+  metadata          Json?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  config            VendorShippingConfig @relation(fields: [configId], references: [id], onDelete: Cascade)
+  vendor            Vendor               @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([vendorId, provider, warehouseId])
+  @@index([configId, isDefault])
+  @@index([vendorId, provider, isDefault])
 }
 
 model ShipmentExecution {
@@ -561,6 +587,8 @@ model ShipmentExecution {
   labelUrl                   String?
   shipmentStatus             ShipmentExecutionStatus @default(PENDING)
   desi                       Decimal                 @default(3.00) @db.Decimal(10, 2)
+  cargoIntegrationId         String?
+  warehouseId                String?
   shippingCost               Decimal?                @db.Decimal(10, 2)
   shippingVat                Decimal?                @db.Decimal(10, 2)
   currency                   String                  @default("TRY")

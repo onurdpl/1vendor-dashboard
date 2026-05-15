@@ -21,7 +21,7 @@ export type ShippingProviderCreateResult = {
 };
 
 export interface ShippingProviderAdapter {
-  provider: 'HEPSIJET';
+  provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -101,7 +101,7 @@ export class HepsijetAdapter implements ShippingProviderAdapter {
   constructor(private readonly env: AppEnv) {}
 
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
-    if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.HEPSIJET_ENABLED) {
+    if (!this.env.SHIPPING_EXECUTION_ENABLED) {
       return {
         providerShipmentId: null,
         trackingNumber: null,
@@ -120,44 +120,7 @@ export class HepsijetAdapter implements ShippingProviderAdapter {
       };
     }
 
-    if (!this.env.HEPSIJET_BASE_URL || !this.env.HEPSIJET_API_KEY) {
-      throw new Error('Hepsijet shipment execution is not configured.');
-    }
-
-    const response = await fetch(`${this.env.HEPSIJET_BASE_URL.replace(/\/$/, '')}/shipments`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.env.HEPSIJET_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(input.requestSnapshot),
-    });
-    const contentType = response.headers.get('content-type') ?? '';
-    const responseText = await response.text();
-    const parsedBody = parseResponseBody(contentType, responseText);
-    const body = isRecord(parsedBody) ? parsedBody : {};
-
-    if (!response.ok) {
-      throw new Error(`Hepsijet shipment execution failed with HTTP ${response.status}.`);
-    }
-
-    return {
-      providerShipmentId: readString(body, ['providerShipmentId', 'shipmentId', 'id', 'barcode']),
-      trackingNumber: readString(body, ['trackingNumber', 'trackingNo', 'barcode']),
-      trackingUrl: readString(body, ['trackingUrl', 'trackingLink']),
-      labelUrl: readString(body, ['labelUrl', 'labelPdfUrl', 'pdfUrl']),
-      shipmentStatus: mapShipmentStatus(readString(body, ['shipmentStatus', 'status'])),
-      shippingCost: readNumber(body, ['shippingCost', 'cost', 'amount']),
-      shippingVat: readNumber(body, ['shippingVat', 'shippingVatAmount', 'vat']),
-      currency: readString(body, ['currency']) ?? 'TRY',
-      responseSnapshot: {
-        status: response.status,
-        ok: response.ok,
-        contentType,
-        bodyKeys: Object.keys(body).sort(),
-        provider: 'hepsijet',
-      },
-    };
+    throw new Error('Hepsijet live shipment execution is not configured in this deployment.');
   }
 
   async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
@@ -173,6 +136,91 @@ export class HepsijetAdapter implements ShippingProviderAdapter {
   }
 }
 
-export function createShippingProviderAdapter(env: AppEnv): ShippingProviderAdapter {
+export class KargoEntegratorAdapter implements ShippingProviderAdapter {
+  provider = 'KARGO_ENTEGRATOR' as const;
+
+  constructor(private readonly env: AppEnv) {}
+
+  async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
+    if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.KARGO_ENTEGRATOR_ENABLED) {
+      return {
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'pending',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          ok: true,
+          dryRun: true,
+          provider: 'kargo_entegrator',
+          reason: 'Kargo Entegratör shipment execution is disabled.',
+        },
+      };
+    }
+
+    if (!this.env.KARGO_ENTEGRATOR_BASE_URL || !this.env.KARGO_ENTEGRATOR_API_KEY) {
+      throw new Error('Kargo Entegratör shipment execution is not configured.');
+    }
+
+    const response = await fetch(`${this.env.KARGO_ENTEGRATOR_BASE_URL.replace(/\/$/, '')}/shipments`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.env.KARGO_ENTEGRATOR_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input.requestSnapshot),
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+    const parsedBody = parseResponseBody(contentType, responseText);
+    const body = isRecord(parsedBody) ? parsedBody : {};
+
+    if (!response.ok) {
+      throw new Error(`Kargo Entegratör shipment execution failed with HTTP ${response.status}.`);
+    }
+
+    return {
+      providerShipmentId: readString(body, ['providerShipmentId', 'shipmentId', 'id', 'cargoId', 'barcode']),
+      trackingNumber: readString(body, ['trackingNumber', 'trackingNo', 'cargoTrackingNo', 'barcode']),
+      trackingUrl: readString(body, ['trackingUrl', 'trackingLink', 'cargoTrackingUrl']),
+      labelUrl: readString(body, ['labelUrl', 'labelPdfUrl', 'pdfUrl', 'barcodeUrl']),
+      shipmentStatus: mapShipmentStatus(readString(body, ['shipmentStatus', 'status', 'cargoStatus'])),
+      shippingCost: readNumber(body, ['shippingCost', 'cost', 'amount', 'cargoPrice']),
+      shippingVat: readNumber(body, ['shippingVat', 'shippingVatAmount', 'vat']),
+      currency: readString(body, ['currency']) ?? 'TRY',
+      responseSnapshot: {
+        status: response.status,
+        ok: response.ok,
+        contentType,
+        bodyKeys: Object.keys(body).sort(),
+        provider: 'kargo_entegrator',
+      },
+    };
+  }
+
+  async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Kargo Entegratör shipment status polling is not implemented in this phase.');
+  }
+
+  async getTrackingInfo(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Kargo Entegratör tracking polling is not implemented in this phase.');
+  }
+
+  async cancelShipment(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Kargo Entegratör shipment cancellation is not implemented in this phase.');
+  }
+}
+
+export function createShippingProviderAdapter(
+  env: AppEnv,
+  provider: ShippingProviderDto = 'hepsijet',
+): ShippingProviderAdapter {
+  if (provider === 'kargo_entegrator') {
+    return new KargoEntegratorAdapter(env);
+  }
+
   return new HepsijetAdapter(env);
 }
