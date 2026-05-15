@@ -13,6 +13,7 @@ import type {
   InvoiceExecutionDto,
   InvoiceExecutionPreviewDto,
   InvoiceExecutionProviderDto,
+  InvoiceExecutionResponseSummaryDto,
   PreviewInvoiceExecutionDto,
 } from './invoice-execution.types.js';
 
@@ -75,6 +76,26 @@ function normalizeProvider(provider?: InvoiceExecutionProviderDto): InvoiceExecu
 
 function mapStatus(status: InvoiceExecutionStatus | string) {
   return status.trim().toLowerCase() as InvoiceExecutionDto['status'];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function collectNestedKeys(value: unknown, prefix = '', keys = new Set<string>()) {
+  if (!isRecord(value)) {
+    return keys;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    const nextKey = prefix ? `${prefix}.${key}` : key;
+    keys.add(nextKey);
+    if (isRecord(child)) {
+      collectNestedKeys(child, nextKey, keys);
+    }
+  }
+
+  return keys;
 }
 
 export function mapInvoiceExecution(execution: InvoiceExecution): InvoiceExecutionDto {
@@ -376,4 +397,43 @@ export async function retryInvoiceExecution(
     requestSnapshot,
     adapter: options.adapter ?? createInvoiceProviderAdapter(options.env),
   });
+}
+
+export async function getInvoiceExecutionResponseSummary(invoiceExecutionId: string): Promise<InvoiceExecutionResponseSummaryDto> {
+  const execution = await prisma.invoiceExecution.findUnique({
+    where: {
+      id: invoiceExecutionId,
+    },
+  });
+
+  if (!execution) {
+    throw new Error('Invoice execution could not be found.');
+  }
+
+  const responseSnapshot = isRecord(execution.responseSnapshot) ? execution.responseSnapshot : null;
+  const body = responseSnapshot && 'body' in responseSnapshot ? responseSnapshot.body : null;
+  const bodyKeys = Array.isArray(responseSnapshot?.bodyKeys)
+    ? responseSnapshot.bodyKeys.filter((key): key is string => typeof key === 'string')
+    : isRecord(body)
+      ? Object.keys(body).sort()
+      : [];
+
+  return {
+    id: execution.id,
+    provider: mapProvider(execution.provider),
+    status: mapStatus(execution.status),
+    providerInvoiceGuidPresent: Boolean(execution.providerInvoiceGuid),
+    providerInvoiceNoPresent: Boolean(execution.providerInvoiceNo),
+    providerPdfUrlPresent: Boolean(execution.providerPdfUrl),
+    response: responseSnapshot
+      ? {
+          httpStatus: typeof responseSnapshot.status === 'number' ? responseSnapshot.status : null,
+          ok: typeof responseSnapshot.ok === 'boolean' ? responseSnapshot.ok : null,
+          contentType: typeof responseSnapshot.contentType === 'string' ? responseSnapshot.contentType : null,
+          parsedBodyType: typeof responseSnapshot.parsedBodyType === 'string' ? responseSnapshot.parsedBodyType : null,
+          bodyKeys,
+          nestedBodyKeys: [...collectNestedKeys(body)].sort(),
+        }
+      : null,
+  };
 }

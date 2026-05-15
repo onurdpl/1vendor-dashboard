@@ -97,6 +97,31 @@ The preview returns:
 
 The preview does not return FirmId, API keys, access tokens, provider URLs containing credentials, or raw secrets.
 
+## Live Response Parsing
+
+BizimHesap AddInvoice success responses are parsed defensively:
+
+- documented lowercase `guid`
+- documented lowercase `url`
+- existing uppercase/provider aliases such as `Guid`, `InvoiceGuid`, `PdfUrl`, and `invoicePdfUrl`
+- nested wrapper payloads
+- simple XML-style `<guid>` / `<url>` response bodies
+
+The provider response snapshot stores safe inspection metadata:
+
+- HTTP status
+- content type
+- parsed body type
+- parsed body keys
+
+Admin-only response summaries expose key presence and body-key structure without returning raw provider values or secrets:
+
+```text
+GET /admin/invoices/:id/response-summary
+```
+
+If BizimHesap does not return an invoice number, the platform leaves `providerInvoiceNo` empty and keeps the provider GUID/PDF URL as the primary execution references.
+
 ## Controlled Execution Flow
 
 Admin create flow:

@@ -15,7 +15,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createInvoiceExecution, previewInvoiceExecutionPayload, retryInvoiceExecution } = await import(
+const { createInvoiceExecution, getInvoiceExecutionResponseSummary, previewInvoiceExecutionPayload, retryInvoiceExecution } = await import(
   '../backend/src/modules/invoices/invoice-execution.service.js'
 );
 const { BizimHesapAdapter } = await import('../backend/src/modules/invoices/invoice-provider.adapter.js');
@@ -116,6 +116,17 @@ function buildExecution(input: Partial<{ status: string; providerInvoiceGuid: st
     responseSnapshot: {},
     createdAt: new Date('2026-05-14T08:00:00.000Z'),
     updatedAt: new Date('2026-05-14T08:01:00.000Z'),
+  };
+}
+
+function buildFetchResponse(body: unknown, contentType = 'application/json') {
+  return {
+    ok: true,
+    status: 200,
+    headers: {
+      get: (key: string) => (key.toLowerCase() === 'content-type' ? contentType : null),
+    },
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   };
 }
 
@@ -354,16 +365,11 @@ describe('invoice execution foundation', () => {
   });
 
   it('passes BizimHesap FirmId and API key through the provider request without logging them in snapshots', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      text: async () =>
-        JSON.stringify({
-          Guid: 'BH-GUID-2',
-          InvoiceNo: 'BH-1002',
-          PdfUrl: 'https://provider.example/invoice-2.pdf',
-        }),
-    });
+    const fetchMock = vi.fn().mockResolvedValue(buildFetchResponse({
+      Guid: 'BH-GUID-2',
+      InvoiceNo: 'BH-1002',
+      PdfUrl: 'https://provider.example/invoice-2.pdf',
+    }));
     vi.stubGlobal('fetch', fetchMock);
 
     const liveAdapter = new BizimHesapAdapter(env);
@@ -394,5 +400,110 @@ describe('invoice execution foundation', () => {
     });
 
     vi.unstubAllGlobals();
+  });
+
+  it('parses documented BizimHesap lowercase guid and url response fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildFetchResponse({
+      guid: 'BH-GUID-LOWER',
+      url: 'https://provider.example/lowercase.pdf',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const liveAdapter = new BizimHesapAdapter(env);
+    const result = await liveAdapter.createInvoice({
+      financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+      requestSnapshot: {
+        AddInvoice: {
+          Customer: {
+            Name: 'Test Customer',
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerInvoiceGuid: 'BH-GUID-LOWER',
+      providerInvoiceNo: null,
+      providerPdfUrl: 'https://provider.example/lowercase.pdf',
+      responseSnapshot: expect.objectContaining({
+        status: 200,
+        ok: true,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['guid', 'url'],
+      }),
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('parses nested BizimHesap provider response wrappers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildFetchResponse({
+      AddInvoiceResult: {
+        guid: 'BH-GUID-NESTED',
+        url: 'https://provider.example/nested.pdf',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const liveAdapter = new BizimHesapAdapter(env);
+    const result = await liveAdapter.createInvoice({
+      financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+      requestSnapshot: {
+        AddInvoice: {
+          Customer: {
+            Name: 'Test Customer',
+          },
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerInvoiceGuid: 'BH-GUID-NESTED',
+      providerPdfUrl: 'https://provider.example/nested.pdf',
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('summarizes persisted provider response snapshots without raw values', async () => {
+    prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce({
+      ...buildExecution({
+        providerInvoiceGuid: 'BH-GUID-SUMMARY',
+      }),
+      providerInvoiceNo: null,
+      providerPdfUrl: 'https://provider.example/invoice.pdf',
+      responseSnapshot: {
+        status: 200,
+        ok: true,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['guid', 'url'],
+        body: {
+          guid: 'BH-GUID-SUMMARY',
+          url: 'https://provider.example/invoice.pdf',
+        },
+      },
+    });
+
+    const summary = await getInvoiceExecutionResponseSummary('invoice-bizimhesap-fin-sporjinal-sale-7616544244049');
+
+    expect(summary).toEqual(
+      expect.objectContaining({
+        providerInvoiceGuidPresent: true,
+        providerInvoiceNoPresent: false,
+        providerPdfUrlPresent: true,
+        response: expect.objectContaining({
+          httpStatus: 200,
+          ok: true,
+          contentType: 'application/json',
+          parsedBodyType: 'object',
+          bodyKeys: ['guid', 'url'],
+          nestedBodyKeys: ['guid', 'url'],
+        }),
+      }),
+    );
+    expect(JSON.stringify(summary)).not.toContain('BH-GUID-SUMMARY');
+    expect(JSON.stringify(summary)).not.toContain('invoice.pdf');
   });
 });

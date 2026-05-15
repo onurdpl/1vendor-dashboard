@@ -15,6 +15,23 @@ export type InvoiceExecutionDto = {
   updatedAt: string;
 };
 
+export type InvoiceExecutionResponseSummaryDto = {
+  id: string;
+  provider: InvoiceExecutionProviderDto;
+  status: InvoiceExecutionStatusDto;
+  providerInvoiceGuidPresent: boolean;
+  providerInvoiceNoPresent: boolean;
+  providerPdfUrlPresent: boolean;
+  response: {
+    httpStatus: number | null;
+    ok: boolean | null;
+    contentType: string | null;
+    parsedBodyType: string | null;
+    bodyKeys: string[];
+    nestedBodyKeys: string[];
+  } | null;
+};
+
 export type CreateInvoiceExecutionDto = {
   financeLedgerEntryId: string;
   provider?: InvoiceExecutionProviderDto;

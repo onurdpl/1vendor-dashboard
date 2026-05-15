@@ -6,7 +6,7 @@ export type InvoiceProviderCreateInput = {
 };
 
 export type InvoiceProviderCreateResult = {
-  providerInvoiceGuid: string;
+  providerInvoiceGuid: string | null;
   providerInvoiceNo?: string | null;
   providerPdfUrl?: string | null;
   responseSnapshot: Record<string, unknown>;
@@ -33,6 +33,74 @@ function readProviderString(payload: unknown, keys: string[]) {
   }
 
   return null;
+}
+
+function normalizeProviderKey(value: string) {
+  return value.replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function listObjectKeys(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return [];
+  }
+
+  return Object.keys(payload).sort();
+}
+
+function readProviderStringDeep(payload: unknown, keys: string[], visited = new Set<unknown>()): string | null {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  if (visited.has(payload)) {
+    return null;
+  }
+  visited.add(payload);
+
+  const normalizedKeys = new Set(keys.map(normalizeProviderKey));
+  if (!Array.isArray(payload)) {
+    for (const [key, value] of Object.entries(payload)) {
+      if (normalizedKeys.has(normalizeProviderKey(key)) && typeof value === 'string' && value.trim()) {
+        return value.trim();
+      }
+    }
+  }
+
+  const childValues = Array.isArray(payload) ? payload : Object.values(payload);
+  for (const child of childValues) {
+    const nested = readProviderStringDeep(child, keys, visited);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function readXmlishValue(payload: string, keys: string[]) {
+  for (const key of keys) {
+    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = payload.match(new RegExp(`<${escapedKey}>\\s*([^<]+?)\\s*</${escapedKey}>`, 'i'));
+    if (match?.[1]?.trim()) {
+      return match[1].trim();
+    }
+  }
+
+  return null;
+}
+
+function readProviderResponseField(payload: unknown, responseText: string, keys: string[]) {
+  return readProviderString(payload, keys) ?? readProviderStringDeep(payload, keys) ?? readXmlishValue(responseText, keys);
+}
+
+function getResponseBodyType(payload: unknown) {
+  if (Array.isArray(payload)) {
+    return 'array';
+  }
+  if (payload === null) {
+    return 'null';
+  }
+  return typeof payload;
 }
 
 function trimTrailingSlash(value: string) {
@@ -90,35 +158,73 @@ export class BizimHesapAdapter implements InvoiceProviderAdapter {
       body: JSON.stringify(input.requestSnapshot),
     });
     const responseText = await response.text();
+    const contentType = response.headers.get('content-type');
     let responseSnapshot: Record<string, unknown> = {
       status: response.status,
       ok: response.ok,
+      contentType,
+      parsedBodyType: 'text',
+      bodyKeys: [],
       body: responseText,
     };
+    let parsedBody: unknown = responseText;
 
     try {
       const json = responseText ? JSON.parse(responseText) : {};
+      parsedBody = json;
       if (json && typeof json === 'object') {
         responseSnapshot = {
           status: response.status,
           ok: response.ok,
+          contentType,
+          parsedBodyType: getResponseBodyType(json),
+          bodyKeys: listObjectKeys(json),
           body: json,
         };
       }
     } catch {
-      // Keep the text response snapshot.
+      const guid = readXmlishValue(responseText, ['providerInvoiceGuid', 'invoiceGuid', 'InvoiceGuid', 'Guid', 'guid', 'id']);
+      const url = readXmlishValue(responseText, ['providerPdfUrl', 'pdfUrl', 'PdfUrl', 'PDFUrl', 'invoicePdfUrl', 'url']);
+      if (guid || url) {
+        const xmlBody = {
+          guid,
+          url,
+        };
+        parsedBody = xmlBody;
+        responseSnapshot = {
+          status: response.status,
+          ok: response.ok,
+          contentType,
+          parsedBodyType: 'xml',
+          bodyKeys: Object.keys(xmlBody).filter((key) => Boolean(xmlBody[key as keyof typeof xmlBody])),
+          body: parsedBody,
+        };
+      }
     }
 
     if (!response.ok) {
       throw new Error(`BizimHesap AddInvoice failed with HTTP ${response.status}.`);
     }
 
-    const body = responseSnapshot.body;
+    const body = parsedBody;
     const providerInvoiceGuid =
-      readProviderString(body, ['providerInvoiceGuid', 'invoiceGuid', 'InvoiceGuid', 'Guid', 'guid', 'id']) ??
-      `bizimhesap-${input.financeLedgerEntryId}`;
-    const providerInvoiceNo = readProviderString(body, ['providerInvoiceNo', 'invoiceNo', 'InvoiceNo', 'No', 'number']);
-    const providerPdfUrl = readProviderString(body, ['providerPdfUrl', 'pdfUrl', 'PdfUrl', 'PDFUrl', 'invoicePdfUrl']);
+      readProviderResponseField(body, responseText, ['providerInvoiceGuid', 'invoiceGuid', 'InvoiceGuid', 'Guid', 'guid', 'id']);
+    const providerInvoiceNo = readProviderResponseField(body, responseText, [
+      'providerInvoiceNo',
+      'invoiceNo',
+      'InvoiceNo',
+      'InvoiceNumber',
+      'No',
+      'number',
+    ]);
+    const providerPdfUrl = readProviderResponseField(body, responseText, [
+      'providerPdfUrl',
+      'pdfUrl',
+      'PdfUrl',
+      'PDFUrl',
+      'invoicePdfUrl',
+      'url',
+    ]);
 
     return {
       providerInvoiceGuid,

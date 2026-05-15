@@ -1200,7 +1200,9 @@ Frontend note:
   - `POST /admin/invoices/preview`
   - `POST /admin/invoices/create`
   - `POST /admin/invoices/:id/retry`
+  - `GET /admin/invoices/:id/response-summary`
 - Preview is dry-run only: it returns the deterministic BizimHesap payload and configuration presence booleans without creating provider records, creating `InvoiceExecution` rows, calling BizimHesap, or exposing FirmId/API keys.
+- Response summaries are admin-only and expose HTTP/content-type/body-key metadata plus persisted-field presence booleans. They do not return raw provider values or secrets.
 - Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, status, GUID, invoice number, PDF link, and execution timestamps.
 - Invoice execution configuration is disabled by default:
   - `INVOICE_EXECUTION_ENABLED=false`
@@ -1212,6 +1214,7 @@ Frontend note:
   - `BIZIMHESAP_ADD_INVOICE_URL`
   - `BIZIMHESAP_ACCESS_TOKEN`
 - Live BizimHesap calls require both `INVOICE_EXECUTION_ENABLED=true` and `BIZIMHESAP_ENABLED=true`.
+- BizimHesap success parsing supports the documented `guid` and `url` fields, legacy casing aliases, nested response wrappers, and simple XML-style provider responses. If invoice number is not returned, `providerInvoiceNo` remains null.
 - Phase 20A preserves these boundaries:
   - no automatic invoice creation
   - no invoice cancellation execution
