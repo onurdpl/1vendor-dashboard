@@ -20,7 +20,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
-import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
+import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
@@ -155,14 +155,19 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
 }
 
 export function ReturnsPage() {
-  const { data: returns, isLoading, isError, error } = useQueryResource(queryKeys.returns.list(), listReturns);
+  const currentUser = getCurrentUser();
+  const currentVendor = getCurrentVendorContext();
+  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const { data: returns, isLoading, isError, error } = useQueryResource(
+    queryKeys.returns.list(currentVendor.vendorId),
+    () => listReturns({ vendorId: currentVendor.vendorId }),
+    { enabled: authContextReady },
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [vendorFilter, setVendorFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
   const isRealMode = runtimeConfig.apiMode === 'real';
   const isAdmin = currentUser?.role === 'admin';
 
@@ -206,20 +211,20 @@ export function ReturnsPage() {
   }, [filteredReturns, returns, selectedReturnId]);
 
   const detailQuery = useQueryResource(
-    selectedReturn ? queryKeys.returns.detail(selectedReturn.id) : ['returns', 'detail', 'empty'],
+    selectedReturn ? queryKeys.returns.detail(selectedReturn.id, currentVendor.vendorId) : ['returns', 'detail', currentVendor.vendorId, 'empty'],
     () => {
       if (!selectedReturn) {
         throw new Error('Return not selected.');
       }
 
-      return getReturn(selectedReturn.id);
+      return getReturn(selectedReturn.id, { vendorId: currentVendor.vendorId });
     },
     {
-      enabled: Boolean(selectedReturn),
+      enabled: authContextReady && Boolean(selectedReturn),
     },
   );
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

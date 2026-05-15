@@ -21,19 +21,19 @@ export const queryKeys = {
     },
   },
   dashboard: {
-    overview: () => ['dashboard', 'overview', getCurrentVendorContext().vendorId] as const,
+    overview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'overview', vendorId] as const,
   },
   orders: {
-    list: () => ['orders', 'list', getCurrentVendorContext().vendorId] as const,
-    detail: (orderId: string) => ['orders', 'detail', getCurrentVendorContext().vendorId, orderId] as const,
+    list: (vendorId = getCurrentVendorContext().vendorId) => ['orders', 'list', vendorId] as const,
+    detail: (orderId: string, vendorId = getCurrentVendorContext().vendorId) => ['orders', 'detail', vendorId, orderId] as const,
   },
   returns: {
-    list: () => ['returns', 'list', getCurrentVendorContext().vendorId] as const,
-    detail: (returnId: string) => ['returns', 'detail', getCurrentVendorContext().vendorId, returnId] as const,
+    list: (vendorId = getCurrentVendorContext().vendorId) => ['returns', 'list', vendorId] as const,
+    detail: (returnId: string, vendorId = getCurrentVendorContext().vendorId) => ['returns', 'detail', vendorId, returnId] as const,
   },
   finance: {
-    summary: () => ['finance', 'summary', getCurrentVendorContext().vendorId] as const,
-    records: () => ['finance', 'records', getCurrentVendorContext().vendorId] as const,
+    summary: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'summary', vendorId] as const,
+    records: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'records', vendorId] as const,
   },
   automation: {
     alerts: () => ['automation', 'alerts', getCurrentVendorContext().vendorId] as const,

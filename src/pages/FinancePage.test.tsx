@@ -7,7 +7,7 @@ import { FinancePage } from './FinancePage';
 import type { FinanceDashboard } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
-const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
+const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
 
@@ -15,7 +15,7 @@ vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
   return {
     ...actual,
-    getFinanceDashboard: () => getFinanceDashboardMock(),
+    getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
@@ -192,6 +192,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Recorded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
     expect(screen.getByText('Total refund amount')).toBeInTheDocument();

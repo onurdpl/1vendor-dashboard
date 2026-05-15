@@ -1,8 +1,8 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { VendorFinancialProfile } from './contracts';
 
-export function getFinanceDashboard() {
-  return runtimeServices.finance.dashboard();
+export function getFinanceDashboard(options: { vendorId?: string | null } = {}) {
+  return runtimeServices.finance.dashboard(options.vendorId ?? undefined);
 }
 
 export function updateVendorFinancialProfile(

@@ -74,13 +74,14 @@ export const runtimeServices = {
     },
   },
   orders: {
-    list: () => (runtimeConfig.apiMode === 'real' ? realOrders.listOrders() : Promise.resolve(listMockOrders(getCurrentVendorId()))),
-    async detail(orderId: string) {
+    list: (vendorId = getCurrentVendorId()) =>
+      runtimeConfig.apiMode === 'real' ? realOrders.listOrders({ vendorId }) : Promise.resolve(listMockOrders(vendorId)),
+    async detail(orderId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getOrder(orderId);
+        return realOrders.getOrder(orderId, { vendorId });
       }
 
-      const order = getMockOrder(orderId, getCurrentVendorId());
+      const order = getMockOrder(orderId, vendorId);
       if (!order) {
         throw new ApiError('Order not found.', 'server', { status: 404 });
       }
@@ -126,13 +127,14 @@ export const runtimeServices = {
     },
   },
   returns: {
-    list: () => (runtimeConfig.apiMode === 'real' ? realReturns.listReturns() : Promise.resolve(listMockReturns(getCurrentVendorId()))),
-    async detail(returnId: string) {
+    list: (vendorId = getCurrentVendorId()) =>
+      runtimeConfig.apiMode === 'real' ? realReturns.listReturns({ vendorId }) : Promise.resolve(listMockReturns(vendorId)),
+    async detail(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
-        return realReturns.getReturn(returnId);
+        return realReturns.getReturn(returnId, { vendorId });
       }
 
-      const returnRecord = getMockReturn(returnId, getCurrentVendorId());
+      const returnRecord = getMockReturn(returnId, vendorId);
       if (!returnRecord) {
         throw new ApiError('Return not found.', 'server', { status: 404 });
       }
@@ -140,10 +142,10 @@ export const runtimeServices = {
     },
   },
   finance: {
-    dashboard: () =>
+    dashboard: (vendorId = getCurrentVendorId()) =>
       runtimeConfig.apiMode === 'real'
-        ? realFinance.getFinanceDashboard()
-        : Promise.resolve(getMockFinanceDashboard(getCurrentVendorId())),
+        ? realFinance.getFinanceDashboard({ vendorId })
+        : Promise.resolve(getMockFinanceDashboard(vendorId)),
     updateProfile: (
       vendorId: string,
       input: Parameters<typeof realFinance.updateVendorFinancialProfile>[1],

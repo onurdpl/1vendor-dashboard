@@ -20,7 +20,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../features/orders/api';
-import { getCurrentVendorContext } from '../lib/auth';
+import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -89,13 +89,19 @@ function getAttentionLabel(order: OrderSummary) {
 }
 
 export function OrdersPage() {
-  const { data: orders, isLoading, isError, error } = useQueryResource(queryKeys.orders.list(), listOrders);
+  const currentUser = getCurrentUser();
+  const currentVendor = getCurrentVendorContext();
+  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const { data: orders, isLoading, isError, error } = useQueryResource(
+    queryKeys.orders.list(currentVendor.vendorId),
+    () => listOrders({ vendorId: currentVendor.vendorId }),
+    { enabled: authContextReady },
+  );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
-  const currentVendor = getCurrentVendorContext();
 
   const rankedOrders = useMemo(() => {
     const rank = (order: OrderSummary) => {
@@ -161,14 +167,14 @@ export function OrdersPage() {
   }, [filteredOrders, selectedOrderId]);
 
   const orderDetailQuery = useQueryResource(
-    selectedOrderSummary ? queryKeys.orders.detail(selectedOrderSummary.id) : queryKeys.orders.list(),
+    selectedOrderSummary ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
       if (!selectedOrderSummary) {
         throw new Error('Order not found.');
       }
-      return getOrder(selectedOrderSummary.id);
+      return getOrder(selectedOrderSummary.id, { vendorId: currentVendor.vendorId });
     },
-    { enabled: Boolean(selectedOrderSummary) },
+    { enabled: authContextReady && Boolean(selectedOrderSummary) },
   );
 
   const selectedOrder = orderDetailQuery.data ?? selectedOrderSummary;
@@ -184,7 +190,7 @@ export function OrdersPage() {
     };
   }, [orders]);
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

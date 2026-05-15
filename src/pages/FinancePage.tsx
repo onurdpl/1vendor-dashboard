@@ -29,7 +29,7 @@ import {
   retryInvoiceExecution,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
-import { getAvailableVendors, getCurrentUser, getCurrentVendorContext } from '../lib/auth';
+import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
 type VendorProfileFormInput = {
@@ -179,7 +179,14 @@ function getVendorTimelineItems(record: FinanceTransaction) {
 }
 
 export function FinancePage() {
-  const { data: finance, isLoading, isError, error, refetch } = useQueryResource(queryKeys.finance.summary(), getFinanceDashboard);
+  const currentUser = getCurrentUser();
+  const currentVendor = getCurrentVendorContext();
+  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const { data: finance, isLoading, isError, error, refetch } = useQueryResource(
+    queryKeys.finance.summary(currentVendor.vendorId),
+    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    { enabled: authContextReady },
+  );
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -194,8 +201,6 @@ export function FinancePage() {
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
   const availableVendors = getAvailableVendors();
   const isAdmin = currentUser?.role === 'admin';
   const isVendorUser = currentUser?.role === 'vendor';
@@ -203,7 +208,7 @@ export function FinancePage() {
     (input: VendorProfileFormInput) =>
       updateVendorFinancialProfile(currentVendor.vendorId, input),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary()],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async () => {
         await refetch();
         showFeedback('Vendor financial profile saved.', 'success');
@@ -215,7 +220,7 @@ export function FinancePage() {
   const preparePayoutBatchMutation = useMutationAction(
     () => preparePayoutBatch(currentVendor.vendorId),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary()],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async (batch) => {
         await refetch();
         showFeedback(`Draft payout batch ${batch.id} prepared for review.`, 'success');
@@ -243,7 +248,7 @@ export function FinancePage() {
         sourceType: 'manual',
       }),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary()],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async () => {
         await refetch();
         showFeedback('Shipping cost saved for future payout context.', 'success');
@@ -255,7 +260,7 @@ export function FinancePage() {
   const createInvoiceMutation = useMutationAction(
     (financeLedgerEntryId: string) => createInvoiceExecution(financeLedgerEntryId),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary()],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async (execution) => {
         await refetch();
         showFeedback(
@@ -272,7 +277,7 @@ export function FinancePage() {
   const retryInvoiceMutation = useMutationAction(
     (invoiceExecutionId: string) => retryInvoiceExecution(invoiceExecutionId),
     {
-      invalidateQueryKeys: [queryKeys.finance.summary()],
+      invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async (execution) => {
         await refetch();
         showFeedback(
@@ -389,7 +394,7 @@ export function FinancePage() {
     return filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0];
   }, [filteredRecords, selectedRecordId]);
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

@@ -7,15 +7,15 @@ import { OrdersPage } from './OrdersPage';
 import type { OrderDetail, OrderSummary } from '../features/orders/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 
-const listOrdersMock = vi.fn<() => Promise<OrderSummary[]>>();
-const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
+const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
+const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
   return {
     ...actual,
-    listOrders: () => listOrdersMock(),
-    getOrder: (orderId: string) => getOrderMock(orderId),
+    listOrders: (options?: { vendorId?: string | null }) => listOrdersMock(options),
+    getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
   };
 });
 
@@ -121,6 +121,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect(await screen.findByRole('heading', { name: /orders control center/i })).toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getByText('Tracking / carrier')).toBeInTheDocument();
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
   });
@@ -135,6 +136,7 @@ describe('OrdersPage control center', () => {
     await userEvent.click(customerLabels[0]);
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
+    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1002', { vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);

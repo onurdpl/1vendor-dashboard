@@ -97,16 +97,27 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
   };
 }
 
-export async function listReturns(options: { limit?: number; offset?: number } = {}) {
+function readVendorRequestOptions(vendorId?: string | null) {
+  return vendorId ? { vendorId } : undefined;
+}
+
+export async function listReturns(options: { limit?: number; offset?: number; vendorId?: string | null } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  const response = await apiClient.get<ReturnSummaryDto[]>(`/returns${params.size ? `?${params.toString()}` : ''}`);
+  const path = `/returns${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.get<ReturnSummaryDto[]>(path, requestOptions)
+    : apiClient.get<ReturnSummaryDto[]>(path));
   return response.map(mapSummary);
 }
 
-export async function getReturn(returnId: string): Promise<ReturnDetail> {
-  const response = await apiClient.get<ReturnDetailDto>(`/returns/${returnId}`);
+export async function getReturn(returnId: string, options: { vendorId?: string | null } = {}): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.get<ReturnDetailDto>(`/returns/${returnId}`, requestOptions)
+    : apiClient.get<ReturnDetailDto>(`/returns/${returnId}`));
   const summary = mapSummary(response);
   const refundedItems = response.refundedItems.map((item) => ({
     id: item.id,

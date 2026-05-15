@@ -97,11 +97,19 @@ export const __financeStatusMapping = {
   mapRecordStatusLabel,
 };
 
-export async function getFinanceDashboard(options: { limit?: number; offset?: number } = {}): Promise<FinanceDashboard> {
+function readVendorRequestOptions(vendorId?: string | null) {
+  return vendorId ? { vendorId } : undefined;
+}
+
+export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null } = {}): Promise<FinanceDashboard> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  const response = await apiClient.get<FinanceDashboardDto>(`/finance${params.size ? `?${params.toString()}` : ''}`);
+  const path = `/finance${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.get<FinanceDashboardDto>(path, requestOptions)
+    : apiClient.get<FinanceDashboardDto>(path));
   const grossSales = formatCurrency(response.summary.grossSales);
   const refunds = formatCurrency(response.summary.refunds);
   const netRevenue = formatCurrency(response.summary.netRevenue);

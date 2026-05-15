@@ -345,16 +345,27 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
   };
 }
 
-export async function listOrders(options: { limit?: number; offset?: number } = {}) {
+function readVendorRequestOptions(vendorId?: string | null) {
+  return vendorId ? { vendorId } : undefined;
+}
+
+export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  const response = await apiClient.get<OrderSummaryDto[]>(`/orders${params.size ? `?${params.toString()}` : ''}`);
+  const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.get<OrderSummaryDto[]>(path, requestOptions)
+    : apiClient.get<OrderSummaryDto[]>(path));
   return response.map(mapOrderSummary);
 }
 
-export async function getOrder(orderId: string) {
-  const response = await apiClient.get<OrderDetailDto>(`/orders/${orderId}`);
+export async function getOrder(orderId: string, options: { vendorId?: string | null } = {}) {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.get<OrderDetailDto>(`/orders/${orderId}`, requestOptions)
+    : apiClient.get<OrderDetailDto>(`/orders/${orderId}`));
   return mapOrderDetail(response);
 }
 

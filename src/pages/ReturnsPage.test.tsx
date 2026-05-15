@@ -7,15 +7,15 @@ import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 
-const listReturnsMock = vi.fn<() => Promise<ReturnSummary[]>>();
-const getReturnMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const listReturnsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<ReturnSummary[]>>();
+const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
   return {
     ...actual,
-    listReturns: () => listReturnsMock(),
-    getReturn: (returnId: string) => getReturnMock(returnId),
+    listReturns: (options?: { vendorId?: string | null }) => listReturnsMock(options),
+    getReturn: (returnId: string, options?: { vendorId?: string | null }) => getReturnMock(returnId, options),
   };
 });
 
@@ -162,6 +162,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage();
 
     expect(await screen.findByRole('heading', { name: /returns control center/i })).toBeInTheDocument();
+    expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Pending return request').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Processed refund').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Not a refund yet').length).toBeGreaterThan(0);
@@ -178,6 +179,7 @@ describe('ReturnsPage control center', () => {
     await userEvent.click(screen.getAllByText('Northwind Retail')[0]);
 
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText(/SKU-A-2/).length).toBeGreaterThan(0);
     expect(screen.getByText(/This refund is allocated to Demo Vendor A/i)).toBeInTheDocument();
   });
