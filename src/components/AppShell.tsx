@@ -31,7 +31,8 @@ export function AppShell() {
   const isAdmin = currentUser?.role === 'admin';
   const isDashboardRoute = location.pathname === '/';
   const isOrdersRoute = location.pathname === '/orders';
-  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute;
+  const isOrderDetailRoute = location.pathname.startsWith('/orders/');
+  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute || isOrderDetailRoute;
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
@@ -67,7 +68,7 @@ export function AppShell() {
   }
 
   return (
-    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''} ${isOrdersRoute ? 'orders-shell-active' : ''}`}>
+    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''} ${isOrdersRoute ? 'orders-shell-active' : ''} ${isOrderDetailRoute ? 'order-detail-shell-active' : ''}`}>
       <aside className="sidebar">
         <div className="brand shell-brand">
           <div className="brand-mark" aria-hidden="true">
