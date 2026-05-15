@@ -59,6 +59,20 @@ export type ShipmentExecutionDto = {
 export type CreateShipmentExecutionDto = {
   allocationId: string;
   provider?: ShippingProviderDto;
+  notificationUrl?: string;
+};
+
+export type ShipmentExecutionPreviewDto = {
+  allocationId: string;
+  vendorId: string;
+  provider: ShippingProviderDto;
+  cargoIntegrationId: string | null;
+  warehouseId: string | null;
+  desi: string;
+  notificationUrl: string | null;
+  payload: Record<string, unknown>;
+  customerFieldsValid: boolean;
+  missingCustomerFields: string[];
 };
 
 export type VendorShippingConfigUpdateDto = {

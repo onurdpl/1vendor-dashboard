@@ -364,9 +364,10 @@ describe('shipping execution foundation', () => {
       expect.objectContaining({
         provider: 'kargo_entegrator',
         requestSnapshot: expect.objectContaining({
-          cargoIntegrationId: '2547',
-          warehouseId: '1774',
-          shippingVatPercent: '18.00',
+          cargo_integration_id: 2547,
+          warehouse_id: 1774,
+          platform_id: 2547,
+          platform_d_id: 1774,
         }),
       }),
     );

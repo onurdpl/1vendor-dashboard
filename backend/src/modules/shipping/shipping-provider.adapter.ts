@@ -20,6 +20,16 @@ export type ShippingProviderCreateResult = {
   responseSnapshot: Record<string, unknown>;
 };
 
+export class ShippingProviderExecutionError extends Error {
+  constructor(
+    message: string,
+    readonly responseSnapshot: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = 'ShippingProviderExecutionError';
+  }
+}
+
 export interface ShippingProviderAdapter {
   provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
@@ -178,8 +188,20 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
     const parsedBody = parseResponseBody(contentType, responseText);
     const body = isRecord(parsedBody) ? parsedBody : {};
 
+    const responseSnapshot = {
+      status: response.status,
+      ok: response.ok,
+      contentType,
+      bodyKeys: Object.keys(body).sort(),
+      provider: 'kargo_entegrator',
+      providerError: readString(body, ['error', 'message', 'errors', 'detail']),
+    };
+
     if (!response.ok) {
-      throw new Error(`Kargo Entegratör shipment execution failed with HTTP ${response.status}.`);
+      throw new ShippingProviderExecutionError(
+        `Kargo Entegratör shipment execution failed with HTTP ${response.status}.`,
+        responseSnapshot,
+      );
     }
 
     return {
@@ -191,13 +213,7 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       shippingCost: readNumber(body, ['shippingCost', 'cost', 'amount', 'cargoPrice']),
       shippingVat: readNumber(body, ['shippingVat', 'shippingVatAmount', 'vat']),
       currency: readString(body, ['currency']) ?? 'TRY',
-      responseSnapshot: {
-        status: response.status,
-        ok: response.ok,
-        contentType,
-        bodyKeys: Object.keys(body).sort(),
-        provider: 'kargo_entegrator',
-      },
+      responseSnapshot,
     };
   }
 

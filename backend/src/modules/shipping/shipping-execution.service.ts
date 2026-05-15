@@ -10,10 +10,12 @@ import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import {
   createShippingProviderAdapter,
+  ShippingProviderExecutionError,
   type ShippingProviderAdapter,
 } from './shipping-provider.adapter.js';
 import type {
   CreateShipmentExecutionDto,
+  ShipmentExecutionPreviewDto,
   ShipmentExecutionDto,
   ShippingProviderDto,
   VendorShippingConfigDto,
@@ -231,6 +233,32 @@ function requireWarehouseConfig(config: VendorShippingConfigDto, provider: Shipp
   };
 }
 
+function splitCustomerName(name: string | null | undefined) {
+  const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) {
+    return {
+      name: null,
+      surname: null,
+    };
+  }
+
+  if (parts.length === 1) {
+    return {
+      name: parts[0],
+      surname: null,
+    };
+  }
+
+  return {
+    name: parts.slice(0, -1).join(' '),
+    surname: parts.at(-1) ?? null,
+  };
+}
+
+function buildNotificationUrl(input?: string | null) {
+  return input?.trim() || null;
+}
+
 async function getStoredShippingConfig(vendorId: string) {
   return prisma.vendorShippingConfig.findUnique({
     where: {
@@ -410,14 +438,12 @@ export async function getShipmentExecutionById(
   return mapShipmentExecution({ ...execution, shippingCostLinked: Boolean(linkedCost) });
 }
 
-export async function createShipmentExecution(
+async function buildShipmentRequestPreview(
   input: CreateShipmentExecutionDto,
   options: {
-    env: AppEnv;
     vendorId: string;
-    adapter?: ShippingProviderAdapter;
   },
-): Promise<ShipmentExecutionDto> {
+): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
     throw new Error('allocationId is required.');
   }
@@ -458,6 +484,107 @@ export async function createShipmentExecution(
   const warehouseConfig =
     provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto) : null;
 
+  const lineItems = allocation.lineItems.map((lineItem) => ({
+    title: lineItem.shopifyOrderLineItem.title ?? lineItem.shopifyOrderLineItem.sku ?? 'Shopify item',
+    sku: lineItem.shopifyOrderLineItem.sku,
+    quantity: lineItem.quantity,
+    lineAmount: toNumber(lineItem.lineAmount),
+  }));
+  const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
+  const customer = splitCustomerName(allocation.order.customerName);
+  const missingCustomerFields = [
+    customer.name ? null : 'customer.name',
+    customer.surname ? null : 'customer.surname',
+  ].filter((field): field is string => Boolean(field));
+  const notificationUrl = buildNotificationUrl(input.notificationUrl);
+  const cargoIntegrationId = warehouseConfig?.cargoIntegrationId ?? null;
+  const warehouseId = warehouseConfig?.warehouseId ?? null;
+  const numericCargoIntegrationId = Number(cargoIntegrationId);
+  const numericWarehouseId = Number(warehouseId);
+
+  const payload = {
+    cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
+    warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
+    platform_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
+    platform_d_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
+    notification_url: notificationUrl,
+    customer: {
+      name: customer.name,
+      surname: customer.surname,
+      email: allocation.order.customerEmail,
+    },
+    payment_type: 'cash_money',
+    desi,
+    lines: lineItems.map((lineItem) => ({
+      title: lineItem.title,
+      quantity: lineItem.quantity,
+      sku: lineItem.sku,
+    })),
+    reference: {
+      allocation_id: allocation.id,
+      shopify_order_id: allocation.sourceShopifyOrderId,
+      shopify_order_number: allocation.sourceShopifyOrderNumber,
+      vendor_id: allocation.assignedVendorId,
+    },
+  };
+
+  return {
+    allocationId: allocation.id,
+    vendorId: allocation.assignedVendorId,
+    provider: providerDto,
+    cargoIntegrationId,
+    warehouseId,
+    desi: toAmountString(desi),
+    notificationUrl,
+    payload,
+    customerFieldsValid: missingCustomerFields.length === 0,
+    missingCustomerFields,
+  };
+}
+
+export async function previewShipmentExecution(
+  input: CreateShipmentExecutionDto,
+  options: {
+    vendorId: string;
+  },
+): Promise<ShipmentExecutionPreviewDto> {
+  return buildShipmentRequestPreview(input, options);
+}
+
+export async function createShipmentExecution(
+  input: CreateShipmentExecutionDto,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const preview = await buildShipmentRequestPreview(input, {
+    vendorId: options.vendorId,
+  });
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: input.allocationId,
+    },
+    include: {
+      order: true,
+      fulfillment: true,
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+    },
+  });
+
+  if (!allocation) {
+    throw new Error('Allocation could not be found for the selected vendor.');
+  }
+
+  const provider = normalizeProvider(preview.provider);
+  const providerDto = preview.provider;
+
   const existing = await prisma.shipmentExecution.findUnique({
     where: {
       allocationId_provider: {
@@ -470,29 +597,8 @@ export async function createShipmentExecution(
     return getShipmentExecutionById(existing.id, options.vendorId) as Promise<ShipmentExecutionDto>;
   }
 
-  const lineItems = allocation.lineItems.map((lineItem) => ({
-    title: lineItem.shopifyOrderLineItem.title,
-    sku: lineItem.shopifyOrderLineItem.sku,
-    quantity: lineItem.quantity,
-    lineAmount: toNumber(lineItem.lineAmount),
-  }));
-  const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
-  const requestSnapshot = {
-    provider: providerDto,
-    allocationId: allocation.id,
-    vendorId: allocation.assignedVendorId,
-    sourceShopifyOrderId: allocation.sourceShopifyOrderId,
-    sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
-    cargoIntegrationId: warehouseConfig?.cargoIntegrationId ?? null,
-    warehouseId: warehouseConfig?.warehouseId ?? null,
-    shippingVatPercent: config.shippingVatPercent,
-    desi,
-    lineItems,
-    recipient: {
-      name: allocation.order.customerName ?? 'Shopify customer',
-      email: allocation.order.customerEmail ?? null,
-    },
-  };
+  const desi = Number(preview.payload.desi);
+  const requestSnapshot = preview.payload;
   const executionId = buildShipmentExecutionId({ allocationId: allocation.id, provider });
 
   await prisma.shipmentExecution.create({
@@ -506,8 +612,8 @@ export async function createShipmentExecution(
       provider,
       shipmentStatus: ShipmentExecutionStatus.PENDING,
       desi,
-      cargoIntegrationId: warehouseConfig?.cargoIntegrationId ?? null,
-      warehouseId: warehouseConfig?.warehouseId ?? null,
+      cargoIntegrationId: preview.cargoIntegrationId,
+      warehouseId: preview.warehouseId,
       requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
     },
   });
@@ -522,7 +628,7 @@ export async function createShipmentExecution(
     });
     const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
     const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
-    const shippingVatPercent = Number(config.shippingVatPercent || SHIPPING_VAT_PERCENT);
+    const shippingVatPercent = SHIPPING_VAT_PERCENT;
     const shippingVat =
       result.shippingVat ??
       (result.shippingCost === null ? null : Number((result.shippingCost * (shippingVatPercent / 100)).toFixed(2)));
@@ -634,16 +740,23 @@ export async function createShipmentExecution(
 
     return mapShipmentExecution(updated);
   } catch (error) {
+    const responseSnapshot =
+      error instanceof ShippingProviderExecutionError
+        ? {
+            ...error.responseSnapshot,
+            error: error.message,
+          }
+        : {
+            error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
+            provider,
+          };
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: executionId,
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: {
-          error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
-          provider,
-        },
+        responseSnapshot,
       },
     });
 

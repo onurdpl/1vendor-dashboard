@@ -8,9 +8,19 @@ import {
   getShipmentExecutionById,
   getVendorShippingConfig,
   listShipmentExecutions,
+  previewShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
+
+function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
+  const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
+  const forwardedHost = String(request.headers['x-forwarded-host'] ?? '').split(',')[0]?.trim();
+  const host = forwardedHost || String(request.headers.host ?? request.hostname);
+  const protocol = forwardedProto || request.protocol || 'https';
+
+  return `${protocol}://${host}/webhooks/shipping/kargo-entegrator`;
+}
 
 export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -32,6 +42,35 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   );
 
   app.post(
+    '/shipments/preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        const body = (request.body ?? {}) as CreateShipmentExecutionDto;
+        return await previewShipmentExecution(
+          {
+            ...body,
+            notificationUrl: body.notificationUrl ?? resolveNotificationUrl(request),
+          },
+          {
+            vendorId,
+          },
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment execution preview could not be created.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post(
     '/shipments/create',
     {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
@@ -43,7 +82,11 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       try {
-        return await createShipmentExecution((request.body ?? {}) as CreateShipmentExecutionDto, {
+        const body = (request.body ?? {}) as CreateShipmentExecutionDto;
+        return await createShipmentExecution({
+          ...body,
+          notificationUrl: body.notificationUrl ?? resolveNotificationUrl(request),
+        }, {
           env,
           vendorId,
         });
