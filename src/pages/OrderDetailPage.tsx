@@ -540,6 +540,14 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.providerError || '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Stored dry-run response</span>
+                              <strong>{shipmentProviderSummary.dryRun === null ? '—' : shipmentProviderSummary.dryRun ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Disabled gates at response time</span>
+                              <strong>{shipmentProviderSummary.disabledGates.length ? shipmentProviderSummary.disabledGates.join(', ') : '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Provider id present</span>
                               <strong>{shipmentProviderSummary.providerShipmentIdPresent ? 'yes' : 'no'}</strong>
                             </div>
@@ -759,6 +767,14 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Provider message</span>
                           <strong>{shipmentProviderSummary.providerError || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Stored dry-run response</span>
+                          <strong>{shipmentProviderSummary.dryRun === null ? '—' : shipmentProviderSummary.dryRun ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Disabled gates at response time</span>
+                          <strong>{shipmentProviderSummary.disabledGates.length ? shipmentProviderSummary.disabledGates.join(', ') : '—'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Provider id present</span>

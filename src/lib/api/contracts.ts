@@ -40,6 +40,8 @@ export type ShipmentExecution = {
     parsedBodyType: string | null;
     responseKeys: string[];
     providerError: string | null;
+    dryRun: boolean | null;
+    disabledGates: string[];
     providerShipmentIdPresent: boolean;
     trackingNumberPresent: boolean;
     labelPresent: boolean;

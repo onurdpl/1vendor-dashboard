@@ -63,6 +63,9 @@ function buildShipmentProviderResponseSummary(
     : snapshot
       ? Object.keys(snapshot).filter((key) => !['body', 'request', 'payload'].includes(key)).sort()
       : [];
+  const disabledGates = Array.isArray(snapshot?.disabledGates)
+    ? snapshot.disabledGates.filter((gate): gate is string => typeof gate === 'string')
+    : [];
 
   return {
     httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
@@ -71,6 +74,8 @@ function buildShipmentProviderResponseSummary(
     parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
     responseKeys,
     providerError: readString(snapshot, ['providerError', 'error', 'message', 'reason']),
+    dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
+    disabledGates,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
     labelPresent: Boolean(execution.labelUrl),

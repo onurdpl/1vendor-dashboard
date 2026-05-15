@@ -446,6 +446,75 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
+  it('does not call the provider again when an existing pending dry-run shipment is present', async () => {
+    const existing = buildShipmentExecution({
+      provider: 'KARGO_ENTEGRATOR',
+      id: 'shipment-kargo_entegrator-alloc-1',
+      shipmentStatus: 'PENDING',
+      responseSnapshot: {
+        ok: true,
+        dryRun: true,
+        provider: 'kargo_entegrator',
+        reason: 'Kargo Entegratör shipment execution is disabled.',
+        disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+      },
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-kargo-1774',
+          vendorId: 'sporjinal',
+          configId: 'config-sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    prismaMock.shipmentExecution.findUnique
+      .mockResolvedValueOnce(existing)
+      .mockResolvedValueOnce(existing);
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGO_ENTEGRATOR_ENABLED: true,
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result).toMatchObject({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      shipmentStatus: 'pending',
+      providerShipmentId: null,
+    });
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+  });
+
   it('preserves vendor isolation when creating shipments', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(
       buildAllocation({

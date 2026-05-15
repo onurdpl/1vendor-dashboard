@@ -91,6 +91,8 @@ const orderWithShipmentSummary: OrderDetail = {
       parsedBodyType: 'object',
       responseKeys: ['message', 'shipment_id'],
       providerError: 'Provider returned no shipment identifiers.',
+      dryRun: true,
+      disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
       providerShipmentIdPresent: false,
       trackingNumberPresent: false,
       labelPresent: false,
@@ -154,10 +156,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
     expect(screen.getByText('message, shipment_id')).toBeInTheDocument();
     expect(screen.getByText('Provider returned no shipment identifiers.')).toBeInTheDocument();
+    expect(screen.getByText('Stored dry-run response')).toBeInTheDocument();
+    expect(screen.getAllByText('SHIPPING_EXECUTION_ENABLED').length).toBeGreaterThan(0);
     expect(screen.getByText('Provider id present')).toBeInTheDocument();
     expect(await screen.findByLabelText('Shipping provider diagnostics')).toBeInTheDocument();
     expect(screen.getByText('Shipping execution enabled')).toBeInTheDocument();
-    expect(screen.getByText('SHIPPING_EXECUTION_ENABLED')).toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
