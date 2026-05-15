@@ -40,6 +40,7 @@ export type ShippingProviderGateDiagnosticsDto = {
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   missing: string[];
+  deprecatedEnvFallbacks: string[];
 };
 
 export type ShipmentExecutionDto = {

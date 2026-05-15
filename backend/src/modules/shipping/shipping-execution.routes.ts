@@ -63,6 +63,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           },
           {
             vendorId,
+            env,
           },
         );
       } catch (error) {

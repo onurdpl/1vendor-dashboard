@@ -50,4 +50,40 @@ describe('backend env shipping provider gates', () => {
     expect(env.SHIPPING_EXECUTION_ENABLED).toBe(true);
     expect(env.KARGO_ENTEGRATOR_ENABLED).toBe(true);
   });
+
+  it('reads the correct Kargo cargo integration env var', () => {
+    resetEnv({
+      KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: '2547',
+      ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: undefined,
+    });
+
+    const env = loadEnv();
+
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID).toBe('2547');
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE).toBe('primary');
+  });
+
+  it('falls back to the deprecated ARGO cargo integration env var', () => {
+    resetEnv({
+      KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: undefined,
+      ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: '2547',
+    });
+
+    const env = loadEnv();
+
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID).toBe('2547');
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE).toBe('deprecated');
+  });
+
+  it('prefers the correct KARGO cargo integration env var when both are present', () => {
+    resetEnv({
+      KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: '2547',
+      ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: 'wrong-fallback',
+    });
+
+    const env = loadEnv();
+
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID).toBe('2547');
+    expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE).toBe('primary');
+  });
 });

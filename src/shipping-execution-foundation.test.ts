@@ -387,6 +387,78 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('uses Kargo cargo integration env fallback only when vendor config has no cargo integration id', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-1027',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, bodyKeys: ['id'] },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+      },
+      {
+        env: {
+          ...env,
+          KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: '2547',
+          KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE: 'primary',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result).toMatchObject({
+      provider: 'kargo_entegrator',
+      cargoIntegrationId: '2547',
+      warehouseId: '1774',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          cargo_integration_id: 2547,
+          platform_id: 2547,
+          warehouse_id: 1774,
+        }),
+      }),
+    );
+  });
+
   it('blocks Kargo Entegratör shipment creation when warehouse config is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
@@ -775,7 +847,24 @@ describe('shipping execution foundation', () => {
       baseUrlConfigured: true,
       apiKeyConfigured: true,
       missing: ['SHIPPING_EXECUTION_ENABLED'],
+      deprecatedEnvFallbacks: [],
     });
+  });
+
+  it('diagnoses deprecated Kargo cargo integration env fallback without exposing values', () => {
+    const diagnostics = getShippingProviderGateDiagnostics({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api',
+      KARGO_ENTEGRATOR_API_KEY: 'configured',
+      KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: '2547',
+      KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE: 'deprecated',
+    });
+
+    expect(diagnostics.deprecatedEnvFallbacks).toEqual(['ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID']);
+    expect(JSON.stringify(diagnostics)).not.toContain('2547');
   });
 
   it('marks Kargo execution ready only when all safe gates and config are present', () => {
@@ -796,6 +885,7 @@ describe('shipping execution foundation', () => {
       baseUrlConfigured: true,
       apiKeyConfigured: true,
       missing: [],
+      deprecatedEnvFallbacks: [],
     });
   });
 

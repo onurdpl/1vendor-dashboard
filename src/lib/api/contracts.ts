@@ -60,6 +60,7 @@ export type ShippingProviderDiagnostics = {
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   missing: string[];
+  deprecatedEnvFallbacks?: string[];
 };
 
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';

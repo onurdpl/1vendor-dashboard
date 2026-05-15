@@ -225,15 +225,20 @@ function selectDefaultWarehouse(config: VendorShippingConfigDto, provider: Shipp
   );
 }
 
-function requireWarehouseConfig(config: VendorShippingConfigDto, provider: ShippingProviderDto) {
+function resolveKargoCargoIntegrationId(config: VendorShippingConfigDto, env?: AppEnv) {
+  return config.cargoIntegrationId ?? env?.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID ?? null;
+}
+
+function requireWarehouseConfig(config: VendorShippingConfigDto, provider: ShippingProviderDto, env?: AppEnv) {
   const warehouse = selectDefaultWarehouse(config, provider);
   const warehouseId = warehouse?.warehouseId ?? config.defaultWarehouseId;
-  if (!config.cargoIntegrationId || !warehouseId) {
+  const cargoIntegrationId = resolveKargoCargoIntegrationId(config, env);
+  if (!cargoIntegrationId || !warehouseId) {
     throw new Error('Vendor shipping warehouse is not configured.');
   }
 
   return {
-    cargoIntegrationId: config.cargoIntegrationId,
+    cargoIntegrationId,
     warehouseId,
   };
 }
@@ -422,6 +427,10 @@ export function getShippingProviderGateDiagnostics(
     baseUrlConfigured,
     apiKeyConfigured,
     missing,
+    deprecatedEnvFallbacks:
+      isKargo && env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE === 'deprecated'
+        ? ['ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID']
+        : [],
   };
 }
 
@@ -643,6 +652,7 @@ async function buildShipmentRequestPreview(
   input: CreateShipmentExecutionDto,
   options: {
     vendorId: string;
+    env?: AppEnv;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
@@ -683,7 +693,7 @@ async function buildShipmentRequestPreview(
     throw new Error('Only Hepsijet and Kargo Entegratör shipment execution are implemented.');
   }
   const warehouseConfig =
-    provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto) : null;
+    provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto, options.env) : null;
 
   const lineItems = allocation.lineItems.map((lineItem) => ({
     title: lineItem.shopifyOrderLineItem.title ?? lineItem.shopifyOrderLineItem.sku ?? 'Shopify item',
@@ -747,6 +757,7 @@ export async function previewShipmentExecution(
   input: CreateShipmentExecutionDto,
   options: {
     vendorId: string;
+    env?: AppEnv;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   return buildShipmentRequestPreview(input, options);
@@ -762,6 +773,7 @@ export async function createShipmentExecution(
 ): Promise<ShipmentExecutionDto> {
   const preview = await buildShipmentRequestPreview(input, {
     vendorId: options.vendorId,
+    env: options.env,
   });
 
   const allocation = await prisma.vendorAllocation.findUnique({
@@ -888,6 +900,7 @@ export async function retryDryRunShipmentExecution(
     },
     {
       vendorId: existing.vendorId,
+      env: options.env,
     },
   );
 

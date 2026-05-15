@@ -905,6 +905,14 @@ export function OrderDetailPage() {
                       <span>Missing env names</span>
                       <strong>{shippingProviderDiagnostics.missing.length ? shippingProviderDiagnostics.missing.join(', ') : '—'}</strong>
                     </div>
+                    <div className="summary-row">
+                      <span>Deprecated env fallback</span>
+                      <strong>
+                        {shippingProviderDiagnostics.deprecatedEnvFallbacks?.length
+                          ? shippingProviderDiagnostics.deprecatedEnvFallbacks.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
                   </div>
                 ) : null}
                 <p className="page-description">

@@ -41,6 +41,8 @@ export type AppEnv = {
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_BASE_URL?: string;
   KARGO_ENTEGRATOR_API_KEY?: string;
+  KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?: string;
+  KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE?: 'primary' | 'deprecated';
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -143,6 +145,30 @@ function parseCommaList(value: string | undefined) {
     .filter(Boolean);
 }
 
+function parseKargoCargoIntegrationEnv() {
+  const primary = process.env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?.trim();
+  const deprecated = process.env.ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?.trim();
+
+  if (primary) {
+    return {
+      value: primary,
+      source: 'primary' as const,
+    };
+  }
+
+  if (deprecated) {
+    return {
+      value: deprecated,
+      source: 'deprecated' as const,
+    };
+  }
+
+  return {
+    value: undefined,
+    source: undefined,
+  };
+}
+
 export function loadEnv(): AppEnv {
   const nodeEnv = normalizeNodeEnv(process.env.NODE_ENV);
   const jwtSecret = process.env.JWT_SECRET || (nodeEnv !== 'production' ? 'dev-only-jwt-secret-change-in-production' : undefined);
@@ -167,6 +193,8 @@ export function loadEnv(): AppEnv {
   if (nodeEnv === 'production' && (!shopifyShopDomain || !shopifyAdminAccessToken)) {
     throw new Error('SHOPIFY_SHOP_DOMAIN and SHOPIFY_ADMIN_ACCESS_TOKEN are required in production.');
   }
+
+  const kargoCargoIntegration = parseKargoCargoIntegrationEnv();
 
   return {
     NODE_ENV: nodeEnv,
@@ -222,5 +250,7 @@ export function loadEnv(): AppEnv {
     KARGO_ENTEGRATOR_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_ENABLED, false),
     KARGO_ENTEGRATOR_BASE_URL: process.env.KARGO_ENTEGRATOR_BASE_URL || undefined,
     KARGO_ENTEGRATOR_API_KEY: process.env.KARGO_ENTEGRATOR_API_KEY || undefined,
+    KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: kargoCargoIntegration.value,
+    KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE: kargoCargoIntegration.source,
   };
 }

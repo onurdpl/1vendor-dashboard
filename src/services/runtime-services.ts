@@ -198,6 +198,7 @@ export const runtimeServices = {
         baseUrlConfigured: false,
         apiKeyConfigured: false,
         missing: ['SHIPPING_EXECUTION_ENABLED', 'KARGO_ENTEGRATOR_ENABLED'],
+        deprecatedEnvFallbacks: [],
       };
     },
   },
