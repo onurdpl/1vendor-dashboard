@@ -132,7 +132,6 @@ a:focus-visible {
   color: #94a3b8;
 }
 
-.brand-subtitle,
 .page-description,
 .auth-footnote,
 .stat-card span,
@@ -171,9 +170,12 @@ a:focus-visible {
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
   display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
   gap: 12px;
   justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
   color: #f8fafc;
 }
 
@@ -184,9 +186,12 @@ a:focus-visible {
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
   display: flex;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
   gap: 12px;
   justify-content: space-between;
-  align-items: center;
+  align-items: stretch;
   color: #f8fafc;
 }
 
@@ -210,12 +215,14 @@ a:focus-visible {
 }
 
 .vendor-switcher {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  width: 100%;
 }
 
 .vendor-select {
-  min-width: 168px;
+  width: 100%;
+  min-width: 0;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid rgba(147, 197, 253, 0.22);
@@ -299,6 +306,8 @@ a:focus-visible {
 }
 
 .vendor-fixed-chip {
+  width: fit-content;
+  max-width: 100%;
   padding: 8px 10px;
   border-radius: 999px;
   border: 1px solid rgba(147, 197, 253, 0.22);
@@ -307,9 +316,12 @@ a:focus-visible {
   font-size: 0.82rem;
   font-weight: 700;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .sidebar .button-secondary {
+  align-self: flex-start;
   border-color: rgba(148, 163, 184, 0.26);
   background: rgba(15, 23, 42, 0.82);
   color: #f8fafc;
@@ -2383,14 +2395,14 @@ h3 {
 
 .orders-workspace-shell {
   display: grid;
-  gap: 28px;
-  width: min(100%, 1500px);
+  gap: 24px;
+  width: min(100%, 1440px);
   margin: 0 auto;
-  padding: 28px;
+  padding: 24px;
   border: 1px solid #e2e8f0;
-  border-radius: 28px;
+  border-radius: 24px;
   background: #ffffff;
-  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.07);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.065);
 }
 
 .orders-enterprise-header {
@@ -2414,34 +2426,34 @@ h3 {
 
 .orders-enterprise-kpis {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-  gap: 16px;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
 }
 
 .orders-enterprise-kpi {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 22px;
-  gap: 12px 14px;
+  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 16px;
+  gap: 9px 11px;
   align-items: start;
-  min-height: 138px;
-  padding: 20px;
+  min-height: 132px;
+  padding: 16px;
   border: 1px solid #e2e8f0;
-  border-radius: 20px;
+  border-radius: 18px;
   background: #ffffff;
-  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.075);
+  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
 }
 
 .orders-enterprise-kpi div {
   display: grid;
-  gap: 7px;
+  gap: 5px;
   min-width: 0;
 }
 
 .orders-kpi-icon {
   display: inline-flex;
-  width: 38px;
-  height: 38px;
+  width: 34px;
+  height: 34px;
   align-items: center;
   justify-content: center;
   border-radius: 13px;
@@ -2453,13 +2465,13 @@ h3 {
 
 .orders-enterprise-kpi span:not(.orders-kpi-icon) {
   color: #64748b;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 800;
 }
 
 .orders-enterprise-kpi strong {
   color: #020617;
-  font-size: clamp(1.55rem, 2vw, 2rem);
+  font-size: clamp(1.35rem, 1.8vw, 1.72rem);
   line-height: 1;
   font-weight: 800;
   font-variant-numeric: tabular-nums;
@@ -2467,7 +2479,7 @@ h3 {
 
 .orders-enterprise-kpi small {
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: 0.72rem;
   font-weight: 600;
   line-height: 1.35;
 }
@@ -2475,7 +2487,7 @@ h3 {
 .orders-kpi-sparkline {
   grid-column: 1 / -1;
   display: block;
-  height: 22px;
+  height: 16px;
   border-radius: 999px;
   background:
     linear-gradient(90deg, transparent 0 8%, rgba(37, 99, 235, 0.18) 8% 10%, transparent 10% 18%, rgba(37, 99, 235, 0.28) 18% 21%, transparent 21% 35%, rgba(37, 99, 235, 0.2) 35% 38%, transparent 38% 100%),
@@ -2522,12 +2534,12 @@ h3 {
 
 .orders-filter-card {
   display: grid;
-  gap: 14px;
-  padding: 18px;
+  gap: 10px;
+  padding: 12px;
   border: 1px solid #e2e8f0;
-  border-radius: 22px;
+  border-radius: 18px;
   background: #ffffff;
-  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.055);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
 }
 
 .orders-control-center .op-toolbar {
@@ -2536,31 +2548,37 @@ h3 {
 }
 
 .orders-control-center .op-toolbar input {
-  flex: 1 1 420px;
-  min-width: min(460px, 100%);
-  min-height: 46px;
+  flex: 0 1 45%;
+  min-width: min(430px, 100%);
+  min-height: 42px;
   border-color: #e2e8f0;
   border-radius: 14px;
   background: #f8fafc;
 }
 
 .orders-control-center .op-filter-bar {
-  flex: 999 1 auto;
-  gap: 10px;
+  flex: 1 1 auto;
+  gap: 8px;
   justify-content: flex-end;
 }
 
 .orders-control-center .op-filter-bar select,
 .orders-control-center .op-filter-bar .button {
-  min-height: 46px;
+  min-height: 42px;
   border-color: #e2e8f0;
   border-radius: 14px;
 }
 
 .orders-workspace-grid {
   grid-template-columns: minmax(0, 1fr) minmax(336px, 360px);
-  gap: 22px;
+  gap: 16px;
   align-items: start;
+}
+
+.orders-left-column {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
 }
 
 .orders-table-shell {
@@ -2570,15 +2588,15 @@ h3 {
 .orders-op-table-v3 {
   overflow: auto;
   border: 1px solid #e2e8f0;
-  border-radius: 22px;
+  border-radius: 18px;
   background: #ffffff;
   box-shadow: 0 18px 38px rgba(15, 23, 42, 0.06);
 }
 
 .orders-op-table-v3 .op-table-head,
 .orders-op-table-v3 .op-table-row {
-  min-width: 920px;
-  grid-template-columns: minmax(240px, 1.48fr) minmax(178px, 1.06fr) minmax(116px, 0.62fr) minmax(170px, 0.96fr) minmax(150px, 0.8fr) minmax(130px, 0.68fr);
+  min-width: 880px;
+  grid-template-columns: minmax(220px, 1.48fr) minmax(158px, 1fr) minmax(104px, 0.58fr) minmax(152px, 0.9fr) minmax(132px, 0.75fr) minmax(112px, 0.58fr);
 }
 
 .orders-op-table-v3 .op-table-head {
@@ -2589,8 +2607,8 @@ h3 {
 }
 
 .orders-op-table-v3 .op-table-row {
-  min-height: 84px;
-  padding: 14px 18px;
+  min-height: 80px;
+  padding: 12px 16px;
   border-bottom-color: #e2e8f0;
   transition:
     background 0.16s ease,
@@ -2605,7 +2623,7 @@ h3 {
 
 .orders-table-order-cell strong {
   color: #0f172a;
-  font-size: 0.96rem;
+  font-size: 0.92rem;
 }
 
 .orders-table-status-cell {
@@ -2632,14 +2650,14 @@ h3 {
 }
 
 .orders-control-center .op-side-panel {
-  top: 20px;
-  width: min(100%, 360px);
-  max-height: calc(100vh - 40px);
-  padding: 18px;
+  top: 24px;
+  width: 360px;
+  max-height: calc(100vh - 48px);
+  padding: 16px;
   border-color: #e2e8f0;
-  border-radius: 24px;
+  border-radius: 18px;
   background: #ffffff;
-  box-shadow: 0 22px 42px rgba(15, 23, 42, 0.09);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.075);
 }
 
 .orders-control-center .op-side-panel-header {
@@ -2654,7 +2672,7 @@ h3 {
 }
 
 .orders-control-center .op-side-panel-body {
-  gap: 12px;
+  gap: 10px;
 }
 
 .orders-detail-hero,
@@ -2669,7 +2687,7 @@ h3 {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 16px;
+  padding: 13px;
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
@@ -2682,7 +2700,7 @@ h3 {
 .orders-detail-info-grid span,
 .orders-status-block span {
   color: #64748b;
-  font-size: 0.68rem;
+  font-size: 0.65rem;
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -2690,7 +2708,7 @@ h3 {
 
 .orders-detail-hero strong {
   color: #020617;
-  font-size: 1.3rem;
+  font-size: 1.18rem;
   line-height: 1.1;
 }
 
@@ -2700,8 +2718,8 @@ h3 {
 
 .orders-detail-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 10px;
+  padding: 13px;
 }
 
 .orders-detail-card h4 {
@@ -2740,8 +2758,8 @@ h3 {
 
 .orders-status-block {
   display: grid;
-  gap: 5px;
-  padding: 10px;
+  gap: 4px;
+  padding: 9px;
   border: 1px solid #e2e8f0;
   border-radius: 13px;
   background: #f8fafc;
@@ -2749,12 +2767,12 @@ h3 {
 
 .orders-status-block strong {
   color: #0f172a;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
 
 .orders-status-block small {
   color: #64748b;
-  font-size: 0.74rem;
+  font-size: 0.68rem;
   font-weight: 700;
 }
 
@@ -2769,7 +2787,7 @@ h3 {
 .orders-control-center .order-detail-item {
   grid-template-columns: 38px minmax(0, 1fr) auto;
   gap: 10px;
-  padding: 10px;
+  padding: 8px;
   border-color: #e2e8f0;
   border-radius: 13px;
   background: #f8fafc;
@@ -2809,15 +2827,15 @@ h3 {
 .orders-insights-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
+  gap: 12px;
 }
 
 .orders-insights-grid .op-section {
   gap: 12px;
-  min-height: 176px;
-  padding: 18px;
+  min-height: 148px;
+  padding: 16px;
   border-color: #e2e8f0;
-  border-radius: 22px;
+  border-radius: 18px;
   background: #ffffff;
   box-shadow: 0 16px 34px rgba(15, 23, 42, 0.055);
 }
@@ -2834,8 +2852,8 @@ h3 {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
-  min-height: 34px;
-  padding: 8px 0;
+  min-height: 30px;
+  padding: 6px 0;
   border-bottom: 1px solid #e2e8f0;
 }
 

@@ -251,74 +251,75 @@ export function OrdersPage() {
           </div>
         </div>
 
-        <div className="orders-enterprise-kpis">
-          {orderKpis.map((metric) => (
-            <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
-              <span className="orders-kpi-icon" aria-hidden="true">{metric.icon}</span>
-              <div>
-                <span>{metric.label}</span>
-                <strong>{metric.value}</strong>
-                <small>{metric.detail}</small>
-              </div>
-              <span className="orders-kpi-sparkline" aria-hidden="true" />
-            </article>
-          ))}
-        </div>
-
-        <div className="orders-filter-card">
-          <OperationalToolbar>
-            <SearchInput
-              placeholder="Search order, customer, tracking, carrier..."
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-            />
-            <FilterBar>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                <option value="all">All allocation states</option>
-                <option value="active">Active</option>
-                <option value="pending_reassignment">Pending reassignment</option>
-                <option value="vendor_blocked">Vendor blocked</option>
-                <option value="fulfilled">Fulfilled allocation</option>
-              </select>
-              <select value={fulfillmentFilter} onChange={(event) => setFulfillmentFilter(event.target.value)}>
-                <option value="all">All fulfillment</option>
-                <option value="Pending">Pending</option>
-                <option value="Processing">Processing</option>
-                <option value="Partially Fulfilled">Partially fulfilled</option>
-                <option value="Fulfilled">Fulfilled</option>
-              </select>
-              <select value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)}>
-                <option value="all">All shipping</option>
-                <option value="Awaiting Shipment">Awaiting shipment</option>
-                <option value="Label Created">Label created</option>
-                <option value="In Transit">In transit</option>
-                <option value="Delivered">Delivered</option>
-              </select>
-              <button
-                type="button"
-                className="button button-secondary"
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                  setFulfillmentFilter('all');
-                  setShippingFilter('all');
-                }}
-              >
-                Reset
-              </button>
-            </FilterBar>
-          </OperationalToolbar>
-
-          <div className="orders-filter-summary">
-            <span>{filteredOrders.length} orders</span>
-            <span>{statusFilter === 'all' ? 'All allocation states' : statusFilter.replace(/_/g, ' ')}</span>
-            <span>{fulfillmentFilter === 'all' ? 'All fulfillment states' : fulfillmentFilter}</span>
-            <span>{shippingFilter === 'all' ? 'All shipping states' : shippingFilter}</span>
-          </div>
-        </div>
-
         <div className="op-control-layout orders-control-layout orders-workspace-grid">
-          <div className="op-main-column orders-table-shell">
+          <div className="orders-left-column">
+            <div className="orders-enterprise-kpis">
+              {orderKpis.map((metric) => (
+                <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
+                  <span className="orders-kpi-icon" aria-hidden="true">{metric.icon}</span>
+                  <div>
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                    <small>{metric.detail}</small>
+                  </div>
+                  <span className="orders-kpi-sparkline" aria-hidden="true" />
+                </article>
+              ))}
+            </div>
+
+            <div className="orders-filter-card">
+              <OperationalToolbar>
+                <SearchInput
+                  placeholder="Search order, customer, tracking, carrier..."
+                  value={searchTerm}
+                  onChange={(event) => setSearchTerm(event.target.value)}
+                />
+                <FilterBar>
+                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                    <option value="all">All allocation states</option>
+                    <option value="active">Active</option>
+                    <option value="pending_reassignment">Pending reassignment</option>
+                    <option value="vendor_blocked">Vendor blocked</option>
+                    <option value="fulfilled">Fulfilled allocation</option>
+                  </select>
+                  <select value={fulfillmentFilter} onChange={(event) => setFulfillmentFilter(event.target.value)}>
+                    <option value="all">All fulfillment</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Processing">Processing</option>
+                    <option value="Partially Fulfilled">Partially fulfilled</option>
+                    <option value="Fulfilled">Fulfilled</option>
+                  </select>
+                  <select value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)}>
+                    <option value="all">All shipping</option>
+                    <option value="Awaiting Shipment">Awaiting shipment</option>
+                    <option value="Label Created">Label created</option>
+                    <option value="In Transit">In transit</option>
+                    <option value="Delivered">Delivered</option>
+                  </select>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => {
+                      setSearchTerm('');
+                      setStatusFilter('all');
+                      setFulfillmentFilter('all');
+                      setShippingFilter('all');
+                    }}
+                  >
+                    Reset
+                  </button>
+                </FilterBar>
+              </OperationalToolbar>
+
+              <div className="orders-filter-summary">
+                <span>{filteredOrders.length} orders</span>
+                <span>{statusFilter === 'all' ? 'All allocation states' : statusFilter.replace(/_/g, ' ')}</span>
+                <span>{fulfillmentFilter === 'all' ? 'All fulfillment states' : fulfillmentFilter}</span>
+                <span>{shippingFilter === 'all' ? 'All shipping states' : shippingFilter}</span>
+              </div>
+            </div>
+
+            <div className="op-main-column orders-table-shell">
             {filteredOrders.length === 0 ? (
               <EmptyStatePanel
                 title="No orders in this view"
@@ -370,6 +371,7 @@ export function OrdersPage() {
                 ))}
               </OperationalTable>
             )}
+          </div>
           </div>
 
           <SideDetailPanel
