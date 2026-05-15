@@ -20,7 +20,26 @@ export type CreateInvoiceExecutionDto = {
   provider?: InvoiceExecutionProviderDto;
 };
 
-export type RetryInvoiceExecutionDto = {
+export type PreviewInvoiceExecutionDto = {
+  financeLedgerEntryId: string;
   provider?: InvoiceExecutionProviderDto;
 };
 
+export type InvoiceExecutionPreviewDto = {
+  provider: InvoiceExecutionProviderDto;
+  dryRun: true;
+  executionEnabled: boolean;
+  providerEnabled: boolean;
+  providerConfigured: boolean;
+  configuration: {
+    firmIdConfigured: boolean;
+    apiKeyConfigured: boolean;
+    baseUrlConfigured: boolean;
+    addInvoiceUrlConfigured: boolean;
+  };
+  requestSnapshot: unknown;
+};
+
+export type RetryInvoiceExecutionDto = {
+  provider?: InvoiceExecutionProviderDto;
+};

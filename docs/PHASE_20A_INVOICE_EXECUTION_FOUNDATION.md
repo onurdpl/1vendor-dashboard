@@ -59,11 +59,43 @@ Invoice execution is disabled by default:
 ```text
 INVOICE_EXECUTION_ENABLED=false
 INVOICE_PROVIDER=bizimhesap
+BIZIMHESAP_ENABLED=false
+BIZIMHESAP_FIRM_ID=
+BIZIMHESAP_API_KEY=
+BIZIMHESAP_BASE_URL=
 BIZIMHESAP_ADD_INVOICE_URL=
 BIZIMHESAP_ACCESS_TOKEN=
 ```
 
 When disabled, execution attempts are recorded as failed with a safe response snapshot. This protects production from accidental outbound accounting calls while keeping the orchestration path auditable.
+
+BizimHesap live execution requires both the generic invoice gate and the provider gate:
+
+- `INVOICE_EXECUTION_ENABLED=true`
+- `BIZIMHESAP_ENABLED=true`
+
+Keep `BIZIMHESAP_ENABLED=false` for production dry-run preparation and preview-only validation. The backend reads `BIZIMHESAP_FIRM_ID` and `BIZIMHESAP_API_KEY` without logging either value. `BIZIMHESAP_BASE_URL` can be used to derive the AddInvoice URL, while `BIZIMHESAP_ADD_INVOICE_URL` remains available as an explicit override.
+
+## Dry-Run Preview
+
+Admins can preview the deterministic BizimHesap AddInvoice payload without creating an `InvoiceExecution` row or calling the provider:
+
+```text
+POST /admin/invoices/preview
+{
+  "financeLedgerEntryId": "..."
+}
+```
+
+The preview returns:
+
+- customer display fields
+- invoice date, currency, description, and notes
+- line items and amounts
+- Shopify/ledger/vendor references
+- configuration presence booleans only
+
+The preview does not return FirmId, API keys, access tokens, provider URLs containing credentials, or raw secrets.
 
 ## Controlled Execution Flow
 
@@ -137,4 +169,3 @@ Future phases can add:
 - accounting export/audit statement generation
 - supplier invoice/procurement accounting
 - tax mapping and compliance review
-

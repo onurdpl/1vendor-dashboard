@@ -1197,14 +1197,21 @@ Frontend note:
   - `UNKNOWN`
 - Duplicate prevention is enforced with a unique finance-ledger/provider key.
 - Admin invoice endpoints:
+  - `POST /admin/invoices/preview`
   - `POST /admin/invoices/create`
   - `POST /admin/invoices/:id/retry`
+- Preview is dry-run only: it returns the deterministic BizimHesap payload and configuration presence booleans without creating provider records, creating `InvoiceExecution` rows, calling BizimHesap, or exposing FirmId/API keys.
 - Finance dashboard records include latest invoice execution reference so admin and vendor views can show provider, status, GUID, invoice number, PDF link, and execution timestamps.
 - Invoice execution configuration is disabled by default:
   - `INVOICE_EXECUTION_ENABLED=false`
   - `INVOICE_PROVIDER=bizimhesap`
+  - `BIZIMHESAP_ENABLED=false`
+  - `BIZIMHESAP_FIRM_ID`
+  - `BIZIMHESAP_API_KEY`
+  - `BIZIMHESAP_BASE_URL`
   - `BIZIMHESAP_ADD_INVOICE_URL`
   - `BIZIMHESAP_ACCESS_TOKEN`
+- Live BizimHesap calls require both `INVOICE_EXECUTION_ENABLED=true` and `BIZIMHESAP_ENABLED=true`.
 - Phase 20A preserves these boundaries:
   - no automatic invoice creation
   - no invoice cancellation execution

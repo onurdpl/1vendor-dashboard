@@ -35,25 +35,58 @@ function readProviderString(payload: unknown, keys: string[]) {
   return null;
 }
 
+function trimTrailingSlash(value: string) {
+  return value.replace(/\/+$/, '');
+}
+
+function resolveBizimHesapAddInvoiceUrl(env: AppEnv) {
+  const configuredUrl =
+    env.BIZIMHESAP_ADD_INVOICE_URL ??
+    (env.BIZIMHESAP_BASE_URL ? `${trimTrailingSlash(env.BIZIMHESAP_BASE_URL)}/AddInvoice` : undefined);
+
+  if (!configuredUrl) {
+    return undefined;
+  }
+
+  if (!env.BIZIMHESAP_FIRM_ID || !env.BIZIMHESAP_API_KEY) {
+    return configuredUrl;
+  }
+
+  const url = new URL(configuredUrl);
+  if (!url.searchParams.has('FirmId')) {
+    url.searchParams.set('FirmId', env.BIZIMHESAP_FIRM_ID);
+  }
+  if (!url.searchParams.has('ApiKey')) {
+    url.searchParams.set('ApiKey', env.BIZIMHESAP_API_KEY);
+  }
+
+  return url.toString();
+}
+
 export class BizimHesapAdapter implements InvoiceProviderAdapter {
   provider = 'BIZIMHESAP' as const;
 
   constructor(private readonly env: AppEnv) {}
 
   async createInvoice(input: InvoiceProviderCreateInput): Promise<InvoiceProviderCreateResult> {
-    if (!this.env.INVOICE_EXECUTION_ENABLED) {
+    if (!this.env.INVOICE_EXECUTION_ENABLED || !this.env.BIZIMHESAP_ENABLED) {
       throw new Error('Invoice execution is disabled by configuration.');
     }
-    if (!this.env.BIZIMHESAP_ADD_INVOICE_URL || !this.env.BIZIMHESAP_ACCESS_TOKEN) {
+    const addInvoiceUrl = resolveBizimHesapAddInvoiceUrl(this.env);
+    if (!addInvoiceUrl || !this.env.BIZIMHESAP_FIRM_ID || !this.env.BIZIMHESAP_API_KEY) {
       throw new Error('BizimHesap invoice execution is not configured.');
     }
 
-    const response = await fetch(this.env.BIZIMHESAP_ADD_INVOICE_URL, {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (this.env.BIZIMHESAP_ACCESS_TOKEN) {
+      headers.Authorization = `Bearer ${this.env.BIZIMHESAP_ACCESS_TOKEN}`;
+    }
+
+    const response = await fetch(addInvoiceUrl, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${this.env.BIZIMHESAP_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify(input.requestSnapshot),
     });
     const responseText = await response.text();
@@ -115,4 +148,3 @@ export function createInvoiceProviderAdapter(env: AppEnv): InvoiceProviderAdapte
 
   return new BizimHesapAdapter(env);
 }
-

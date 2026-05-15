@@ -8,7 +8,13 @@ import {
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import { createInvoiceProviderAdapter, type InvoiceProviderAdapter } from './invoice-provider.adapter.js';
-import type { CreateInvoiceExecutionDto, InvoiceExecutionDto, InvoiceExecutionProviderDto } from './invoice-execution.types.js';
+import type {
+  CreateInvoiceExecutionDto,
+  InvoiceExecutionDto,
+  InvoiceExecutionPreviewDto,
+  InvoiceExecutionProviderDto,
+  PreviewInvoiceExecutionDto,
+} from './invoice-execution.types.js';
 
 type FinanceLedgerForInvoice = FinanceLedgerEntry & {
   vendorAllocation: {
@@ -89,6 +95,10 @@ export function mapInvoiceExecution(execution: InvoiceExecution): InvoiceExecuti
 
 function buildInvoiceExecutionId(provider: InvoiceExecutionProvider, financeLedgerEntryId: string) {
   return `invoice-${provider.toLowerCase()}-${financeLedgerEntryId}`;
+}
+
+function hasConfiguredBizimHesapUrl(env: AppEnv) {
+  return Boolean(env.BIZIMHESAP_ADD_INVOICE_URL || env.BIZIMHESAP_BASE_URL);
 }
 
 function buildBizimHesapAddInvoiceSnapshot(entry: FinanceLedgerForInvoice) {
@@ -271,6 +281,41 @@ export async function createInvoiceExecution(
     requestSnapshot,
     adapter: options.adapter ?? createInvoiceProviderAdapter(options.env),
   });
+}
+
+export async function previewInvoiceExecutionPayload(
+  input: PreviewInvoiceExecutionDto,
+  options: {
+    env: AppEnv;
+    vendorId?: string | null;
+  },
+): Promise<InvoiceExecutionPreviewDto> {
+  if (!input.financeLedgerEntryId) {
+    throw new Error('financeLedgerEntryId is required.');
+  }
+
+  const provider = normalizeProvider(input.provider);
+  if (provider !== InvoiceExecutionProvider.BIZIMHESAP) {
+    throw new Error('Only BizimHesap invoice preview is implemented.');
+  }
+
+  const entry = await getInvoiceableLedgerEntry(input.financeLedgerEntryId, options.vendorId);
+  const requestSnapshot = buildBizimHesapAddInvoiceSnapshot(entry);
+
+  return {
+    provider: mapProvider(provider),
+    dryRun: true,
+    executionEnabled: options.env.INVOICE_EXECUTION_ENABLED,
+    providerEnabled: options.env.BIZIMHESAP_ENABLED,
+    providerConfigured: Boolean(options.env.BIZIMHESAP_FIRM_ID && options.env.BIZIMHESAP_API_KEY && hasConfiguredBizimHesapUrl(options.env)),
+    configuration: {
+      firmIdConfigured: Boolean(options.env.BIZIMHESAP_FIRM_ID),
+      apiKeyConfigured: Boolean(options.env.BIZIMHESAP_API_KEY),
+      baseUrlConfigured: Boolean(options.env.BIZIMHESAP_BASE_URL),
+      addInvoiceUrlConfigured: Boolean(options.env.BIZIMHESAP_ADD_INVOICE_URL),
+    },
+    requestSnapshot,
+  };
 }
 
 export async function retryInvoiceExecution(

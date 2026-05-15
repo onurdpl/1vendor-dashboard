@@ -15,9 +15,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createInvoiceExecution, retryInvoiceExecution } = await import(
+const { createInvoiceExecution, previewInvoiceExecutionPayload, retryInvoiceExecution } = await import(
   '../backend/src/modules/invoices/invoice-execution.service.js'
 );
+const { BizimHesapAdapter } = await import('../backend/src/modules/invoices/invoice-provider.adapter.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -39,6 +40,10 @@ const env = {
   EMAIL_ADMIN_RECIPIENTS: [],
   INVOICE_EXECUTION_ENABLED: true,
   INVOICE_PROVIDER: 'bizimhesap' as const,
+  BIZIMHESAP_ENABLED: true,
+  BIZIMHESAP_FIRM_ID: 'test-firm',
+  BIZIMHESAP_API_KEY: 'test-api-key',
+  BIZIMHESAP_BASE_URL: 'https://provider.example',
 };
 
 function buildLedgerEntry() {
@@ -207,6 +212,55 @@ describe('invoice execution foundation', () => {
     });
   });
 
+  it('previews BizimHesap invoice payload without creating an execution or exposing secrets', async () => {
+    const preview = await previewInvoiceExecutionPayload(
+      {
+        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+        provider: 'bizimhesap',
+      },
+      {
+        env,
+        vendorId: 'sporjinal',
+      },
+    );
+
+    expect(preview).toMatchObject({
+      provider: 'bizimhesap',
+      dryRun: true,
+      executionEnabled: true,
+      providerEnabled: true,
+      providerConfigured: true,
+      configuration: {
+        firmIdConfigured: true,
+        apiKeyConfigured: true,
+        baseUrlConfigured: true,
+      },
+    });
+    expect(preview.requestSnapshot).toEqual(
+      expect.objectContaining({
+        AddInvoice: expect.objectContaining({
+          Customer: expect.objectContaining({
+            Name: 'Test Customer',
+          }),
+          Lines: [
+            expect.objectContaining({
+              ProductName: 'Running Shoe',
+              LineAmount: 3399,
+            }),
+          ],
+          References: expect.objectContaining({
+            FinanceLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+            ShopifyOrderNumber: '1021',
+          }),
+        }),
+      }),
+    );
+    expect(JSON.stringify(preview)).not.toContain('test-api-key');
+    expect(JSON.stringify(preview)).not.toContain('test-firm');
+    expect(prismaMock.invoiceExecution.create).not.toHaveBeenCalled();
+    expect(adapter.createInvoice).not.toHaveBeenCalled();
+  });
+
   it('prevents duplicate invoice execution for the same ledger row and provider', async () => {
     prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce(buildExecution());
 
@@ -297,5 +351,48 @@ describe('invoice execution foundation', () => {
       }),
     );
     expect(execution.status).toBe('created');
+  });
+
+  it('passes BizimHesap FirmId and API key through the provider request without logging them in snapshots', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          Guid: 'BH-GUID-2',
+          InvoiceNo: 'BH-1002',
+          PdfUrl: 'https://provider.example/invoice-2.pdf',
+        }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const liveAdapter = new BizimHesapAdapter(env);
+    const result = await liveAdapter.createInvoice({
+      financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+      requestSnapshot: {
+        AddInvoice: {
+          Customer: {
+            Name: 'Test Customer',
+          },
+        },
+      },
+    });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(requestUrl.pathname).toBe('/AddInvoice');
+    expect(requestUrl.searchParams.get('FirmId')).toBe('test-firm');
+    expect(requestUrl.searchParams.get('ApiKey')).toBe('test-api-key');
+    expect(fetchMock.mock.calls[0][1]).toEqual(
+      expect.objectContaining({
+        method: 'POST',
+        body: expect.not.stringContaining('test-api-key'),
+      }),
+    );
+    expect(result).toMatchObject({
+      providerInvoiceGuid: 'BH-GUID-2',
+      providerInvoiceNo: 'BH-1002',
+    });
+
+    vi.unstubAllGlobals();
   });
 });
