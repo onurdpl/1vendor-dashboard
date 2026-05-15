@@ -5,14 +5,12 @@ import {
   EmptyStatePanel,
   FilterBar,
   KPIStatCard,
-  MetadataGroup,
   MetadataRow,
   OperationalActionGroup,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
   SearchInput,
-  ShopifyEntityDisplay,
   SideDetailPanel,
   StatusBadge,
 } from '../components/OperationalPrimitives';
@@ -28,7 +26,7 @@ import {
   retryInvoiceExecution,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
-import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
+import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
 
 type VendorProfileFormInput = {
@@ -89,21 +87,39 @@ function isPendingOrHoldRecord(record: FinanceTransaction) {
   return status === 'Pending' || status === 'Recorded';
 }
 
-function getFinanceLifecycleLabel(record: FinanceTransaction) {
+function getPayoutActivityType(record: FinanceTransaction) {
+  if (record.category === 'Invoice') {
+    return 'Sale';
+  }
+  return record.category;
+}
+
+function getPayoutActivityStatusLabel(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
   if (status === 'Failed') {
-    return 'Attention required';
+    return 'Needs review';
   }
-  if (status === 'Recorded') {
-    return 'Ledger recorded';
+  if (isRefundRecord(record) && ['Recorded', 'Completed', 'Reconciled'].includes(status)) {
+    return 'Refunded';
   }
-  if (status === 'Pending') {
-    return 'Pending or held';
+  if (record.payoutBatch) {
+    return 'Included in payout';
   }
-  if (status === 'Reconciled') {
-    return 'Reconciled';
+  if (record.settlement?.payoutReady || status === 'Pending' || status === 'Recorded') {
+    return 'Awaiting payout';
   }
-  return 'Completed';
+  return status;
+}
+
+function getPayoutActivityTone(record: FinanceTransaction) {
+  const label = getPayoutActivityStatusLabel(record);
+  if (label === 'Needs review') {
+    return 'danger' as const;
+  }
+  if (label === 'Refunded' || label === 'Included in payout') {
+    return 'success' as const;
+  }
+  return 'attention' as const;
 }
 
 function isZeroCurrencyValue(value: string) {
@@ -139,6 +155,65 @@ function getInvoiceStatusLabel(status?: string) {
     .join(' ');
 }
 
+function getInvoiceStatusDisplay(status?: string) {
+  if (status === 'created') {
+    return 'Invoice created';
+  }
+  if (status === 'failed') {
+    return 'Invoice failed';
+  }
+  return 'Invoice pending';
+}
+
+function getPayoutImpact(record: FinanceTransaction) {
+  if (isRefundRecord(record)) {
+    return formatDeductionValue(record.payoutCalculation?.refundImpact ?? record.amount);
+  }
+  return record.payoutCalculation?.estimatedPayout ?? record.amount;
+}
+
+function getTotalDeductions(record: FinanceTransaction) {
+  const values = [
+    record.payoutCalculation?.commission,
+    record.payoutCalculation?.commissionVat,
+    record.payoutCalculation?.shippingDeduction,
+    record.payoutCalculation?.refundImpact,
+  ].filter((value): value is string => Boolean(value));
+
+  if (!values.length) {
+    return '$0.00';
+  }
+
+  const total = values.reduce((sum, value) => {
+    const numeric = Number(value.replace(/[^0-9.-]/g, ''));
+    return Number.isFinite(numeric) ? sum + Math.abs(numeric) : sum;
+  }, 0);
+  const currency = values[0].match(/^[^\d-]+/)?.[0] ?? '$';
+  return `${currency}${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function getFinanceTimelineItems(record: FinanceTransaction) {
+  return [
+    {
+      label: isRefundRecord(record) ? 'Refund recorded' : 'Order recorded',
+      at: record.date,
+      status: normalizeFinanceStatus(record.status),
+    },
+    {
+      label: record.settlement?.payoutReady ? 'Awaiting payout' : 'Payout pending',
+      at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
+      status: record.settlement?.payoutReady ? 'Ready' : 'Pending',
+    },
+    record.payoutBatch
+      ? {
+          label: record.payoutBatch.status === 'paid_placeholder' ? 'Paid out' : 'Included in payout',
+          at: record.payoutBatch.createdAt,
+          status: getPayoutBatchStatusLabel(record.payoutBatch.status),
+        }
+      : null,
+  ].filter((item): item is { label: string; at: string | null; status: string } => Boolean(item));
+}
+
 export function FinancePage() {
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
@@ -152,7 +227,6 @@ export function FinancePage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
-  const [vendorFilter, setVendorFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
   const [commissionPercent, setCommissionPercent] = useState('10.00');
   const [commissionVatPercent, setCommissionVatPercent] = useState('0.00');
@@ -162,7 +236,6 @@ export function FinancePage() {
   const [shippingCostProvider, setShippingCostProvider] = useState('Manual provider');
   const [shippingCostAmount, setShippingCostAmount] = useState('');
   const [shippingVatAmount, setShippingVatAmount] = useState('');
-  const availableVendors = getAvailableVendors();
   const isAdmin = currentUser?.role === 'admin';
   const isVendorUser = currentUser?.role === 'vendor';
   const saveProfileMutation = useMutationAction(
@@ -226,7 +299,7 @@ export function FinancePage() {
         await refetch();
         showFeedback(
           execution.status === 'created'
-            ? 'Invoice execution created for this ledger row.'
+            ? 'Invoice created for this finance row.'
             : `Invoice execution recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
           execution.status === 'failed' ? 'error' : 'success',
         );
@@ -243,7 +316,7 @@ export function FinancePage() {
         await refetch();
         showFeedback(
           execution.status === 'created'
-            ? 'Invoice execution retry created the provider invoice.'
+            ? 'Invoice retry created the invoice.'
             : `Invoice execution retry recorded as ${getInvoiceStatusLabel(execution.status).toLowerCase()}.`,
           execution.status === 'failed' ? 'error' : 'success',
         );
@@ -323,11 +396,9 @@ export function FinancePage() {
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return (finance?.transactions ?? []).filter((record) => {
-      const recordVendorId = currentVendor.vendorId;
-      const displayStatus = normalizeFinanceStatus(record.status);
+      const displayStatus = getPayoutActivityStatusLabel(record);
       const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
       const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
-      const matchesVendor = vendorFilter === 'all' || recordVendorId === vendorFilter;
       const searchableText = [
         record.id,
         record.description,
@@ -344,9 +415,9 @@ export function FinancePage() {
         .join(' ')
         .toLowerCase();
 
-      return matchesStatus && matchesCategory && matchesVendor && (!query || searchableText.includes(query));
+      return matchesStatus && matchesCategory && (!query || searchableText.includes(query));
     });
-  }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, searchTerm, statusFilter, vendorFilter]);
+  }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, searchTerm, statusFilter]);
 
   const selectedRecord = useMemo(() => {
     if (!filteredRecords.length) {
@@ -378,191 +449,58 @@ export function FinancePage() {
   }
 
   return (
-    <section className={`op-page finance-control-center ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
-      <div className="op-page-heading">
+    <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
+      <div className="op-page-heading finance-page-header">
         <div>
           <p className="eyebrow">Finance</p>
-          <h2>{currentVendor.vendorName} {isVendorUser ? 'balance workspace' : 'finance control center'}</h2>
+          <h2>{currentVendor.vendorName} payout workspace</h2>
           <p className="page-description">
-            {isVendorUser
-              ? 'Your sales, refunds, deductions, and upcoming payout status in one vendor-scoped view.'
-              : 'Vendor-scoped ledger visibility for Shopify refunds, holds, failed records, and reporting-only payout estimates.'}
+            Track available balance, payout activity, deductions, refunds, and invoice state from one focused finance view.
           </p>
         </div>
         <div className="op-heading-meta">
-          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+          <StatusBadge tone="info">{currentVendor.vendorName}</StatusBadge>
           <StatusBadge tone={currentUser?.role === 'admin' ? 'success' : 'neutral'}>{currentUser?.role ?? 'user'}</StatusBadge>
+          <button
+            type="button"
+            className="button button-secondary button-compact"
+            onClick={() => showFeedback('Finance export prepared for review.', 'success')}
+          >
+            Export
+          </button>
         </div>
       </div>
 
-      {isVendorUser ? (
-        <div className="op-kpi-row finance-kpi-row finance-vendor-balance-row">
-          <KPIStatCard label="Payable balance" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Ready for payout preparation" tone="success" />
-          <KPIStatCard label="Upcoming payout" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail={`${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`} tone="info" />
-          <KPIStatCard label="Accruing balance" value={finance.summary.accruedBalance ?? '$0.00'} detail="Waiting for fulfillment or payout readiness" tone="attention" />
-          <KPIStatCard label="Refund impact" value={finance.summary.refunds} detail="Refunds reduce vendor payout" tone="danger" />
-          <KPIStatCard label="Held / pending" value={finance.summary.heldBalance ?? finance.summary.pendingSettlement ?? '$0.00'} detail="Not currently payout-ready" tone="neutral" />
-        </div>
-      ) : (
-        <div className="op-kpi-row finance-kpi-row">
-          <KPIStatCard label="Recorded refunds" value={financeKpis.recordedRefunds} detail="Refund ledger rows" tone="success" />
-          <KPIStatCard label="Total refund amount" value={finance.summary.refunds} detail="Summary refund impact" tone="danger" />
-          <KPIStatCard label="Pending / hold" value={financeKpis.pendingOrHeld} detail="Recorded or pending items" tone="attention" />
-          <KPIStatCard label="Failed / attention" value={financeKpis.failed} detail="Requires operator review" tone="danger" />
-          <KPIStatCard label="Commission" value={finance.summary.platformFee} detail={`${finance.profile?.commissionPercent ?? '10.00'}% vendor profile`} tone="neutral" />
-          <KPIStatCard label="Vendor payable" value={finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Fulfilled settlement-ready balance" tone="success" />
-          <KPIStatCard label="Accrued balance" value={finance.summary.accruedBalance ?? finance.summary.payoutEstimate} detail="Pending fulfillment or settlement readiness" tone="attention" />
-        </div>
-      )}
-
-      <section className="operational-card finance-profile-card">
-        <div>
-          <p className="eyebrow">Vendor finance profile</p>
-          <h3>{currentVendor.vendorName} payout settings</h3>
-          <p className="page-description">
-            Applies to new vendor payout estimates from now on. Existing ledger rows keep their original profile snapshot.
-          </p>
-        </div>
-        <div className="finance-profile-summary">
-          <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
-          <MetadataRow label="Commission VAT" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-          <MetadataRow label="Shipping mode" value={finance.profile?.shippingMode ?? 'disabled'} />
-          <MetadataRow label="Shipping deduction" value={finance.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
-        </div>
-        {isAdmin ? (
-          <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
-            <div className="op-form-grid">
-              <label>
-                <span>Commission %</span>
-                <input
-                  name="commissionPercent"
-                  value={commissionPercent}
-                  onChange={(event) => setCommissionPercent(event.target.value)}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                <span>Commission VAT %</span>
-                <input
-                  name="commissionVatPercent"
-                  value={commissionVatPercent}
-                  onChange={(event) => setCommissionVatPercent(event.target.value)}
-                  inputMode="decimal"
-                />
-              </label>
-              <label>
-                <span>Shipping mode</span>
-                <select name="shippingMode" value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
-                  <option value="disabled">Disabled</option>
-                  <option value="fixed">Fixed</option>
-                  <option value="external_provider">External provider</option>
-                </select>
-              </label>
-              <label>
-                <span>Fixed shipping fee</span>
-                <input
-                  name="fixedShippingFee"
-                  value={fixedShippingFee}
-                  onChange={(event) => setFixedShippingFee(event.target.value)}
-                  inputMode="decimal"
-                />
-              </label>
-            </div>
-            <label className="op-checkbox-row">
-              <input
-                name="deductShippingEnabled"
-                type="checkbox"
-                checked={deductShippingEnabled}
-                onChange={(event) => setDeductShippingEnabled(event.target.checked)}
-              />
-              <span>Deduct shipping after fulfillment</span>
-            </label>
-            <button
-              type="submit"
-              className="button button-primary"
-              disabled={saveProfileMutation.isPending}
-            >
-              {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
-            </button>
-          </form>
-        ) : (
-          <StatusBadge tone="neutral">Read-only vendor profile</StatusBadge>
-        )}
-      </section>
-
-      <section className="operational-card finance-payout-prep-card">
-        <div>
-          <p className="eyebrow">Payout preparation</p>
-          <h3>{currentVendor.vendorName} upcoming payout</h3>
-          <p className="page-description">
-            {isVendorUser
-              ? 'Upcoming payout reflects payable rows and prepared draft batches. This view is read-only.'
-              : 'Draft batches group payable ledger rows for admin review only. No payment execution is performed here.'}
-          </p>
-        </div>
-        <div className="finance-profile-summary">
-          <MetadataRow label="Eligible rows" value={finance.payoutBatchSummary?.eligibleRowCount ?? 0} />
-          <MetadataRow label="Eligible net" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} />
-          <MetadataRow label="Blocked rows" value={finance.payoutBatchSummary?.blockedRowCount ?? 0} />
-          <MetadataRow
-            label={isVendorUser ? 'Latest payout batch' : 'Latest draft'}
-            value={
-              finance.payoutBatchSummary?.latestBatch
-                ? `${getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status)} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
-                : 'No draft prepared'
-            }
-          />
-        </div>
-        {isAdmin ? (
-          <div className="finance-payout-prep-actions">
-            <button
-              type="button"
-              className="button button-primary button-compact"
-              disabled={preparePayoutBatchMutation.isPending || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
-              onClick={() => preparePayoutBatchMutation.mutate(undefined)}
-            >
-              {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft payout'}
-            </button>
-            <StatusBadge tone={(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
-              {(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Payable rows ready' : 'No payable rows'}
-            </StatusBadge>
-          </div>
-        ) : (
-          <StatusBadge tone="neutral">Read-only upcoming payout</StatusBadge>
-        )}
-      </section>
+      <div className="op-kpi-row finance-kpi-row">
+        <KPIStatCard label="Available balance" value={finance.summary.availableBalance ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Ready balance" tone="success" />
+        <KPIStatCard label="Pending payout" value={finance.summary.pendingPayouts ?? finance.summary.heldBalance ?? '$0.00'} detail="Waiting to be paid" tone="attention" />
+        <KPIStatCard label="Refund deductions" value={finance.summary.refundsThisMonth ?? finance.summary.refunds} detail="Refunds reduce payout" tone="danger" />
+        <KPIStatCard label="Upcoming payout" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail={`${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`} tone="info" />
+        <KPIStatCard label="Needs review" value={financeKpis.failed + (finance.payoutBatchSummary?.blockedRowCount ?? 0)} detail="Action may be needed" tone="warning" />
+      </div>
 
       <div className="op-control-layout finance-layout">
-        <div className="op-main-column">
+        <div className="op-main-column finance-activity-column">
           <OperationalToolbar>
             <SearchInput
-              placeholder="Search status, vendor, order, refund, amount..."
+              placeholder="Search payout activity by order, status, amount..."
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
             <FilterBar>
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
                 <option value="all">All statuses</option>
-                <option value="Recorded">Recorded</option>
-                <option value="Pending">Pending</option>
-                <option value="Completed">Completed</option>
-                <option value="Reconciled">Reconciled</option>
-                <option value="Failed">Failed</option>
+                <option value="Awaiting payout">Awaiting payout</option>
+                <option value="Included in payout">Included in payout</option>
+                <option value="Refunded">Refunded</option>
+                <option value="Needs review">Needs review</option>
               </select>
               <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
-                <option value="all">All sources</option>
+                <option value="all">All types</option>
+                <option value="Invoice">Sale</option>
                 <option value="Refund">Refund</option>
                 <option value="Payout">Payout</option>
-                <option value="Invoice">Invoice</option>
                 <option value="Adjustment">Adjustment</option>
-              </select>
-              <select value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
-                <option value="all">Current vendor scope</option>
-                {availableVendors.map((vendor) => (
-                  <option key={vendor.vendorId} value={vendor.vendorId}>
-                    {vendor.vendorName}
-                  </option>
-                ))}
               </select>
               <button
                 type="button"
@@ -571,29 +509,21 @@ export function FinancePage() {
                   setSearchTerm('');
                   setStatusFilter('all');
                   setCategoryFilter('all');
-                  setVendorFilter('all');
                 }}
               >
                 Reset
               </button>
             </FilterBar>
-            <button
-              type="button"
-              className="button button-primary"
-              onClick={() => showFeedback('Finance snapshot exported for review.', 'success')}
-            >
-              Export snapshot
-            </button>
           </OperationalToolbar>
 
           {filteredRecords.length === 0 ? (
             <EmptyStatePanel
-              title="No finance records in this view"
-              description="Adjust the status, vendor, source, or text filters to inspect synced ledger rows."
+              title="No payout activity in this view"
+              description="Adjust the status, type, or search filters to review payout activity."
             />
           ) : (
             <OperationalTable
-              columns={['Status', 'Source', 'Vendor', 'Order', 'Refund', 'Amount', 'Life', 'Updated', 'Action']}
+              columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payout impact', 'Updated', 'Action']}
               className="finance-op-table finance-op-table-v2"
             >
               {filteredRecords.map((record) => (
@@ -602,25 +532,33 @@ export function FinancePage() {
                   selected={selectedRecord?.id === record.id}
                   onSelect={() => setSelectedRecordId(record.id)}
                 >
-                  <StatusBadge tone={getStatusTone(record.status)}>{normalizeFinanceStatus(record.status)}</StatusBadge>
-                  <ShopifyEntityDisplay label={record.category} primary={record.description} secondary={record.id} />
-                  <ShopifyEntityDisplay label="Vendor" primary={currentVendor.vendorName} />
-                  <ShopifyEntityDisplay
-                    label="Shopify Order"
-                    primary={record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : 'Not synced'}
-                  />
-                  <ShopifyEntityDisplay label="Shopify Refund" primary={record.shopifyRefundId ?? 'Not synced'} />
+                  <span className="finance-date-cell">
+                    <strong>{formatDate(record.date)}</strong>
+                  </span>
+                  <span className="finance-type-cell">
+                    <span className={`finance-type-icon ${isRefundRecord(record) ? 'is-refund' : 'is-sale'}`}>
+                      {isRefundRecord(record) ? 'R' : 'S'}
+                    </span>
+                    <span>
+                      <strong>{getPayoutActivityType(record)}</strong>
+                      <small>{record.description}</small>
+                    </span>
+                  </span>
+                  <span>
+                    <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
+                    <small>{currentVendor.vendorName}</small>
+                  </span>
+                  <StatusBadge tone={getPayoutActivityTone(record)}>{getPayoutActivityStatusLabel(record)}</StatusBadge>
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
                     {record.amount}
                   </strong>
-                  <span>
-                    <strong>{getFinanceLifecycleLabel(record)}</strong>
-                    <small>{record.counterparty}</small>
-                  </span>
+                  <strong className={isRefundRecord(record) ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
+                    {getPayoutImpact(record)}
+                  </strong>
                   <span>
                     <strong>{formatDate(record.date)}</strong>
-                    <small>{record.category}</small>
+                    <small>{getPayoutActivityType(record)}</small>
                   </span>
                   <OperationalActionGroup>
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
@@ -631,16 +569,132 @@ export function FinancePage() {
               ))}
             </OperationalTable>
           )}
+
+          <div className="finance-info-footer">
+            <section className="finance-footer-card">
+              <div>
+                <p className="eyebrow">Vendor profile</p>
+                <h3>{currentVendor.vendorName} payout settings</h3>
+                <p className="page-description">Applies to new payout estimates from now on. Past activity keeps its original rates.</p>
+              </div>
+              <div className="finance-profile-summary">
+                <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label="Tax" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Shipping" value={finance.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
+              </div>
+              {isAdmin ? (
+                <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
+                  <div className="op-form-grid">
+                    <label>
+                      <span>Commission %</span>
+                      <input
+                        name="commissionPercent"
+                        value={commissionPercent}
+                        onChange={(event) => setCommissionPercent(event.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                    <label>
+                      <span>Commission VAT %</span>
+                      <input
+                        name="commissionVatPercent"
+                        value={commissionVatPercent}
+                        onChange={(event) => setCommissionVatPercent(event.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                    <label>
+                      <span>Shipping mode</span>
+                      <select name="shippingMode" value={shippingMode} onChange={(event) => setShippingMode(event.target.value as typeof shippingMode)}>
+                        <option value="disabled">Disabled</option>
+                        <option value="fixed">Fixed</option>
+                        <option value="external_provider">External provider</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>Fixed shipping fee</span>
+                      <input
+                        name="fixedShippingFee"
+                        value={fixedShippingFee}
+                        onChange={(event) => setFixedShippingFee(event.target.value)}
+                        inputMode="decimal"
+                      />
+                    </label>
+                  </div>
+                  <label className="op-checkbox-row">
+                    <input
+                      name="deductShippingEnabled"
+                      type="checkbox"
+                      checked={deductShippingEnabled}
+                      onChange={(event) => setDeductShippingEnabled(event.target.checked)}
+                    />
+                    <span>Deduct shipping after fulfillment</span>
+                  </label>
+                  <button
+                    type="submit"
+                    className="button button-primary button-compact"
+                    disabled={saveProfileMutation.isPending}
+                  >
+                    {saveProfileMutation.isPending ? 'Saving...' : 'Save vendor profile'}
+                  </button>
+                </form>
+              ) : (
+                <StatusBadge tone="neutral">Read-only vendor profile</StatusBadge>
+              )}
+            </section>
+
+            <section className="finance-footer-card">
+              <div>
+                <p className="eyebrow">Payout preparation</p>
+                <h3>Upcoming payout</h3>
+                <p className="page-description">
+                  {isVendorUser
+                    ? 'A read-only view of rows currently eligible for upcoming payout.'
+                    : 'Prepare payable rows for review. No payment is executed here.'}
+                </p>
+              </div>
+              <div className="finance-profile-summary">
+                <MetadataRow label="Eligible rows" value={finance.payoutBatchSummary?.eligibleRowCount ?? 0} />
+                <MetadataRow label="Eligible net" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} />
+                <MetadataRow label="Needs review" value={finance.payoutBatchSummary?.blockedRowCount ?? 0} />
+                <MetadataRow
+                  label={isVendorUser ? 'Latest payout' : 'Latest draft'}
+                  value={
+                    finance.payoutBatchSummary?.latestBatch
+                      ? `${getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status)} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
+                      : 'No draft prepared'
+                  }
+                />
+              </div>
+              {isAdmin ? (
+                <div className="finance-payout-prep-actions">
+                  <button
+                    type="button"
+                    className="button button-primary button-compact"
+                    disabled={preparePayoutBatchMutation.isPending || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
+                    onClick={() => preparePayoutBatchMutation.mutate(undefined)}
+                  >
+                    {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft payout'}
+                  </button>
+                  <StatusBadge tone={(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
+                    {(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows ready' : 'No payable rows'}
+                  </StatusBadge>
+                </div>
+              ) : (
+                <StatusBadge tone="neutral">Read-only upcoming payout</StatusBadge>
+              )}
+            </section>
+          </div>
         </div>
 
-        <SideDetailPanel eyebrow="Ledger detail" title={selectedRecord?.category ?? 'No record selected'}>
+        <SideDetailPanel eyebrow={selectedRecord ? getPayoutActivityType(selectedRecord) : 'Payout activity'} title="Payout summary">
           {selectedRecord ? (
             <>
               <div className="op-detail-status-row">
-                <StatusBadge tone={getStatusTone(selectedRecord.status)}>{normalizeFinanceStatus(selectedRecord.status)}</StatusBadge>
+                <StatusBadge tone={getPayoutActivityTone(selectedRecord)}>{getPayoutActivityStatusLabel(selectedRecord)}</StatusBadge>
                 {selectedRecord.invoiceExecution ? (
                   <StatusBadge tone={selectedRecord.invoiceExecution.status === 'created' ? 'success' : selectedRecord.invoiceExecution.status === 'failed' ? 'danger' : 'attention'}>
-                    Invoice {getInvoiceStatusLabel(selectedRecord.invoiceExecution.status)}
+                    {getInvoiceStatusDisplay(selectedRecord.invoiceExecution.status)}
                   </StatusBadge>
                 ) : null}
                 <strong
@@ -654,54 +708,16 @@ export function FinancePage() {
                   {selectedRecord.amount}
                 </strong>
               </div>
-              <div className="finance-detail-card finance-invoice-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Customer invoice</h4>
-                  <StatusBadge
-                    tone={
-                      selectedRecord.invoiceExecution?.status === 'created'
-                        ? 'success'
-                        : selectedRecord.invoiceExecution?.status === 'failed'
-                          ? 'danger'
-                          : 'attention'
-                    }
-                  >
-                    {selectedRecord.invoiceExecution?.status === 'created'
-                      ? 'Invoice created'
-                      : selectedRecord.invoiceExecution?.status === 'failed'
-                        ? 'Invoice failed'
-                        : 'Invoice pending'}
-                  </StatusBadge>
-                </div>
-                <div className="finance-detail-rows">
-                  <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not assigned'} />
-                  <MetadataRow label="Invoice date" value={selectedRecord.invoiceExecution ? formatDate(selectedRecord.invoiceExecution.updatedAt) : '—'} />
-                  <MetadataRow
-                    label="PDF"
-                    value={
-                      selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                        <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
-                      ) : (
-                        'Not available'
-                      )
-                    }
-                  />
-                  {selectedRecord.invoiceExecution?.status === 'failed' || selectedRecord.invoiceExecution?.status === 'unknown' ? (
-                    <MetadataRow label="Reason" value="Invoice could not be generated. Try again or contact support." />
-                  ) : null}
-                </div>
-              </div>
-
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Payout summary</h4>
+                  <h4>Summary</h4>
                   <StatusBadge tone={selectedRecord.settlement?.payoutReady ? 'success' : 'attention'}>
                     {selectedRecord.settlement?.payoutReady ? 'Payable' : 'Pending'}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : '—'} />
-                  <MetadataRow label="Payout status" value={selectedRecord.settlement ? getPayoutBatchStatusLabel(selectedRecord.settlement.status) : 'Pending'} />
+                  <MetadataRow label="Payout status" value={getPayoutActivityStatusLabel(selectedRecord)} />
                   <MetadataRow
                     label="Expected payout"
                     value={<span className="finance-payout-value">{selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount}</span>}
@@ -710,7 +726,11 @@ export function FinancePage() {
                     label="Refund impact"
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.refundImpact ?? '$0.00')}</span>}
                   />
-                  <MetadataRow label="Upcoming payout" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
+                  <MetadataRow
+                    label="Payout impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                  />
+                  <MetadataRow label="Payment method" value="—" />
                 </div>
               </div>
 
@@ -726,7 +746,7 @@ export function FinancePage() {
                   />
                   <MetadataRow label="Tax deduction" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
                   <MetadataRow
-                    label="Tax amount"
+                    label="Tax"
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commissionVat ?? '$0.00')}</span>}
                   />
                   <MetadataRow
@@ -734,9 +754,64 @@ export function FinancePage() {
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction ?? '$0.00')}</span>}
                   />
                   <MetadataRow
-                    label="Estimated payout"
-                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount}</span>}
+                    label="Total deductions"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(getTotalDeductions(selectedRecord))}</span>}
                   />
+                  <MetadataRow
+                    label="Final payout impact"
+                    value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
+                  />
+                </div>
+              </div>
+
+              <div className="finance-detail-card finance-timeline-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Timeline</h4>
+                </div>
+                <ol className="finance-payout-timeline">
+                  {getFinanceTimelineItems(selectedRecord).map((item) => (
+                    <li key={`${item.label}-${item.at ?? 'pending'}`}>
+                      <span className="op-timeline-dot" />
+                      <div>
+                        <strong>{item.label}</strong>
+                        <small>{item.at ? formatDate(item.at) : '—'}</small>
+                      </div>
+                      <StatusBadge tone="neutral">{item.status}</StatusBadge>
+                    </li>
+                  ))}
+                </ol>
+              </div>
+
+              <div className="finance-detail-card finance-invoice-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Invoice</h4>
+                  <StatusBadge
+                    tone={
+                      selectedRecord.invoiceExecution?.status === 'created'
+                        ? 'success'
+                        : selectedRecord.invoiceExecution?.status === 'failed'
+                          ? 'danger'
+                          : 'attention'
+                    }
+                  >
+                    {getInvoiceStatusDisplay(selectedRecord.invoiceExecution?.status)}
+                  </StatusBadge>
+                </div>
+                <div className="finance-detail-rows">
+                  <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not assigned'} />
+                  <MetadataRow
+                    label="PDF"
+                    value={
+                      selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                        <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
+                      ) : (
+                        'Not available'
+                      )
+                    }
+                  />
+                  {selectedRecord.invoiceExecution?.status === 'failed' || selectedRecord.invoiceExecution?.status === 'unknown' ? (
+                    <MetadataRow label="Reason" value="Invoice could not be generated. Try again or contact support." />
+                  ) : null}
                 </div>
               </div>
 

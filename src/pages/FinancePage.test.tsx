@@ -194,12 +194,12 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /payout workspace/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
-    expect(screen.getAllByText('Recorded').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Failed').length).toBeGreaterThan(0);
-    expect(screen.getByText('Total refund amount')).toBeInTheDocument();
-    expect(screen.getByText('Failed / attention')).toBeInTheDocument();
+    expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund deductions')).toBeInTheDocument();
+    expect(screen.getByText('Available balance')).toBeInTheDocument();
   });
 
   it('opens the finance detail panel for a selected ledger row', async () => {
@@ -210,8 +210,8 @@ describe('FinancePage control center', () => {
     await screen.findByText('Refund ledger write failed');
     await userEvent.click(screen.getByText('Refund ledger write failed'));
 
-    expect(await screen.findByText('Customer invoice')).toBeInTheDocument();
-    expect(screen.getByText('Payout summary')).toBeInTheDocument();
+    expect(await screen.findByText('Invoice')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Payout summary' })).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
@@ -255,7 +255,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByText('Invoice pending')).toBeInTheDocument();
+    expect((await screen.findAllByText('Invoice pending')).length).toBeGreaterThan(0);
     expect(screen.getByText('Invoice could not be generated. Try again or contact support.')).toBeInTheDocument();
     expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
     expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
@@ -277,7 +277,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('Recorded')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Ledger recorded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
   });
 
   it('shows editable vendor profile controls once for admins', async () => {
@@ -313,7 +313,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByText('Demo Vendor A upcoming payout')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Upcoming payout' })).toBeInTheDocument();
     expect(screen.getByText('Eligible rows')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /prepare draft payout/i })).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /prepare draft payout/i }));
@@ -335,13 +335,13 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /balance workspace/i })).toBeInTheDocument();
-    expect(screen.getByText('Payable balance')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /payout workspace/i })).toBeInTheDocument();
+    expect(screen.getByText('Available balance')).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
+    expect(screen.getByText('Refund deductions')).toBeInTheDocument();
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
-    expect(screen.getByText('Latest payout batch')).toBeInTheDocument();
+    expect(screen.getByText('Latest payout')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
@@ -362,10 +362,10 @@ describe('FinancePage control center', () => {
 
     await userEvent.click(await screen.findByText('Shopify order sale recorded'));
 
-    expect(await screen.findByText('Payout summary')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Payout summary' })).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    expect(screen.getByText('Customer invoice')).toBeInTheDocument();
+    expect(screen.getByText('Invoice')).toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
   });
 
@@ -396,7 +396,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Refunds reduce vendor payout')).toBeInTheDocument();
+    expect(screen.getByText('Refunds reduce payout')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
 
@@ -444,7 +444,7 @@ describe('FinancePage control center', () => {
 
     await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
+    expect((await screen.findAllByText('15.00%')).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('-$488.75')).length).toBeGreaterThan(0);
   });
 
@@ -499,7 +499,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     await userEvent.click(await screen.findByText('Shopify order sale recorded'));
-    expect(await screen.findByText('-$339.90')).toBeInTheDocument();
+    expect((await screen.findAllByText((content) => content.includes('339.90'))).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$0.00')).length).toBeGreaterThan(0);
 
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
@@ -523,9 +523,9 @@ describe('FinancePage control center', () => {
       }),
     );
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
-    expect((await screen.findAllByText('$509.85')).length).toBeGreaterThan(0);
-    expect(await screen.findByText('-$91.77')).toBeInTheDocument();
+    expect((await screen.findAllByText('15.00%')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText((content) => content.includes('509.85'))).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText((content) => content.includes('91.77'))).length).toBeGreaterThan(0);
     expect(screen.getAllByText('$0.00').length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$2,797.38')).length).toBeGreaterThan(0);
   });
@@ -617,9 +617,9 @@ describe('FinancePage control center', () => {
         fixedShippingFee: 88,
       }),
     );
-    expect(await screen.findByText('12.00% vendor profile')).toBeInTheDocument();
-    expect((await screen.findAllByText('$407.88')).length).toBeGreaterThan(0);
-    expect(await screen.findByText('-$81.58')).toBeInTheDocument();
+    expect((await screen.findAllByText('12.00%')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText((content) => content.includes('407.88'))).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText((content) => content.includes('81.58'))).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$2,909.54')).length).toBeGreaterThan(0);
   });
 
