@@ -23,6 +23,7 @@ import { registerObservabilityRoutes } from './modules/observability/observabili
 import { registerRulesRoutes } from './modules/rules/rules.routes.js';
 import { registerNotificationRoutes } from './modules/notifications/notifications.routes.js';
 import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
+import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 
 export function createApp() {
   const env = loadEnv();
@@ -112,6 +113,7 @@ export function createApp() {
   registerRulesRoutes(app, env);
   registerNotificationRoutes(app, env);
   registerInvoiceExecutionRoutes(app, env);
+  registerShippingExecutionRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerShopifyWebhookRoutes(app, env);
   registerScheduledReconciliationScheduler(app, env);

@@ -36,6 +36,11 @@ export type AppEnv = {
   BIZIMHESAP_BASE_URL?: string;
   BIZIMHESAP_ADD_INVOICE_URL?: string;
   BIZIMHESAP_ACCESS_TOKEN?: string;
+  SHIPPING_EXECUTION_ENABLED: boolean;
+  SHIPPING_PROVIDER: 'hepsijet';
+  HEPSIJET_ENABLED: boolean;
+  HEPSIJET_BASE_URL?: string;
+  HEPSIJET_API_KEY?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -122,6 +127,15 @@ function parseInvoiceProvider(value: string | undefined): AppEnv['INVOICE_PROVID
   throw new Error('Invalid INVOICE_PROVIDER value. Expected bizimhesap.');
 }
 
+function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROVIDER'] {
+  const normalized = (value || 'hepsijet').trim().toLowerCase();
+  if (normalized === 'hepsijet') {
+    return normalized;
+  }
+
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet.');
+}
+
 function parseCommaList(value: string | undefined) {
   return (value || '')
     .split(',')
@@ -203,5 +217,10 @@ export function loadEnv(): AppEnv {
     BIZIMHESAP_BASE_URL: process.env.BIZIMHESAP_BASE_URL || undefined,
     BIZIMHESAP_ADD_INVOICE_URL: process.env.BIZIMHESAP_ADD_INVOICE_URL || undefined,
     BIZIMHESAP_ACCESS_TOKEN: process.env.BIZIMHESAP_ACCESS_TOKEN || undefined,
+    SHIPPING_EXECUTION_ENABLED: parseBoolean(process.env.SHIPPING_EXECUTION_ENABLED, false),
+    SHIPPING_PROVIDER: parseShippingProvider(process.env.SHIPPING_PROVIDER),
+    HEPSIJET_ENABLED: parseBoolean(process.env.HEPSIJET_ENABLED, false),
+    HEPSIJET_BASE_URL: process.env.HEPSIJET_BASE_URL || undefined,
+    HEPSIJET_API_KEY: process.env.HEPSIJET_API_KEY || undefined,
   };
 }

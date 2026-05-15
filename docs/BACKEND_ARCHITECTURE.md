@@ -1233,3 +1233,55 @@ Frontend note:
   - no tax engine
   - no payment reconciliation
   - no mutation of immutable finance snapshots, settlement state, payout batches, or Shopify truth
+
+## Shipping Execution Foundation (Phase 20B)
+- Phase 20B introduces merchant-of-record shipping execution orchestration while keeping the platform as canonical operational and finance truth.
+- External carriers execute shipment creation. The backend persists carrier evidence without replacing Shopify canonical fulfillment state or weakening existing fulfillment safeguards.
+- Provider abstraction:
+  - `ShippingProviderAdapter`
+  - `createShipment()`
+  - `getShipmentStatus()`
+  - `getTrackingInfo()`
+  - `cancelShipment()` placeholder
+- Initial provider:
+  - `HEPSIJET`
+  - future-ready schema values: `MNG`, `YURTICI`, `ARAS`
+- `VendorShippingConfig` stores vendor-level shipping settings:
+  - preferred provider
+  - shipping enabled flag
+  - default desi
+  - optional provider metadata
+- `ShipmentExecution` stores shipment execution evidence:
+  - allocation and vendor scope
+  - provider and provider shipment reference
+  - tracking number, tracking URL, and label URL when returned
+  - shipment status
+  - desi
+  - shipping cost, shipping VAT, and currency when returned
+  - request and safe response snapshots
+- Duplicate prevention is enforced by the allocation/provider unique key. Repeat create attempts return the existing shipment execution instead of creating duplicate carrier shipments.
+- Initial desi rules are deterministic and intentionally lightweight:
+  - shoes: 3 desi
+  - bags: 3 desi
+  - apparel: 3 desi
+  - fallback: vendor default desi
+- Shipping VAT defaults to 18% when the provider returns a shipping cost without explicit VAT.
+- Finance linkage:
+  - confirmed provider cost creates or updates `ShipmentShippingCost`
+  - source type is `EXTERNAL_PROVIDER`
+  - status is `CONFIRMED`
+  - immutable finance ledger snapshots are not mutated retroactively
+- Shipping execution configuration is disabled by default:
+  - `SHIPPING_EXECUTION_ENABLED=false`
+  - `SHIPPING_PROVIDER=hepsijet`
+  - `HEPSIJET_ENABLED=false`
+  - `HEPSIJET_BASE_URL`
+  - `HEPSIJET_API_KEY`
+- Backend endpoints:
+  - `GET /shipping/config`
+  - `POST /shipments/create`
+  - `GET /shipments/:id`
+  - `GET /admin/shipments`
+  - `PUT /admin/vendors/:vendorId/shipping-config`
+- Vendor users can create and inspect shipments only for their own allocations. Admins can inspect shipment executions and configure vendor carrier settings.
+- Phase 20B does not add WMS functionality, rate shopping, automatic return shipments, carrier cancellation execution, label printing infrastructure, or live provider reconciliation.

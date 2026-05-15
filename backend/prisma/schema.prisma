@@ -102,6 +102,23 @@ enum ShippingCostStatus {
   IGNORED
 }
 
+enum ShippingProvider {
+  HEPSIJET
+  MNG
+  YURTICI
+  ARAS
+}
+
+enum ShipmentExecutionStatus {
+  PENDING
+  CREATED
+  FAILED
+  IN_TRANSIT
+  DELIVERED
+  RETURNED
+  CANCELLED
+}
+
 enum OperationalSignalSeverity {
   INFO
   WARNING
@@ -213,6 +230,8 @@ model Vendor {
   assignedAllocations   VendorAllocation[]            @relation("assignedVendor")
   financeEntries        FinanceLedgerEntry[]
   shippingCosts         ShipmentShippingCost[]
+  shippingConfig        VendorShippingConfig?
+  shipmentExecutions    ShipmentExecution[]
   financialProfile      VendorFinancialProfile?
   payoutBatches         PayoutBatch[]
   operationalSignals    OperationalSignal[]
@@ -309,6 +328,7 @@ model VendorAllocation {
   financeEntries           FinanceLedgerEntry[]
   operationalJobs          OperationalJob[]
   shippingCosts            ShipmentShippingCost[]
+  shipmentExecutions       ShipmentExecution[]
   operationalSignals       OperationalSignal[]
   automationActions        AutomationAction[]
 }
@@ -511,6 +531,51 @@ model ShipmentShippingCost {
   @@index([vendorId, status])
   @@index([allocationId, status])
   @@index([sourceShopifyOrderId])
+}
+
+model VendorShippingConfig {
+  id                String           @id @default(cuid())
+  vendorId          String           @unique
+  preferredProvider ShippingProvider @default(HEPSIJET)
+  shippingEnabled   Boolean          @default(true)
+  defaultDesi       Decimal          @default(3.00) @db.Decimal(10, 2)
+  providerMetadata  Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  vendor            Vendor           @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, shippingEnabled])
+}
+
+model ShipmentExecution {
+  id                         String                  @id
+  allocationId               String
+  vendorId                   String
+  sourceShopifyOrderId       String?
+  sourceShopifyOrderNumber   String?
+  sourceShopifyFulfillmentId String?
+  provider                   ShippingProvider
+  providerShipmentId         String?
+  trackingNumber             String?
+  trackingUrl                String?
+  labelUrl                   String?
+  shipmentStatus             ShipmentExecutionStatus @default(PENDING)
+  desi                       Decimal                 @default(3.00) @db.Decimal(10, 2)
+  shippingCost               Decimal?                @db.Decimal(10, 2)
+  shippingVat                Decimal?                @db.Decimal(10, 2)
+  currency                   String                  @default("TRY")
+  requestSnapshot            Json
+  responseSnapshot           Json?
+  createdAt                  DateTime                @default(now())
+  updatedAt                  DateTime                @updatedAt
+  allocation                 VendorAllocation        @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  vendor                     Vendor                  @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([allocationId, provider])
+  @@index([sourceShopifyOrderId])
+  @@index([vendorId, shipmentStatus])
+  @@index([provider, shipmentStatus])
+  @@index([createdAt])
 }
 
 model PayoutBatch {

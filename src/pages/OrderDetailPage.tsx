@@ -4,13 +4,13 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getOrder, submitFulfillmentTracking } from '../features/orders/api';
+import { createShipmentExecution, getOrder, submitFulfillmentTracking } from '../features/orders/api';
 import { getCurrentUser } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
-import { toTitleCaseLabel } from '../services/real/formatting';
+import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -146,6 +146,12 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
     },
   );
+  const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
+    async (allocationId: string) => createShipmentExecution(allocationId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -178,6 +184,8 @@ export function OrderDetailPage() {
     order?.shippingStatus === 'Delivered' ||
     order?.fulfillmentStatus === 'Fulfilled';
   const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
+  const shipmentExecution = order?.shipmentExecution ?? null;
+  const hasShipmentExecution = Boolean(shipmentExecution);
 
   useEffect(() => {
     if (!order) {
@@ -423,11 +431,25 @@ export function OrderDetailPage() {
               <div className="action-row vendor-action-panel">
                 {isRealMode ? (
                   <>
-                    {hasTrackingSync ? (
+                    {hasTrackingSync || hasShipmentExecution ? (
                       <div className="tracking-summary-card order-tracking-summary-card">
+                        {shipmentExecution ? (
+                          <>
+                            <div className="summary-row">
+                              <span>Shipment provider</span>
+                              <strong>{toTitleCaseLabel(shipmentExecution.provider)}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Carrier status</span>
+                              <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
+                            </div>
+                          </>
+                        ) : null}
                         <div className="summary-row">
                           <span>Tracking</span>
-                          <strong className={order.trackingNumber ? '' : 'muted'}>{order.trackingNumber ?? 'Not available'}</strong>
+                          <strong className={order.trackingNumber || shipmentExecution?.trackingNumber ? '' : 'muted'}>
+                            {order.trackingNumber ?? shipmentExecution?.trackingNumber ?? 'Not available'}
+                          </strong>
                         </div>
                         <div className="summary-row">
                           <span>Carrier</span>
@@ -435,15 +457,60 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>Tracking link</span>
-                          {order.trackingUrl ? (
-                            <a className="inline-link" href={order.trackingUrl} target="_blank" rel="noreferrer">
+                          {order.trackingUrl || shipmentExecution?.trackingUrl ? (
+                            <a
+                              className="inline-link"
+                              href={(order.trackingUrl ?? shipmentExecution?.trackingUrl) || undefined}
+                              target="_blank"
+                              rel="noreferrer"
+                            >
                               Open tracking
                             </a>
                           ) : (
                             <strong className="muted">Not available</strong>
                           )}
                         </div>
+                        {shipmentExecution?.labelUrl ? (
+                          <div className="summary-row">
+                            <span>Label</span>
+                            <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                              Open label
+                            </a>
+                          </div>
+                        ) : null}
+                        {shipmentExecution?.shippingCost ? (
+                          <div className="summary-row">
+                            <span>Shipping cost</span>
+                            <strong>{formatCurrency(shipmentExecution.shippingCost, shipmentExecution.currency)}</strong>
+                          </div>
+                        ) : null}
                       </div>
+                    ) : null}
+                    {!hasTrackingSync && !hasShipmentExecution ? (
+                      <button
+                        type="button"
+                        className="button button-primary"
+                        disabled={isCreatingShipment}
+                        onClick={() => {
+                          void createShipmentMutation(order.id)
+                            .then((shipment) => {
+                              showFeedback(
+                                shipment.shipmentStatus === 'pending'
+                                  ? 'Shipment request recorded. Carrier execution is pending.'
+                                  : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+                                'success',
+                              );
+                            })
+                            .catch((mutationError) => {
+                              showFeedback(
+                                mutationError instanceof Error ? mutationError.message : 'Unable to create shipment right now.',
+                                'error',
+                              );
+                            });
+                        }}
+                      >
+                        {isCreatingShipment ? 'Creating...' : 'Create shipment'}
+                      </button>
                     ) : null}
                     {shouldShowRealTrackingForm ? (
                       <form

@@ -23,3 +23,7 @@ export async function submitFulfillmentTracking(
 ) {
   return runtimeServices.orders.submitFulfillmentTracking(allocationId, payload);
 }
+
+export async function createShipmentExecution(allocationId: string) {
+  return runtimeServices.orders.createShipmentExecution(allocationId);
+}

@@ -125,6 +125,31 @@ export const runtimeServices = {
         shipmentUpdatedAt: submittedAt,
       };
     },
+    async createShipmentExecution(allocationId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.createShipmentExecution(allocationId);
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: `mock-shipment-hepsijet-${allocationId}`,
+        allocationId,
+        vendorId: getCurrentVendorId(),
+        provider: 'hepsijet' as const,
+        providerShipmentId: `mock-hepsijet-${allocationId}`,
+        trackingNumber: `HJ-${allocationId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created' as const,
+        desi: '3.00',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
   },
   returns: {
     list: (vendorId = getCurrentVendorId()) =>

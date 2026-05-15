@@ -7,6 +7,7 @@ import type {
   FulfillmentStatus,
   OrderDetail,
   OrderLineItem,
+  ShipmentExecution,
   OrderStatus,
   OrderSummary,
   ShippingStatus,
@@ -37,6 +38,8 @@ export type SubmitFulfillmentTrackingResult = {
   shipmentCreatedAt: string;
   shipmentUpdatedAt: string;
 };
+
+export type CreateShipmentExecutionResult = ShipmentExecution;
 
 type OrderSummaryDto = {
   id: string;
@@ -81,6 +84,7 @@ type OrderDetailDto = OrderSummaryDto & {
     actorUserId: string | null;
     createdAt: string;
   }>;
+  shipmentExecution: OrderDetail['shipmentExecution'];
 };
 
 type AdminOrderBreakdownDto = {
@@ -305,6 +309,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     fulfilledByVendorId: dto.fulfilledAt ? dto.assignedVendorId : undefined,
     shipmentCreatedAt: dto.shipmentCreatedAt ?? undefined,
     shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
+    shipmentExecution: dto.shipmentExecution ?? null,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
@@ -449,4 +454,11 @@ export async function submitFulfillmentTracking(
     `/fulfillments/${allocationId}/tracking`,
     payload,
   );
+}
+
+export async function createShipmentExecution(allocationId: string) {
+  return apiClient.post<CreateShipmentExecutionResult>('/shipments/create', {
+    allocationId,
+    provider: 'hepsijet',
+  });
 }

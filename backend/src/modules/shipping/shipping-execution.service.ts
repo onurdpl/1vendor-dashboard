@@ -1,0 +1,510 @@
+import {
+  Prisma,
+  ShipmentExecutionStatus,
+  ShippingProvider,
+  type ShipmentExecution,
+  type VendorShippingConfig,
+} from '@prisma/client';
+import { prisma } from '../../db/prisma.js';
+import type { AppEnv } from '../../config/env.js';
+import {
+  createShippingProviderAdapter,
+  type ShippingProviderAdapter,
+} from './shipping-provider.adapter.js';
+import type {
+  CreateShipmentExecutionDto,
+  ShipmentExecutionDto,
+  ShippingProviderDto,
+  VendorShippingConfigDto,
+  VendorShippingConfigUpdateDto,
+} from './shipping-execution.types.js';
+
+const SHIPPING_VAT_PERCENT = 18;
+
+function toNumber(value: unknown) {
+  const numeric = Number(value ?? 0);
+  return Number.isFinite(numeric) ? numeric : 0;
+}
+
+function toAmountString(value: number) {
+  return value.toFixed(2);
+}
+
+function mapProvider(provider: ShippingProvider | string): ShippingProviderDto {
+  return provider.trim().toLowerCase() as ShippingProviderDto;
+}
+
+function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
+  const normalized = (provider ?? 'hepsijet').trim().toLowerCase();
+  if (normalized === 'hepsijet') {
+    return ShippingProvider.HEPSIJET;
+  }
+  if (normalized === 'mng') {
+    return ShippingProvider.MNG;
+  }
+  if (normalized === 'yurtici') {
+    return ShippingProvider.YURTICI;
+  }
+  if (normalized === 'aras') {
+    return ShippingProvider.ARAS;
+  }
+
+  throw new Error('Unsupported shipping provider.');
+}
+
+function mapStatus(status: ShipmentExecutionStatus | string): ShipmentExecutionDto['shipmentStatus'] {
+  return status.trim().toLowerCase() as ShipmentExecutionDto['shipmentStatus'];
+}
+
+function mapShippingConfig(config: VendorShippingConfig | null, vendorId: string): VendorShippingConfigDto {
+  if (!config) {
+    return {
+      vendorId,
+      preferredProvider: 'hepsijet',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      providerMetadata: null,
+      source: 'default',
+    };
+  }
+
+  return {
+    vendorId: config.vendorId,
+    preferredProvider: mapProvider(config.preferredProvider),
+    shippingEnabled: config.shippingEnabled,
+    defaultDesi: toAmountString(toNumber(config.defaultDesi)),
+    providerMetadata: config.providerMetadata,
+    source: 'configured',
+  };
+}
+
+function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinked?: boolean }): ShipmentExecutionDto {
+  return {
+    id: execution.id,
+    allocationId: execution.allocationId,
+    vendorId: execution.vendorId,
+    sourceShopifyOrderId: execution.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: execution.sourceShopifyOrderNumber,
+    sourceShopifyFulfillmentId: execution.sourceShopifyFulfillmentId,
+    provider: mapProvider(execution.provider),
+    providerShipmentId: execution.providerShipmentId,
+    trackingNumber: execution.trackingNumber,
+    trackingUrl: execution.trackingUrl,
+    labelUrl: execution.labelUrl,
+    shipmentStatus: mapStatus(execution.shipmentStatus),
+    desi: toAmountString(toNumber(execution.desi)),
+    shippingCost: execution.shippingCost === null ? null : toAmountString(toNumber(execution.shippingCost)),
+    shippingVat: execution.shippingVat === null ? null : toAmountString(toNumber(execution.shippingVat)),
+    currency: execution.currency,
+    shippingCostLinked: Boolean(execution.shippingCostLinked),
+    createdAt: execution.createdAt.toISOString(),
+    updatedAt: execution.updatedAt.toISOString(),
+  };
+}
+
+export function inferShipmentDesi(
+  lineItems: Array<{ title?: string | null; sku?: string | null }>,
+  fallbackDesi = 3,
+) {
+  const haystack = lineItems
+    .map((item) => `${item.title ?? ''} ${item.sku ?? ''}`)
+    .join(' ')
+    .toLowerCase();
+
+  if (
+    /\b(shoe|shoes|sneaker|trainer|boot|bag|backpack|handbag|apparel|shirt|t-shirt|tee|pants|jacket|hoodie|dress)\b/.test(
+      haystack,
+    )
+  ) {
+    return 3;
+  }
+
+  return fallbackDesi;
+}
+
+function buildShipmentExecutionId(input: {
+  allocationId: string;
+  provider: ShippingProvider;
+}) {
+  return `shipment-${input.provider.toLowerCase()}-${input.allocationId}`;
+}
+
+function buildShippingCostId(input: {
+  vendorId: string;
+  allocationId: string;
+  provider: ShippingProvider;
+  providerReference: string;
+}) {
+  const provider = input.provider.toLowerCase();
+  const reference = input.providerReference
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'shipment';
+
+  return `shipcost-${input.vendorId}-${input.allocationId}-${provider}-${reference}`;
+}
+
+function mapProviderStatus(status: ShipmentExecutionDto['shipmentStatus']) {
+  if (status === 'created') {
+    return ShipmentExecutionStatus.CREATED;
+  }
+  if (status === 'failed') {
+    return ShipmentExecutionStatus.FAILED;
+  }
+  if (status === 'in_transit') {
+    return ShipmentExecutionStatus.IN_TRANSIT;
+  }
+  if (status === 'delivered') {
+    return ShipmentExecutionStatus.DELIVERED;
+  }
+  if (status === 'returned') {
+    return ShipmentExecutionStatus.RETURNED;
+  }
+  if (status === 'cancelled') {
+    return ShipmentExecutionStatus.CANCELLED;
+  }
+  return ShipmentExecutionStatus.PENDING;
+}
+
+function allocationShippingStatus(status: ShipmentExecutionDto['shipmentStatus']) {
+  if (status === 'delivered') {
+    return 'delivered';
+  }
+  if (status === 'in_transit') {
+    return 'in_transit';
+  }
+  if (status === 'created') {
+    return 'label_created';
+  }
+  return 'awaiting_shipment';
+}
+
+async function getStoredShippingConfig(vendorId: string) {
+  return prisma.vendorShippingConfig.findUnique({
+    where: {
+      vendorId,
+    },
+  });
+}
+
+export async function getVendorShippingConfig(vendorId: string): Promise<VendorShippingConfigDto> {
+  return mapShippingConfig(await getStoredShippingConfig(vendorId), vendorId);
+}
+
+export async function upsertVendorShippingConfig(
+  vendorId: string,
+  input: VendorShippingConfigUpdateDto,
+): Promise<VendorShippingConfigDto> {
+  const defaultConfig = mapShippingConfig(null, vendorId);
+  const preferredProvider = normalizeProvider(input.preferredProvider ?? defaultConfig.preferredProvider);
+  const defaultDesi = input.defaultDesi ?? Number(defaultConfig.defaultDesi);
+
+  if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
+    throw new Error('defaultDesi must be greater than zero.');
+  }
+
+  const config = await prisma.vendorShippingConfig.upsert({
+    where: {
+      vendorId,
+    },
+    update: {
+      preferredProvider,
+      shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
+      defaultDesi,
+      providerMetadata:
+        input.providerMetadata === undefined
+          ? undefined
+          : (input.providerMetadata as Prisma.InputJsonValue),
+    },
+    create: {
+      vendorId,
+      preferredProvider,
+      shippingEnabled: input.shippingEnabled ?? defaultConfig.shippingEnabled,
+      defaultDesi,
+      providerMetadata:
+        input.providerMetadata === undefined
+          ? Prisma.JsonNull
+          : (input.providerMetadata as Prisma.InputJsonValue),
+    },
+  });
+
+  return mapShippingConfig(config, vendorId);
+}
+
+export async function listShipmentExecutions(options: {
+  vendorId?: string;
+  status?: ShipmentExecutionDto['shipmentStatus'];
+} = {}): Promise<ShipmentExecutionDto[]> {
+  const executions = await prisma.shipmentExecution.findMany({
+    where: {
+      vendorId: options.vendorId,
+      shipmentStatus: options.status ? mapProviderStatus(options.status) : undefined,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 100,
+  });
+
+  return executions.map((execution) => mapShipmentExecution(execution));
+}
+
+export async function getShipmentExecutionById(
+  shipmentExecutionId: string,
+  vendorId?: string | null,
+): Promise<ShipmentExecutionDto | null> {
+  const execution = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+  if (!execution || (vendorId && execution.vendorId !== vendorId)) {
+    return null;
+  }
+
+  const linkedCost = await prisma.shipmentShippingCost.findFirst({
+    where: {
+      allocationId: execution.allocationId,
+      providerReference: execution.providerShipmentId ?? execution.trackingNumber ?? execution.id,
+      sourceType: 'EXTERNAL_PROVIDER',
+    },
+    select: {
+      id: true,
+    },
+  });
+
+  return mapShipmentExecution({ ...execution, shippingCostLinked: Boolean(linkedCost) });
+}
+
+export async function createShipmentExecution(
+  input: CreateShipmentExecutionDto,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  if (!input.allocationId) {
+    throw new Error('allocationId is required.');
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: input.allocationId,
+    },
+    include: {
+      order: true,
+      fulfillment: true,
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+    },
+  });
+
+  if (!allocation || allocation.assignedVendorId !== options.vendorId) {
+    throw new Error('Allocation could not be found for the selected vendor.');
+  }
+
+  if (allocation.cancellationReason || allocation.allocationStatus !== 'ACTIVE') {
+    throw new Error('Allocation is not eligible for shipment execution.');
+  }
+
+  const config = mapShippingConfig(await getStoredShippingConfig(options.vendorId), options.vendorId);
+  if (!config.shippingEnabled) {
+    throw new Error('Shipping execution is disabled for this vendor.');
+  }
+
+  const provider = normalizeProvider(input.provider ?? config.preferredProvider);
+  if (provider !== ShippingProvider.HEPSIJET) {
+    throw new Error('Only Hepsijet shipment execution is implemented in Phase 20B.');
+  }
+
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      allocationId_provider: {
+        allocationId: allocation.id,
+        provider,
+      },
+    },
+  });
+  if (existing) {
+    return getShipmentExecutionById(existing.id, options.vendorId) as Promise<ShipmentExecutionDto>;
+  }
+
+  const lineItems = allocation.lineItems.map((lineItem) => ({
+    title: lineItem.shopifyOrderLineItem.title,
+    sku: lineItem.shopifyOrderLineItem.sku,
+    quantity: lineItem.quantity,
+    lineAmount: toNumber(lineItem.lineAmount),
+  }));
+  const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
+  const requestSnapshot = {
+    provider: mapProvider(provider),
+    allocationId: allocation.id,
+    vendorId: allocation.assignedVendorId,
+    sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+    desi,
+    lineItems,
+    recipient: {
+      name: allocation.order.customerName ?? 'Shopify customer',
+      email: allocation.order.customerEmail ?? null,
+    },
+  };
+  const executionId = buildShipmentExecutionId({ allocationId: allocation.id, provider });
+
+  await prisma.shipmentExecution.create({
+    data: {
+      id: executionId,
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+      sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+      sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
+      provider,
+      shipmentStatus: ShipmentExecutionStatus.PENDING,
+      desi,
+      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const adapter = options.adapter ?? createShippingProviderAdapter(options.env);
+    const result = await adapter.createShipment({
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      provider: mapProvider(provider),
+      requestSnapshot,
+    });
+    const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
+    const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
+    const shippingVat =
+      result.shippingVat ??
+      (result.shippingCost === null ? null : Number((result.shippingCost * (SHIPPING_VAT_PERCENT / 100)).toFixed(2)));
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const execution = await tx.shipmentExecution.update({
+        where: {
+          id: executionId,
+        },
+        data: {
+          providerShipmentId: result.providerShipmentId,
+          trackingNumber: result.trackingNumber,
+          trackingUrl: result.trackingUrl,
+          labelUrl: result.labelUrl,
+          shipmentStatus: status,
+          shippingCost: result.shippingCost,
+          shippingVat,
+          currency: result.currency,
+          responseSnapshot: result.responseSnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      if (providerCreated) {
+        const shipmentUpdatedAt = new Date();
+        await tx.vendorAllocation.update({
+          where: {
+            id: allocation.id,
+          },
+          data: {
+            shippingStatus: allocationShippingStatus(mapStatus(status)),
+            fulfillmentStatus: allocation.fulfillmentStatus === 'Pending' ? 'Processing' : allocation.fulfillmentStatus,
+            trackingNumber: result.trackingNumber,
+            carrier: mapProvider(provider),
+          },
+        });
+        await tx.fulfillment.upsert({
+          where: {
+            vendorAllocationId: allocation.id,
+          },
+          update: {
+            fulfillmentStatus: 'shipment_created',
+            trackingNumber: result.trackingNumber,
+            carrier: mapProvider(provider),
+            trackingUrl: result.trackingUrl,
+            shipmentCreatedAt: allocation.fulfillment?.shipmentCreatedAt ?? shipmentUpdatedAt,
+            shipmentUpdatedAt,
+            syncStatus: 'carrier_created',
+            errorMessage: null,
+          },
+          create: {
+            vendorAllocationId: allocation.id,
+            fulfillmentStatus: 'shipment_created',
+            trackingNumber: result.trackingNumber,
+            carrier: mapProvider(provider),
+            trackingUrl: result.trackingUrl,
+            shipmentCreatedAt: shipmentUpdatedAt,
+            shipmentUpdatedAt,
+            syncStatus: 'carrier_created',
+          },
+        });
+      }
+
+      if (result.shippingCost !== null) {
+        const providerReference = result.providerShipmentId ?? result.trackingNumber ?? execution.id;
+        await tx.shipmentShippingCost.upsert({
+          where: {
+            id: buildShippingCostId({
+              vendorId: allocation.assignedVendorId,
+              allocationId: allocation.id,
+              provider,
+              providerReference,
+            }),
+          },
+          update: {
+            providerName: mapProvider(provider),
+            providerReference,
+            shippingCost: result.shippingCost,
+            shippingVatAmount: shippingVat,
+            currency: result.currency,
+            status: 'CONFIRMED',
+            sourceType: 'EXTERNAL_PROVIDER',
+          },
+          create: {
+            id: buildShippingCostId({
+              vendorId: allocation.assignedVendorId,
+              allocationId: allocation.id,
+              provider,
+              providerReference,
+            }),
+            vendorId: allocation.assignedVendorId,
+            allocationId: allocation.id,
+            sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+            sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
+            providerName: mapProvider(provider),
+            providerReference,
+            shippingCost: result.shippingCost,
+            shippingVatAmount: shippingVat,
+            currency: result.currency,
+            status: 'CONFIRMED',
+            sourceType: 'EXTERNAL_PROVIDER',
+          },
+        });
+
+        return { ...execution, shippingCostLinked: true };
+      }
+
+      return execution;
+    });
+
+    return mapShipmentExecution(updated);
+  } catch (error) {
+    const failed = await prisma.shipmentExecution.update({
+      where: {
+        id: executionId,
+      },
+      data: {
+        shipmentStatus: ShipmentExecutionStatus.FAILED,
+        responseSnapshot: {
+          error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
+          provider,
+        },
+      },
+    });
+
+    return mapShipmentExecution(failed);
+  }
+}

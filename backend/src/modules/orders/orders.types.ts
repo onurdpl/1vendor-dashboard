@@ -34,6 +34,25 @@ export type OrderAssignmentHistoryDto = {
   createdAt: string;
 };
 
+export type OrderShipmentExecutionDto = {
+  id: string;
+  provider: string;
+  sourceShopifyOrderId: string | null;
+  sourceShopifyOrderNumber: string | null;
+  sourceShopifyFulfillmentId: string | null;
+  providerShipmentId: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  shipmentStatus: string;
+  desi: string;
+  shippingCost: string | null;
+  shippingVat: string | null;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type OrderDetailDto = OrderSummaryDto & {
   carrier: string | null;
   trackingNumber: string | null;
@@ -45,6 +64,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   cancellationReason: string | null;
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
+  shipmentExecution: OrderShipmentExecutionDto | null;
 };
 
 export type AdminOrderBreakdownLineItemDto = {

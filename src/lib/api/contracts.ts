@@ -11,6 +11,28 @@ export type AllocationBlockReason =
   | 'damaged_inventory'
   | 'fulfillment_issue';
 
+export type ShipmentExecution = {
+  id: string;
+  allocationId: string;
+  vendorId: string;
+  sourceShopifyOrderId?: string | null;
+  sourceShopifyOrderNumber?: string | null;
+  sourceShopifyFulfillmentId?: string | null;
+  provider: 'hepsijet' | 'mng' | 'yurtici' | 'aras';
+  providerShipmentId: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  shipmentStatus: 'pending' | 'created' | 'failed' | 'in_transit' | 'delivered' | 'returned' | 'cancelled';
+  desi: string;
+  shippingCost: string | null;
+  shippingVat: string | null;
+  currency: string;
+  shippingCostLinked: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';
 
 export type AssignmentHistoryEntry = {
@@ -90,6 +112,7 @@ export type OrderDetail = OrderSummary & {
   lineItems: OrderLineItem[];
   items: OrderLineItem[];
   timeline: Array<{ label: string; at: string }>;
+  shipmentExecution?: ShipmentExecution | null;
 };
 
 export type VendorAllocationSummary = {

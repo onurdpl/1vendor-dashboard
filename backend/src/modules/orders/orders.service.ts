@@ -1,5 +1,5 @@
 import { prisma } from '../../db/prisma.js';
-import type { AdminOrderBreakdownDto, OrderDetailDto, OrderSummaryDto } from './orders.types.js';
+import type { AdminOrderBreakdownDto, OrderDetailDto, OrderShipmentExecutionDto, OrderSummaryDto } from './orders.types.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -23,6 +23,48 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function mapShipmentExecution(execution: {
+  id: string;
+  provider: string;
+  sourceShopifyOrderId: string | null;
+  sourceShopifyOrderNumber: string | null;
+  sourceShopifyFulfillmentId: string | null;
+  providerShipmentId: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+  shipmentStatus: string;
+  desi: unknown;
+  shippingCost: unknown;
+  shippingVat: unknown;
+  currency: string;
+  createdAt: Date;
+  updatedAt: Date;
+} | null | undefined): OrderShipmentExecutionDto | null {
+  if (!execution) {
+    return null;
+  }
+
+  return {
+    id: execution.id,
+    provider: execution.provider.trim().toLowerCase(),
+    sourceShopifyOrderId: execution.sourceShopifyOrderId,
+    sourceShopifyOrderNumber: execution.sourceShopifyOrderNumber,
+    sourceShopifyFulfillmentId: execution.sourceShopifyFulfillmentId,
+    providerShipmentId: execution.providerShipmentId,
+    trackingNumber: execution.trackingNumber,
+    trackingUrl: execution.trackingUrl,
+    labelUrl: execution.labelUrl,
+    shipmentStatus: execution.shipmentStatus.trim().toLowerCase(),
+    desi: toAmountString(toNumber(execution.desi)),
+    shippingCost: execution.shippingCost === null || execution.shippingCost === undefined ? null : toAmountString(toNumber(execution.shippingCost)),
+    shippingVat: execution.shippingVat === null || execution.shippingVat === undefined ? null : toAmountString(toNumber(execution.shippingVat)),
+    currency: execution.currency,
+    createdAt: execution.createdAt.toISOString(),
+    updatedAt: execution.updatedAt.toISOString(),
+  };
 }
 
 export async function listVendorOrders(
@@ -73,6 +115,12 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     include: {
       order: true,
       fulfillment: true,
+      shipmentExecutions: {
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 1,
+      },
       lineItems: {
         include: {
           shopifyOrderLineItem: true,
@@ -112,6 +160,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
     shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt),
     shipmentUpdatedAt: toIsoString(allocation.fulfillment?.shipmentUpdatedAt),
+    shipmentExecution: mapShipmentExecution(allocation.shipmentExecutions?.[0]),
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,
     lineItems: allocation.lineItems.map((item) => ({
