@@ -161,12 +161,12 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByRole('heading', { name: /returns control center/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /returns workspace/i })).toBeInTheDocument();
     expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
-    expect(screen.getAllByText('Pending return request').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Processed refund').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Not a refund yet').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Finance-visible refund').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Return request').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Included in payout calculations').length).toBeGreaterThan(0);
   });
 
   it('renders selected drawer item details from the scoped return detail endpoint', async () => {
@@ -181,7 +181,8 @@ describe('ReturnsPage control center', () => {
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
     expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText(/SKU-A-2/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/This refund is allocated to Demo Vendor A/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Included in payout calculations').length).toBeGreaterThan(0);
   });
 
   it('preserves vendor-scoped visibility in mock mode data', async () => {
@@ -194,13 +195,14 @@ describe('ReturnsPage control center', () => {
     await waitFor(() => expect(screen.queryByText(otherVendorReturn.customer)).not.toBeInTheDocument());
   });
 
-  it('surfaces reconciliation and review context for attention states', async () => {
+  it('surfaces vendor-friendly review context for attention states', async () => {
     listReturnsMock.mockResolvedValue([toSummary(pendingReturn)]);
     getReturnMock.mockResolvedValue(pendingReturn);
 
     renderReturnsPage();
 
-    expect((await screen.findAllByText('Review recommended')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Diagnostics and recovery remain admin-only/i).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Need help?').length).toBeGreaterThan(0);
   });
 });
