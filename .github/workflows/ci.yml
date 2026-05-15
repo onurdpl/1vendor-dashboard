@@ -28,6 +28,10 @@ jobs:
       - name: Install backend dependencies
         run: npm --prefix backend ci
 
+      - name: Generate Prisma Client
+        # Frontend tests import backend enum-backed services, so generate Prisma before any build/test step.
+        run: npm run backend:db:generate
+
       - name: Build
         run: npm run build
 
