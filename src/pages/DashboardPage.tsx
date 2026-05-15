@@ -110,6 +110,19 @@ function formatPriorityLabel(tone: string) {
   return tone.replace(/^severity-/, '').replaceAll('-', ' ');
 }
 
+function getStatusDotTone(tone: 'success' | 'warning' | 'danger' | 'attention' | 'info') {
+  if (tone === 'danger') {
+    return 'status-danger';
+  }
+  if (tone === 'warning' || tone === 'attention') {
+    return 'status-warning';
+  }
+  if (tone === 'info') {
+    return 'status-info';
+  }
+  return 'status-success';
+}
+
 function formatRecentActivity(item: string) {
   const [title, ...descriptionParts] = item.split(':');
   const description = descriptionParts.join(':').trim();
@@ -460,10 +473,11 @@ export function DashboardPage() {
             {attentionItems.length === 0 ? (
               <EmptyStatePanel title="No attention items" description="No active attention items." />
             ) : (
-              <div className="dashboard-priority-list">
+              <div className="dashboard-attention-list">
                 {attentionItems.map((item) => (
-                  <article key={item.label} className="dashboard-attention-row">
-                    <div>
+                  <article key={item.label} className={`dashboard-attention-row ${item.tone}`}>
+                    <span className={`dashboard-status-dot ${getStatusDotTone(item.tone === 'severity-warning' ? 'warning' : item.tone === 'severity-attention' ? 'attention' : 'info')}`} aria-hidden="true" />
+                    <div className="dashboard-attention-copy">
                       <strong>{item.label}</strong>
                       {item.description ? <p>{item.description}</p> : null}
                     </div>
@@ -475,27 +489,51 @@ export function DashboardPage() {
           </OperationalSection>
 
           <OperationalSection title="Finance snapshot" description="Overview of financial performance.">
-            <div className="op-meta-grid">
-              <MetadataRow label="Gross sales" value={dashboard.financeSnapshot?.grossSales ?? '—'} />
-              <MetadataRow label="Refunds" value={dashboard.financeSnapshot?.refunds ?? '—'} />
-              <MetadataRow label="Net revenue" value={dashboard.financeSnapshot?.netRevenue ?? '—'} />
-              <MetadataRow label="Payout estimate" value={dashboard.financeSnapshot?.payoutEstimate ?? '—'} />
+            <div className="dashboard-status-metric-list dashboard-finance-rows">
+              <div className="dashboard-status-metric-row">
+                <span>Gross sales</span>
+                <strong>{dashboard.financeSnapshot?.grossSales ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Refunds</span>
+                <strong>{dashboard.financeSnapshot?.refunds ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Net revenue</span>
+                <strong>{dashboard.financeSnapshot?.netRevenue ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Payout estimate</span>
+                <strong>{dashboard.financeSnapshot?.payoutEstimate ?? '—'}</strong>
+              </div>
             </div>
           </OperationalSection>
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Diagnostics summary" description="System health and reconciliation overview.">
               {dashboard.diagnosticsSummary ? (
-                <div className="dashboard-signal-row">
-                  <StatusBadge tone={dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success'}>
-                    Failed webhooks {dashboard.diagnosticsSummary.failedWebhooks}
-                  </StatusBadge>
-                  <StatusBadge tone={dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success'}>
-                    Stuck received {dashboard.diagnosticsSummary.stuckReceived}
-                  </StatusBadge>
-                  <StatusBadge tone={dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success'}>
-                    Fulfillment sync failures {dashboard.diagnosticsSummary.fulfillmentSyncFailures}
-                  </StatusBadge>
+                <div className="dashboard-status-metric-list dashboard-diagnostics-rows">
+                  <div className="dashboard-status-metric-row">
+                    <span>
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success')}`} aria-hidden="true" />
+                      Failed webhooks
+                    </span>
+                    <strong>{dashboard.diagnosticsSummary.failedWebhooks}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success')}`} aria-hidden="true" />
+                      Stuck received
+                    </span>
+                    <strong>{dashboard.diagnosticsSummary.stuckReceived}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success')}`} aria-hidden="true" />
+                      Fulfillment sync failures
+                    </span>
+                    <strong>{dashboard.diagnosticsSummary.fulfillmentSyncFailures}</strong>
+                  </div>
                 </div>
               ) : (
                 <EmptyStatePanel title="Diagnostics unavailable" description="Not synced for this scope." />
@@ -506,15 +544,41 @@ export function DashboardPage() {
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Operational health" description="Uptime and operational metrics.">
               {dashboard.observabilitySummary ? (
-                <div className="op-meta-grid dashboard-observability-grid">
-                  <MetadataRow label="Health" value={<StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>} />
-                  <MetadataRow label="Success rate 24h" value={formatRate(dashboard.observabilitySummary.successRate24h)} />
-                  <MetadataRow label="Failed webhooks 24h" value={dashboard.observabilitySummary.failedWebhooks24h} />
-                  <MetadataRow label="Retry pressure" value={dashboard.observabilitySummary.retryPressureScore} />
-                  <MetadataRow label="Dead-letter" value={dashboard.observabilitySummary.deadLetterReady} />
-                  <MetadataRow label="Reconciliation backlog" value={dashboard.observabilitySummary.reconciliationBacklog} />
-                  <MetadataRow label="Stale signals" value={dashboard.observabilitySummary.staleStateCount} />
-                  <MetadataRow label="Note" value={dashboard.observabilitySummary.note} />
+                <div className="dashboard-status-metric-list dashboard-health-list">
+                  <div className="dashboard-status-metric-row">
+                    <span>
+                      <i className={`dashboard-status-dot ${getStatusDotTone(getHealthTone(dashboard.observabilitySummary.health))}`} aria-hidden="true" />
+                      Health
+                    </span>
+                    <StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Success rate 24h</span>
+                    <strong>{formatRate(dashboard.observabilitySummary.successRate24h)}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Failed webhooks 24h</span>
+                    <strong>{dashboard.observabilitySummary.failedWebhooks24h}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Retry pressure</span>
+                    <strong>{dashboard.observabilitySummary.retryPressureScore}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Dead-letter</span>
+                    <strong>{dashboard.observabilitySummary.deadLetterReady}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Reconciliation backlog</span>
+                    <strong>{dashboard.observabilitySummary.reconciliationBacklog}</strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Stale signals</span>
+                    <strong>{dashboard.observabilitySummary.staleStateCount}</strong>
+                  </div>
+                  {dashboard.observabilitySummary.note ? (
+                    <p className="dashboard-status-note">{dashboard.observabilitySummary.note}</p>
+                  ) : null}
                 </div>
               ) : (
                 <EmptyStatePanel title="Observability unavailable" description="Not synced for this scope." />
