@@ -4,7 +4,6 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
   FilterBar,
-  KPIStatCard,
   MetadataRow,
   OperationalActionGroup,
   OperationalTable,
@@ -45,6 +44,21 @@ function formatDate(value: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(value));
+}
+
+function formatDateParts(value: string) {
+  const date = new Date(value);
+  return {
+    date: new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date),
+    time: new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date),
+  };
 }
 
 function normalizeFinanceStatus(status: string) {
@@ -92,6 +106,16 @@ function getPayoutActivityType(record: FinanceTransaction) {
     return 'Sale';
   }
   return record.category;
+}
+
+function getPayoutActivityDetail(record: FinanceTransaction) {
+  if (record.category === 'Invoice') {
+    return 'Shopify order';
+  }
+  if (record.category === 'Refund') {
+    return 'Customer return';
+  }
+  return 'Payout activity';
 }
 
 function getPayoutActivityStatusLabel(record: FinanceTransaction) {
@@ -163,6 +187,16 @@ function getInvoiceStatusDisplay(status?: string) {
     return 'Invoice failed';
   }
   return 'Invoice pending';
+}
+
+function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return finance.payoutBatchSummary?.latestBatch?.createdAt
+    ? formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date
+    : finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate;
+}
+
+function getUpcomingPayoutDetail(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
+  return finance.payoutBatchSummary?.latestBatch?.createdAt ? 'Estimated date' : `${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`;
 }
 
 function getPayoutImpact(record: FinanceTransaction) {
@@ -453,14 +487,15 @@ export function FinancePage() {
       <div className="op-page-heading finance-page-header">
         <div>
           <p className="eyebrow">Finance</p>
-          <h2>{currentVendor.vendorName} payout workspace</h2>
+          <h2>Finance control center</h2>
           <p className="page-description">
-            Track available balance, payout activity, deductions, refunds, and invoice state from one focused finance view.
+            Track payouts, refunds, holds, and your settlement activity.
           </p>
         </div>
         <div className="op-heading-meta">
-          <StatusBadge tone="info">{currentVendor.vendorName}</StatusBadge>
-          <StatusBadge tone={currentUser?.role === 'admin' ? 'success' : 'neutral'}>{currentUser?.role ?? 'user'}</StatusBadge>
+          <button type="button" className="button button-secondary button-compact">
+            This week
+          </button>
           <button
             type="button"
             className="button button-secondary button-compact"
@@ -472,18 +507,59 @@ export function FinancePage() {
       </div>
 
       <div className="op-kpi-row finance-kpi-row">
-        <KPIStatCard label="Available balance" value={finance.summary.availableBalance ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail="Ready balance" tone="success" />
-        <KPIStatCard label="Pending payout" value={finance.summary.pendingPayouts ?? finance.summary.heldBalance ?? '$0.00'} detail="Waiting to be paid" tone="attention" />
-        <KPIStatCard label="Refund deductions" value={finance.summary.refundsThisMonth ?? finance.summary.refunds} detail="Refunds reduce payout" tone="danger" />
-        <KPIStatCard label="Upcoming payout" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} detail={`${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`} tone="info" />
-        <KPIStatCard label="Needs review" value={financeKpis.failed + (finance.payoutBatchSummary?.blockedRowCount ?? 0)} detail="Action may be needed" tone="warning" />
+        {[
+          {
+            icon: 'B',
+            label: 'Available balance',
+            value: finance.summary.availableBalance ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate,
+            detail: 'Ready for payout',
+            tone: 'success',
+          },
+          {
+            icon: 'P',
+            label: 'Pending payout',
+            value: finance.summary.pendingPayouts ?? finance.summary.heldBalance ?? '$0.00',
+            detail: `Includes ${finance.payoutBatchSummary?.eligibleRowCount ?? 0} items`,
+            tone: 'info',
+          },
+          {
+            icon: 'R',
+            label: 'Refund deductions',
+            value: formatDeductionValue(finance.summary.refundsThisMonth ?? finance.summary.refunds),
+            detail: 'This period',
+            tone: 'attention',
+          },
+          {
+            icon: 'D',
+            label: 'Upcoming payout',
+            value: getUpcomingPayoutLabel(finance),
+            detail: getUpcomingPayoutDetail(finance),
+            tone: 'info',
+          },
+          {
+            icon: '!',
+            label: 'Needs review',
+            value: financeKpis.failed + (finance.payoutBatchSummary?.blockedRowCount ?? 0),
+            detail: 'Action required',
+            tone: 'danger',
+          },
+        ].map((kpi) => (
+          <article key={kpi.label} className={`finance-kpi-card op-tone-${kpi.tone}`}>
+            <span className="finance-kpi-icon" aria-hidden="true">{kpi.icon}</span>
+            <div>
+              <span>{kpi.label}</span>
+              <strong>{kpi.value}</strong>
+              <small>{kpi.detail}</small>
+            </div>
+          </article>
+        ))}
       </div>
 
       <div className="op-control-layout finance-layout">
         <div className="op-main-column finance-activity-column">
           <OperationalToolbar>
             <SearchInput
-              placeholder="Search payout activity by order, status, amount..."
+              placeholder="Search by order #, type, status, amount..."
               value={searchTerm}
               onChange={(event) => setSearchTerm(event.target.value)}
             />
@@ -502,6 +578,11 @@ export function FinancePage() {
                 <option value="Payout">Payout</option>
                 <option value="Adjustment">Adjustment</option>
               </select>
+              <select defaultValue="week" aria-label="Date range">
+                <option value="week">This week</option>
+                <option value="month">This month</option>
+                <option value="all">All time</option>
+              </select>
               <button
                 type="button"
                 className="button button-secondary"
@@ -515,6 +596,11 @@ export function FinancePage() {
               </button>
             </FilterBar>
           </OperationalToolbar>
+          <div className="finance-filter-chips" aria-label="Finance quick filters">
+            {['All', 'Sales', 'Refunds', 'Holds', 'Payouts'].map((chip) => (
+              <span key={chip} className={chip === 'All' ? 'is-active' : ''}>{chip}</span>
+            ))}
+          </div>
 
           {filteredRecords.length === 0 ? (
             <EmptyStatePanel
@@ -533,20 +619,23 @@ export function FinancePage() {
                   onSelect={() => setSelectedRecordId(record.id)}
                 >
                   <span className="finance-date-cell">
-                    <strong>{formatDate(record.date)}</strong>
-                  </span>
-                  <span className="finance-type-cell">
-                    <span className={`finance-type-icon ${isRefundRecord(record) ? 'is-refund' : 'is-sale'}`}>
+                    <span className={`finance-type-icon ${isRefundRecord(record) ? 'is-refund' : 'is-sale'}`} aria-hidden="true">
                       {isRefundRecord(record) ? 'R' : 'S'}
                     </span>
                     <span>
+                      <strong>{formatDateParts(record.date).date}</strong>
+                      <small>{formatDateParts(record.date).time}</small>
+                    </span>
+                  </span>
+                  <span className="finance-type-cell">
+                    <span>
                       <strong>{getPayoutActivityType(record)}</strong>
-                      <small>{record.description}</small>
+                      <small>{getPayoutActivityDetail(record)}</small>
                     </span>
                   </span>
                   <span>
                     <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
-                    <small>{currentVendor.vendorName}</small>
+                    <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>
                   </span>
                   <StatusBadge tone={getPayoutActivityTone(record)}>{getPayoutActivityStatusLabel(record)}</StatusBadge>
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
@@ -557,8 +646,8 @@ export function FinancePage() {
                     {getPayoutImpact(record)}
                   </strong>
                   <span>
-                    <strong>{formatDate(record.date)}</strong>
-                    <small>{getPayoutActivityType(record)}</small>
+                    <strong>{formatDateParts(record.date).date}</strong>
+                    <small>{formatDateParts(record.date).time}</small>
                   </span>
                   <OperationalActionGroup>
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
@@ -687,7 +776,10 @@ export function FinancePage() {
           </div>
         </div>
 
-        <SideDetailPanel eyebrow={selectedRecord ? getPayoutActivityType(selectedRecord) : 'Payout activity'} title="Payout summary">
+        <SideDetailPanel
+          eyebrow="Payout summary"
+          title={selectedRecord?.shopifyOrderNumber ? `Order #${selectedRecord.shopifyOrderNumber}` : 'Payout summary'}
+        >
           {selectedRecord ? (
             <>
               <div className="op-detail-status-row">
@@ -730,7 +822,7 @@ export function FinancePage() {
                     label="Payout impact"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
                   />
-                  <MetadataRow label="Payment method" value="—" />
+                  <MetadataRow label="Payment method" value={selectedRecord.payoutBatch ? 'Bank transfer' : '—'} />
                 </div>
               </div>
 
@@ -739,14 +831,12 @@ export function FinancePage() {
                   <h4>Deductions</h4>
                 </div>
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
                   <MetadataRow
-                    label="Commission amount"
+                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%)`}
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commission ?? '$0.00')}</span>}
                   />
-                  <MetadataRow label="Tax deduction" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
                   <MetadataRow
-                    label="Tax"
+                    label={`Tax (${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%)`}
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commissionVat ?? '$0.00')}</span>}
                   />
                   <MetadataRow

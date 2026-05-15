@@ -194,7 +194,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /payout workspace/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
@@ -207,11 +207,12 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await screen.findByText('Refund ledger write failed');
-    await userEvent.click(screen.getByText('Refund ledger write failed'));
+    await screen.findByText('#1002');
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
 
     expect(await screen.findByText('Invoice')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Payout summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
+    expect(screen.getByText('Payout summary')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
@@ -221,10 +222,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
-    expect((await screen.findAllByText('Commission')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Tax deduction').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Commission \(/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Tax \(/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Shipping fee').length).toBeGreaterThan(0);
     expect(screen.queryByText('Snapshot at sale creation')).not.toBeInTheDocument();
     expect(screen.queryByText('Current vendor profile')).not.toBeInTheDocument();
@@ -335,7 +336,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: /payout workspace/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(screen.getByText('Available balance')).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
@@ -360,9 +361,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
-    expect(await screen.findByRole('heading', { name: 'Payout summary' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
+    expect(screen.getByText('Payout summary')).toBeInTheDocument();
     expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
     expect(screen.getByText('Invoice')).toBeInTheDocument();
@@ -396,7 +398,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Refunds reduce payout')).toBeInTheDocument();
+    expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
 
@@ -434,7 +436,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click(await screen.findByText('Shopify refund recorded'));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
     expect((await screen.findAllByText('-$425.00')).length).toBeGreaterThan(0);
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
     const commissionInput = within(profilePanel).getByLabelText(/commission %/i);
@@ -498,7 +500,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
     expect((await screen.findAllByText((content) => content.includes('339.90'))).length).toBeGreaterThan(0);
     expect((await screen.findAllByText('$0.00')).length).toBeGreaterThan(0);
 
@@ -600,7 +602,7 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    await userEvent.click(await screen.findByText('Shopify order sale recorded'));
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
     await userEvent.clear(within(profilePanel).getByLabelText(/^commission %$/i));
     await userEvent.type(within(profilePanel).getByLabelText(/^commission %$/i), '12');
