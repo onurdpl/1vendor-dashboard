@@ -25,6 +25,59 @@ function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: Record<string, unknown> | null, keys: string[]) {
+  if (!value) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      return raw.trim().length > 220 ? `${raw.trim().slice(0, 217)}...` : raw.trim();
+    }
+  }
+
+  return null;
+}
+
+function buildShipmentProviderResponseSummary(
+  execution: {
+    providerShipmentId: string | null;
+    trackingNumber: string | null;
+    labelUrl: string | null;
+    responseSnapshot?: unknown;
+  },
+  includeSummary: boolean,
+): OrderShipmentExecutionDto['providerResponseSummary'] | undefined {
+  if (!includeSummary) {
+    return undefined;
+  }
+
+  const snapshot = isRecord(execution.responseSnapshot) ? execution.responseSnapshot : null;
+  const responseKeys = Array.isArray(snapshot?.bodyKeys)
+    ? snapshot.bodyKeys.filter((key): key is string => typeof key === 'string')
+    : snapshot
+      ? Object.keys(snapshot).filter((key) => !['body', 'request', 'payload'].includes(key)).sort()
+      : [];
+
+  return {
+    httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
+    ok: typeof snapshot?.ok === 'boolean' ? snapshot.ok : null,
+    contentType: typeof snapshot?.contentType === 'string' ? snapshot.contentType : null,
+    parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
+    responseKeys,
+    providerError: readString(snapshot, ['providerError', 'error', 'message', 'reason']),
+    providerShipmentIdPresent: Boolean(execution.providerShipmentId),
+    trackingNumberPresent: Boolean(execution.trackingNumber),
+    labelPresent: Boolean(execution.labelUrl),
+    statusField: readString(snapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
+  };
+}
+
 function mapShipmentExecution(execution: {
   id: string;
   provider: string;
@@ -42,9 +95,10 @@ function mapShipmentExecution(execution: {
   shippingCost: unknown;
   shippingVat: unknown;
   currency: string;
+  responseSnapshot?: unknown;
   createdAt: Date;
   updatedAt: Date;
-} | null | undefined): OrderShipmentExecutionDto | null {
+} | null | undefined, options: { includeProviderResponseSummary?: boolean } = {}): OrderShipmentExecutionDto | null {
   if (!execution) {
     return null;
   }
@@ -68,6 +122,10 @@ function mapShipmentExecution(execution: {
     currency: execution.currency,
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),
+    providerResponseSummary: buildShipmentProviderResponseSummary(
+      execution,
+      Boolean(options.includeProviderResponseSummary),
+    ),
   };
 }
 
@@ -185,6 +243,34 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
       actorUserId: entry.actorUserId,
       createdAt: entry.createdAt.toISOString(),
     })),
+  };
+}
+
+export async function getVendorOrderByIdForUser(
+  vendorId: string,
+  orderId: string,
+  options: { includeShipmentProviderResponseSummary?: boolean } = {},
+): Promise<OrderDetailDto | null> {
+  const order = await getVendorOrderById(vendorId, orderId);
+  if (!order || !options.includeShipmentProviderResponseSummary) {
+    return order;
+  }
+
+  const shipmentExecution = await prisma.shipmentExecution.findFirst({
+    where: {
+      allocationId: order.id,
+      vendorId,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  });
+
+  return {
+    ...order,
+    shipmentExecution: mapShipmentExecution(shipmentExecution, {
+      includeProviderResponseSummary: true,
+    }),
   };
 }
 

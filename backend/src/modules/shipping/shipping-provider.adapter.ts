@@ -187,14 +187,17 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
     const responseText = await response.text();
     const parsedBody = parseResponseBody(contentType, responseText);
     const body = isRecord(parsedBody) ? parsedBody : {};
+    const parsedBodyType = Array.isArray(parsedBody) ? 'array' : typeof parsedBody;
 
     const responseSnapshot = {
       status: response.status,
       ok: response.ok,
       contentType,
+      parsedBodyType,
       bodyKeys: Object.keys(body).sort(),
       provider: 'kargo_entegrator',
       providerError: readString(body, ['error', 'message', 'errors', 'detail']),
+      statusField: readString(body, ['shipmentStatus', 'status', 'cargoStatus']),
     };
 
     if (!response.ok) {

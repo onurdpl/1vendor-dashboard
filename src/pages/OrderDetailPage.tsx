@@ -108,6 +108,7 @@ function getTrackingMutationErrorMessage(error: unknown) {
 export function OrderDetailPage() {
   const { orderId } = useParams();
   const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === 'admin';
   const isRealMode = runtimeConfig.apiMode === 'real';
   const { message, tone, showFeedback } = useActionFeedback();
   const [carrier, setCarrier] = useState('');
@@ -186,6 +187,17 @@ export function OrderDetailPage() {
   const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
   const shipmentExecution = order?.shipmentExecution ?? null;
   const hasShipmentExecution = Boolean(shipmentExecution);
+  const shipmentProviderSummary = shipmentExecution?.providerResponseSummary;
+  const shouldShowShipmentProviderSummary =
+    isAdmin &&
+    Boolean(shipmentProviderSummary) &&
+    Boolean(
+      shipmentExecution &&
+        (['pending', 'failed', 'unknown'].includes(shipmentExecution.shipmentStatus) ||
+          !shipmentExecution.providerShipmentId ||
+          !shipmentExecution.trackingNumber ||
+          !shipmentExecution.labelUrl),
+    );
 
   useEffect(() => {
     if (!order) {
@@ -490,6 +502,50 @@ export function OrderDetailPage() {
                             <strong>{formatCurrency(shipmentExecution.shippingCost, shipmentExecution.currency)}</strong>
                           </div>
                         ) : null}
+                        {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
+                          <div className="provider-response-summary" aria-label="Provider response summary">
+                            <div className="provider-response-heading">
+                              <strong>Provider response summary</strong>
+                              <span>Admin only</span>
+                            </div>
+                            <div className="summary-row">
+                              <span>HTTP</span>
+                              <strong>{shipmentProviderSummary.httpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Content type</span>
+                              <strong>{shipmentProviderSummary.contentType || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Body type</span>
+                              <strong>{shipmentProviderSummary.parsedBodyType || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Response keys</span>
+                              <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Status field</span>
+                              <strong>{shipmentProviderSummary.statusField || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider message</span>
+                              <strong>{shipmentProviderSummary.providerError || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider id present</span>
+                              <strong>{shipmentProviderSummary.providerShipmentIdPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Tracking present</span>
+                              <strong>{shipmentProviderSummary.trackingNumberPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Label present</span>
+                              <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {!hasTrackingSync && !hasShipmentExecution ? (
@@ -641,6 +697,78 @@ export function OrderDetailPage() {
               </div>
             ) : (
               <div className="action-row vendor-blocked-panel">
+                {isAdmin && shipmentExecution ? (
+                  <div className="tracking-summary-card order-tracking-summary-card">
+                    <div className="summary-row">
+                      <span>Shipment provider</span>
+                      <strong>{toTitleCaseLabel(shipmentExecution.provider)}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Carrier status</span>
+                      <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
+                    </div>
+                    {shipmentExecution.warehouseId ? (
+                      <div className="summary-row">
+                        <span>Warehouse</span>
+                        <strong>{shipmentExecution.warehouseId}</strong>
+                      </div>
+                    ) : null}
+                    <div className="summary-row">
+                      <span>Tracking</span>
+                      <strong className={order.trackingNumber || shipmentExecution.trackingNumber ? '' : 'muted'}>
+                        {order.trackingNumber ?? shipmentExecution.trackingNumber ?? 'Not available'}
+                      </strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Carrier</span>
+                      <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
+                    </div>
+                    {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
+                      <div className="provider-response-summary" aria-label="Provider response summary">
+                        <div className="provider-response-heading">
+                          <strong>Provider response summary</strong>
+                          <span>Admin only</span>
+                        </div>
+                        <div className="summary-row">
+                          <span>HTTP</span>
+                          <strong>{shipmentProviderSummary.httpStatus ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Content type</span>
+                          <strong>{shipmentProviderSummary.contentType || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Body type</span>
+                          <strong>{shipmentProviderSummary.parsedBodyType || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Response keys</span>
+                          <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Status field</span>
+                          <strong>{shipmentProviderSummary.statusField || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Provider message</span>
+                          <strong>{shipmentProviderSummary.providerError || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Provider id present</span>
+                          <strong>{shipmentProviderSummary.providerShipmentIdPresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Tracking present</span>
+                          <strong>{shipmentProviderSummary.trackingNumberPresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Label present</span>
+                          <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <p className="page-description">
                   Shipping actions are currently unavailable.
                   {order.cancellationReason ? ` Reason: ${order.cancellationReason.replace(/_/g, ' ')}.` : ''}

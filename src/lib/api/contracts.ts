@@ -33,6 +33,18 @@ export type ShipmentExecution = {
   shippingCostLinked: boolean;
   createdAt: string;
   updatedAt: string;
+  providerResponseSummary?: {
+    httpStatus: number | null;
+    ok: boolean | null;
+    contentType: string | null;
+    parsedBodyType: string | null;
+    responseKeys: string[];
+    providerError: string | null;
+    providerShipmentIdPresent: boolean;
+    trackingNumberPresent: boolean;
+    labelPresent: boolean;
+    statusField: string | null;
+  };
 };
 
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';

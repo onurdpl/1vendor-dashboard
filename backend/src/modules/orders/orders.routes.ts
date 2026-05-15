@@ -3,7 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
-import { getAdminShopifyOrderBreakdown, getVendorOrderById, listVendorOrders } from './orders.service.js';
+import { getAdminShopifyOrderBreakdown, getVendorOrderByIdForUser, listVendorOrders } from './orders.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
@@ -36,7 +36,9 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      const order = await getVendorOrderById(vendorId, request.params.orderId);
+      const order = await getVendorOrderByIdForUser(vendorId, request.params.orderId, {
+        includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
+      });
       if (!order) {
         return reply.code(404).send({ message: 'Order not found.' });
       }

@@ -53,6 +53,18 @@ export type OrderShipmentExecutionDto = {
   currency: string;
   createdAt: string;
   updatedAt: string;
+  providerResponseSummary?: {
+    httpStatus: number | null;
+    ok: boolean | null;
+    contentType: string | null;
+    parsedBodyType: string | null;
+    responseKeys: string[];
+    providerError: string | null;
+    providerShipmentIdPresent: boolean;
+    trackingNumberPresent: boolean;
+    labelPresent: boolean;
+    statusField: string | null;
+  };
 };
 
 export type OrderDetailDto = OrderSummaryDto & {
