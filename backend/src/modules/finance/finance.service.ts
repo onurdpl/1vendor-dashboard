@@ -566,11 +566,17 @@ function mapInvoiceExecutionReference(execution?: {
   if (!execution) {
     return null;
   }
+  const normalizedStatus =
+    execution.status.trim().toUpperCase() === 'CREATED' &&
+    !execution.providerInvoiceGuid &&
+    !execution.providerPdfUrl
+      ? 'unknown'
+      : execution.status.trim().toLowerCase();
 
   return {
     id: execution.id,
     provider: execution.provider.trim().toLowerCase() as InvoiceExecutionReferenceDto['provider'],
-    status: execution.status.trim().toLowerCase() as InvoiceExecutionReferenceDto['status'],
+    status: normalizedStatus as InvoiceExecutionReferenceDto['status'],
     providerInvoiceGuid: execution.providerInvoiceGuid,
     providerInvoiceNo: execution.providerInvoiceNo,
     providerPdfUrl: execution.providerPdfUrl,

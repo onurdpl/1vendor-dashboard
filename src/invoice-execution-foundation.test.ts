@@ -15,7 +15,13 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createInvoiceExecution, getInvoiceExecutionResponseSummary, previewInvoiceExecutionPayload, retryInvoiceExecution } = await import(
+const {
+  createInvoiceExecution,
+  getInvoiceExecutionResponseSummary,
+  mapInvoiceExecution,
+  previewInvoiceExecutionPayload,
+  retryInvoiceExecution,
+} = await import(
   '../backend/src/modules/invoices/invoice-execution.service.js'
 );
 const { BizimHesapAdapter } = await import('../backend/src/modules/invoices/invoice-provider.adapter.js');
@@ -108,7 +114,7 @@ function buildExecution(input: Partial<{ status: string; providerInvoiceGuid: st
     id: 'invoice-bizimhesap-fin-sporjinal-sale-7616544244049',
     financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
     provider: 'BIZIMHESAP',
-    providerInvoiceGuid: input.providerInvoiceGuid ?? 'BH-GUID-1',
+    providerInvoiceGuid: 'providerInvoiceGuid' in input ? input.providerInvoiceGuid ?? null : 'BH-GUID-1',
     providerInvoiceNo: 'BH-1001',
     providerPdfUrl: 'https://provider.example/invoice.pdf',
     status: input.status ?? 'CREATED',
@@ -322,6 +328,53 @@ describe('invoice execution foundation', () => {
     expect(execution.status).toBe('failed');
   });
 
+  it('does not mark provider HTTP success as created when guid and PDF URL are missing', async () => {
+    adapter.createInvoice.mockResolvedValueOnce({
+      providerInvoiceGuid: null,
+      providerInvoiceNo: null,
+      providerPdfUrl: null,
+      responseSnapshot: {
+        status: 200,
+        ok: true,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['eInvoiceNo', 'error', 'guid', 'url'],
+        body: {
+          eInvoiceNo: '',
+          error: '',
+          guid: '',
+          url: '',
+        },
+      },
+    });
+
+    const execution = await createInvoiceExecution(
+      {
+        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+        provider: 'bizimhesap',
+      },
+      {
+        env,
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(prismaMock.invoiceExecution.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: 'UNKNOWN',
+          providerInvoiceGuid: null,
+          providerPdfUrl: null,
+          responseSnapshot: expect.objectContaining({
+            error: 'BizimHesap AddInvoice returned HTTP success without provider GUID or PDF URL.',
+          }),
+        }),
+      }),
+    );
+    expect(execution.status).toBe('unknown');
+  });
+
   it('preserves vendor isolation during invoice creation', async () => {
     await expect(
       createInvoiceExecution(
@@ -361,6 +414,22 @@ describe('invoice execution foundation', () => {
         }),
       }),
     );
+    expect(execution.status).toBe('created');
+  });
+
+  it('allows retry for inconsistent created executions without provider identifiers', async () => {
+    prismaMock.invoiceExecution.findUnique.mockResolvedValueOnce({
+      ...buildExecution({ status: 'CREATED', providerInvoiceGuid: null }),
+      providerPdfUrl: null,
+      financeLedgerEntry: buildLedgerEntry(),
+    });
+
+    const execution = await retryInvoiceExecution('invoice-bizimhesap-fin-sporjinal-sale-7616544244049', {
+      env,
+      adapter,
+    });
+
+    expect(adapter.createInvoice).toHaveBeenCalledOnce();
     expect(execution.status).toBe('created');
   });
 
@@ -435,6 +504,69 @@ describe('invoice execution foundation', () => {
     });
 
     vi.unstubAllGlobals();
+  });
+
+  it('treats BizimHesap provider error bodies as failed provider execution', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildFetchResponse({
+      eInvoiceNo: '',
+      error: 'provider rejected invoice',
+      guid: '',
+      url: '',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const liveAdapter = new BizimHesapAdapter(env);
+
+    await expect(
+      liveAdapter.createInvoice({
+        financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+        requestSnapshot: {
+          AddInvoice: {
+            Customer: {
+              Name: 'Test Customer',
+            },
+          },
+        },
+      }),
+    ).rejects.toThrow('BizimHesap AddInvoice returned a provider error.');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not synthesize fallback provider GUIDs for missing provider identifiers', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(buildFetchResponse({
+      eInvoiceNo: '',
+      error: '',
+      guid: '',
+      url: '',
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const liveAdapter = new BizimHesapAdapter(env);
+    const result = await liveAdapter.createInvoice({
+      financeLedgerEntryId: 'fin-sporjinal-sale-7616544244049',
+      requestSnapshot: {
+        AddInvoice: {
+          Customer: {
+            Name: 'Test Customer',
+          },
+        },
+      },
+    });
+
+    expect(result.providerInvoiceGuid).toBeNull();
+    expect(result.providerPdfUrl).toBeNull();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('maps legacy created executions without provider identifiers as unknown for UI display', () => {
+    const execution = mapInvoiceExecution({
+      ...buildExecution({ status: 'CREATED', providerInvoiceGuid: null }),
+      providerPdfUrl: null,
+    });
+
+    expect(execution.status).toBe('unknown');
   });
 
   it('parses nested BizimHesap provider response wrappers', async () => {

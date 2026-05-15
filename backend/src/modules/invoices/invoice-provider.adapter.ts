@@ -93,6 +93,19 @@ function readProviderResponseField(payload: unknown, responseText: string, keys:
   return readProviderString(payload, keys) ?? readProviderStringDeep(payload, keys) ?? readXmlishValue(responseText, keys);
 }
 
+function hasProviderError(payload: unknown, responseText: string) {
+  return Boolean(
+    readProviderResponseField(payload, responseText, [
+      'error',
+      'Error',
+      'errorMessage',
+      'ErrorMessage',
+      'message',
+      'Message',
+    ]),
+  );
+}
+
 function getResponseBodyType(payload: unknown) {
   if (Array.isArray(payload)) {
     return 'array';
@@ -207,6 +220,10 @@ export class BizimHesapAdapter implements InvoiceProviderAdapter {
     }
 
     const body = parsedBody;
+    if (hasProviderError(body, responseText)) {
+      throw new Error('BizimHesap AddInvoice returned a provider error.');
+    }
+
     const providerInvoiceGuid =
       readProviderResponseField(body, responseText, ['providerInvoiceGuid', 'invoiceGuid', 'InvoiceGuid', 'Guid', 'guid', 'id']);
     const providerInvoiceNo = readProviderResponseField(body, responseText, [

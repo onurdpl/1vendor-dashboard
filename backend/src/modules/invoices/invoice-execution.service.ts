@@ -78,6 +78,35 @@ function mapStatus(status: InvoiceExecutionStatus | string) {
   return status.trim().toLowerCase() as InvoiceExecutionDto['status'];
 }
 
+function mapEffectiveInvoiceStatus(execution: {
+  status: InvoiceExecutionStatus | string;
+  providerInvoiceGuid: string | null;
+  providerPdfUrl: string | null;
+}) {
+  if (
+    String(execution.status).trim().toUpperCase() === InvoiceExecutionStatus.CREATED &&
+    !execution.providerInvoiceGuid &&
+    !execution.providerPdfUrl
+  ) {
+    return 'unknown' as const;
+  }
+
+  return mapStatus(execution.status);
+}
+
+function isRetryableInvoiceExecution(execution: {
+  status: InvoiceExecutionStatus | string;
+  providerInvoiceGuid: string | null;
+  providerPdfUrl: string | null;
+}) {
+  const normalizedStatus = String(execution.status).trim().toUpperCase();
+  return (
+    normalizedStatus === InvoiceExecutionStatus.FAILED ||
+    normalizedStatus === InvoiceExecutionStatus.UNKNOWN ||
+    (normalizedStatus === InvoiceExecutionStatus.CREATED && !execution.providerInvoiceGuid && !execution.providerPdfUrl)
+  );
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -106,7 +135,7 @@ export function mapInvoiceExecution(execution: InvoiceExecution): InvoiceExecuti
     providerInvoiceGuid: execution.providerInvoiceGuid,
     providerInvoiceNo: execution.providerInvoiceNo,
     providerPdfUrl: execution.providerPdfUrl,
-    status: mapStatus(execution.status),
+    status: mapEffectiveInvoiceStatus(execution),
     requestSnapshot: execution.requestSnapshot,
     responseSnapshot: execution.responseSnapshot,
     createdAt: execution.createdAt.toISOString(),
@@ -218,16 +247,22 @@ async function executeProviderCall(input: {
       financeLedgerEntryId: input.entry.id,
       requestSnapshot: input.requestSnapshot,
     });
+    const providerSucceeded = Boolean(result.providerInvoiceGuid || result.providerPdfUrl);
     const updated = await prisma.invoiceExecution.update({
       where: {
         id: input.executionId,
       },
       data: {
-        status: InvoiceExecutionStatus.CREATED,
+        status: providerSucceeded ? InvoiceExecutionStatus.CREATED : InvoiceExecutionStatus.UNKNOWN,
         providerInvoiceGuid: result.providerInvoiceGuid,
         providerInvoiceNo: result.providerInvoiceNo ?? null,
         providerPdfUrl: result.providerPdfUrl ?? null,
-        responseSnapshot: result.responseSnapshot as Prisma.InputJsonValue,
+        responseSnapshot: providerSucceeded
+          ? (result.responseSnapshot as Prisma.InputJsonValue)
+          : ({
+              ...result.responseSnapshot,
+              error: 'BizimHesap AddInvoice returned HTTP success without provider GUID or PDF URL.',
+            } as Prisma.InputJsonValue),
       },
     });
 
@@ -374,7 +409,7 @@ export async function retryInvoiceExecution(
   if (!execution) {
     throw new Error('Invoice execution could not be found.');
   }
-  if (execution.status !== InvoiceExecutionStatus.FAILED && execution.status !== InvoiceExecutionStatus.UNKNOWN) {
+  if (!isRetryableInvoiceExecution(execution)) {
     throw new Error('Only failed or unknown invoice executions can be retried.');
   }
   const entry = execution.financeLedgerEntry as FinanceLedgerForInvoice;
@@ -421,7 +456,7 @@ export async function getInvoiceExecutionResponseSummary(invoiceExecutionId: str
   return {
     id: execution.id,
     provider: mapProvider(execution.provider),
-    status: mapStatus(execution.status),
+    status: mapEffectiveInvoiceStatus(execution),
     providerInvoiceGuidPresent: Boolean(execution.providerInvoiceGuid),
     providerInvoiceNoPresent: Boolean(execution.providerInvoiceNo),
     providerPdfUrlPresent: Boolean(execution.providerPdfUrl),
