@@ -134,6 +134,10 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
   };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 export function inferShipmentDesi(
   lineItems: Array<{ title?: string | null; sku?: string | null }>,
   fallbackDesi = 3,
@@ -421,6 +425,175 @@ export function getShippingProviderGateDiagnostics(
   };
 }
 
+function hasDryRunRetryMarker(snapshot: unknown) {
+  if (!isRecord(snapshot)) {
+    return false;
+  }
+
+  return snapshot.dryRun === true || (Array.isArray(snapshot.disabledGates) && snapshot.disabledGates.length > 0);
+}
+
+function assertDryRunRetryEligible(execution: ShipmentExecution) {
+  if (execution.shipmentStatus !== ShipmentExecutionStatus.PENDING) {
+    throw new Error('Only pending dry-run shipment executions can be retried.');
+  }
+
+  if (execution.providerShipmentId) {
+    throw new Error('Shipment execution already has a provider shipment id and cannot be retried.');
+  }
+
+  if (execution.trackingNumber) {
+    throw new Error('Shipment execution already has tracking and cannot be retried.');
+  }
+
+  if (!hasDryRunRetryMarker(execution.responseSnapshot)) {
+    throw new Error('Only dry-run shipment executions can be retried.');
+  }
+}
+
+function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider) {
+  return error instanceof ShippingProviderExecutionError
+    ? {
+        ...error.responseSnapshot,
+        error: error.message,
+      }
+    : {
+        error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
+        provider,
+      };
+}
+
+async function persistProviderShipmentResult(input: {
+  executionId: string;
+  allocation: {
+    id: string;
+    assignedVendorId: string;
+    sourceShopifyOrderId: string;
+    fulfillmentStatus: string;
+    fulfillment: {
+      shopifyFulfillmentId: string | null;
+      shipmentCreatedAt: Date | null;
+    } | null;
+  };
+  provider: ShippingProvider;
+  result: Awaited<ReturnType<ShippingProviderAdapter['createShipment']>>;
+}) {
+  const { allocation, executionId, provider, result } = input;
+  const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
+  const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
+  const shippingVatPercent = SHIPPING_VAT_PERCENT;
+  const shippingVat =
+    result.shippingVat ??
+    (result.shippingCost === null ? null : Number((result.shippingCost * (shippingVatPercent / 100)).toFixed(2)));
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const execution = await tx.shipmentExecution.update({
+      where: {
+        id: executionId,
+      },
+      data: {
+        providerShipmentId: result.providerShipmentId,
+        trackingNumber: result.trackingNumber,
+        trackingUrl: result.trackingUrl,
+        labelUrl: result.labelUrl,
+        shipmentStatus: status,
+        shippingCost: result.shippingCost,
+        shippingVat,
+        currency: result.currency,
+        responseSnapshot: result.responseSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    if (providerCreated) {
+      const shipmentUpdatedAt = new Date();
+      await tx.vendorAllocation.update({
+        where: {
+          id: allocation.id,
+        },
+        data: {
+          shippingStatus: allocationShippingStatus(mapStatus(status)),
+          fulfillmentStatus: allocation.fulfillmentStatus === 'Pending' ? 'Processing' : allocation.fulfillmentStatus,
+          trackingNumber: result.trackingNumber,
+          carrier: mapProvider(provider),
+        },
+      });
+      await tx.fulfillment.upsert({
+        where: {
+          vendorAllocationId: allocation.id,
+        },
+        update: {
+          fulfillmentStatus: 'shipment_created',
+          trackingNumber: result.trackingNumber,
+          carrier: mapProvider(provider),
+          trackingUrl: result.trackingUrl,
+          shipmentCreatedAt: allocation.fulfillment?.shipmentCreatedAt ?? shipmentUpdatedAt,
+          shipmentUpdatedAt,
+          syncStatus: 'carrier_created',
+          errorMessage: null,
+        },
+        create: {
+          vendorAllocationId: allocation.id,
+          fulfillmentStatus: 'shipment_created',
+          trackingNumber: result.trackingNumber,
+          carrier: mapProvider(provider),
+          trackingUrl: result.trackingUrl,
+          shipmentCreatedAt: shipmentUpdatedAt,
+          shipmentUpdatedAt,
+          syncStatus: 'carrier_created',
+        },
+      });
+    }
+
+    if (result.shippingCost !== null) {
+      const providerReference = result.providerShipmentId ?? result.trackingNumber ?? execution.id;
+      await tx.shipmentShippingCost.upsert({
+        where: {
+          id: buildShippingCostId({
+            vendorId: allocation.assignedVendorId,
+            allocationId: allocation.id,
+            provider,
+            providerReference,
+          }),
+        },
+        update: {
+          providerName: mapProvider(provider),
+          providerReference,
+          shippingCost: result.shippingCost,
+          shippingVatAmount: shippingVat,
+          currency: result.currency,
+          status: 'CONFIRMED',
+          sourceType: 'EXTERNAL_PROVIDER',
+        },
+        create: {
+          id: buildShippingCostId({
+            vendorId: allocation.assignedVendorId,
+            allocationId: allocation.id,
+            provider,
+            providerReference,
+          }),
+          vendorId: allocation.assignedVendorId,
+          allocationId: allocation.id,
+          sourceShopifyOrderId: allocation.sourceShopifyOrderId,
+          sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
+          providerName: mapProvider(provider),
+          providerReference,
+          shippingCost: result.shippingCost,
+          shippingVatAmount: shippingVat,
+          currency: result.currency,
+          status: 'CONFIRMED',
+          sourceType: 'EXTERNAL_PROVIDER',
+        },
+      });
+
+      return { ...execution, shippingCostLinked: true };
+    }
+
+    return execution;
+  });
+
+  return mapShipmentExecution(updated);
+}
+
 export async function listShipmentExecutions(options: {
   vendorId?: string;
   status?: ShipmentExecutionDto['shipmentStatus'];
@@ -654,137 +827,130 @@ export async function createShipmentExecution(
       provider: providerDto,
       requestSnapshot,
     });
-    const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
-    const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
-    const shippingVatPercent = SHIPPING_VAT_PERCENT;
-    const shippingVat =
-      result.shippingVat ??
-      (result.shippingCost === null ? null : Number((result.shippingCost * (shippingVatPercent / 100)).toFixed(2)));
-
-    const updated = await prisma.$transaction(async (tx) => {
-      const execution = await tx.shipmentExecution.update({
-        where: {
-          id: executionId,
-        },
-        data: {
-          providerShipmentId: result.providerShipmentId,
-          trackingNumber: result.trackingNumber,
-          trackingUrl: result.trackingUrl,
-          labelUrl: result.labelUrl,
-          shipmentStatus: status,
-          shippingCost: result.shippingCost,
-          shippingVat,
-          currency: result.currency,
-          responseSnapshot: result.responseSnapshot as Prisma.InputJsonValue,
-        },
-      });
-
-      if (providerCreated) {
-        const shipmentUpdatedAt = new Date();
-        await tx.vendorAllocation.update({
-          where: {
-            id: allocation.id,
-          },
-          data: {
-            shippingStatus: allocationShippingStatus(mapStatus(status)),
-            fulfillmentStatus: allocation.fulfillmentStatus === 'Pending' ? 'Processing' : allocation.fulfillmentStatus,
-            trackingNumber: result.trackingNumber,
-            carrier: mapProvider(provider),
-          },
-        });
-        await tx.fulfillment.upsert({
-          where: {
-            vendorAllocationId: allocation.id,
-          },
-          update: {
-            fulfillmentStatus: 'shipment_created',
-            trackingNumber: result.trackingNumber,
-            carrier: mapProvider(provider),
-            trackingUrl: result.trackingUrl,
-            shipmentCreatedAt: allocation.fulfillment?.shipmentCreatedAt ?? shipmentUpdatedAt,
-            shipmentUpdatedAt,
-            syncStatus: 'carrier_created',
-            errorMessage: null,
-          },
-          create: {
-            vendorAllocationId: allocation.id,
-            fulfillmentStatus: 'shipment_created',
-            trackingNumber: result.trackingNumber,
-            carrier: mapProvider(provider),
-            trackingUrl: result.trackingUrl,
-            shipmentCreatedAt: shipmentUpdatedAt,
-            shipmentUpdatedAt,
-            syncStatus: 'carrier_created',
-          },
-        });
-      }
-
-      if (result.shippingCost !== null) {
-        const providerReference = result.providerShipmentId ?? result.trackingNumber ?? execution.id;
-        await tx.shipmentShippingCost.upsert({
-          where: {
-            id: buildShippingCostId({
-              vendorId: allocation.assignedVendorId,
-              allocationId: allocation.id,
-              provider,
-              providerReference,
-            }),
-          },
-          update: {
-            providerName: mapProvider(provider),
-            providerReference,
-            shippingCost: result.shippingCost,
-            shippingVatAmount: shippingVat,
-            currency: result.currency,
-            status: 'CONFIRMED',
-            sourceType: 'EXTERNAL_PROVIDER',
-          },
-          create: {
-            id: buildShippingCostId({
-              vendorId: allocation.assignedVendorId,
-              allocationId: allocation.id,
-              provider,
-              providerReference,
-            }),
-            vendorId: allocation.assignedVendorId,
-            allocationId: allocation.id,
-            sourceShopifyOrderId: allocation.sourceShopifyOrderId,
-            sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
-            providerName: mapProvider(provider),
-            providerReference,
-            shippingCost: result.shippingCost,
-            shippingVatAmount: shippingVat,
-            currency: result.currency,
-            status: 'CONFIRMED',
-            sourceType: 'EXTERNAL_PROVIDER',
-          },
-        });
-
-        return { ...execution, shippingCostLinked: true };
-      }
-
-      return execution;
+    return persistProviderShipmentResult({
+      executionId,
+      allocation,
+      provider,
+      result,
     });
-
-    return mapShipmentExecution(updated);
   } catch (error) {
-    const responseSnapshot =
-      error instanceof ShippingProviderExecutionError
-        ? {
-            ...error.responseSnapshot,
-            error: error.message,
-          }
-        : {
-            error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
-            provider,
-          };
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: executionId,
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot,
+        responseSnapshot: buildProviderFailureSnapshot(error, provider),
+      },
+    });
+
+    return mapShipmentExecution(failed);
+  }
+}
+
+export async function retryDryRunShipmentExecution(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    actorRole?: string;
+    notificationUrl?: string | null;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  if (options.actorRole !== 'admin') {
+    throw new Error('Admin access required.');
+  }
+
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  assertDryRunRetryEligible(existing);
+
+  const providerDto = mapProvider(existing.provider);
+  const diagnostics = getShippingProviderGateDiagnostics(options.env, providerDto);
+  if (!diagnostics.executionReady) {
+    const missing = diagnostics.missing.length ? diagnostics.missing.join(', ') : 'provider configuration';
+    throw new Error(`Shipping provider execution is not ready. Missing: ${missing}.`);
+  }
+
+  const preview = await buildShipmentRequestPreview(
+    {
+      allocationId: existing.allocationId,
+      provider: providerDto,
+      notificationUrl: options.notificationUrl ?? undefined,
+    },
+    {
+      vendorId: existing.vendorId,
+    },
+  );
+
+  const provider = normalizeProvider(preview.provider);
+  if (provider !== existing.provider) {
+    throw new Error('Vendor shipping provider no longer matches the shipment execution provider.');
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: existing.allocationId,
+    },
+    include: {
+      order: true,
+      fulfillment: true,
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+    },
+  });
+
+  if (!allocation || allocation.assignedVendorId !== existing.vendorId) {
+    throw new Error('Allocation could not be found for the selected shipment execution.');
+  }
+
+  const requestSnapshot = preview.payload;
+  await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      desi: Number(preview.desi),
+      cargoIntegrationId: preview.cargoIntegrationId,
+      warehouseId: preview.warehouseId,
+      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+    const result = await adapter.createShipment({
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      provider: providerDto,
+      requestSnapshot,
+    });
+
+    return persistProviderShipmentResult({
+      executionId: existing.id,
+      allocation,
+      provider,
+      result,
+    });
+  } catch (error) {
+    const failed = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        shipmentStatus: ShipmentExecutionStatus.FAILED,
+        responseSnapshot: buildProviderFailureSnapshot(error, provider),
       },
     });
 

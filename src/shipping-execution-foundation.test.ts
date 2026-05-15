@@ -29,7 +29,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createShipmentExecution, getShippingProviderGateDiagnostics, inferShipmentDesi } = await import(
+const { createShipmentExecution, getShippingProviderGateDiagnostics, inferShipmentDesi, retryDryRunShipmentExecution } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
 
@@ -513,6 +513,182 @@ describe('shipping execution foundation', () => {
     });
     expect(adapter.createShipment).not.toHaveBeenCalled();
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('retries an existing pending dry-run shipment once when current Kargo gates are enabled', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'PENDING',
+      responseSnapshot: {
+        ok: true,
+        dryRun: true,
+        provider: 'kargo_entegrator',
+        reason: 'Kargo Entegratör shipment execution is disabled.',
+        disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+      },
+    });
+    storedExecution = existing;
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-retry-1027',
+      trackingNumber: 'KE-RETRY-1027',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, bodyKeys: ['id', 'trackingNumber'] },
+    });
+
+    const result = await retryDryRunShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargo_entegrator',
+        SHIPPING_EXECUTION_ENABLED: true,
+        KARGO_ENTEGRATOR_ENABLED: true,
+      },
+      actorRole: 'admin',
+      notificationUrl: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+      adapter,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'kargo_entegrator',
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-retry-1027',
+      trackingNumber: 'KE-RETRY-1027',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kargo_entegrator',
+        requestSnapshot: expect.objectContaining({
+          cargo_integration_id: 2547,
+          warehouse_id: 1774,
+          notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+        }),
+      }),
+    );
+  });
+
+  it('blocks dry-run retry when current Kargo gates are disabled', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'PENDING',
+      responseSnapshot: {
+        dryRun: true,
+        disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      retryDryRunShipmentExecution(existing.id, {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+          SHIPPING_EXECUTION_ENABLED: false,
+          KARGO_ENTEGRATOR_ENABLED: true,
+        },
+        actorRole: 'admin',
+        adapter,
+      }),
+    ).rejects.toThrow('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('does not retry shipment executions that already have provider identifiers', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'PENDING',
+      providerShipmentId: 'ke-existing',
+      responseSnapshot: {
+        dryRun: true,
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      retryDryRunShipmentExecution(existing.id, {
+        env,
+        actorRole: 'admin',
+        adapter,
+      }),
+    ).rejects.toThrow('provider shipment id');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('does not retry shipment executions that already have tracking', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'PENDING',
+      trackingNumber: 'KE-TRACKING',
+      responseSnapshot: {
+        dryRun: true,
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      retryDryRunShipmentExecution(existing.id, {
+        env,
+        actorRole: 'admin',
+        adapter,
+      }),
+    ).rejects.toThrow('tracking');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks vendor users from dry-run shipment retry', async () => {
+    await expect(
+      retryDryRunShipmentExecution('shipment-kargo_entegrator-alloc-1', {
+        env,
+        actorRole: 'vendor',
+      }),
+    ).rejects.toThrow('Admin access required.');
+    expect(prismaMock.shipmentExecution.findUnique).not.toHaveBeenCalled();
   });
 
   it('preserves vendor isolation when creating shipments', async () => {

@@ -10,6 +10,7 @@ import {
   getVendorShippingConfig,
   listShipmentExecutions,
   previewShipmentExecution,
+  retryDryRunShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
@@ -149,6 +150,29 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         vendorId: query.vendorId,
         status: query.status as never,
       });
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admin/shipments/:id/retry',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await retryDryRunShipmentExecution(request.params.id, {
+          env,
+          actorRole: request.authUser.role,
+          notificationUrl: resolveNotificationUrl(request),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
+        return reply.code(400).send({ message });
+      }
     },
   );
 
