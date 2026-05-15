@@ -413,10 +413,16 @@ a:focus-visible {
   border-color: rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
   color: #f8fafc;
+  padding: 12px;
 }
 
 .order-detail-shell-active .vendor-card {
   margin-top: auto;
+}
+
+.order-detail-shell-active .vendor-card,
+.order-detail-shell-active .session-card {
+  gap: 8px;
 }
 
 .order-detail-shell-active .session-state {
@@ -426,9 +432,12 @@ a:focus-visible {
 .order-detail-shell-active .vendor-fixed-chip,
 .order-detail-shell-active .vendor-select {
   max-width: 100%;
+  width: 100%;
   border-color: rgba(147, 197, 253, 0.22);
   background: rgba(30, 41, 59, 0.9);
   color: #e5edf8;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .order-detail-shell-active .button-secondary {
@@ -3382,9 +3391,9 @@ h3 {
 .order-detail-workspace {
   display: grid;
   gap: 16px;
-  width: min(100%, 1420px);
+  width: min(100%, 1320px);
   margin: 0 auto;
-  padding: 22px 24px 28px;
+  padding: 20px 24px 28px;
   color: #0f172a;
 }
 
@@ -3398,8 +3407,8 @@ h3 {
 
 .order-detail-topbar {
   display: grid;
-  gap: 12px;
-  padding: 18px 20px;
+  gap: 10px;
+  padding: 16px;
   border-radius: 24px;
 }
 
@@ -3421,7 +3430,7 @@ h3 {
 
 .order-detail-title-stack {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
@@ -3435,9 +3444,9 @@ h3 {
 .order-detail-heading-line h1 {
   margin: 0;
   color: #0f172a;
-  font-size: clamp(2rem, 3vw, 2.7rem);
+  font-size: clamp(1.8rem, 2.4vw, 2.35rem);
   line-height: 1.05;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.02em;
 }
 
 .order-source-pill {
@@ -3472,14 +3481,14 @@ h3 {
 .order-detail-meta-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 12px 22px;
+  gap: 10px 18px;
 }
 
 .order-detail-meta-strip div {
   display: grid;
   grid-template-columns: auto;
   gap: 3px;
-  min-width: 128px;
+  min-width: 116px;
 }
 
 .order-detail-meta-strip span,
@@ -3525,11 +3534,11 @@ h3 {
 }
 
 .order-status-summary-card {
-  min-height: 122px;
+  min-height: 112px;
   display: flex;
   align-items: flex-start;
   gap: 14px;
-  padding: 16px;
+  padding: 14px;
   border-radius: 20px;
 }
 
@@ -3546,14 +3555,14 @@ h3 {
 
 .order-status-summary-card strong {
   color: #0f172a;
-  font-size: 1.25rem;
+  font-size: 1.14rem;
   line-height: 1.15;
 }
 
 .order-status-summary-card p {
   margin: 0;
   color: #64748b;
-  font-size: 0.84rem;
+  font-size: 0.8rem;
   line-height: 1.35;
 }
 
@@ -3561,8 +3570,8 @@ h3 {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 14px;
   font-weight: 900;
 }
@@ -3614,7 +3623,7 @@ h3 {
 
 .order-detail-card-v2 {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   padding: 16px;
   border-radius: 20px;
 }
@@ -3651,10 +3660,10 @@ h3 {
 
 .order-line-item-row-v2 {
   display: grid;
-  grid-template-columns: 44px minmax(160px, 1.5fr) minmax(130px, 1fr) 56px minmax(92px, 0.7fr) minmax(92px, 0.7fr);
-  gap: 12px;
+  grid-template-columns: 44px minmax(150px, 1.45fr) minmax(118px, 0.9fr) 48px minmax(84px, 0.68fr) minmax(84px, 0.68fr);
+  gap: 10px;
   align-items: center;
-  padding: 10px;
+  padding: 9px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   background: #ffffff;
@@ -3695,7 +3704,7 @@ h3 {
   display: grid;
   gap: 5px;
   min-width: 0;
-  padding: 12px;
+  padding: 11px;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
   background: #f8fafc;
@@ -3722,7 +3731,7 @@ h3 {
 
 .order-tracking-summary-card {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   padding: 0;
   border: 0;
@@ -3742,6 +3751,20 @@ h3 {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
   align-items: end;
+}
+
+.order-primary-action-card .order-tracking-summary-card,
+.order-primary-action-card .order-tracking-form {
+  grid-template-columns: 1fr;
+}
+
+.order-primary-action-card .field,
+.order-primary-action-card .checkbox-field {
+  margin: 0;
+}
+
+.order-primary-action-card .field input {
+  min-height: 38px;
 }
 
 .order-tracking-form .checkbox-field,
@@ -3786,7 +3809,7 @@ h3 {
   display: grid;
   grid-template-columns: 14px minmax(0, 1fr);
   gap: 10px;
-  padding: 0 0 14px;
+  padding: 0 0 12px;
 }
 
 .order-timeline-compact li:last-child {

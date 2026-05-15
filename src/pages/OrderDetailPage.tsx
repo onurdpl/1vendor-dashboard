@@ -5,7 +5,7 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, submitFulfillmentTracking } from '../features/orders/api';
-import { getCurrentUser, getCurrentUserRole } from '../lib/auth';
+import { getCurrentUser } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
@@ -62,6 +62,28 @@ function getInitialsLabel(value: string) {
     .join('') || '—';
 }
 
+function getVendorTimelineLabel(label: string) {
+  const normalized = label.toLowerCase();
+
+  if (normalized.includes('order')) {
+    return 'Order received';
+  }
+  if (normalized.includes('fulfillment')) {
+    return 'Fulfillment pending';
+  }
+  if (normalized.includes('shipping') || normalized.includes('shipment')) {
+    return 'Awaiting shipment';
+  }
+  if (normalized.includes('tracking')) {
+    return 'Tracking pending';
+  }
+  if (normalized.includes('delivered')) {
+    return 'Delivered';
+  }
+
+  return toTitleCaseLabel(label);
+}
+
 function getTrackingMutationErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     switch (error.status) {
@@ -85,7 +107,6 @@ function getTrackingMutationErrorMessage(error: unknown) {
 
 export function OrderDetailPage() {
   const { orderId } = useParams();
-  const isAdmin = getCurrentUserRole() === 'admin';
   const currentUser = getCurrentUser();
   const isRealMode = runtimeConfig.apiMode === 'real';
   const { message, tone, showFeedback } = useActionFeedback();
@@ -195,8 +216,6 @@ export function OrderDetailPage() {
 
   const orderItems = order.lineItems ?? order.items;
   const customerLabel = getCompactCustomerLabel(order.customer);
-  const allocationOwner =
-    order.assignedVendorId === order.originalVendorId ? 'Original vendor owner' : 'Reassigned operational owner';
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
   const summaryCards = [
@@ -258,22 +277,7 @@ export function OrderDetailPage() {
                 <span>Customer</span>
                 <strong>{customerLabel}</strong>
               </div>
-              <div>
-                <span>Allocation ID</span>
-                <strong>{order.id || '—'}</strong>
-              </div>
-              <div>
-                <span>Source</span>
-                <strong>{order.channel || 'Unknown'}</strong>
-              </div>
             </div>
-          </div>
-          <div className="order-detail-header-actions">
-            {isAdmin ? (
-              <Link className="button button-secondary" to={`/admin/orders/${order.sourceShopifyOrderNumber}`}>
-                Open Shopify order breakdown
-              </Link>
-            ) : null}
           </div>
         </div>
         <div className="order-detail-status-pills">
@@ -347,27 +351,27 @@ export function OrderDetailPage() {
 
           <article className="order-detail-card-v2">
             <div className="order-card-heading">
-              <h2>Financial impact</h2>
+              <h2>Financial summary</h2>
             </div>
             <div className="order-financial-impact-grid">
               <div>
-                <span>Allocation total</span>
+                <span>Order total</span>
                 <strong>{order.amount}</strong>
               </div>
               <div>
-                <span>Refund impact</span>
-                <strong>Included in finance reconciliation</strong>
+                <span>Vendor payout impact</span>
+                <strong>Included in payout calculations</strong>
               </div>
               <div>
-                <span>Net impact</span>
-                <strong>Tracked in vendor finance view</strong>
+                <span>Refund status</span>
+                <strong>—</strong>
               </div>
             </div>
           </article>
 
           <article className="order-detail-card-v2">
             <div className="order-card-heading">
-              <h2>Secondary details</h2>
+              <h2>Additional details</h2>
             </div>
             <div className="order-secondary-detail-grid">
               <div>
@@ -375,56 +379,52 @@ export function OrderDetailPage() {
                 <strong>{order.sourceShopifyOrderId || '—'}</strong>
               </div>
               <div>
-                <span>Workflow status</span>
-                <strong>{order.allocationStatus || 'Unknown'}</strong>
-              </div>
-              <div>
-                <span>Shipment created</span>
-                <strong>{formatOptionalDate(order.shipmentCreatedAt, 'Not created')}</strong>
-              </div>
-              <div>
-                <span>Shipment updated</span>
-                <strong>{formatOptionalDate(order.shipmentUpdatedAt, 'Not updated')}</strong>
+                <span>Shipment status</span>
+                <strong>{order.shipmentCreatedAt ? formatOptionalDate(order.shipmentCreatedAt) : order.shippingStatus}</strong>
               </div>
               <div>
                 <span>Shipping address</span>
                 <strong>{order.shippingAddress || 'Unknown'}</strong>
               </div>
-              <div>
-                <span>Notes</span>
-                <strong>{order.notes || '—'}</strong>
-              </div>
             </div>
+          </article>
+        </div>
+
+        <aside className="order-detail-right-column">
+          <article className="order-detail-card-v2">
+            <div className="order-card-heading">
+              <h2>Operational timeline</h2>
+            </div>
+            {order.timeline.length > 0 ? (
+              <ol className="order-timeline-compact">
+                {order.timeline.map((entry) => (
+                  <li key={`${entry.label}-${entry.at}`}>
+                    <span className="order-timeline-dot" aria-hidden="true" />
+                    <div>
+                      <strong>{getVendorTimelineLabel(entry.label)}</strong>
+                      <span>{formatDate(entry.at)}</span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="order-empty-copy">No records available.</p>
+            )}
           </article>
 
           <article className="order-detail-card-v2 order-primary-action-card">
             <div className="order-card-heading">
               <div>
-                <h2>Primary action</h2>
-                <p>{isRealMode ? 'Shopify tracking sync remains routed through the backend fulfillment flow.' : 'Mock fulfillment actions remain available for demo mode.'}</p>
+                <h2>Vendor actions</h2>
+                <p>{hasTrackingSync ? 'Shipment information is available for this order.' : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
             {canUseFulfillmentActions ? (
               <div className="action-row vendor-action-panel">
                 {isRealMode ? (
                   <>
-                    <div className="real-mode-action-copy">
-                      <p className="page-description">
-                        {shouldShowRealTrackingForm
-                          ? 'Ready for tracking submission. Add shipment details to sync this vendor-owned fulfillment.'
-                          : 'Tracking has already been synced for this allocation.'}
-                      </p>
-                    </div>
                     {hasTrackingSync ? (
                       <div className="tracking-summary-card order-tracking-summary-card">
-                        <div className="summary-row">
-                          <span>Shipping</span>
-                          <strong>{order.shippingStatus}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Fulfillment</span>
-                          <strong>{order.fulfillmentStatus}</strong>
-                        </div>
                         <div className="summary-row">
                           <span>Tracking</span>
                           <strong className={order.trackingNumber ? '' : 'muted'}>{order.trackingNumber ?? 'Not available'}</strong>
@@ -478,7 +478,7 @@ export function OrderDetailPage() {
                           })
                             .then((result) => {
                               showFeedback(
-                                `Tracking ${result.trackingNumber} submitted via ${result.shopifySyncSource}. Shipping status: ${result.shippingStatus}.`,
+                                `Tracking ${result.trackingNumber} submitted. Shipping status: ${result.shippingStatus}.`,
                                 'success',
                               );
                             })
@@ -524,71 +524,52 @@ export function OrderDetailPage() {
                           <span>Notify customer</span>
                         </label>
                         <button type="submit" className="button button-primary" disabled={isSubmittingTracking}>
-                          {isSubmittingTracking ? 'Submitting tracking...' : 'Submit tracking'}
+                          {isSubmittingTracking ? 'Submitting...' : 'Add tracking information'}
                         </button>
                       </form>
                     ) : null}
                   </>
                 ) : (
-                  <>
-                    <p className="page-description">This allocation is fulfillable. Select the next shipping action.</p>
-                    <div className="detail-actions order-inline-actions">
-                      <button
-                        type="button"
-                        className="button button-primary"
-                        disabled={isRunningFulfillmentAction}
-                        onClick={() => {
-                          if (!order) {
-                            return;
-                          }
+                  <div className="detail-actions order-inline-actions">
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={isRunningFulfillmentAction}
+                      onClick={() => {
+                        if (!order) {
+                          return;
+                        }
 
-                          void runFulfillmentAction({ orderId: order.id, action: 'label' })
-                            .then(() => showFeedback('Shipping label creation requested (mock).', 'success'))
-                            .catch(() => showFeedback('Unable to create shipping label right now.', 'error'));
-                        }}
-                      >
-                        Create shipping label
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={isRunningFulfillmentAction}
-                        onClick={() => {
-                          if (!order) {
-                            return;
-                          }
+                        void runFulfillmentAction({ orderId: order.id, action: 'label' })
+                          .then(() => showFeedback('Shipping label creation requested (mock).', 'success'))
+                          .catch(() => showFeedback('Unable to create shipping label right now.', 'error'));
+                      }}
+                    >
+                      Create shipment
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={isRunningFulfillmentAction}
+                      onClick={() => {
+                        if (!order) {
+                          return;
+                        }
 
-                          void runFulfillmentAction({ orderId: order.id, action: 'ship' })
-                            .then(() => showFeedback('Order marked as shipped (mock).', 'success'))
-                            .catch(() => showFeedback('Unable to mark shipment right now.', 'error'));
-                        }}
-                      >
-                        Mark as shipped
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        disabled={isRunningFulfillmentAction}
-                        onClick={() => {
-                          if (!order) {
-                            return;
-                          }
-
-                          void runFulfillmentAction({ orderId: order.id, action: 'tracking' })
-                            .then(() => showFeedback('Tracking update submitted (mock).', 'success'))
-                            .catch(() => showFeedback('Unable to update tracking right now.', 'error'));
-                        }}
-                      >
-                        Update tracking
-                      </button>
-                    </div>
-                  </>
+                        void runFulfillmentAction({ orderId: order.id, action: 'tracking' })
+                          .then(() => showFeedback('Tracking update submitted (mock).', 'success'))
+                          .catch(() => showFeedback('Unable to update tracking right now.', 'error'));
+                      }}
+                    >
+                      Add tracking information
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
               <div className="action-row vendor-blocked-panel">
                 <p className="page-description">
-                  Allocation is currently blocked for shipping actions.
+                  Shipping actions are currently unavailable.
                   {order.cancellationReason ? ` Reason: ${order.cancellationReason.replace(/_/g, ' ')}.` : ''}
                 </p>
                 {isVendorAssignedOwner ? (
@@ -598,13 +579,13 @@ export function OrderDetailPage() {
                       className="button button-secondary"
                       onClick={() => {
                         if (!canReportIssue || !order) {
-                          showFeedback('This allocation is already blocked for reassignment.', 'info');
+                          showFeedback('This order is already under review.', 'info');
                           return;
                         }
 
                         void reportFulfillmentIssue(order.id)
                           .then(() => {
-                            showFeedback('Fulfillment issue reported. Allocation marked for admin review.', 'success');
+                            showFeedback('Fulfillment issue reported for review.', 'success');
                           })
                           .catch(() => {
                             showFeedback('Unable to report fulfillment issue right now.', 'error');
@@ -612,102 +593,12 @@ export function OrderDetailPage() {
                       }}
                       disabled={isReportingIssue || !canReportIssue}
                     >
-                      Report fulfillment issue
+                      Contact support
                     </button>
                   </div>
                 ) : null}
               </div>
             )}
-          </article>
-
-          {isAdmin ? (
-            <article className="order-detail-card-v2 order-admin-tools-card">
-              <div>
-                <h2>Admin tools</h2>
-                <p>Inspect the full Shopify order graph across all vendor allocations.</p>
-              </div>
-              <Link className="button button-secondary" to={`/admin/orders/${order.sourceShopifyOrderNumber}`}>
-                Open Shopify order breakdown
-              </Link>
-            </article>
-          ) : null}
-        </div>
-
-        <aside className="order-detail-right-column">
-          <article className="order-detail-card-v2">
-            <div className="order-card-heading">
-              <h2>Operational timeline</h2>
-            </div>
-            {order.timeline.length > 0 ? (
-              <ol className="order-timeline-compact">
-                {order.timeline.map((entry) => (
-                  <li key={`${entry.label}-${entry.at}`}>
-                    <span className="order-timeline-dot" aria-hidden="true" />
-                    <div>
-                      <strong>{entry.label}</strong>
-                      <span>{formatDate(entry.at)}</span>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="order-empty-copy">No records available.</p>
-            )}
-          </article>
-
-          <article className="order-detail-card-v2">
-            <div className="order-card-heading">
-              <h2>Summary</h2>
-            </div>
-            <div className="order-summary-compact">
-              <div>
-                <span>Channel</span>
-                <strong>{order.channel || 'Unknown'}</strong>
-              </div>
-              <div>
-                <span>Original vendor</span>
-                <strong>{order.originalVendorId || 'Unknown'}</strong>
-              </div>
-              <div>
-                <span>Assigned vendor</span>
-                <strong>{order.assignedVendorId || 'Unknown'}</strong>
-              </div>
-              <div>
-                <span>Allocation ownership</span>
-                <strong>{allocationOwner}</strong>
-              </div>
-              <div>
-                <span>Tracking submission</span>
-                <strong>{isRealMode ? 'Backend Shopify fulfillment flow' : 'Demo fulfillment flow'}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article className="order-detail-card-v2">
-            <div className="order-card-heading">
-              <h2>Fulfillment & shipping</h2>
-            </div>
-            <div className="order-shipping-state-grid">
-              <div>
-                <span>Fulfillment</span>
-                <strong>{order.fulfillmentStatus}</strong>
-              </div>
-              <div>
-                <span>Shipping</span>
-                <strong>{order.shippingStatus}</strong>
-              </div>
-              <div>
-                <span>Tracking</span>
-                <strong>{trackingTitle}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article className="order-detail-card-v2 order-reconciliation-card">
-            <h2>Reconciliation context</h2>
-            <p>
-              Reconcile from Diagnostics if fulfillment, shipping, or tracking looks stale.
-            </p>
           </article>
         </aside>
       </div>
