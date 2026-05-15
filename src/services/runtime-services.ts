@@ -155,6 +155,36 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async retryShipmentExecution(shipmentExecutionId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.retryShipmentExecution(shipmentExecutionId);
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-kargo-/, ''),
+        vendorId: getCurrentVendorId(),
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'kargo_entegrator' as const,
+        providerShipmentId: `mock-kargo-retry-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `KE-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created' as const,
+        desi: '3.00',
+        cargoIntegrationId: '2547',
+        warehouseId: '1774',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async shippingProviderDiagnostics() {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics('kargo_entegrator');

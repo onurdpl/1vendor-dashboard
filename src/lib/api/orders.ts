@@ -28,6 +28,10 @@ export async function createShipmentExecution(allocationId: string) {
   return runtimeServices.orders.createShipmentExecution(allocationId);
 }
 
+export async function retryShipmentExecution(shipmentExecutionId: string) {
+  return runtimeServices.orders.retryShipmentExecution(shipmentExecutionId);
+}
+
 export async function getShippingProviderDiagnostics() {
   return runtimeServices.orders.shippingProviderDiagnostics();
 }

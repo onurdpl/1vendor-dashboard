@@ -4,7 +4,13 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { createShipmentExecution, getOrder, getShippingProviderDiagnostics, submitFulfillmentTracking } from '../features/orders/api';
+import {
+  createShipmentExecution,
+  getOrder,
+  getShippingProviderDiagnostics,
+  retryShipmentExecution,
+  submitFulfillmentTracking,
+} from '../features/orders/api';
 import { getCurrentUser } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -115,7 +121,7 @@ export function OrderDetailPage() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
-  const { data: order, isLoading, isError, error } = useQueryResource(
+  const { data: order, isLoading, isError, error, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
     () => {
       if (!orderId) {
@@ -156,6 +162,12 @@ export function OrderDetailPage() {
   );
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
     async (allocationId: string) => createShipmentExecution(allocationId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+    },
+  );
+  const { mutateAsync: retryShipmentMutation, isPending: isRetryingShipment } = useMutationAction(
+    async (shipmentExecutionId: string) => retryShipmentExecution(shipmentExecutionId),
     {
       invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
     },
@@ -205,6 +217,33 @@ export function OrderDetailPage() {
           !shipmentExecution.trackingNumber ||
           !shipmentExecution.labelUrl),
     );
+  const canRetryDryRunShipment =
+    isAdmin &&
+    Boolean(shipmentExecution) &&
+    shipmentExecution?.shipmentStatus === 'pending' &&
+    !shipmentExecution.providerShipmentId &&
+    !shipmentExecution.trackingNumber &&
+    Boolean(shipmentProviderSummary?.dryRun === true || (shipmentProviderSummary?.disabledGates.length ?? 0) > 0);
+
+  const handleRetryShipment = () => {
+    if (!shipmentExecution || !canRetryDryRunShipment) {
+      return;
+    }
+
+    void retryShipmentMutation(shipmentExecution.id)
+      .then((shipment) => {
+        showFeedback(
+          shipment.shipmentStatus === 'pending'
+            ? 'Shipment retry recorded. Carrier execution is pending.'
+            : `Shipment ${shipment.providerShipmentId ?? shipment.id} refreshed.`,
+          'success',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        showFeedback(getTrackingMutationErrorMessage(mutationError), 'error');
+      });
+  };
 
   useEffect(() => {
     if (!order) {
@@ -559,6 +598,16 @@ export function OrderDetailPage() {
                               <span>Label present</span>
                               <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
                             </div>
+                            {canRetryDryRunShipment ? (
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isRetryingShipment}
+                                onClick={handleRetryShipment}
+                              >
+                                {isRetryingShipment ? 'Retrying...' : 'Retry live shipment'}
+                              </button>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -788,6 +837,16 @@ export function OrderDetailPage() {
                           <span>Label present</span>
                           <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
                         </div>
+                        {canRetryDryRunShipment ? (
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isRetryingShipment}
+                            onClick={handleRetryShipment}
+                          >
+                            {isRetryingShipment ? 'Retrying...' : 'Retry live shipment'}
+                          </button>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

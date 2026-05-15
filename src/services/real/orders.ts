@@ -464,6 +464,10 @@ export async function createShipmentExecution(allocationId: string) {
   });
 }
 
+export async function retryShipmentExecution(shipmentExecutionId: string) {
+  return apiClient.post<CreateShipmentExecutionResult>(`/admin/shipments/${shipmentExecutionId}/retry`, {});
+}
+
 export async function getShippingProviderDiagnostics(provider: 'kargo_entegrator' = 'kargo_entegrator') {
   return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?provider=${provider}`);
 }

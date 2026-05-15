@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderDetail } from '../features/orders/api';
@@ -8,6 +9,7 @@ import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
+const retryShipmentExecutionMock = vi.fn();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -16,6 +18,7 @@ vi.mock('../features/orders/api', async () => {
     getOrder: (orderId: string) => getOrderMock(orderId),
     getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
     createShipmentExecution: vi.fn(),
+    retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     submitFulfillmentTracking: vi.fn(),
   };
 });
@@ -138,6 +141,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       apiKeyConfigured: true,
       missing: ['SHIPPING_EXECUTION_ENABLED'],
     });
+    retryShipmentExecutionMock.mockReset();
+    retryShipmentExecutionMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-live-1028',
+      updatedAt: '2026-05-15T19:40:00.000Z',
+    });
   });
 
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {
@@ -165,6 +175,113 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
 
+  it('shows retry action to admins for eligible stale dry-run pending shipments', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('button', { name: 'Retry live shipment' })).toBeInTheDocument();
+  });
+
+  it('does not show retry action when a provider shipment id exists', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        providerShipmentId: 'ke-created-1028',
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
+  });
+
+  it('does not show retry action when a tracking number exists', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        trackingNumber: 'TRACK-1028',
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
+  });
+
+  it('calls the admin retry endpoint and refreshes order detail on success', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry live shipment' }));
+
+    expect(retryShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961');
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/Shipment ke-live-1028 refreshed/i)).toBeInTheDocument();
+  });
+
+  it('shows a safe backend error when retry fails', async () => {
+    const user = userEvent.setup();
+    retryShipmentExecutionMock.mockRejectedValueOnce(
+      new Error('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.'),
+    );
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry live shipment' }));
+
+    expect(await screen.findByText('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.')).toBeInTheDocument();
+  });
+
   it('does not show provider response internals to vendors', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
@@ -182,6 +299,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByText('message, shipment_id')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
   });
 });
