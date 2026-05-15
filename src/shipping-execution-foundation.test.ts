@@ -29,7 +29,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createShipmentExecution, inferShipmentDesi } = await import(
+const { createShipmentExecution, getShippingProviderGateDiagnostics, inferShipmentDesi } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
 
@@ -496,5 +496,47 @@ describe('shipping execution foundation', () => {
         }),
       }),
     );
+  });
+
+  it('diagnoses the global shipping execution gate separately from the Kargo provider gate', () => {
+    const diagnostics = getShippingProviderGateDiagnostics({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: false,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api',
+      KARGO_ENTEGRATOR_API_KEY: 'configured',
+    });
+
+    expect(diagnostics).toMatchObject({
+      provider: 'kargo_entegrator',
+      executionReady: false,
+      globalShippingExecutionEnabled: false,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      missing: ['SHIPPING_EXECUTION_ENABLED'],
+    });
+  });
+
+  it('marks Kargo execution ready only when all safe gates and config are present', () => {
+    const diagnostics = getShippingProviderGateDiagnostics({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api',
+      KARGO_ENTEGRATOR_API_KEY: 'configured',
+    });
+
+    expect(diagnostics).toMatchObject({
+      provider: 'kargo_entegrator',
+      executionReady: true,
+      globalShippingExecutionEnabled: true,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      missing: [],
+    });
   });
 });

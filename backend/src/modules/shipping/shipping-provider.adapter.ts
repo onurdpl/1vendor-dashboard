@@ -153,6 +153,11 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
 
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
     if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.KARGO_ENTEGRATOR_ENABLED) {
+      const disabledGates = [
+        !this.env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
+        !this.env.KARGO_ENTEGRATOR_ENABLED ? 'KARGO_ENTEGRATOR_ENABLED' : null,
+      ].filter((gate): gate is string => Boolean(gate));
+
       return {
         providerShipmentId: null,
         trackingNumber: null,
@@ -167,6 +172,7 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
           dryRun: true,
           provider: 'kargo_entegrator',
           reason: 'Kargo Entegratör shipment execution is disabled.',
+          disabledGates,
         },
       };
     }

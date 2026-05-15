@@ -32,6 +32,16 @@ export type VendorShippingConfigDto = {
   source: 'configured' | 'default';
 };
 
+export type ShippingProviderGateDiagnosticsDto = {
+  provider: ShippingProviderDto;
+  executionReady: boolean;
+  globalShippingExecutionEnabled: boolean;
+  providerEnabled: boolean;
+  baseUrlConfigured: boolean;
+  apiKeyConfigured: boolean;
+  missing: string[];
+};
+
 export type ShipmentExecutionDto = {
   id: string;
   allocationId: string;

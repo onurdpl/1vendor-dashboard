@@ -6,6 +6,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import {
   createShipmentExecution,
   getShipmentExecutionById,
+  getShippingProviderGateDiagnostics,
   getVendorShippingConfig,
   listShipmentExecutions,
   previewShipmentExecution,
@@ -114,6 +115,22 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       return shipment;
+    },
+  );
+
+  app.get(
+    '/admin/shipments/provider-config',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const query = request.query as { provider?: string };
+      const provider = query.provider === 'kargo_entegrator' ? 'kargo_entegrator' : undefined;
+      return getShippingProviderGateDiagnostics(env, provider);
     },
   );
 

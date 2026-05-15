@@ -17,6 +17,7 @@ import type {
   CreateShipmentExecutionDto,
   ShipmentExecutionPreviewDto,
   ShipmentExecutionDto,
+  ShippingProviderGateDiagnosticsDto,
   ShippingProviderDto,
   VendorShippingConfigDto,
   VendorShippingConfigUpdateDto,
@@ -391,6 +392,33 @@ export async function upsertVendorShippingConfig(
   });
 
   return mapShippingConfig(config, vendorId);
+}
+
+export function getShippingProviderGateDiagnostics(
+  env: AppEnv,
+  providerOverride?: ShippingProviderDto,
+): ShippingProviderGateDiagnosticsDto {
+  const provider = providerOverride ?? (env.SHIPPING_PROVIDER === 'kargo_entegrator' ? 'kargo_entegrator' : 'hepsijet');
+  const isKargo = provider === 'kargo_entegrator';
+  const providerEnabled = isKargo ? env.KARGO_ENTEGRATOR_ENABLED : false;
+  const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : false;
+  const apiKeyConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_API_KEY) : false;
+  const missing = [
+    !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
+    isKargo && !env.KARGO_ENTEGRATOR_ENABLED ? 'KARGO_ENTEGRATOR_ENABLED' : null,
+    isKargo && !env.KARGO_ENTEGRATOR_BASE_URL ? 'KARGO_ENTEGRATOR_BASE_URL' : null,
+    isKargo && !env.KARGO_ENTEGRATOR_API_KEY ? 'KARGO_ENTEGRATOR_API_KEY' : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    provider,
+    executionReady: env.SHIPPING_EXECUTION_ENABLED && providerEnabled && baseUrlConfigured && apiKeyConfigured,
+    globalShippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
+    providerEnabled,
+    baseUrlConfigured,
+    apiKeyConfigured,
+    missing,
+  };
 }
 
 export async function listShipmentExecutions(options: {
