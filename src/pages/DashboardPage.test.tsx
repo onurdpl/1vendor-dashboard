@@ -41,7 +41,7 @@ const dashboardOverview: DashboardOverview = {
     { label: 'Blocked / attention', value: '1' },
     { label: 'Payout estimate', value: '$1,200.00' },
   ],
-  recentActivity: ['ORD-A-1002 is delivered for Shopify order #1002'],
+  recentActivity: ['Refund webhook processed: Refund ID 123 processed successfully.'],
   workspaceStatus: 'Demo Vendor A has 4 vendor-scoped orders.',
   priorityWork: [
     { label: 'Blocked allocations', value: '1', tone: 'severity-warning', description: 'Allocations waiting for recovery.' },
@@ -194,6 +194,16 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('shipping cost')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
+  });
+
+  it('renders recent activity as a compact title and description feed', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('Recent operational events')).toBeInTheDocument();
+    expect(screen.getByText('Refund webhook processed')).toBeInTheDocument();
+    expect(screen.getByText('Refund ID 123 processed successfully.')).toBeInTheDocument();
   });
 
   it('renders an empty notification state', async () => {

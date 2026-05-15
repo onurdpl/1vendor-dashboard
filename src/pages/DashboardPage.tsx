@@ -110,6 +110,16 @@ function formatPriorityLabel(tone: string) {
   return tone.replace(/^severity-/, '').replaceAll('-', ' ');
 }
 
+function formatRecentActivity(item: string) {
+  const [title, ...descriptionParts] = item.split(':');
+  const description = descriptionParts.join(':').trim();
+
+  return {
+    title: title.trim() || 'Unknown',
+    description: description || '—',
+  };
+}
+
 export function DashboardPage() {
   const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
   const currentUser = getCurrentUser();
@@ -353,22 +363,26 @@ export function DashboardPage() {
 
           <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
             {dashboard.recentActivity.length === 0 ? (
-              <EmptyStatePanel title="No recent activity" description="No recent activity for the current vendor." />
+              <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
-                {dashboard.recentActivity.map((item) => (
-                  <li key={item}>
-                    <span className="dashboard-event-dot" aria-hidden="true" />
-                    <div className="dashboard-event-copy">
-                      <strong>{item}</strong>
-                      <span>—</span>
-                    </div>
-                    <div className="dashboard-event-meta">
-                      <StatusBadge tone="info">—</StatusBadge>
-                      <span>—</span>
-                    </div>
-                  </li>
-                ))}
+                {dashboard.recentActivity.map((item) => {
+                  const activity = formatRecentActivity(item);
+
+                  return (
+                    <li key={item}>
+                      <span className="dashboard-event-dot" aria-hidden="true" />
+                      <div className="dashboard-event-copy">
+                        <strong>{activity.title}</strong>
+                        <span>{activity.description}</span>
+                      </div>
+                      <div className="dashboard-event-meta">
+                        <StatusBadge tone="info">—</StatusBadge>
+                        <span>—</span>
+                      </div>
+                    </li>
+                  );
+                })}
               </ul>
             )}
           </OperationalSection>
