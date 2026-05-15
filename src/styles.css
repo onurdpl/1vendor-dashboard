@@ -84,19 +84,24 @@ a:focus-visible {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
+  grid-template-columns: 240px minmax(0, 1fr);
+  background: #f8fafc;
 }
 
 .sidebar {
   position: sticky;
   top: 0;
   min-height: 100vh;
-  padding: var(--space-5) var(--space-4);
-  border-right: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.9);
-  display: grid;
-  align-content: start;
-  gap: var(--space-4);
+  padding: 22px 16px;
+  border-right: 0;
+  background:
+    radial-gradient(circle at 20% 0%, rgba(37, 99, 235, 0.2), transparent 34%),
+    linear-gradient(180deg, #071226 0%, #08111f 100%);
+  color: #e5edf8;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  box-shadow: inset -1px 0 0 rgba(148, 163, 184, 0.12);
 }
 
 .brand {
@@ -112,23 +117,26 @@ a:focus-visible {
   border-radius: var(--radius-sm);
   display: grid;
   place-items: center;
-  color: white;
+  color: #0f172a;
   font-weight: 700;
-  background: #172033;
-  box-shadow: var(--op-shadow-sm);
+  background: #f8fafc;
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.24);
 }
 
 .brand-name {
   font-weight: 700;
-  color: var(--op-text-strong);
+  color: #ffffff;
+}
+
+.brand-subtitle {
+  color: #94a3b8;
 }
 
 .brand-subtitle,
 .page-description,
 .auth-footnote,
 .stat-card span,
-.panel p,
-.nav-link {
+.panel p {
   color: var(--text-muted);
 }
 
@@ -151,47 +159,54 @@ a:focus-visible {
 .nav-group-label {
   padding: 0 2px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   font-size: 0.7rem;
   font-weight: 700;
-  color: var(--text-muted);
+  color: #8da0b8;
 }
 
 .session-card {
   padding: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
   display: flex;
   gap: 12px;
   justify-content: space-between;
   align-items: center;
+  color: #f8fafc;
 }
 
 .vendor-card {
   padding: 12px;
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: rgba(255, 255, 255, 0.72);
+  margin-top: auto;
+  border-radius: 14px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  background: rgba(15, 23, 42, 0.72);
   display: flex;
   gap: 12px;
   justify-content: space-between;
   align-items: center;
+  color: #f8fafc;
 }
 
 .session-label {
-  color: var(--text-muted);
-  font-size: 0.85rem;
+  color: #8da0b8;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
 }
 
 .session-state {
+  color: #ffffff;
   font-weight: 700;
 }
 
 .session-meta {
   margin-top: 4px;
   font-size: 0.82rem;
-  color: var(--text-muted);
+  color: #94a3b8;
 }
 
 .vendor-switcher {
@@ -203,9 +218,9 @@ a:focus-visible {
   min-width: 168px;
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid var(--border);
-  background: white;
-  color: inherit;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e5edf8;
   font: inherit;
   transition:
     border-color var(--transition-fast),
@@ -213,10 +228,14 @@ a:focus-visible {
 }
 
 .nav-link {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 38px;
   padding: 9px 10px;
-  border-radius: var(--radius-sm);
+  border-radius: 11px;
   border: 1px solid transparent;
-  color: #475569;
+  color: #dbe7f6;
   font-size: 0.9rem;
   font-weight: 600;
   transition:
@@ -227,18 +246,35 @@ a:focus-visible {
 
 .nav-link.active,
 .nav-link:hover {
-  color: var(--op-text-strong);
-  background: #f1f5f9;
-  border-color: #e2e8f0;
+  color: #ffffff;
+  background: rgba(59, 130, 246, 0.18);
+  border-color: rgba(147, 197, 253, 0.16);
 }
 
 .nav-link.active {
-  box-shadow: inset 3px 0 0 var(--accent), 0 1px 2px rgba(15, 23, 42, 0.04);
+  background: linear-gradient(90deg, #243fb5 0%, #3152d4 100%);
+  border-color: rgba(147, 197, 253, 0.2);
+  box-shadow: 0 10px 22px rgba(30, 64, 175, 0.28);
+}
+
+.nav-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(147, 197, 253, 0.18);
+  border-radius: 7px;
+  background: rgba(15, 23, 42, 0.35);
+  color: #bfdbfe;
+  font-size: 0.62rem;
+  font-weight: 900;
 }
 
 .app-content {
   min-width: 0;
-  padding: var(--space-4) var(--space-5);
+  padding: 24px;
+  background: #f8fafc;
 }
 
 .page-header {
@@ -255,22 +291,28 @@ a:focus-visible {
 
 .admin-nav-label {
   margin-top: -2px;
-  color: #9a3412;
+  color: #8da0b8;
 }
 
 .shell-card {
-  background: rgba(255, 255, 255, 0.78);
+  background: rgba(15, 23, 42, 0.72);
 }
 
 .vendor-fixed-chip {
   padding: 8px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(59, 130, 246, 0.24);
-  background: rgba(59, 130, 246, 0.12);
-  color: #1e3a8a;
+  border: 1px solid rgba(147, 197, 253, 0.22);
+  background: rgba(30, 41, 59, 0.9);
+  color: #e5edf8;
   font-size: 0.82rem;
   font-weight: 700;
   white-space: nowrap;
+}
+
+.sidebar .button-secondary {
+  border-color: rgba(148, 163, 184, 0.26);
+  background: rgba(15, 23, 42, 0.82);
+  color: #f8fafc;
 }
 
 .shell-context-bar {
@@ -278,6 +320,21 @@ a:focus-visible {
   flex-wrap: wrap;
   gap: var(--space-2);
   margin-bottom: var(--space-3);
+}
+
+.orders-shell-active .app-content {
+  min-height: 100vh;
+  padding: 24px;
+  background: #f8fafc;
+}
+
+.orders-shell-active .page-frame {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
 }
 
 .diagnostics-layout {
@@ -2318,10 +2375,22 @@ h3 {
 }
 
 .orders-enterprise-workspace {
-  gap: 24px;
+  gap: 0;
   min-height: 100%;
   padding: 24px;
   background: #f8fafc;
+}
+
+.orders-workspace-shell {
+  display: grid;
+  gap: 28px;
+  width: min(100%, 1500px);
+  margin: 0 auto;
+  padding: 28px;
+  border: 1px solid #e2e8f0;
+  border-radius: 28px;
+  background: #ffffff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, 0.07);
 }
 
 .orders-enterprise-header {
@@ -2352,14 +2421,15 @@ h3 {
 .orders-enterprise-kpi {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr);
-  gap: 14px;
+  grid-template-rows: minmax(0, 1fr) 22px;
+  gap: 12px 14px;
   align-items: start;
-  min-height: 128px;
+  min-height: 138px;
   padding: 20px;
   border: 1px solid #e2e8f0;
   border-radius: 20px;
   background: #ffffff;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.055);
+  box-shadow: 0 16px 32px rgba(15, 23, 42, 0.075);
 }
 
 .orders-enterprise-kpi div {
@@ -2402,6 +2472,34 @@ h3 {
   line-height: 1.35;
 }
 
+.orders-kpi-sparkline {
+  grid-column: 1 / -1;
+  display: block;
+  height: 22px;
+  border-radius: 999px;
+  background:
+    linear-gradient(90deg, transparent 0 8%, rgba(37, 99, 235, 0.18) 8% 10%, transparent 10% 18%, rgba(37, 99, 235, 0.28) 18% 21%, transparent 21% 35%, rgba(37, 99, 235, 0.2) 35% 38%, transparent 38% 100%),
+    linear-gradient(180deg, transparent 50%, #eff6ff 50% 54%, transparent 54%);
+}
+
+.orders-kpi-awaiting .orders-kpi-sparkline {
+  background:
+    linear-gradient(90deg, transparent 0 8%, rgba(245, 158, 11, 0.18) 8% 10%, transparent 10% 18%, rgba(245, 158, 11, 0.28) 18% 21%, transparent 21% 35%, rgba(245, 158, 11, 0.2) 35% 38%, transparent 38% 100%),
+    linear-gradient(180deg, transparent 50%, #fef3c7 50% 54%, transparent 54%);
+}
+
+.orders-kpi-blocked .orders-kpi-sparkline {
+  background:
+    linear-gradient(90deg, transparent 0 8%, rgba(220, 38, 38, 0.18) 8% 10%, transparent 10% 18%, rgba(220, 38, 38, 0.28) 18% 21%, transparent 21% 35%, rgba(220, 38, 38, 0.2) 35% 38%, transparent 38% 100%),
+    linear-gradient(180deg, transparent 50%, #fee2e2 50% 54%, transparent 54%);
+}
+
+.orders-kpi-fulfilled .orders-kpi-sparkline {
+  background:
+    linear-gradient(90deg, transparent 0 8%, rgba(22, 163, 74, 0.18) 8% 10%, transparent 10% 18%, rgba(22, 163, 74, 0.28) 18% 21%, transparent 21% 35%, rgba(22, 163, 74, 0.2) 35% 38%, transparent 38% 100%),
+    linear-gradient(180deg, transparent 50%, #dcfce7 50% 54%, transparent 54%);
+}
+
 .orders-kpi-awaiting .orders-kpi-icon {
   color: #92400e;
   background: #fef3c7;
@@ -2424,12 +2522,12 @@ h3 {
 
 .orders-filter-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 14px;
+  padding: 18px;
   border: 1px solid #e2e8f0;
-  border-radius: 18px;
+  border-radius: 22px;
   background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.055);
 }
 
 .orders-control-center .op-toolbar {
@@ -2438,54 +2536,61 @@ h3 {
 }
 
 .orders-control-center .op-toolbar input {
-  min-width: min(420px, 100%);
-  min-height: 44px;
+  flex: 1 1 420px;
+  min-width: min(460px, 100%);
+  min-height: 46px;
   border-color: #e2e8f0;
   border-radius: 14px;
   background: #f8fafc;
 }
 
 .orders-control-center .op-filter-bar {
+  flex: 999 1 auto;
   gap: 10px;
+  justify-content: flex-end;
 }
 
 .orders-control-center .op-filter-bar select,
 .orders-control-center .op-filter-bar .button {
-  min-height: 44px;
+  min-height: 46px;
   border-color: #e2e8f0;
   border-radius: 14px;
 }
 
 .orders-workspace-grid {
   grid-template-columns: minmax(0, 1fr) minmax(336px, 360px);
-  gap: 18px;
+  gap: 22px;
   align-items: start;
+}
+
+.orders-table-shell {
+  min-width: 0;
 }
 
 .orders-op-table-v3 {
   overflow: auto;
   border: 1px solid #e2e8f0;
-  border-radius: 18px;
+  border-radius: 22px;
   background: #ffffff;
-  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.05);
+  box-shadow: 0 18px 38px rgba(15, 23, 42, 0.06);
 }
 
 .orders-op-table-v3 .op-table-head,
 .orders-op-table-v3 .op-table-row {
-  min-width: 860px;
-  grid-template-columns: minmax(210px, 1.45fr) minmax(170px, 1.1fr) minmax(110px, 0.66fr) minmax(160px, 1fr) minmax(140px, 0.82fr) minmax(124px, 0.72fr);
+  min-width: 920px;
+  grid-template-columns: minmax(240px, 1.48fr) minmax(178px, 1.06fr) minmax(116px, 0.62fr) minmax(170px, 0.96fr) minmax(150px, 0.8fr) minmax(130px, 0.68fr);
 }
 
 .orders-op-table-v3 .op-table-head {
-  min-height: 38px;
-  padding: 0 16px;
+  min-height: 42px;
+  padding: 0 18px;
   background: #f8fafc;
   color: #64748b;
 }
 
 .orders-op-table-v3 .op-table-row {
-  min-height: 72px;
-  padding: 12px 16px;
+  min-height: 84px;
+  padding: 14px 18px;
   border-bottom-color: #e2e8f0;
   transition:
     background 0.16s ease,
@@ -2495,7 +2600,7 @@ h3 {
 .orders-op-table-v3 .op-table-row:hover,
 .orders-op-table-v3 .op-row-selected {
   background: #f8fbff;
-  box-shadow: inset 3px 0 0 #2563eb;
+  box-shadow: inset 4px 0 0 #2563eb, 0 10px 28px rgba(37, 99, 235, 0.06);
 }
 
 .orders-table-order-cell strong {
@@ -2530,11 +2635,11 @@ h3 {
   top: 20px;
   width: min(100%, 360px);
   max-height: calc(100vh - 40px);
-  padding: 16px;
+  padding: 18px;
   border-color: #e2e8f0;
-  border-radius: 20px;
+  border-radius: 24px;
   background: #ffffff;
-  box-shadow: 0 18px 34px rgba(15, 23, 42, 0.075);
+  box-shadow: 0 22px 42px rgba(15, 23, 42, 0.09);
 }
 
 .orders-control-center .op-side-panel-header {
@@ -2564,7 +2669,7 @@ h3 {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  padding: 14px;
+  padding: 16px;
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
@@ -2596,7 +2701,7 @@ h3 {
 .orders-detail-card {
   display: grid;
   gap: 12px;
-  padding: 14px;
+  padding: 16px;
 }
 
 .orders-detail-card h4 {
@@ -2629,6 +2734,7 @@ h3 {
 
 .orders-status-block-grid {
   display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -2662,8 +2768,8 @@ h3 {
 
 .orders-control-center .order-detail-item {
   grid-template-columns: 38px minmax(0, 1fr) auto;
-  gap: 9px;
-  padding: 9px;
+  gap: 10px;
+  padding: 10px;
   border-color: #e2e8f0;
   border-radius: 13px;
   background: #f8fafc;
@@ -2703,16 +2809,17 @@ h3 {
 .orders-insights-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 18px;
 }
 
 .orders-insights-grid .op-section {
   gap: 12px;
-  padding: 16px;
+  min-height: 176px;
+  padding: 18px;
   border-color: #e2e8f0;
-  border-radius: 18px;
+  border-radius: 22px;
   background: #ffffff;
-  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.045);
+  box-shadow: 0 16px 34px rgba(15, 23, 42, 0.055);
 }
 
 .orders-insight-list,

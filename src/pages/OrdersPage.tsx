@@ -236,145 +236,147 @@ export function OrdersPage() {
 
   return (
     <section className="op-page orders-control-center orders-enterprise-workspace">
-      <div className="op-page-heading orders-enterprise-header">
-        <div>
-          <p className="eyebrow">Orders</p>
-          <h2>{currentVendor.vendorName} orders control center</h2>
-          <p className="page-description">
-            Vendor-scoped fulfillment queue with Shopify order metadata, shipment progress, and tracking visibility.
-          </p>
+      <div className="orders-workspace-shell">
+        <div className="op-page-heading orders-enterprise-header">
+          <div>
+            <p className="eyebrow">Orders</p>
+            <h2>{currentVendor.vendorName} orders control center</h2>
+            <p className="page-description">
+              Vendor-scoped fulfillment queue with Shopify order metadata, shipment progress, and tracking visibility.
+            </p>
+          </div>
+          <div className="op-heading-meta">
+            <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+            <StatusBadge tone={summary.blocked > 0 ? 'warning' : 'success'}>{summary.blocked} attention</StatusBadge>
+          </div>
         </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
-          <StatusBadge tone={summary.blocked > 0 ? 'warning' : 'success'}>{summary.blocked} attention</StatusBadge>
+
+        <div className="orders-enterprise-kpis">
+          {orderKpis.map((metric) => (
+            <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
+              <span className="orders-kpi-icon" aria-hidden="true">{metric.icon}</span>
+              <div>
+                <span>{metric.label}</span>
+                <strong>{metric.value}</strong>
+                <small>{metric.detail}</small>
+              </div>
+              <span className="orders-kpi-sparkline" aria-hidden="true" />
+            </article>
+          ))}
         </div>
-      </div>
 
-      <div className="orders-enterprise-kpis">
-        {orderKpis.map((metric) => (
-          <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
-            <span className="orders-kpi-icon" aria-hidden="true">{metric.icon}</span>
-            <div>
-              <span>{metric.label}</span>
-              <strong>{metric.value}</strong>
-              <small>{metric.detail}</small>
-            </div>
-          </article>
-        ))}
-      </div>
-
-      <div className="orders-filter-card">
-        <OperationalToolbar>
-          <SearchInput
-            placeholder="Search order, customer, tracking, carrier..."
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-          />
-          <FilterBar>
-            <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-              <option value="all">All allocation states</option>
-              <option value="active">Active</option>
-              <option value="pending_reassignment">Pending reassignment</option>
-              <option value="vendor_blocked">Vendor blocked</option>
-              <option value="fulfilled">Fulfilled allocation</option>
-            </select>
-            <select value={fulfillmentFilter} onChange={(event) => setFulfillmentFilter(event.target.value)}>
-              <option value="all">All fulfillment</option>
-              <option value="Pending">Pending</option>
-              <option value="Processing">Processing</option>
-              <option value="Partially Fulfilled">Partially fulfilled</option>
-              <option value="Fulfilled">Fulfilled</option>
-            </select>
-            <select value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)}>
-              <option value="all">All shipping</option>
-              <option value="Awaiting Shipment">Awaiting shipment</option>
-              <option value="Label Created">Label created</option>
-              <option value="In Transit">In transit</option>
-              <option value="Delivered">Delivered</option>
-            </select>
-            <button
-              type="button"
-              className="button button-secondary"
-              onClick={() => {
-                setSearchTerm('');
-                setStatusFilter('all');
-                setFulfillmentFilter('all');
-                setShippingFilter('all');
-              }}
-            >
-              Reset
-            </button>
-          </FilterBar>
-        </OperationalToolbar>
-
-        <div className="orders-filter-summary">
-          <span>{filteredOrders.length} orders</span>
-          <span>{statusFilter === 'all' ? 'All allocation states' : statusFilter.replace(/_/g, ' ')}</span>
-          <span>{fulfillmentFilter === 'all' ? 'All fulfillment states' : fulfillmentFilter}</span>
-          <span>{shippingFilter === 'all' ? 'All shipping states' : shippingFilter}</span>
-        </div>
-      </div>
-
-      <div className="op-control-layout orders-control-layout orders-workspace-grid">
-        <div className="op-main-column">
-          {filteredOrders.length === 0 ? (
-            <EmptyStatePanel
-              title="No orders in this view"
-              description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
+        <div className="orders-filter-card">
+          <OperationalToolbar>
+            <SearchInput
+              placeholder="Search order, customer, tracking, carrier..."
+              value={searchTerm}
+              onChange={(event) => setSearchTerm(event.target.value)}
             />
-          ) : (
-            <OperationalTable
-              columns={['Order', 'Lifecycle', 'Value', 'Shipping', 'Updated', 'Actions']}
-              className="orders-op-table orders-op-table-v3"
-            >
-              {filteredOrders.map((order) => (
-                <OperationalTableRow
-                  key={order.id}
-                  selected={selectedOrderSummary?.id === order.id}
-                  onSelect={() => setSelectedOrderId(order.id)}
-                >
-                  <span className="orders-table-order-cell">
-                    <strong>#{order.sourceShopifyOrderNumber}</strong>
-                    <small>{getCustomerLabel(order.customer)}</small>
-                    <small>{currentVendor.vendorName} · {order.channel}</small>
-                  </span>
-                  <div className="orders-table-status-cell">
-                    <StatusBadge tone={getStatusTone(order.allocationStatus)}>{getAttentionLabel(order)}</StatusBadge>
-                    <StatusBadge tone={getStatusTone(order.fulfillmentStatus)}>{order.fulfillmentStatus}</StatusBadge>
-                    <small>{order.allocationStatus.replace(/_/g, ' ')}</small>
-                  </div>
-                  <span>
-                    <strong className="finance-amount-emphasis">{order.amount}</strong>
-                    <small>{getLineItemCount(order)} line items</small>
-                  </span>
-                  <span>
-                    <StatusBadge tone={getStatusTone(order.shippingStatus)}>{order.shippingStatus}</StatusBadge>
-                    <small>{getTrackingLabel(order)}</small>
-                    <small>{getTrackingHelper(order)}</small>
-                  </span>
-                  <span>
-                    <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
-                    <small>{order.channel}</small>
-                  </span>
-                  <OperationalActionGroup>
-                    <button type="button" className="button button-secondary" onClick={() => setSelectedOrderId(order.id)}>
-                      View
-                    </button>
-                    <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
-                      Open
-                    </Link>
-                  </OperationalActionGroup>
-                </OperationalTableRow>
-              ))}
-            </OperationalTable>
-          )}
+            <FilterBar>
+              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                <option value="all">All allocation states</option>
+                <option value="active">Active</option>
+                <option value="pending_reassignment">Pending reassignment</option>
+                <option value="vendor_blocked">Vendor blocked</option>
+                <option value="fulfilled">Fulfilled allocation</option>
+              </select>
+              <select value={fulfillmentFilter} onChange={(event) => setFulfillmentFilter(event.target.value)}>
+                <option value="all">All fulfillment</option>
+                <option value="Pending">Pending</option>
+                <option value="Processing">Processing</option>
+                <option value="Partially Fulfilled">Partially fulfilled</option>
+                <option value="Fulfilled">Fulfilled</option>
+              </select>
+              <select value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)}>
+                <option value="all">All shipping</option>
+                <option value="Awaiting Shipment">Awaiting shipment</option>
+                <option value="Label Created">Label created</option>
+                <option value="In Transit">In transit</option>
+                <option value="Delivered">Delivered</option>
+              </select>
+              <button
+                type="button"
+                className="button button-secondary"
+                onClick={() => {
+                  setSearchTerm('');
+                  setStatusFilter('all');
+                  setFulfillmentFilter('all');
+                  setShippingFilter('all');
+                }}
+              >
+                Reset
+              </button>
+            </FilterBar>
+          </OperationalToolbar>
+
+          <div className="orders-filter-summary">
+            <span>{filteredOrders.length} orders</span>
+            <span>{statusFilter === 'all' ? 'All allocation states' : statusFilter.replace(/_/g, ' ')}</span>
+            <span>{fulfillmentFilter === 'all' ? 'All fulfillment states' : fulfillmentFilter}</span>
+            <span>{shippingFilter === 'all' ? 'All shipping states' : shippingFilter}</span>
+          </div>
         </div>
 
-        <SideDetailPanel
-          eyebrow="Order detail"
-          title={selectedOrder ? `Shopify #${selectedOrder.sourceShopifyOrderNumber}` : 'No order selected'}
-          action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open</Link> : null}
-        >
+        <div className="op-control-layout orders-control-layout orders-workspace-grid">
+          <div className="op-main-column orders-table-shell">
+            {filteredOrders.length === 0 ? (
+              <EmptyStatePanel
+                title="No orders in this view"
+                description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
+              />
+            ) : (
+              <OperationalTable
+                columns={['Order', 'Lifecycle', 'Value', 'Shipping', 'Updated', 'Actions']}
+                className="orders-op-table orders-op-table-v3"
+              >
+                {filteredOrders.map((order) => (
+                  <OperationalTableRow
+                    key={order.id}
+                    selected={selectedOrderSummary?.id === order.id}
+                    onSelect={() => setSelectedOrderId(order.id)}
+                  >
+                    <span className="orders-table-order-cell">
+                      <strong>#{order.sourceShopifyOrderNumber}</strong>
+                      <small>{getCustomerLabel(order.customer)}</small>
+                      <small>{currentVendor.vendorName} · {order.channel}</small>
+                    </span>
+                    <div className="orders-table-status-cell">
+                      <StatusBadge tone={getStatusTone(order.allocationStatus)}>{getAttentionLabel(order)}</StatusBadge>
+                      <StatusBadge tone={getStatusTone(order.fulfillmentStatus)}>{order.fulfillmentStatus}</StatusBadge>
+                      <small>{order.allocationStatus.replace(/_/g, ' ')}</small>
+                    </div>
+                    <span>
+                      <strong className="finance-amount-emphasis">{order.amount}</strong>
+                      <small>{getLineItemCount(order)} line items</small>
+                    </span>
+                    <span>
+                      <StatusBadge tone={getStatusTone(order.shippingStatus)}>{order.shippingStatus}</StatusBadge>
+                      <small>{getTrackingLabel(order)}</small>
+                      <small>{getTrackingHelper(order)}</small>
+                    </span>
+                    <span>
+                      <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
+                      <small>{order.channel}</small>
+                    </span>
+                    <OperationalActionGroup>
+                      <button type="button" className="button button-secondary" onClick={() => setSelectedOrderId(order.id)}>
+                        View
+                      </button>
+                      <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
+                        Open
+                      </Link>
+                    </OperationalActionGroup>
+                  </OperationalTableRow>
+                ))}
+              </OperationalTable>
+            )}
+          </div>
+
+          <SideDetailPanel
+            eyebrow="Order detail"
+            title={selectedOrder ? `Shopify #${selectedOrder.sourceShopifyOrderNumber}` : 'No order selected'}
+            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open</Link> : null}
+          >
           {selectedOrder ? (
             <>
               <div className="orders-detail-hero">
@@ -504,61 +506,62 @@ export function OrdersPage() {
           ) : (
             <EmptyStatePanel title="Select an order" description="Choose an order to inspect allocation, fulfillment, and tracking context." />
           )}
-        </SideDetailPanel>
-      </div>
+          </SideDetailPanel>
+        </div>
 
-      <div className="orders-insights-grid">
-        <OperationalSection title="Operational insights" description="Current vendor-scoped order signals.">
-          <div className="orders-insight-list">
-            <div>
-              <span>Awaiting shipment</span>
-              <strong>{summary.awaitingShipment}</strong>
+        <div className="orders-insights-grid">
+          <OperationalSection title="Operational insights" description="Current vendor-scoped order signals.">
+            <div className="orders-insight-list">
+              <div>
+                <span>Awaiting shipment</span>
+                <strong>{summary.awaitingShipment}</strong>
+              </div>
+              <div>
+                <span>Blocked / attention</span>
+                <strong>{summary.blocked}</strong>
+              </div>
+              <div>
+                <span>Tracking visible</span>
+                <strong>{summary.tracked}</strong>
+              </div>
             </div>
-            <div>
-              <span>Blocked / attention</span>
-              <strong>{summary.blocked}</strong>
-            </div>
-            <div>
-              <span>Tracking visible</span>
-              <strong>{summary.tracked}</strong>
-            </div>
-          </div>
-        </OperationalSection>
+          </OperationalSection>
 
-        <OperationalSection title="Recent order activity" description="Latest orders in the current filtered view.">
-          {recentOrders.length ? (
-            <div className="orders-activity-list">
-              {recentOrders.map((order) => (
-                <div key={order.id} className="orders-activity-row">
-                  <span className="orders-activity-dot" aria-hidden="true" />
-                  <div>
-                    <strong>#{order.sourceShopifyOrderNumber}</strong>
-                    <small>{order.shippingStatus} · {formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</small>
+          <OperationalSection title="Recent order activity" description="Latest orders in the current filtered view.">
+            {recentOrders.length ? (
+              <div className="orders-activity-list">
+                {recentOrders.map((order) => (
+                  <div key={order.id} className="orders-activity-row">
+                    <span className="orders-activity-dot" aria-hidden="true" />
+                    <div>
+                      <strong>#{order.sourceShopifyOrderNumber}</strong>
+                      <small>{order.shippingStatus} · {formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</small>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <EmptyStatePanel title="No records available" description="No records available." />
-          )}
-        </OperationalSection>
+                ))}
+              </div>
+            ) : (
+              <EmptyStatePanel title="No records available" description="No records available." />
+            )}
+          </OperationalSection>
 
-        <OperationalSection title="Automation signals" description="Order conditions that may need operator attention.">
-          <div className="orders-insight-list">
-            <div>
-              <span>Reassignment or vendor block</span>
-              <strong>{summary.blocked}</strong>
+          <OperationalSection title="Automation signals" description="Order conditions that may need operator attention.">
+            <div className="orders-insight-list">
+              <div>
+                <span>Reassignment or vendor block</span>
+                <strong>{summary.blocked}</strong>
+              </div>
+              <div>
+                <span>Awaiting shipment</span>
+                <strong>{summary.awaitingShipment}</strong>
+              </div>
+              <div>
+                <span>Current view</span>
+                <strong>{filteredOrders.length}</strong>
+              </div>
             </div>
-            <div>
-              <span>Awaiting shipment</span>
-              <strong>{summary.awaitingShipment}</strong>
-            </div>
-            <div>
-              <span>Current view</span>
-              <strong>{filteredOrders.length}</strong>
-            </div>
-          </div>
-        </OperationalSection>
+          </OperationalSection>
+        </div>
       </div>
     </section>
   );

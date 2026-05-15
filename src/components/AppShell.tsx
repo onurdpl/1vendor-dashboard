@@ -8,19 +8,19 @@ import { useActionFeedback } from '../lib/ui';
 import { ActionFeedback } from './ActionFeedback';
 
 const workspaceNavItems = [
-  { to: '/', label: 'Dashboard' },
+  { to: '/', label: 'Dashboard', icon: 'D' },
 ];
 
 const operationsNavItems = [
-  { to: '/orders', label: 'Orders' },
-  { to: '/returns', label: 'Returns' },
-  { to: '/finance', label: 'Finance' },
-  { to: '/automation', label: 'Automation' },
+  { to: '/orders', label: 'Orders', icon: 'O' },
+  { to: '/returns', label: 'Returns', icon: 'R' },
+  { to: '/finance', label: 'Finance', icon: 'F' },
+  { to: '/automation', label: 'Automation', icon: 'A' },
 ];
 
 const adminNavItems = [
-  { to: '/admin/operations', label: 'Operations Queue' },
-  { to: '/admin/diagnostics', label: 'Diagnostics' },
+  { to: '/admin/operations', label: 'Operations Queue', icon: 'Q' },
+  { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
 ];
 
 export function AppShell() {
@@ -30,6 +30,8 @@ export function AppShell() {
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
   const isDashboardRoute = location.pathname === '/';
+  const isOrdersRoute = location.pathname === '/orders';
+  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute;
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);
@@ -65,7 +67,7 @@ export function AppShell() {
   }
 
   return (
-    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''}`}>
+    <div className={`app-shell ${isDashboardRoute ? 'dashboard-shell-active' : ''} ${isOrdersRoute ? 'orders-shell-active' : ''}`}>
       <aside className="sidebar">
         <div className="brand shell-brand">
           <div className="brand-mark" aria-hidden="true">
@@ -87,6 +89,7 @@ export function AppShell() {
                 end
                 className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
               >
+                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                 {item.label}
               </NavLink>
             ))}
@@ -102,6 +105,7 @@ export function AppShell() {
                 to={item.to}
                 className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
               >
+                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                 {item.label}
               </NavLink>
             ))}
@@ -117,6 +121,7 @@ export function AppShell() {
                   to={item.to}
                   className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
                 >
+                  <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                   {item.label}
                 </NavLink>
               ))}
@@ -172,7 +177,7 @@ export function AppShell() {
       </aside>
 
       <div className="app-content">
-        {isDashboardRoute ? null : (
+        {usesModernWorkspaceFrame ? null : (
           <>
             <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
             <div className="shell-context-bar">
