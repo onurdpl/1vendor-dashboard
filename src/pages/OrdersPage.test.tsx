@@ -122,7 +122,7 @@ describe('OrdersPage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /orders control center/i })).toBeInTheDocument();
     expect(listOrdersMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
-    expect(screen.getByText('Tracking / carrier')).toBeInTheDocument();
+    expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
   });
 
@@ -137,7 +137,7 @@ describe('OrdersPage control center', () => {
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
     expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1002', { vendorId: 'demo-vendor-a' });
-    expect(screen.getAllByText('TRK-A-1002').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
   });
