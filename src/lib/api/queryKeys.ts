@@ -19,6 +19,9 @@ export const queryKeys = {
     orders: {
       breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,
     },
+    shipments: {
+      providerConfig: (provider: string) => ['admin', 'shipments', 'provider-config', provider] as const,
+    },
   },
   dashboard: {
     overview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'overview', vendorId] as const,

@@ -155,6 +155,21 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async shippingProviderDiagnostics() {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.getShippingProviderDiagnostics('kargo_entegrator');
+      }
+
+      return {
+        provider: 'kargo_entegrator' as const,
+        executionReady: false,
+        shippingExecutionEnabled: false,
+        providerEnabled: false,
+        baseUrlConfigured: false,
+        apiKeyConfigured: false,
+        missing: ['SHIPPING_EXECUTION_ENABLED', 'KARGO_ENTEGRATOR_ENABLED'],
+      };
+    },
   },
   returns: {
     list: (vendorId = getCurrentVendorId()) =>

@@ -7,12 +7,14 @@ import { setCurrentUser, setToken } from '../lib/auth';
 import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
+const getShippingProviderDiagnosticsMock = vi.fn();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
   return {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
+    getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
     createShipmentExecution: vi.fn(),
     submitFulfillmentTracking: vi.fn(),
   };
@@ -124,6 +126,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     setToken('test-token');
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
+    getShippingProviderDiagnosticsMock.mockReset();
+    getShippingProviderDiagnosticsMock.mockResolvedValue({
+      provider: 'kargo_entegrator',
+      executionReady: false,
+      shippingExecutionEnabled: false,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      missing: ['SHIPPING_EXECUTION_ENABLED'],
+    });
   });
 
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {
@@ -143,7 +155,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('message, shipment_id')).toBeInTheDocument();
     expect(screen.getByText('Provider returned no shipment identifiers.')).toBeInTheDocument();
     expect(screen.getByText('Provider id present')).toBeInTheDocument();
-    expect(screen.queryByText(/api key/i)).not.toBeInTheDocument();
+    expect(await screen.findByLabelText('Shipping provider diagnostics')).toBeInTheDocument();
+    expect(screen.getByText('Shipping execution enabled')).toBeInTheDocument();
+    expect(screen.getByText('SHIPPING_EXECUTION_ENABLED')).toBeInTheDocument();
+    expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
 
@@ -162,6 +177,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByText('Order ##1028')).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByText('message, shipment_id')).not.toBeInTheDocument();
+    expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
   });
 });

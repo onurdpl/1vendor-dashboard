@@ -511,7 +511,7 @@ describe('shipping execution foundation', () => {
     expect(diagnostics).toMatchObject({
       provider: 'kargo_entegrator',
       executionReady: false,
-      globalShippingExecutionEnabled: false,
+      shippingExecutionEnabled: false,
       providerEnabled: true,
       baseUrlConfigured: true,
       apiKeyConfigured: true,
@@ -532,7 +532,7 @@ describe('shipping execution foundation', () => {
     expect(diagnostics).toMatchObject({
       provider: 'kargo_entegrator',
       executionReady: true,
-      globalShippingExecutionEnabled: true,
+      shippingExecutionEnabled: true,
       providerEnabled: true,
       baseUrlConfigured: true,
       apiKeyConfigured: true,

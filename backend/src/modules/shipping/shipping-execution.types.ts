@@ -35,7 +35,7 @@ export type VendorShippingConfigDto = {
 export type ShippingProviderGateDiagnosticsDto = {
   provider: ShippingProviderDto;
   executionReady: boolean;
-  globalShippingExecutionEnabled: boolean;
+  shippingExecutionEnabled: boolean;
   providerEnabled: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;

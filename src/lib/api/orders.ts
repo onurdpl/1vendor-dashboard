@@ -27,3 +27,7 @@ export async function submitFulfillmentTracking(
 export async function createShipmentExecution(allocationId: string) {
   return runtimeServices.orders.createShipmentExecution(allocationId);
 }
+
+export async function getShippingProviderDiagnostics() {
+  return runtimeServices.orders.shippingProviderDiagnostics();
+}

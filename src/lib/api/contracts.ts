@@ -47,6 +47,16 @@ export type ShipmentExecution = {
   };
 };
 
+export type ShippingProviderDiagnostics = {
+  provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
+  executionReady: boolean;
+  shippingExecutionEnabled: boolean;
+  providerEnabled: boolean;
+  baseUrlConfigured: boolean;
+  apiKeyConfigured: boolean;
+  missing: string[];
+};
+
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';
 
 export type AssignmentHistoryEntry = {

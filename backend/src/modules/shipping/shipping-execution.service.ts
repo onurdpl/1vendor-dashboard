@@ -413,7 +413,7 @@ export function getShippingProviderGateDiagnostics(
   return {
     provider,
     executionReady: env.SHIPPING_EXECUTION_ENABLED && providerEnabled && baseUrlConfigured && apiKeyConfigured,
-    globalShippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
+    shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
     providerEnabled,
     baseUrlConfigured,
     apiKeyConfigured,

@@ -8,6 +8,7 @@ import type {
   OrderDetail,
   OrderLineItem,
   ShipmentExecution,
+  ShippingProviderDiagnostics,
   OrderStatus,
   OrderSummary,
   ShippingStatus,
@@ -40,6 +41,7 @@ export type SubmitFulfillmentTrackingResult = {
 };
 
 export type CreateShipmentExecutionResult = ShipmentExecution;
+export type ShippingProviderDiagnosticsResult = ShippingProviderDiagnostics;
 
 type OrderSummaryDto = {
   id: string;
@@ -460,4 +462,8 @@ export async function createShipmentExecution(allocationId: string) {
   return apiClient.post<CreateShipmentExecutionResult>('/shipments/create', {
     allocationId,
   });
+}
+
+export async function getShippingProviderDiagnostics(provider: 'kargo_entegrator' = 'kargo_entegrator') {
+  return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?provider=${provider}`);
 }

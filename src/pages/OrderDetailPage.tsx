@@ -4,7 +4,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { createShipmentExecution, getOrder, submitFulfillmentTracking } from '../features/orders/api';
+import { createShipmentExecution, getOrder, getShippingProviderDiagnostics, submitFulfillmentTracking } from '../features/orders/api';
 import { getCurrentUser } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -123,6 +123,13 @@ export function OrderDetailPage() {
       }
 
       return getOrder(orderId);
+    },
+  );
+  const { data: shippingProviderDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig('kargo_entegrator'),
+    () => getShippingProviderDiagnostics(),
+    {
+      enabled: isAdmin,
     },
   );
   const { mutateAsync: reportFulfillmentIssue, isPending: isReportingIssue } = useMutationAction(
@@ -767,6 +774,34 @@ export function OrderDetailPage() {
                         </div>
                       </div>
                     ) : null}
+                  </div>
+                ) : null}
+                {isAdmin && shippingProviderDiagnostics ? (
+                  <div className="shipping-provider-diagnostics" aria-label="Shipping provider diagnostics">
+                    <div className="provider-response-heading">
+                      <strong>Shipping provider diagnostics</strong>
+                      <span>Admin only</span>
+                    </div>
+                    <div className="summary-row">
+                      <span>Shipping execution enabled</span>
+                      <strong>{shippingProviderDiagnostics.shippingExecutionEnabled ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Provider enabled</span>
+                      <strong>{shippingProviderDiagnostics.providerEnabled ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Base URL configured</span>
+                      <strong>{shippingProviderDiagnostics.baseUrlConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>API key configured</span>
+                      <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Missing env names</span>
+                      <strong>{shippingProviderDiagnostics.missing.length ? shippingProviderDiagnostics.missing.join(', ') : '—'}</strong>
+                    </div>
                   </div>
                 ) : null}
                 <p className="page-description">
