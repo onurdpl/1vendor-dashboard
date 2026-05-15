@@ -237,16 +237,15 @@ export function OrdersPage() {
   return (
     <section className="op-page orders-control-center orders-enterprise-workspace">
       <div className="orders-workspace-shell">
-        <div className="op-page-heading orders-enterprise-header">
+        <div className="orders-compact-header">
           <div>
-            <p className="eyebrow">Orders</p>
-            <h2>{currentVendor.vendorName} orders control center</h2>
-            <p className="page-description">
-              Vendor-scoped fulfillment queue with Shopify order metadata, shipment progress, and tracking visibility.
-            </p>
+            <div className="orders-title-row">
+              <h2>Orders</h2>
+              <StatusBadge tone="info">{currentVendor.vendorName}</StatusBadge>
+            </div>
+            <p>Manage shipments and tracking</p>
           </div>
           <div className="op-heading-meta">
-            <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
             <StatusBadge tone={summary.blocked > 0 ? 'warning' : 'success'}>{summary.blocked} attention</StatusBadge>
           </div>
         </div>
