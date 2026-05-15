@@ -15,7 +15,6 @@ import {
   ShopifyEntityDisplay,
   SideDetailPanel,
   StatusBadge,
-  TimelineBlock,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -25,7 +24,6 @@ import {
   attachShippingCost,
   createInvoiceExecution,
   getFinanceDashboard,
-  getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
   retryInvoiceExecution,
   updateVendorFinancialProfile,
@@ -108,19 +106,6 @@ function getFinanceLifecycleLabel(record: FinanceTransaction) {
   return 'Completed';
 }
 
-function getCalculationProfileSourceLabel(source?: string) {
-  if (source === 'snapshot') {
-    return 'Snapshot at sale creation';
-  }
-  if (source === 'current') {
-    return 'Current vendor profile';
-  }
-  if (source === 'default') {
-    return 'Default profile';
-  }
-  return 'Default profile';
-}
-
 function isZeroCurrencyValue(value: string) {
   return !/[1-9]/.test(value.replace(/[^\d]/g, ''));
 }
@@ -152,39 +137,6 @@ function getInvoiceStatusLabel(status?: string) {
     .split('_')
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(' ');
-}
-
-function formatResponseKeys(keys?: string[]) {
-  return keys?.length ? keys.join(', ') : '—';
-}
-
-function formatBooleanLabel(value?: boolean) {
-  return value ? 'yes' : 'no';
-}
-
-function getVendorTimelineItems(record: FinanceTransaction) {
-  const settlement = record.settlement;
-  return [
-    {
-      label: settlement?.status === 'accruing' ? 'Accruing' : 'Accrued',
-      at: settlement?.accruedAt ?? record.date,
-    },
-    {
-      label: settlement?.payoutReady ? 'Payable' : 'Waiting for payout readiness',
-      at: settlement?.payableAt ?? settlement?.eligibleAt ?? null,
-      detail: settlement?.payoutReady ? 'Ready' : 'Pending',
-    },
-    {
-      label: record.payoutBatch ? 'Included in payout batch' : 'Not batched yet',
-      at: record.payoutBatch?.createdAt ?? null,
-      detail: record.payoutBatch ? getPayoutBatchStatusLabel(record.payoutBatch.status) : 'Upcoming payout not prepared',
-    },
-    {
-      label: record.payoutBatch?.status === 'paid_placeholder' ? 'Paid placeholder' : 'Payout pending',
-      at: null,
-      detail: record.payoutBatch?.status === 'paid_placeholder' ? 'Marked placeholder only' : 'No payment execution yet',
-    },
-  ];
 }
 
 export function FinancePage() {
@@ -402,24 +354,6 @@ export function FinancePage() {
     }
     return filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0];
   }, [filteredRecords, selectedRecordId]);
-  const selectedInvoiceExecution = selectedRecord?.invoiceExecution ?? null;
-  const shouldShowInvoiceResponseSummary =
-    isAdmin && Boolean(selectedInvoiceExecution) && ['failed', 'unknown'].includes(selectedInvoiceExecution?.status ?? '');
-  const {
-    data: invoiceResponseSummary,
-    isLoading: isInvoiceResponseSummaryLoading,
-    isError: isInvoiceResponseSummaryError,
-  } = useQueryResource(
-    ['finance', 'invoice-response-summary', selectedInvoiceExecution?.id ?? 'none'],
-    () => {
-      if (!selectedInvoiceExecution) {
-        throw new Error('Invoice execution is not selected.');
-      }
-
-      return getInvoiceExecutionResponseSummary(selectedInvoiceExecution.id);
-    },
-    { enabled: shouldShowInvoiceResponseSummary },
-  );
 
   if (!authContextReady || isLoading) {
     return (
@@ -720,172 +654,142 @@ export function FinancePage() {
                   {selectedRecord.amount}
                 </strong>
               </div>
-              {isVendorUser ? null : (
-                <MetadataGroup title="Ledger metadata">
-                  <MetadataRow label="Ledger Record" value={selectedRecord.id} />
-                  <MetadataRow label="Source / type" value={selectedRecord.category} />
-                  <MetadataRow label="Lifecycle" value={getFinanceLifecycleLabel(selectedRecord)} />
-                  <MetadataRow label="Counterparty" value={selectedRecord.counterparty} />
-                  <MetadataRow label="Created At" value={formatDate(selectedRecord.date)} />
-                </MetadataGroup>
-              )}
-              {selectedRecord.payoutCalculation ? (
-                <MetadataGroup title={isVendorUser ? 'Payout breakdown' : 'Payout estimate'}>
-                  <MetadataRow label="Gross amount" value={selectedRecord.payoutCalculation.grossAmount} />
+              <div className="finance-detail-card finance-invoice-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Customer invoice</h4>
+                  <StatusBadge
+                    tone={
+                      selectedRecord.invoiceExecution?.status === 'created'
+                        ? 'success'
+                        : selectedRecord.invoiceExecution?.status === 'failed'
+                          ? 'danger'
+                          : 'attention'
+                    }
+                  >
+                    {selectedRecord.invoiceExecution?.status === 'created'
+                      ? 'Invoice created'
+                      : selectedRecord.invoiceExecution?.status === 'failed'
+                        ? 'Invoice failed'
+                        : 'Invoice pending'}
+                  </StatusBadge>
+                </div>
+                <div className="finance-detail-rows">
+                  <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not assigned'} />
+                  <MetadataRow label="Invoice date" value={selectedRecord.invoiceExecution ? formatDate(selectedRecord.invoiceExecution.updatedAt) : '—'} />
                   <MetadataRow
-                    label={`Commission (${selectedRecord.payoutCalculation.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%)`}
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.commission)}</span>}
+                    label="PDF"
+                    value={
+                      selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                        <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
+                      ) : (
+                        'Not available'
+                      )
+                    }
                   />
+                  {selectedRecord.invoiceExecution?.status === 'failed' || selectedRecord.invoiceExecution?.status === 'unknown' ? (
+                    <MetadataRow label="Reason" value="Invoice could not be generated. Try again or contact support." />
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="finance-detail-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Payout summary</h4>
+                  <StatusBadge tone={selectedRecord.settlement?.payoutReady ? 'success' : 'attention'}>
+                    {selectedRecord.settlement?.payoutReady ? 'Payable' : 'Pending'}
+                  </StatusBadge>
+                </div>
+                <div className="finance-detail-rows">
+                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : '—'} />
+                  <MetadataRow label="Payout status" value={selectedRecord.settlement ? getPayoutBatchStatusLabel(selectedRecord.settlement.status) : 'Pending'} />
                   <MetadataRow
-                    label={`Commission VAT (${selectedRecord.payoutCalculation.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%)`}
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.commissionVat)}</span>}
+                    label="Expected payout"
+                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount}</span>}
                   />
-                  <MetadataRow
-                    label="Shipping deduction"
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.shippingDeduction)}</span>}
-                  />
-                  <MetadataRow label="Shipping source" value={selectedRecord.payoutCalculation.shippingDeductionSource ?? 'none'} />
-                  <MetadataRow label="Shipping provider" value={selectedRecord.payoutCalculation.shippingCostProvider ?? 'Pending provider cost'} />
-                  <MetadataRow label="Shipping cost snapshot" value={selectedRecord.payoutCalculation.shippingCostSnapshot ?? 'No shipping cost snapshot'} />
-                  <MetadataRow label="Provider cost state" value={selectedRecord.payoutCalculation.shippingCostStatus ?? 'not_applicable'} />
                   <MetadataRow
                     label="Refund impact"
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation.refundImpact)}</span>}
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.refundImpact ?? '$0.00')}</span>}
+                  />
+                  <MetadataRow label="Upcoming payout" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
+                </div>
+              </div>
+
+              <div className="finance-detail-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Deductions</h4>
+                </div>
+                <div className="finance-detail-rows">
+                  <MetadataRow label="Commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
+                  <MetadataRow
+                    label="Commission amount"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commission ?? '$0.00')}</span>}
+                  />
+                  <MetadataRow label="Tax deduction" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
+                  <MetadataRow
+                    label="Tax amount"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commissionVat ?? '$0.00')}</span>}
+                  />
+                  <MetadataRow
+                    label="Shipping fee"
+                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction ?? '$0.00')}</span>}
                   />
                   <MetadataRow
                     label="Estimated payout"
-                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation.estimatedPayout}</span>}
+                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount}</span>}
                   />
-                </MetadataGroup>
-              ) : null}
-              {selectedRecord.settlement ? (
-                <MetadataGroup title={isVendorUser ? 'Payout status' : 'Settlement lifecycle'}>
-                  <MetadataRow label={isVendorUser ? 'Current state' : 'Settlement status'} value={getPayoutBatchStatusLabel(selectedRecord.settlement.status)} />
-                  <MetadataRow label="Payout readiness" value={selectedRecord.settlement.payoutReady ? 'Ready' : 'Not ready'} />
-                  <MetadataRow label="Eligible at" value={selectedRecord.settlement.eligibleAt ? formatDate(selectedRecord.settlement.eligibleAt) : 'Not eligible'} />
-                  <MetadataRow label="Payable at" value={selectedRecord.settlement.payableAt ? formatDate(selectedRecord.settlement.payableAt) : 'Not payable'} />
-                  <MetadataRow label={isVendorUser ? 'What this means' : 'Settlement note'} value={selectedRecord.settlement.note} />
-                </MetadataGroup>
-              ) : null}
-              {isVendorUser ? (
-                <MetadataGroup title="Payout timeline">
-                  <TimelineBlock items={getVendorTimelineItems(selectedRecord)} />
-                </MetadataGroup>
-              ) : null}
-              <MetadataGroup title="Payout batch">
-                <MetadataRow label="Batch status" value={selectedRecord.payoutBatch ? getPayoutBatchStatusLabel(selectedRecord.payoutBatch.status) : 'Unbatched'} />
-                <MetadataRow label="Batch reference" value={selectedRecord.payoutBatch?.id ?? 'Not prepared'} />
-                  <MetadataRow label="Batch net" value={selectedRecord.payoutBatch?.netAmount ?? 'Not prepared'} />
-                </MetadataGroup>
-              <MetadataGroup title="Customer invoice">
-                <MetadataRow label="Provider" value={selectedRecord.invoiceExecution?.provider ?? 'BizimHesap'} />
-                <MetadataRow label="Status" value={getInvoiceStatusLabel(selectedRecord.invoiceExecution?.status)} />
-                <MetadataRow label="Invoice GUID" value={selectedRecord.invoiceExecution?.providerInvoiceGuid ?? 'Not created'} />
-                <MetadataRow label="Invoice No" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not assigned'} />
-                <MetadataRow
-                  label="PDF"
-                  value={
-                    selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                      <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">Open invoice PDF</a>
-                    ) : (
-                      'Not available'
-                    )
-                  }
-                />
-                <MetadataRow
-                  label="Executed at"
-                  value={selectedRecord.invoiceExecution ? formatDate(selectedRecord.invoiceExecution.updatedAt) : 'Not executed'}
-                />
-              </MetadataGroup>
-              {shouldShowInvoiceResponseSummary ? (
-                <MetadataGroup title="Provider response summary">
-                  {isInvoiceResponseSummaryLoading ? (
-                    <MetadataRow label="Status" value="Loading provider summary..." />
-                  ) : isInvoiceResponseSummaryError ? (
-                    <MetadataRow label="Status" value="Provider summary unavailable" />
-                  ) : invoiceResponseSummary?.response ? (
-                    <>
-                      <MetadataRow label="HTTP" value={invoiceResponseSummary.response.httpStatus?.toString() ?? 'Unknown'} />
-                      <MetadataRow label="Content type" value={invoiceResponseSummary.response.contentType ?? 'Unknown'} />
-                      <MetadataRow
-                        label="Keys"
-                        value={formatResponseKeys(
-                          invoiceResponseSummary.response.bodyKeys.length
-                            ? invoiceResponseSummary.response.bodyKeys
-                            : invoiceResponseSummary.response.nestedBodyKeys,
-                        )}
-                      />
-                      <MetadataRow label="Provider error" value={invoiceResponseSummary.response.providerError ?? 'Not reported'} />
-                      <MetadataRow label="GUID present" value={formatBooleanLabel(invoiceResponseSummary.response.parsedGuidPresent)} />
-                      <MetadataRow label="PDF present" value={formatBooleanLabel(invoiceResponseSummary.response.parsedPdfUrlPresent)} />
-                    </>
-                  ) : (
-                    <MetadataRow label="Status" value="No provider response captured" />
-                  )}
-                </MetadataGroup>
-              ) : null}
-              {isAdmin && selectedRecord.category === 'Invoice' ? (
-                <div className="op-panel-section">
-                  <h4>Invoice execution</h4>
-                  <p className="page-description">
-                    Customer invoice execution is merchant-of-record accounting output. Ledger snapshots remain canonical.
-                  </p>
-                  <OperationalActionGroup>
-                    <button
-                      type="button"
-                      className="button button-primary button-compact"
-                      disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
-                      onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
-                    >
-                      {createInvoiceMutation.isPending ? 'Creating...' : 'Create invoice'}
-                    </button>
-                    <button
-                      type="button"
-                      className="button button-secondary button-compact"
-                      disabled={
-                        retryInvoiceMutation.isPending ||
-                        !selectedRecord.invoiceExecution ||
-                        !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
-                      }
-                      onClick={() => {
-                        if (selectedRecord.invoiceExecution) {
-                          retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
-                        }
-                      }}
-                    >
-                      {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry failed invoice'}
-                    </button>
-                  </OperationalActionGroup>
                 </div>
-              ) : null}
-              {isVendorUser ? null : (
-                <>
-                  <MetadataGroup title="Shopify identifiers">
-                    <MetadataRow label="Shopify Order Number" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : 'Not synced'} />
-                    <MetadataRow label="Shopify Order ID" value={selectedRecord.shopifyOrderId ?? 'Not synced'} />
-                    <MetadataRow label="Shopify Refund ID" value={selectedRecord.shopifyRefundId ?? 'Not synced'} />
-                  </MetadataGroup>
-                  <MetadataGroup title="Vendor scope">
-                    <MetadataRow label="Vendor" value={currentVendor.vendorName} />
-                    <MetadataRow label="Vendor ID" value={currentVendor.vendorId} />
-                    <MetadataRow label="Isolation" value="Current vendor-scoped finance query" />
-                  </MetadataGroup>
-                  <MetadataGroup title="Calculation profile">
-                    <MetadataRow label="Calculation profile" value={getCalculationProfileSourceLabel(selectedRecord.payoutCalculation?.profileSource)} />
-                    <MetadataRow label="Applied commission" value={`${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%`} />
-                    <MetadataRow label="Applied commission VAT" value={`${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-                    <MetadataRow label="Current vendor profile" value={`${finance.profile?.commissionPercent ?? '10.00'}% / ${finance.profile?.commissionVatPercent ?? '0.00'}% VAT`} />
-                    <MetadataRow label="Shipping mode" value={selectedRecord.payoutCalculation?.shippingMode ?? finance.profile?.shippingMode ?? 'disabled'} />
-                    <MetadataRow label="Shipping deductions" value={finance.summary.shippingDeductions ?? '$0.00'} />
-                  </MetadataGroup>
-                </>
-              )}
+              </div>
+
+              <div className="finance-detail-card finance-actions-card">
+                <div className="finance-detail-card-heading">
+                  <h4>Actions</h4>
+                </div>
+                <OperationalActionGroup>
+                  {selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                    <a className="button button-secondary button-compact" href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">
+                      Download PDF
+                    </a>
+                  ) : null}
+                  {isAdmin && selectedRecord.category === 'Invoice' ? (
+                    <>
+                      <button
+                        type="button"
+                        className="button button-primary button-compact"
+                        disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
+                        onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
+                      >
+                        {createInvoiceMutation.isPending ? 'Creating...' : 'Create invoice'}
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        disabled={
+                          retryInvoiceMutation.isPending ||
+                          !selectedRecord.invoiceExecution ||
+                          !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
+                        }
+                        onClick={() => {
+                          if (selectedRecord.invoiceExecution) {
+                            retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
+                          }
+                        }}
+                      >
+                        {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry invoice'}
+                      </button>
+                    </>
+                  ) : null}
+                  {!selectedRecord.invoiceExecution?.providerPdfUrl && !(isAdmin && selectedRecord.category === 'Invoice') ? (
+                    <StatusBadge tone="neutral">No actions available</StatusBadge>
+                  ) : null}
+                </OperationalActionGroup>
+              </div>
+
               {isAdmin && selectedRecord.category === 'Invoice' ? (
                 <form className="finance-shipping-cost-form" aria-label="Attach shipping cost" onSubmit={handleAttachShippingCost}>
                   <h4>Shipping cost</h4>
                   <div className="op-form-grid">
                     <label>
-                      <span>Provider</span>
+                      <span>Source</span>
                       <input
                         name="providerName"
                         value={shippingCostProvider}
@@ -906,7 +810,7 @@ export function FinancePage() {
                       />
                     </label>
                     <label>
-                      <span>VAT</span>
+                      <span>Tax</span>
                       <input
                         name="shippingVatAmount"
                         value={shippingVatAmount}
@@ -916,24 +820,16 @@ export function FinancePage() {
                     </label>
                   </div>
                   <button type="submit" className="button button-secondary button-compact" disabled={attachShippingCostMutation.isPending}>
-                    {attachShippingCostMutation.isPending ? 'Saving...' : 'Attach confirmed cost'}
+                    {attachShippingCostMutation.isPending ? 'Saving...' : 'Save shipping cost'}
                   </button>
                   <p className="page-description">
-                    Confirmed costs are stored for provider readiness. Existing ledger snapshots are not rewritten.
+                    Shipping cost can affect payout calculations.
                   </p>
                 </form>
               ) : null}
-              <div className="op-panel-section">
-                <h4>{isVendorUser ? 'Payout note' : 'Related return / refund context'}</h4>
-                <p className="page-description">
-                  {isVendorUser
-                    ? 'This is a read-only payout view. Actual payment execution is not enabled yet.'
-                    : 'Finance rows are derived from immutable ledger snapshots and settlement readiness state. Payout execution is not enabled yet.'}
-                </p>
-              </div>
             </>
           ) : (
-            <EmptyStatePanel title="Select a finance record" description="Choose a ledger record to inspect Shopify metadata and payout context." />
+            <EmptyStatePanel title="Select a finance record" description="Choose a finance row to review payout and invoice details." />
           )}
         </SideDetailPanel>
       </div>

@@ -210,28 +210,28 @@ describe('FinancePage control center', () => {
     await screen.findByText('Refund ledger write failed');
     await userEvent.click(screen.getByText('Refund ledger write failed'));
 
-    expect((await screen.findAllByText('gid://shopify/Refund/502')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Payout execution is not enabled yet/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Current vendor-scoped finance query').length).toBeGreaterThan(0);
+    expect(await screen.findByText('Customer invoice')).toBeInTheDocument();
+    expect(screen.getByText('Payout summary')).toBeInTheDocument();
+    expect(screen.getByText('Deductions')).toBeInTheDocument();
+    expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
 
-  it('shows applied snapshot commission and VAT rates in compact ledger detail', async () => {
+  it('shows vendor-friendly commission and tax deductions in compact ledger detail', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
     renderFinancePage();
 
     await userEvent.click(await screen.findByText('Shopify order sale recorded'));
 
-    expect(await screen.findByText('Commission (10.00%)')).toBeInTheDocument();
-    expect(screen.getByText('Commission VAT (0.00%)')).toBeInTheDocument();
-    expect(screen.getByText('Snapshot at sale creation')).toBeInTheDocument();
-    expect(screen.getByText('Applied commission')).toBeInTheDocument();
-    expect(screen.getByText('Applied commission VAT')).toBeInTheDocument();
-    expect(screen.getByText('Current vendor profile')).toBeInTheDocument();
+    expect((await screen.findAllByText('Commission')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tax deduction').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Shipping fee').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Snapshot at sale creation')).not.toBeInTheDocument();
+    expect(screen.queryByText('Current vendor profile')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
   });
 
-  it('shows safe invoice provider response summary to admins for unknown executions', async () => {
+  it('hides provider response internals for unknown invoice executions', async () => {
     getFinanceDashboardMock.mockResolvedValue({
       ...financeDashboard,
       transactions: [
@@ -252,34 +252,15 @@ describe('FinancePage control center', () => {
         financeDashboard.transactions[2],
       ],
     });
-    getInvoiceExecutionResponseSummaryMock.mockResolvedValue({
-      id: 'invoice-exec-unknown',
-      provider: 'bizimhesap',
-      status: 'unknown',
-      providerInvoiceGuidPresent: false,
-      providerInvoiceNoPresent: false,
-      providerPdfUrlPresent: false,
-      response: {
-        httpStatus: 200,
-        ok: true,
-        contentType: 'application/json',
-        parsedBodyType: 'object',
-        bodyKeys: ['error', 'guid', 'url', 'eInvoiceNo'],
-        nestedBodyKeys: ['error', 'guid', 'url', 'eInvoiceNo'],
-        providerError: 'Invoice could not be created.',
-        parsedGuidPresent: false,
-        parsedPdfUrlPresent: false,
-      },
-    });
 
     renderFinancePage();
 
-    expect(await screen.findByText('Provider response summary')).toBeInTheDocument();
-    expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown');
-    expect(screen.getByText('application/json')).toBeInTheDocument();
-    expect(screen.getByText('error, guid, url, eInvoiceNo')).toBeInTheDocument();
-    expect(screen.getByText('Invoice could not be created.')).toBeInTheDocument();
-    expect(screen.getAllByText('no').length).toBeGreaterThanOrEqual(2);
+    expect(await screen.findByText('Invoice pending')).toBeInTheDocument();
+    expect(screen.getByText('Invoice could not be generated. Try again or contact support.')).toBeInTheDocument();
+    expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('application/json')).not.toBeInTheDocument();
+    expect(screen.queryByText('GUID present')).not.toBeInTheDocument();
   });
 
   it('displays hold-equivalent refund ledger rows as Recorded instead of Failed', async () => {
@@ -356,7 +337,7 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /balance workspace/i })).toBeInTheDocument();
     expect(screen.getByText('Payable balance')).toBeInTheDocument();
-    expect(screen.getByText('Upcoming payout')).toBeInTheDocument();
+    expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
@@ -365,7 +346,7 @@ describe('FinancePage control center', () => {
     expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
   });
 
-  it('shows vendor payout timeline and batch reference in read-only detail', async () => {
+  it('shows vendor payout status and upcoming payout in read-only detail', async () => {
     setCurrentUser({
       email: 'vendor@demo.com',
       name: 'Demo Vendor',
@@ -381,10 +362,10 @@ describe('FinancePage control center', () => {
 
     await userEvent.click(await screen.findByText('Shopify order sale recorded'));
 
-    expect(await screen.findByText('Payout timeline')).toBeInTheDocument();
-    expect(screen.getByText('Included in payout batch')).toBeInTheDocument();
-    expect(screen.getByText('batch-demo-vendor-a')).toBeInTheDocument();
-    expect(screen.getByText('Payout pending')).toBeInTheDocument();
+    expect(await screen.findByText('Payout summary')).toBeInTheDocument();
+    expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
+    expect(screen.getByText('Customer invoice')).toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
   });
 
@@ -464,7 +445,7 @@ describe('FinancePage control center', () => {
     await waitFor(() => expect(updateVendorFinancialProfileMock).toHaveBeenCalled());
     await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('15.00% vendor profile')).toBeInTheDocument();
-    expect(await screen.findByText('-$488.75')).toBeInTheDocument();
+    expect((await screen.findAllByText('-$488.75')).length).toBeGreaterThan(0);
   });
 
   it('refreshes selected invoice payout detail after saving commission and VAT profile changes', async () => {

@@ -2433,6 +2433,38 @@ h3 {
   line-height: 1.35;
 }
 
+.finance-detail-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.045);
+}
+
+.finance-detail-card-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+}
+
+.finance-detail-card-heading h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.finance-detail-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.finance-actions-card .op-action-group {
+  justify-content: flex-start;
+}
+
 .finance-deduction-value {
   color: var(--op-danger);
   font-variant-numeric: tabular-nums;
