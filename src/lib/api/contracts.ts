@@ -248,6 +248,26 @@ export type InvoiceExecutionReference = {
   updatedAt: string;
 };
 
+export type InvoiceExecutionResponseSummary = {
+  id: string;
+  provider: 'bizimhesap' | 'parasut' | 'birfatura';
+  status: 'pending' | 'created' | 'failed' | 'cancelled' | 'unknown';
+  providerInvoiceGuidPresent: boolean;
+  providerInvoiceNoPresent: boolean;
+  providerPdfUrlPresent: boolean;
+  response: {
+    httpStatus: number | null;
+    ok: boolean | null;
+    contentType: string | null;
+    parsedBodyType: string | null;
+    bodyKeys: string[];
+    nestedBodyKeys: string[];
+    providerError: string | null;
+    parsedGuidPresent: boolean;
+    parsedPdfUrlPresent: boolean;
+  } | null;
+};
+
 export type PayoutBatchSummary = {
   eligibleRowCount: number;
   eligibleNetAmount: string;

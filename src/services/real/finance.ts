@@ -3,6 +3,7 @@ import type {
   FinanceDashboard,
   FinanceTransaction,
   InvoiceExecutionReference,
+  InvoiceExecutionResponseSummary,
   PayoutBatch,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
@@ -243,4 +244,10 @@ export function createInvoiceExecution(financeLedgerEntryId: string): Promise<In
 
 export function retryInvoiceExecution(invoiceExecutionId: string): Promise<InvoiceExecutionReference> {
   return apiClient.post<InvoiceExecutionReference>(`/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/retry`);
+}
+
+export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string): Promise<InvoiceExecutionResponseSummary> {
+  return apiClient.get<InvoiceExecutionResponseSummary>(
+    `/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/response-summary`,
+  );
 }

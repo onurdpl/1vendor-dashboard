@@ -632,6 +632,9 @@ describe('invoice execution foundation', () => {
           parsedBodyType: 'object',
           bodyKeys: ['guid', 'url'],
           nestedBodyKeys: ['guid', 'url'],
+          providerError: null,
+          parsedGuidPresent: true,
+          parsedPdfUrlPresent: true,
         }),
       }),
     );

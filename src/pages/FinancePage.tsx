@@ -25,6 +25,7 @@ import {
   attachShippingCost,
   createInvoiceExecution,
   getFinanceDashboard,
+  getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
   retryInvoiceExecution,
   updateVendorFinancialProfile,
@@ -151,6 +152,14 @@ function getInvoiceStatusLabel(status?: string) {
     .split('_')
     .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
     .join(' ');
+}
+
+function formatResponseKeys(keys?: string[]) {
+  return keys?.length ? keys.join(', ') : '—';
+}
+
+function formatBooleanLabel(value?: boolean) {
+  return value ? 'yes' : 'no';
 }
 
 function getVendorTimelineItems(record: FinanceTransaction) {
@@ -393,6 +402,24 @@ export function FinancePage() {
     }
     return filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0];
   }, [filteredRecords, selectedRecordId]);
+  const selectedInvoiceExecution = selectedRecord?.invoiceExecution ?? null;
+  const shouldShowInvoiceResponseSummary =
+    isAdmin && Boolean(selectedInvoiceExecution) && ['failed', 'unknown'].includes(selectedInvoiceExecution?.status ?? '');
+  const {
+    data: invoiceResponseSummary,
+    isLoading: isInvoiceResponseSummaryLoading,
+    isError: isInvoiceResponseSummaryError,
+  } = useQueryResource(
+    ['finance', 'invoice-response-summary', selectedInvoiceExecution?.id ?? 'none'],
+    () => {
+      if (!selectedInvoiceExecution) {
+        throw new Error('Invoice execution is not selected.');
+      }
+
+      return getInvoiceExecutionResponseSummary(selectedInvoiceExecution.id);
+    },
+    { enabled: shouldShowInvoiceResponseSummary },
+  );
 
   if (!authContextReady || isLoading) {
     return (
@@ -770,6 +797,33 @@ export function FinancePage() {
                   value={selectedRecord.invoiceExecution ? formatDate(selectedRecord.invoiceExecution.updatedAt) : 'Not executed'}
                 />
               </MetadataGroup>
+              {shouldShowInvoiceResponseSummary ? (
+                <MetadataGroup title="Provider response summary">
+                  {isInvoiceResponseSummaryLoading ? (
+                    <MetadataRow label="Status" value="Loading provider summary..." />
+                  ) : isInvoiceResponseSummaryError ? (
+                    <MetadataRow label="Status" value="Provider summary unavailable" />
+                  ) : invoiceResponseSummary?.response ? (
+                    <>
+                      <MetadataRow label="HTTP" value={invoiceResponseSummary.response.httpStatus?.toString() ?? 'Unknown'} />
+                      <MetadataRow label="Content type" value={invoiceResponseSummary.response.contentType ?? 'Unknown'} />
+                      <MetadataRow
+                        label="Keys"
+                        value={formatResponseKeys(
+                          invoiceResponseSummary.response.bodyKeys.length
+                            ? invoiceResponseSummary.response.bodyKeys
+                            : invoiceResponseSummary.response.nestedBodyKeys,
+                        )}
+                      />
+                      <MetadataRow label="Provider error" value={invoiceResponseSummary.response.providerError ?? 'Not reported'} />
+                      <MetadataRow label="GUID present" value={formatBooleanLabel(invoiceResponseSummary.response.parsedGuidPresent)} />
+                      <MetadataRow label="PDF present" value={formatBooleanLabel(invoiceResponseSummary.response.parsedPdfUrlPresent)} />
+                    </>
+                  ) : (
+                    <MetadataRow label="Status" value="No provider response captured" />
+                  )}
+                </MetadataGroup>
+              ) : null}
               {isAdmin && selectedRecord.category === 'Invoice' ? (
                 <div className="op-panel-section">
                   <h4>Invoice execution</h4>

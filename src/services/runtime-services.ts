@@ -229,6 +229,28 @@ export const runtimeServices = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }),
+    getInvoiceExecutionResponseSummary: (invoiceExecutionId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getInvoiceExecutionResponseSummary(invoiceExecutionId)
+        : Promise.resolve({
+            id: invoiceExecutionId,
+            provider: 'bizimhesap' as const,
+            status: 'unknown' as const,
+            providerInvoiceGuidPresent: false,
+            providerInvoiceNoPresent: false,
+            providerPdfUrlPresent: false,
+            response: {
+              httpStatus: 200,
+              ok: true,
+              contentType: 'application/json',
+              parsedBodyType: 'object',
+              bodyKeys: ['error', 'guid', 'url'],
+              nestedBodyKeys: ['error', 'guid', 'url'],
+              providerError: null,
+              parsedGuidPresent: false,
+              parsedPdfUrlPresent: false,
+            },
+          }),
   },
   automation: {
     dashboard: () =>

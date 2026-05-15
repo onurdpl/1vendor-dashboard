@@ -127,6 +127,45 @@ function collectNestedKeys(value: unknown, prefix = '', keys = new Set<string>()
   return keys;
 }
 
+function normalizeResponseKey(value: string) {
+  return value.replace(/[^a-z0-9]/gi, '').toLowerCase();
+}
+
+function readNestedResponseString(value: unknown, keys: string[], visited = new Set<unknown>()): string | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (visited.has(value)) {
+    return null;
+  }
+  visited.add(value);
+
+  const normalizedKeys = new Set(keys.map(normalizeResponseKey));
+  for (const [key, child] of Object.entries(value)) {
+    if (normalizedKeys.has(normalizeResponseKey(key)) && typeof child === 'string' && child.trim()) {
+      return child.trim();
+    }
+  }
+
+  for (const child of Object.values(value)) {
+    const nested = readNestedResponseString(child, keys, visited);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function truncateProviderError(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  return value.length > 220 ? `${value.slice(0, 217)}...` : value;
+}
+
 export function mapInvoiceExecution(execution: InvoiceExecution): InvoiceExecutionDto {
   return {
     id: execution.id,
@@ -468,6 +507,15 @@ export async function getInvoiceExecutionResponseSummary(invoiceExecutionId: str
           parsedBodyType: typeof responseSnapshot.parsedBodyType === 'string' ? responseSnapshot.parsedBodyType : null,
           bodyKeys,
           nestedBodyKeys: [...collectNestedKeys(body)].sort(),
+          providerError: truncateProviderError(
+            readNestedResponseString(body, ['error', 'Error', 'errorMessage', 'ErrorMessage', 'message', 'Message']),
+          ),
+          parsedGuidPresent: Boolean(
+            readNestedResponseString(body, ['providerInvoiceGuid', 'invoiceGuid', 'InvoiceGuid', 'Guid', 'guid', 'id']),
+          ),
+          parsedPdfUrlPresent: Boolean(
+            readNestedResponseString(body, ['providerPdfUrl', 'pdfUrl', 'PdfUrl', 'PDFUrl', 'invoicePdfUrl', 'url']),
+          ),
         }
       : null,
   };

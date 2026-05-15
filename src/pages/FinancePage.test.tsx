@@ -10,12 +10,14 @@ import { setCurrentUser, setToken } from '../lib/auth';
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
 const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
+const getInvoiceExecutionResponseSummaryMock = vi.fn();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+    getInvoiceExecutionResponseSummary: (...args: unknown[]) => getInvoiceExecutionResponseSummaryMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
   };
@@ -184,6 +186,7 @@ describe('FinancePage control center', () => {
     getFinanceDashboardMock.mockReset();
     updateVendorFinancialProfileMock.mockReset();
     preparePayoutBatchMock.mockReset();
+    getInvoiceExecutionResponseSummaryMock.mockReset();
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {
@@ -226,6 +229,57 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Applied commission VAT')).toBeInTheDocument();
     expect(screen.getByText('Current vendor profile')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: 'View' }).length).toBeGreaterThan(0);
+  });
+
+  it('shows safe invoice provider response summary to admins for unknown executions', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          invoiceExecution: {
+            id: 'invoice-exec-unknown',
+            provider: 'bizimhesap',
+            providerInvoiceGuid: null,
+            providerInvoiceNo: null,
+            providerPdfUrl: null,
+            status: 'unknown',
+            createdAt: '2026-05-13T12:00:00Z',
+            updatedAt: '2026-05-13T12:00:00Z',
+          },
+        },
+        financeDashboard.transactions[1],
+        financeDashboard.transactions[2],
+      ],
+    });
+    getInvoiceExecutionResponseSummaryMock.mockResolvedValue({
+      id: 'invoice-exec-unknown',
+      provider: 'bizimhesap',
+      status: 'unknown',
+      providerInvoiceGuidPresent: false,
+      providerInvoiceNoPresent: false,
+      providerPdfUrlPresent: false,
+      response: {
+        httpStatus: 200,
+        ok: true,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['error', 'guid', 'url', 'eInvoiceNo'],
+        nestedBodyKeys: ['error', 'guid', 'url', 'eInvoiceNo'],
+        providerError: 'Invoice could not be created.',
+        parsedGuidPresent: false,
+        parsedPdfUrlPresent: false,
+      },
+    });
+
+    renderFinancePage();
+
+    expect(await screen.findByText('Provider response summary')).toBeInTheDocument();
+    expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown');
+    expect(screen.getByText('application/json')).toBeInTheDocument();
+    expect(screen.getByText('error, guid, url, eInvoiceNo')).toBeInTheDocument();
+    expect(screen.getByText('Invoice could not be created.')).toBeInTheDocument();
+    expect(screen.getAllByText('no').length).toBeGreaterThanOrEqual(2);
   });
 
   it('displays hold-equivalent refund ledger rows as Recorded instead of Failed', async () => {

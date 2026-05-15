@@ -29,6 +29,9 @@ export type InvoiceExecutionResponseSummaryDto = {
     parsedBodyType: string | null;
     bodyKeys: string[];
     nestedBodyKeys: string[];
+    providerError: string | null;
+    parsedGuidPresent: boolean;
+    parsedPdfUrlPresent: boolean;
   } | null;
 };
 

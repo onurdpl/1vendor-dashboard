@@ -2,6 +2,7 @@ export {
   attachShippingCost,
   createInvoiceExecution,
   getFinanceDashboard,
+  getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
   retryInvoiceExecution,
   updateVendorFinancialProfile,
@@ -11,6 +12,7 @@ export type {
   FinanceSummary,
   FinanceTransaction,
   InvoiceExecutionReference,
+  InvoiceExecutionResponseSummary,
   PayoutBatch,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';

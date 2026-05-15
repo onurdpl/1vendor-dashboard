@@ -42,3 +42,7 @@ export function createInvoiceExecution(financeLedgerEntryId: string) {
 export function retryInvoiceExecution(invoiceExecutionId: string) {
   return runtimeServices.finance.retryInvoiceExecution(invoiceExecutionId);
 }
+
+export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string) {
+  return runtimeServices.finance.getInvoiceExecutionResponseSummary(invoiceExecutionId);
+}
