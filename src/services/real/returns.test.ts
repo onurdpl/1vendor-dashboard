@@ -415,4 +415,51 @@ describe('real returns service item title mapping', () => {
     expect(detail.refundedItems[0].name).toBe(summary.refundedItems?.[0]?.name);
     expect(summary.refundedItems?.[0]?.name).not.toBe('SWOOSH-WHITE-S');
   });
+
+  it('maps Shopify return reason and note into vendor-facing return detail', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      id: 'return-reason',
+      sourceShopifyOrderId: 'gid://shopify/Order/1026',
+      sourceShopifyOrderNumber: '#1026',
+      sourceShopifyRefundId: '',
+      sourceShopifyReturnId: '23165600087',
+      sourceShopifyReturnGid: 'gid://shopify/Return/23165600087',
+      returnLifecycleStatus: 'requested',
+      returnRequestSource: 'shopify_return_request',
+      vendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      originalVendorId: 'sporjinal',
+      sourceShopifyInternalOrderId: 'gid://shopify/Order/1026',
+      status: 'requested',
+      reason: 'SIZE_TOO_LARGE',
+      returnReasonNote: 'Beden büyük geldi.',
+      refundAmount: '0.00',
+      refundedItemCount: 1,
+      refundedSkus: ['SWOOSH-WHITE-S'],
+      itemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      variantTitle: null,
+      refundedItems: [
+        {
+          id: 'line-reason',
+          sourceLineItemId: 'line-reason',
+          sourceVariantId: null,
+          sku: 'SWOOSH-WHITE-S',
+          title: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+          quantity: 1,
+          refundAmount: '0.00',
+        },
+      ],
+      requestCreatedAt: '2026-05-13T04:44:00Z',
+      requestUpdatedAt: '2026-05-13T04:44:00Z',
+      createdAt: '2026-05-13T04:44:00Z',
+      updatedAt: '2026-05-13T04:44:00Z',
+    });
+
+    const detail = await getReturn('return-reason');
+
+    expect(detail.reason).toBe('Size Too Large');
+    expect(detail.returnReasonNote).toBe('Beden büyük geldi.');
+    expect(detail.resolution).toBe('Beden büyük geldi.');
+  });
 });

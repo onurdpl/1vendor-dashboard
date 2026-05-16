@@ -30,6 +30,9 @@ type ShopifyReturnQueryResponse = {
       edges: Array<{
         node: {
           id: string;
+          customerNote?: string | null;
+          returnReason?: string | null;
+          returnReasonNote?: string | null;
           fulfillmentLineItem?: {
             id: string;
             lineItem: {
@@ -240,6 +243,10 @@ function parseMockReturnDetailsByReturnGid(
             lineItemGid:
               item.lineItemGid === null || item.lineItemGid === undefined ? null : String(item.lineItemGid),
             sku: item.sku === null || item.sku === undefined ? null : String(item.sku),
+            returnReason: item.returnReason === null || item.returnReason === undefined ? null : String(item.returnReason),
+            returnReasonNote:
+              item.returnReasonNote === null || item.returnReasonNote === undefined ? null : String(item.returnReasonNote),
+            customerNote: item.customerNote === null || item.customerNote === undefined ? null : String(item.customerNote),
           };
         })
         .filter((item) => item.returnLineItemGid),
@@ -432,6 +439,9 @@ export function createShopifyAdminService(env: AppEnv) {
                     node {
                       id
                       ... on ReturnLineItem {
+                        customerNote
+                        returnReason
+                        returnReasonNote
                         fulfillmentLineItem {
                           id
                           lineItem {
@@ -492,6 +502,9 @@ export function createShopifyAdminService(env: AppEnv) {
         fulfillmentLineItemGid: edge.node.fulfillmentLineItem?.id ?? null,
         lineItemGid: edge.node.fulfillmentLineItem?.lineItem?.id ?? null,
         sku: edge.node.fulfillmentLineItem?.lineItem?.sku ?? null,
+        returnReason: edge.node.returnReason ?? null,
+        returnReasonNote: edge.node.returnReasonNote ?? null,
+        customerNote: edge.node.customerNote ?? null,
       }))
       .filter((item) => item.returnLineItemGid);
 
@@ -502,6 +515,9 @@ export function createShopifyAdminService(env: AppEnv) {
           fulfillmentLineItemGid: lineItemEdge.node.fulfillmentLineItem?.id ?? null,
           lineItemGid: lineItemEdge.node.fulfillmentLineItem?.lineItem?.id ?? null,
           sku: lineItemEdge.node.fulfillmentLineItem?.lineItem?.sku ?? null,
+          returnReason: null,
+          returnReasonNote: null,
+          customerNote: null,
         }))
         .filter((item) => item.fulfillmentLineItemGid || item.lineItemGid || item.sku),
     );

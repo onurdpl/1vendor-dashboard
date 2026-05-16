@@ -10,6 +10,8 @@ export type ReturnSummaryDto = {
   vendorId: string;
   assignedVendorId: string;
   status: string;
+  reason: string | null;
+  returnReasonNote: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];

@@ -37,6 +37,8 @@ describe('backend returns list route contract', () => {
         vendorId: 'sporjinal',
         assignedVendorId: 'sporjinal',
         status: 'requested',
+        reason: 'SIZE_TOO_LARGE',
+        returnReasonNote: 'Beden büyük geldi.',
         refundAmount: '0.00',
         refundedItemCount: 1,
         refundedSkus: ['SWOOSH-WHITE-S'],
@@ -80,6 +82,8 @@ describe('backend returns list route contract', () => {
         itemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
         displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
         variantTitle: null,
+        reason: 'SIZE_TOO_LARGE',
+        returnReasonNote: 'Beden büyük geldi.',
         refundedItems: [
           expect.objectContaining({
             displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',

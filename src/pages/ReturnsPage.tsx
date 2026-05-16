@@ -84,10 +84,10 @@ function getRefundStatusLabel(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refunded';
 }
 
-function getVendorReason(reason: string | null | undefined) {
+function getVendorReason(reason: string | null | undefined, fallback = 'Return requested') {
   const value = reason?.trim();
   if (!value) {
-    return 'Return requested';
+    return fallback;
   }
 
   const normalized = value.toLowerCase();
@@ -99,7 +99,7 @@ function getVendorReason(reason: string | null | undefined) {
     normalized.includes('shopify return request') ||
     normalized.includes('shopify refund')
   ) {
-    return 'Return requested';
+    return fallback;
   }
 
   return value;
@@ -742,6 +742,12 @@ export function ReturnsPage() {
                     <span>Reason</span>
                     <strong>{getVendorReason(selectedReturn.reason)}</strong>
                   </div>
+                  {getVendorReason(selectedReturn.returnReasonNote, '') ? (
+                    <div>
+                      <span>Note</span>
+                      <strong>{getVendorReason(selectedReturn.returnReasonNote, '')}</strong>
+                    </div>
+                  ) : null}
                 </div>
               </div>
 

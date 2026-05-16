@@ -10,6 +10,9 @@ export type ShopifyReturnLineItem = {
   fulfillmentLineItemGid: string | null;
   lineItemGid: string | null;
   sku: string | null;
+  returnReason: string | null;
+  returnReasonNote: string | null;
+  customerNote: string | null;
 };
 
 export type FetchShopifyReturnDetailsResult = {

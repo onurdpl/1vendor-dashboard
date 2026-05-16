@@ -399,6 +399,7 @@ model ReturnRecord {
   requestUpdatedAt         DateTime?
   status                   String
   reason                   String?
+  returnReasonNote         String?
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
   vendorAllocation         VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)

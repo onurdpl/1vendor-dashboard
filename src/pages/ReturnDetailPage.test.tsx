@@ -120,4 +120,19 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Shopify return ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
   });
+
+  it('renders actual Shopify return reason and customer note when available', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      reason: 'Size Too Large',
+      returnReasonNote: 'Beden büyük geldi.',
+      resolution: 'Beden büyük geldi.',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Size Too Large')).toBeInTheDocument();
+    expect(screen.getByText('Beden büyük geldi.')).toBeInTheDocument();
+    expect(screen.queryByText(/Shopify return request lifecycle/i)).not.toBeInTheDocument();
+  });
 });

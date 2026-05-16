@@ -216,6 +216,7 @@ export type ReturnSummary = {
   updatedAt?: string;
   customer: string;
   reason: string;
+  returnReasonNote?: string | null;
   amount: string;
   itemTitle?: string | null;
   displayTitle?: string | null;

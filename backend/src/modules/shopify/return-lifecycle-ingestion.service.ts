@@ -73,6 +73,19 @@ function deriveReasonFromPayload(payload: Record<string, unknown>) {
   return 'Shopify return lifecycle event';
 }
 
+function readReturnReason(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text || text.toLowerCase() === 'unknown') {
+    return null;
+  }
+
+  return text;
+}
+
+function resolveReturnReasonNote(lineItem: { returnReasonNote: string | null; customerNote: string | null }) {
+  return readReturnReason(lineItem.customerNote) ?? readReturnReason(lineItem.returnReasonNote);
+}
+
 async function failWebhook(eventId: string, errorMessage: string): Promise<ReturnLifecycleIngestionResult> {
   await prisma.webhookEvent.update({
     where: { id: eventId },
@@ -201,7 +214,8 @@ export async function ingestReturnRequestWebhook(
             requestCreatedAt: new Date(),
             requestUpdatedAt: new Date(),
             status: lifecycleStatus,
-            reason: deriveReasonFromPayload(input.payload),
+            reason: readReturnReason(mappedItem.lineItem.returnReason) ?? deriveReasonFromPayload(input.payload),
+            returnReasonNote: resolveReturnReasonNote(mappedItem.lineItem),
           },
           create: {
             id,
@@ -217,7 +231,8 @@ export async function ingestReturnRequestWebhook(
             requestCreatedAt: new Date(),
             requestUpdatedAt: new Date(),
             status: lifecycleStatus,
-            reason: deriveReasonFromPayload(input.payload),
+            reason: readReturnReason(mappedItem.lineItem.returnReason) ?? deriveReasonFromPayload(input.payload),
+            returnReasonNote: resolveReturnReasonNote(mappedItem.lineItem),
           },
         });
 
@@ -286,7 +301,6 @@ export async function applyReturnLifecycleStatusWebhook(
           returnLifecycleStatus: lifecycleStatus,
           requestUpdatedAt: new Date(),
           status: lifecycleStatus,
-          reason: deriveReasonFromPayload(input.payload),
         },
       });
 

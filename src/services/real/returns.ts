@@ -14,6 +14,8 @@ type ReturnSummaryDto = {
   vendorId: string;
   assignedVendorId: string;
   status: string;
+  reason?: string | null;
+  returnReasonNote?: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
@@ -144,6 +146,24 @@ function readFirstDtoProductText(sku: string | null | undefined, ...values: unkn
   return values.map((value) => readDtoProductText(value, sku)).find(Boolean) ?? '';
 }
 
+function formatReturnReason(value: string | null | undefined) {
+  const text = readDtoText(value);
+  if (!text) {
+    return '';
+  }
+
+  if (!text.includes('_') && text !== text.toUpperCase()) {
+    return text;
+  }
+
+  return text
+    .toLowerCase()
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
 type ReturnItemDto = NonNullable<ReturnSummaryDto['refundedItems']>[number];
 
 function getReturnItemFallbackName(item: Pick<ReturnItemDto, 'sku'>) {
@@ -246,7 +266,8 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     date: dto.createdAt,
     updatedAt: dto.updatedAt,
     customer: 'Customer unavailable',
-    reason: `${sourceLabel} · ${sourceId}`,
+    reason: formatReturnReason(dto.reason) || `${sourceLabel} · ${sourceId}`,
+    returnReasonNote: readDtoText(dto.returnReasonNote) || null,
     amount: formatCurrency(dto.refundAmount),
     itemTitle: summaryDisplayTitle || null,
     displayTitle: summaryDisplayTitle || null,
@@ -296,8 +317,10 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     ...summary,
     originalVendorId: response.originalVendorId,
     resolution:
-      response.returnRequestSource === 'shopify_return_request'
-        ? 'Pending return request synced from Shopify return lifecycle.'
+      response.returnReasonNote
+        ? response.returnReasonNote
+        : response.returnRequestSource === 'shopify_return_request'
+        ? ''
         : summary.status === 'Processed'
           ? 'Refund processed and allocated to vendor scope.'
           : 'Refund allocation recorded for operational review.',
