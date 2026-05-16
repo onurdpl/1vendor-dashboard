@@ -114,6 +114,40 @@ function getTimelineLabel(label: string) {
 }
 
 function getTimeline(returnRequest: ReturnDetail) {
+  const normalizedStatus = returnRequest.status.toLowerCase();
+  const hasReturnTracking = Boolean(
+    returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
+  );
+  const dataBackedTimeline = [
+    {
+      label: 'Return requested',
+      at: formatDate(returnRequest.date),
+      enabled: true,
+    },
+    {
+      label: 'Return approved',
+      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      enabled: normalizedStatus === 'approved',
+    },
+    {
+      label: 'Return shipment created',
+      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      enabled: hasReturnTracking,
+    },
+    {
+      label: 'Refund processed',
+      at: formatDate(returnRequest.updatedAt ?? returnRequest.date),
+      enabled:
+        returnRequest.sourceType !== 'shopify_return_request' ||
+        normalizedStatus === 'processed' ||
+        normalizedStatus === 'refunded',
+    },
+  ].filter((entry) => entry.enabled);
+
+  if (dataBackedTimeline.length > 1 || hasReturnTracking) {
+    return dataBackedTimeline;
+  }
+
   const seenLabels = new Set<string>();
   const timeline = returnRequest.timeline
     .map((entry) => ({
@@ -185,6 +219,9 @@ export function ReturnDetailPage() {
 
   const returnedItems = getReturnedItems(returnRequest);
   const timeline = getTimeline(returnRequest);
+  const hasReturnShipment = Boolean(
+    returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
+  );
 
   return (
     <section className="return-review-page">
@@ -270,6 +307,33 @@ export function ReturnDetailPage() {
               <button type="button" className="button button-secondary">Contact support</button>
             </div>
           </article>
+
+          {hasReturnShipment ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Return shipment</p>
+                  <h3>Customer shipment</h3>
+                </div>
+              </div>
+              <div className="return-review-summary-list">
+                <div>
+                  <span>Carrier</span>
+                  <strong>{returnRequest.returnCarrierName ?? 'Not provided'}</strong>
+                </div>
+                <div>
+                  <span>Tracking</span>
+                  {returnRequest.returnTrackingUrl ? (
+                    <a href={returnRequest.returnTrackingUrl} target="_blank" rel="noreferrer">
+                      {returnRequest.returnTrackingNumber ?? 'Open tracking'}
+                    </a>
+                  ) : (
+                    <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>
+                  )}
+                </div>
+              </div>
+            </article>
+          ) : null}
 
           <article className="return-review-card">
             <div className="return-review-card-header">

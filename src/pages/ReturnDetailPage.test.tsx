@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
@@ -32,6 +32,9 @@ const returnDetail: ReturnDetail = {
   updatedAt: '2026-05-13T05:00:00Z',
   customer: 'Customer unavailable',
   reason: 'Shopify return request lifecycle - Return 23165600081',
+  returnCarrierName: null,
+  returnTrackingNumber: null,
+  returnTrackingUrl: null,
   amount: '$0.00',
   refundedSkus: ['DJ1196-002-40,5'],
   resolution: 'Pending return request synced from Shopify return lifecycle.',
@@ -80,6 +83,7 @@ function renderPage() {
 
 describe('ReturnDetailPage vendor review screen', () => {
   beforeEach(() => {
+    cleanup();
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -134,5 +138,60 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(await screen.findByText('Size Too Large')).toBeInTheDocument();
     expect(screen.getByText('Beden büyük geldi.')).toBeInTheDocument();
     expect(screen.queryByText(/Shopify return request lifecycle/i)).not.toBeInTheDocument();
+  });
+
+  it('renders return shipment details and tracking-backed timeline stage when available', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnCarrierName: 'Yurtiçi Kargo',
+      returnTrackingNumber: 'returnkargo-123',
+      returnTrackingUrl: 'https://tracking.example/returnkargo-123',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Customer shipment')).toBeInTheDocument();
+    expect(screen.getByText('Yurtiçi Kargo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'returnkargo-123' })).toHaveAttribute(
+      'href',
+      'https://tracking.example/returnkargo-123',
+    );
+    expect(screen.getByText('Return shipment created')).toBeInTheDocument();
+    expect(screen.queryByText(/in transit/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/delivered/i)).not.toBeInTheDocument();
+  });
+
+  it('hides return shipment details when Shopify tracking is unavailable', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(screen.queryByText('Customer shipment')).not.toBeInTheDocument();
+    expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
+  });
+
+  it('adds approved and refund processed timeline stages only when status data supports them', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      status: 'Approved',
+    });
+
+    const { unmount } = renderPage();
+
+    expect(await screen.findByText('Return approved')).toBeInTheDocument();
+    expect(screen.queryByText('Refund processed')).not.toBeInTheDocument();
+
+    unmount();
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      sourceType: 'shopify_refund',
+      status: 'Processed',
+      sourceShopifyRefundId: 'gid://shopify/Refund/1',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Refund processed')).toBeInTheDocument();
   });
 });
