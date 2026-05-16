@@ -165,6 +165,7 @@ describe('ReturnsPage control center', () => {
     expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Wireless label printer').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SKU-A-1').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
@@ -210,6 +211,6 @@ describe('ReturnsPage control center', () => {
     expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText('View return for order 1001').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('İncele return for order 1001').length).toBeGreaterThan(0);
   });
 });

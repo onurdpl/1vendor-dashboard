@@ -34,6 +34,25 @@ function formatDate(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
+function formatDateParts(value: string | null | undefined) {
+  if (!value) {
+    return { date: '—', time: '' };
+  }
+
+  const date = new Date(value);
+  return {
+    date: new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(date),
+    time: new Intl.DateTimeFormat('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(date),
+  };
+}
+
 function getReturnKind(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refunded';
 }
@@ -120,6 +139,15 @@ function getVariantText(value: string | null | undefined) {
   return text;
 }
 
+function getSkuText(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text || /^unknown-sku$/i.test(text)) {
+    return '—';
+  }
+
+  return text;
+}
+
 function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   const detailItems = detail?.refundedItems ?? [];
   if (detailItems.length > 0) {
@@ -160,6 +188,7 @@ function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null
   return {
     title: firstItem?.title || 'Return item',
     variant: getVariantText(firstItem?.variantTitle),
+    sku: getSkuText(firstItem?.sku),
   };
 }
 
@@ -421,7 +450,8 @@ export function ReturnsPage() {
           ) : (
             <OperationalTable
               columns={[
-                'Product',
+                'Item',
+                'SKU',
                 'Order #',
                 'Return status',
                 'Requested',
@@ -432,6 +462,7 @@ export function ReturnsPage() {
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
                 const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail : null);
+                const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow
                     key={item.id}
@@ -447,6 +478,7 @@ export function ReturnsPage() {
                         {itemDisplay.variant ? <small>{itemDisplay.variant}</small> : null}
                       </span>
                     </div>
+                    <span className="returns-sku-cell">{itemDisplay.sku}</span>
                     <span>
                       <strong>#{item.sourceShopifyOrderNumber}</strong>
                       <small>{getReturnKind(item)}</small>
@@ -455,17 +487,18 @@ export function ReturnsPage() {
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
                       <small>{getRefundStatusLabel(item)}</small>
                     </span>
-                    <span>
-                      <strong>{formatDate(item.date)}</strong>
+                    <span className="returns-requested-cell">
+                      <strong>{requestedAt.date}</strong>
+                      {requestedAt.time ? <small>{requestedAt.time}</small> : null}
                     </span>
                     <OperationalActionGroup>
                       <Link
                         to={`/returns/${item.id}`}
                         className="button button-ghost button-link returns-row-action"
-                        aria-label={`View return for order ${item.sourceShopifyOrderNumber}`}
+                        aria-label={`İncele return for order ${item.sourceShopifyOrderNumber}`}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        ›
+                        İncele
                       </Link>
                     </OperationalActionGroup>
                   </OperationalTableRow>
@@ -561,7 +594,7 @@ export function ReturnsPage() {
               </div>
             </>
           ) : (
-            <EmptyStatePanel title="Select a return" description="Choose a record from the table to inspect lifecycle, item, and Shopify metadata." />
+            <EmptyStatePanel title="Select a return" description="Choose a record from the table to inspect return details and items." />
           )}
         </SideDetailPanel>
       </div>
