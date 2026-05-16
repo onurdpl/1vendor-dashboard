@@ -28,3 +28,19 @@ export async function updateAdminSupportTicketStatus(ticketId: string, status: S
 export async function addAdminSupportTicketNote(ticketId: string, content: string): Promise<SupportTicketNote> {
   return apiClient.post<SupportTicketNote>(`/admin/support/tickets/${ticketId}/notes`, { content });
 }
+
+export async function addAdminSupportTicketReply(ticketId: string, message: string, status?: SupportTicketStatus): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(`/admin/support/tickets/${ticketId}/replies`, { message, status });
+}
+
+export async function addVendorSupportTicketReply(ticketId: string, message: string): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(`/support/tickets/${ticketId}/replies`, { message });
+}
+
+export async function assignAdminSupportTicketToSelf(ticketId: string): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(`/admin/support/tickets/${ticketId}/assign-self`, {});
+}
+
+export async function unassignAdminSupportTicket(ticketId: string): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(`/admin/support/tickets/${ticketId}/unassign`, {});
+}

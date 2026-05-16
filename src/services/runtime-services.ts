@@ -1,5 +1,5 @@
 import { runtimeConfig } from '../config/runtime';
-import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser, getDemoUserByCredentials } from '../lib/auth';
+import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser, getCurrentUser, getDemoUserByCredentials } from '../lib/auth';
 import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
 import { getMockFinanceDashboard } from '../lib/api/mockFinance';
@@ -490,7 +490,10 @@ export const runtimeServices = {
         contextSnapshot: input.contextSnapshot ?? null,
         resolvedAt: null,
         closedAt: null,
+        assigneeUserId: null,
+        assigneeName: null,
         notes: [],
+        replies: [],
       };
       mockSupportTickets.unshift(ticket);
       return ticket;
@@ -557,6 +560,91 @@ export const runtimeServices = {
       ticket.notes = [...(ticket.notes ?? []), note];
       ticket.updatedAt = note.createdAt;
       return note;
+    },
+    async addAdminReply(ticketId: string, message: string, status?: SupportTicketStatus) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.addAdminSupportTicketReply(ticketId, message, status);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      const currentUser = getCurrentUser();
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      if (ticket.status === 'CLOSED') {
+        throw new ApiError('Closed support tickets cannot receive replies.', 'server', { status: 400 });
+      }
+      const now = new Date().toISOString();
+      ticket.replies = [
+        ...(ticket.replies ?? []),
+        {
+          id: `mock-reply-${Date.now()}`,
+          supportTicketId: ticketId,
+          authorUserId: currentUser?.email ?? 'mock-admin',
+          authorName: currentUser?.name ?? 'Mock Admin',
+          authorRole: 'ADMIN',
+          message,
+          createdAt: now,
+        },
+      ];
+      ticket.status = status ?? ticket.status;
+      ticket.updatedAt = now;
+      return ticket;
+    },
+    async addVendorReply(ticketId: string, message: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.addVendorSupportTicketReply(ticketId, message);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId && item.vendorId === getCurrentVendorId());
+      const currentUser = getCurrentUser();
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      if (ticket.status === 'CLOSED') {
+        throw new ApiError('Closed support tickets cannot receive replies.', 'server', { status: 400 });
+      }
+      const now = new Date().toISOString();
+      ticket.replies = [
+        ...(ticket.replies ?? []),
+        {
+          id: `mock-reply-${Date.now()}`,
+          supportTicketId: ticketId,
+          authorUserId: currentUser?.email ?? 'mock-vendor',
+          authorName: currentUser?.name ?? 'Vendor User',
+          authorRole: 'VENDOR',
+          message,
+          createdAt: now,
+        },
+      ];
+      ticket.status = ticket.status === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : ticket.status;
+      ticket.updatedAt = now;
+      return { ...ticket, notes: undefined };
+    },
+    async assignToSelf(ticketId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.assignAdminSupportTicketToSelf(ticketId);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      const currentUser = getCurrentUser();
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      ticket.assigneeUserId = currentUser?.email ?? 'mock-admin';
+      ticket.assigneeName = currentUser?.name ?? 'Mock Admin';
+      ticket.updatedAt = new Date().toISOString();
+      return ticket;
+    },
+    async unassign(ticketId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.unassignAdminSupportTicket(ticketId);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      ticket.assigneeUserId = null;
+      ticket.assigneeName = null;
+      ticket.updatedAt = new Date().toISOString();
+      return ticket;
     },
   },
   diagnostics: {

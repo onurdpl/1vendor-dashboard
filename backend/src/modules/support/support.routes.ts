@@ -5,16 +5,21 @@ import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
   addAdminSupportTicketNote,
+  addAdminSupportTicketReply,
+  addVendorSupportTicketReply,
+  assignSupportTicketToSelf,
   createSupportTicket,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
   listVendorSupportTickets,
   SupportTicketError,
+  unassignSupportTicket,
   updateAdminSupportTicketStatus,
 } from './support.service.js';
 import type {
   AddSupportTicketNoteInput,
+  AddSupportTicketReplyInput,
   CreateSupportTicketInput,
   SupportTicketFilters,
   UpdateSupportTicketStatusInput,
@@ -83,6 +88,29 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
+  app.post<{ Params: { ticketId: string }; Body: AddSupportTicketReplyInput }>(
+    '/support/tickets/:ticketId/replies',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (!request.authUser || !request.vendorContext) {
+        return reply.code(401).send({ message: 'Unauthorized' });
+      }
+
+      try {
+        return await addVendorSupportTicketReply(
+          request.params.ticketId,
+          request.vendorContext.vendorId,
+          request.authUser,
+          request.body ?? {},
+        );
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
   app.get<{ Querystring: SupportTicketFilters }>(
     '/admin/support/tickets',
     {
@@ -128,6 +156,60 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
 
       try {
         return await updateAdminSupportTicketStatus(request.params.ticketId, request.body ?? {});
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { ticketId: string }; Body: AddSupportTicketReplyInput }>(
+    '/admin/support/tickets/:ticketId/replies',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await addAdminSupportTicketReply(request.params.ticketId, request.authUser, request.body ?? {});
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { ticketId: string } }>(
+    '/admin/support/tickets/:ticketId/assign-self',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await assignSupportTicketToSelf(request.params.ticketId, request.authUser);
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { ticketId: string } }>(
+    '/admin/support/tickets/:ticketId/unassign',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await unassignSupportTicket(request.params.ticketId);
       } catch (error) {
         return sendSupportError(error, reply);
       }

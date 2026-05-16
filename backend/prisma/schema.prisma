@@ -220,6 +220,7 @@ model User {
   assignments  AllocationAssignmentHistory[] @relation("assignmentActor")
   supportTickets SupportTicket[]
   supportNotes   SupportTicketNote[]
+  supportReplies SupportTicketReply[]
 }
 
 model Vendor {
@@ -258,6 +259,8 @@ model SupportTicket {
   priority        String   @default("normal")
   status          String   @default("OPEN")
   category        String   @default("OTHER")
+  assigneeUserId  String?
+  assigneeName    String?
   contextType     String
   contextId       String?
   contextSnapshot Json?
@@ -266,9 +269,11 @@ model SupportTicket {
   createdBy       User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
   vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
   notes           SupportTicketNote[]
+  replies         SupportTicketReply[]
 
   @@index([vendorId, status, createdAt])
   @@index([category, status])
+  @@index([assigneeUserId])
   @@index([contextType, contextId])
   @@index([createdAt])
 }
@@ -280,6 +285,20 @@ model SupportTicketNote {
   authorName      String
   authorRole      String
   content         String
+  createdAt       DateTime      @default(now())
+  supportTicket   SupportTicket @relation(fields: [supportTicketId], references: [id], onDelete: Cascade)
+  author          User          @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([supportTicketId, createdAt])
+}
+
+model SupportTicketReply {
+  id              String        @id @default(cuid())
+  supportTicketId String
+  authorUserId    String
+  authorName      String
+  authorRole      String
+  message         String
   createdAt       DateTime      @default(now())
   supportTicket   SupportTicket @relation(fields: [supportTicketId], references: [id], onDelete: Cascade)
   author          User          @relation(fields: [authorUserId], references: [id], onDelete: Cascade)

@@ -6,11 +6,15 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
-import { getCurrentVendorContext } from '../lib/auth';
+import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import {
   addAdminSupportTicketNote,
+  addAdminSupportTicketReply,
+  addVendorSupportTicketReply,
+  assignAdminSupportTicketToSelf,
   getAdminSupportTicket,
   getVendorSupportTicket,
+  unassignAdminSupportTicket,
   updateAdminSupportTicketStatus,
   type SupportTicket,
   type SupportTicketStatus,
@@ -76,8 +80,11 @@ export function SupportTicketDetailPage() {
   const { ticketId } = useParams();
   const location = useLocation();
   const isAdmin = location.pathname.startsWith('/admin/');
+  const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const [note, setNote] = useState('');
+  const [replyMessage, setReplyMessage] = useState('');
+  const [replyStatus, setReplyStatus] = useState<'keep' | 'WAITING_FOR_VENDOR'>('keep');
   const { message, tone, showFeedback } = useActionFeedback();
 
   const queryKey = isAdmin
@@ -133,6 +140,74 @@ export function SupportTicketDetailPage() {
     },
   );
 
+  const replyMutation = useMutationAction(
+    (content: string) => {
+      if (!ticketId) {
+        throw new Error('Support ticket not found.');
+      }
+      return isAdmin
+        ? addAdminSupportTicketReply(ticketId, content, replyStatus === 'WAITING_FOR_VENDOR' ? 'WAITING_FOR_VENDOR' : undefined)
+        : addVendorSupportTicketReply(ticketId, content);
+    },
+    {
+      onSuccess: async () => {
+        setReplyMessage('');
+        setReplyStatus('keep');
+        await Promise.all([
+          refetch(),
+          queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() }),
+          queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) }),
+        ]);
+        showFeedback('Reply posted.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Unable to post reply.', 'error');
+      },
+    },
+  );
+
+  const assignMutation = useMutationAction(
+    () => {
+      if (!ticketId) {
+        throw new Error('Support ticket not found.');
+      }
+      return assignAdminSupportTicketToSelf(ticketId);
+    },
+    {
+      onSuccess: async () => {
+        await Promise.all([
+          refetch(),
+          queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() }),
+        ]);
+        showFeedback('Ticket assigned to you.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Unable to assign ticket.', 'error');
+      },
+    },
+  );
+
+  const unassignMutation = useMutationAction(
+    () => {
+      if (!ticketId) {
+        throw new Error('Support ticket not found.');
+      }
+      return unassignAdminSupportTicket(ticketId);
+    },
+    {
+      onSuccess: async () => {
+        await Promise.all([
+          refetch(),
+          queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() }),
+        ]);
+        showFeedback('Ticket unassigned.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Unable to unassign ticket.', 'error');
+      },
+    },
+  );
+
   const snapshotEntries = useMemo(() => getSnapshotEntries(ticket?.contextSnapshot), [ticket?.contextSnapshot]);
 
   if (isLoading) {
@@ -158,6 +233,8 @@ export function SupportTicketDetailPage() {
   }
 
   const contextLink = getContextLink(ticket);
+  const canReply = ticket.status !== 'CLOSED';
+  const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
 
   return (
     <section className="op-page support-detail-page">
@@ -209,6 +286,10 @@ export function SupportTicketDetailPage() {
                 <span>Created</span>
                 <strong>{formatDate(ticket.createdAt)}</strong>
               </div>
+              <div>
+                <span>Assignee</span>
+                <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
+              </div>
             </div>
             {snapshotEntries.length ? (
               <div className="support-snapshot-grid">
@@ -225,7 +306,69 @@ export function SupportTicketDetailPage() {
           <article className="support-card">
             <div className="support-card-header">
               <div>
-                <p className="eyebrow">Conversation timeline</p>
+                <p className="eyebrow">Conversation</p>
+                <h3>Public thread</h3>
+              </div>
+            </div>
+            <div className="support-reply-list">
+              <div className="support-reply">
+                <div>
+                  <strong>{ticket.createdByRole === 'admin' ? 'Admin' : ticket.vendorName ?? 'Vendor'}</strong>
+                  <span>{formatDate(ticket.createdAt)}</span>
+                </div>
+                <p>{ticket.message}</p>
+              </div>
+              {ticket.replies?.length ? (
+                ticket.replies.map((reply) => (
+                  <div key={reply.id} className="support-reply">
+                    <div>
+                      <strong>{reply.authorName}</strong>
+                      <StatusBadge tone={reply.authorRole === 'ADMIN' ? 'info' : 'neutral'}>{formatSupportLabel(reply.authorRole)}</StatusBadge>
+                      <span>{formatDate(reply.createdAt)}</span>
+                    </div>
+                    <p>{reply.message}</p>
+                  </div>
+                ))
+              ) : (
+                <EmptyStatePanel title="No replies yet" description="Public support replies will appear here." />
+              )}
+            </div>
+            {canReply ? (
+              <form
+                className="support-note-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!replyMessage.trim()) {
+                    return;
+                  }
+                  void replyMutation.mutateAsync(replyMessage);
+                }}
+              >
+                <textarea
+                  value={replyMessage}
+                  onChange={(event) => setReplyMessage(event.target.value)}
+                  placeholder="Write a public reply..."
+                  rows={4}
+                />
+                {isAdmin ? (
+                  <select value={replyStatus} onChange={(event) => setReplyStatus(event.target.value as typeof replyStatus)}>
+                    <option value="keep">Keep current status</option>
+                    <option value="WAITING_FOR_VENDOR">Set waiting for vendor</option>
+                  </select>
+                ) : null}
+                <button type="submit" className="button button-primary" disabled={replyMutation.isPending || !replyMessage.trim()}>
+                  {replyMutation.isPending ? 'Posting...' : 'Post reply'}
+                </button>
+              </form>
+            ) : (
+              <p className="page-description">Closed support tickets cannot receive new replies.</p>
+            )}
+          </article>
+
+          <article className="support-card">
+            <div className="support-card-header">
+              <div>
+                <p className="eyebrow">Status timeline</p>
                 <h3>Progress</h3>
               </div>
             </div>
@@ -252,7 +395,33 @@ export function SupportTicketDetailPage() {
                   <h3>Manage ticket</h3>
                 </div>
               </div>
+              <div className="support-assignee-box">
+                <span>Assignee</span>
+                <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
+                {ticket.assigneeName && ticket.assigneeName !== currentUser?.name ? (
+                  <small>Owned by another admin</small>
+                ) : null}
+              </div>
               <div className="support-status-actions">
+                {assignedToCurrentUser ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={unassignMutation.isPending}
+                    onClick={() => void unassignMutation.mutateAsync(undefined)}
+                  >
+                    Unassign
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={assignMutation.isPending}
+                    onClick={() => void assignMutation.mutateAsync(undefined)}
+                  >
+                    Assign to me
+                  </button>
+                )}
                 {ADMIN_STATUSES.map((status) => (
                   <button
                     key={status}

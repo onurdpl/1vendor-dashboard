@@ -11,6 +11,9 @@ const prismaMock = vi.hoisted(() => ({
   supportTicketNote: {
     create: vi.fn(),
   },
+  supportTicketReply: {
+    create: vi.fn(),
+  },
   vendorAllocation: {
     findFirst: vi.fn(),
   },
@@ -28,11 +31,15 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const {
   addAdminSupportTicketNote,
+  addAdminSupportTicketReply,
+  addVendorSupportTicketReply,
+  assignSupportTicketToSelf,
   createSupportTicket,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
   sanitizeSupportContextSnapshot,
+  unassignSupportTicket,
   updateAdminSupportTicketStatus,
 } = await import('../backend/src/modules/support/support.service.js');
 
@@ -69,8 +76,11 @@ function ticketRecord(overrides: Record<string, unknown> = {}) {
     contextSnapshot: { route: '/returns/return-1' },
     resolvedAt: null,
     closedAt: null,
+    assigneeUserId: null,
+    assigneeName: null,
     vendor: { name: 'Vendor A' },
     notes: [],
+    replies: [],
     ...overrides,
   };
 }
@@ -83,6 +93,7 @@ describe('support tickets', () => {
     prismaMock.supportTicket.findUnique.mockReset();
     prismaMock.supportTicket.update.mockReset();
     prismaMock.supportTicketNote.create.mockReset();
+    prismaMock.supportTicketReply.create.mockReset();
     prismaMock.vendorAllocation.findFirst.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
@@ -267,13 +278,184 @@ describe('support tickets', () => {
           createdAt: new Date('2026-05-16T12:05:00Z'),
         },
       ],
+      replies: [
+        {
+          id: 'reply-1',
+          supportTicketId: 'ticket-1',
+          authorUserId: 'admin-1',
+          authorName: 'Admin User',
+          authorRole: 'ADMIN',
+          message: 'Public reply.',
+          createdAt: new Date('2026-05-16T12:06:00Z'),
+        },
+      ],
     }));
-    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord());
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord({
+      replies: [
+        {
+          id: 'reply-1',
+          supportTicketId: 'ticket-1',
+          authorUserId: 'admin-1',
+          authorName: 'Admin User',
+          authorRole: 'ADMIN',
+          message: 'Public reply.',
+          createdAt: new Date('2026-05-16T12:06:00Z'),
+        },
+      ],
+    }));
 
     const adminTicket = await getAdminSupportTicket('ticket-1');
     const vendorTicket = await getVendorSupportTicket('ticket-1', 'vendor-a');
 
     expect(adminTicket?.notes?.[0]?.content).toBe('Internal investigation note.');
+    expect(adminTicket?.replies?.[0]?.message).toBe('Public reply.');
     expect(vendorTicket?.notes).toBeUndefined();
+    expect(vendorTicket?.replies?.[0]?.message).toBe('Public reply.');
+  });
+
+  it('lets a vendor reply to own waiting ticket and moves it to review', async () => {
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce({ id: 'ticket-1', status: 'WAITING_FOR_VENDOR' });
+    prismaMock.supportTicketReply.create.mockResolvedValueOnce({
+      id: 'reply-vendor',
+      supportTicketId: 'ticket-1',
+      authorUserId: 'user-vendor',
+      authorName: 'Vendor User',
+      authorRole: 'VENDOR',
+      message: 'Here is the requested context.',
+      createdAt: new Date('2026-05-16T12:10:00Z'),
+    });
+    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({ status: 'IN_REVIEW' }));
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord({
+      status: 'IN_REVIEW',
+      replies: [
+        {
+          id: 'reply-vendor',
+          supportTicketId: 'ticket-1',
+          authorUserId: 'user-vendor',
+          authorName: 'Vendor User',
+          authorRole: 'VENDOR',
+          message: 'Here is the requested context.',
+          createdAt: new Date('2026-05-16T12:10:00Z'),
+        },
+      ],
+    }));
+
+    const result = await addVendorSupportTicketReply('ticket-1', 'vendor-a', authUser, {
+      message: 'Here is the requested context.',
+    });
+
+    expect(result.status).toBe('IN_REVIEW');
+    expect(result.replies?.[0]?.message).toBe('Here is the requested context.');
+    expect(prismaMock.supportTicket.findFirst).toHaveBeenNthCalledWith(1, {
+      where: { id: 'ticket-1', vendorId: 'vendor-a' },
+      select: { id: true, status: true },
+    });
+    expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
+      where: { id: 'ticket-1' },
+      data: expect.objectContaining({ status: 'IN_REVIEW' }),
+    });
+  });
+
+  it('blocks vendor replies to another vendor ticket', async () => {
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(null);
+
+    await expect(addVendorSupportTicketReply('ticket-1', 'vendor-b', authUser, {
+      message: 'Trying to reply.',
+    })).rejects.toThrow('Support ticket not found.');
+
+    expect(prismaMock.supportTicketReply.create).not.toHaveBeenCalled();
+  });
+
+  it('lets admins reply to any open ticket', async () => {
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce({ id: 'ticket-1', status: 'OPEN' });
+    prismaMock.supportTicketReply.create.mockResolvedValueOnce({
+      id: 'reply-admin',
+      supportTicketId: 'ticket-1',
+      authorUserId: 'admin-1',
+      authorName: 'Admin User',
+      authorRole: 'ADMIN',
+      message: 'Can you send a photo?',
+      createdAt: new Date('2026-05-16T12:12:00Z'),
+    });
+    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({ status: 'WAITING_FOR_VENDOR' }));
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce(ticketRecord({
+      status: 'WAITING_FOR_VENDOR',
+      replies: [
+        {
+          id: 'reply-admin',
+          supportTicketId: 'ticket-1',
+          authorUserId: 'admin-1',
+          authorName: 'Admin User',
+          authorRole: 'ADMIN',
+          message: 'Can you send a photo?',
+          createdAt: new Date('2026-05-16T12:12:00Z'),
+        },
+      ],
+    }));
+
+    const result = await addAdminSupportTicketReply('ticket-1', {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      status: 'active',
+    }, { message: 'Can you send a photo?', status: 'WAITING_FOR_VENDOR' });
+
+    expect(result.status).toBe('WAITING_FOR_VENDOR');
+    expect(result.replies?.[0]?.authorRole).toBe('ADMIN');
+    expect(prismaMock.supportTicketReply.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        supportTicketId: 'ticket-1',
+        authorRole: 'ADMIN',
+        message: 'Can you send a photo?',
+      }),
+    });
+  });
+
+  it('blocks replies to closed tickets', async () => {
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce({ id: 'ticket-1', status: 'CLOSED' });
+
+    await expect(addAdminSupportTicketReply('ticket-1', {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      status: 'active',
+    }, { message: 'Closed follow-up.' })).rejects.toThrow('Closed support tickets cannot receive replies.');
+
+    expect(prismaMock.supportTicketReply.create).not.toHaveBeenCalled();
+  });
+
+  it('supports admin assignment and unassignment', async () => {
+    prismaMock.supportTicket.update
+      .mockResolvedValueOnce(ticketRecord({
+        assigneeUserId: 'admin-1',
+        assigneeName: 'Admin User',
+      }))
+      .mockResolvedValueOnce(ticketRecord());
+
+    const assigned = await assignSupportTicketToSelf('ticket-1', {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      status: 'active',
+    });
+    const unassigned = await unassignSupportTicket('ticket-1');
+
+    expect(assigned.assigneeName).toBe('Admin User');
+    expect(unassigned.assigneeName).toBeNull();
+    expect(prismaMock.supportTicket.update).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      data: {
+        assigneeUserId: 'admin-1',
+        assigneeName: 'Admin User',
+      },
+    }));
+    expect(prismaMock.supportTicket.update).toHaveBeenNthCalledWith(2, expect.objectContaining({
+      data: {
+        assigneeUserId: null,
+        assigneeName: null,
+      },
+    }));
   });
 });

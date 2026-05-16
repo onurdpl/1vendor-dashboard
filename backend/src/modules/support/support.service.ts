@@ -3,6 +3,7 @@ import { prisma } from '../../db/prisma.js';
 import type { AuthUserContext } from '../auth/auth.types.js';
 import type { RequestVendorContext } from '../vendor-access/vendor-access.types.js';
 import type {
+  AddSupportTicketReplyInput,
   AddSupportTicketNoteInput,
   CreateSupportTicketInput,
   SupportTicketCategory,
@@ -11,6 +12,7 @@ import type {
   SupportTicketFilters,
   SupportTicketNoteDto,
   SupportTicketPriority,
+  SupportTicketReplyDto,
   SupportTicketStatus,
   UpdateSupportTicketStatusInput,
 } from './support.types.js';
@@ -251,6 +253,26 @@ function mapNote(note: {
   };
 }
 
+function mapReply(reply: {
+  id: string;
+  supportTicketId: string;
+  authorUserId: string;
+  authorName: string;
+  authorRole: string;
+  message: string;
+  createdAt: Date;
+}): SupportTicketReplyDto {
+  return {
+    id: reply.id,
+    supportTicketId: reply.supportTicketId,
+    authorUserId: reply.authorUserId,
+    authorName: reply.authorName,
+    authorRole: reply.authorRole === 'ADMIN' ? 'ADMIN' : 'VENDOR',
+    message: reply.message,
+    createdAt: reply.createdAt.toISOString(),
+  };
+}
+
 function mapTicket(ticket: {
   id: string;
   createdAt: Date;
@@ -263,6 +285,8 @@ function mapTicket(ticket: {
   priority: string;
   status: string;
   category: string;
+  assigneeUserId?: string | null;
+  assigneeName?: string | null;
   contextType: string;
   contextId: string | null;
   contextSnapshot: Prisma.JsonValue | null;
@@ -278,7 +302,16 @@ function mapTicket(ticket: {
     content: string;
     createdAt: Date;
   }>;
-}, options: { includeNotes?: boolean } = {}): SupportTicketDto {
+  replies?: Array<{
+    id: string;
+    supportTicketId: string;
+    authorUserId: string;
+    authorName: string;
+    authorRole: string;
+    message: string;
+    createdAt: Date;
+  }>;
+}, options: { includeNotes?: boolean; includeReplies?: boolean } = {}): SupportTicketDto {
   return {
     id: ticket.id,
     createdAt: ticket.createdAt.toISOString(),
@@ -292,12 +325,15 @@ function mapTicket(ticket: {
     priority: ticket.priority as SupportTicketPriority,
     status: normalizeStatus(ticket.status),
     category: normalizeCategory(ticket.category),
+    assigneeUserId: ticket.assigneeUserId ?? null,
+    assigneeName: ticket.assigneeName ?? null,
     contextType: ticket.contextType as SupportTicketContextType,
     contextId: ticket.contextId,
     contextSnapshot: ticket.contextSnapshot,
     resolvedAt: ticket.resolvedAt?.toISOString() ?? null,
     closedAt: ticket.closedAt?.toISOString() ?? null,
     notes: options.includeNotes ? (ticket.notes ?? []).map(mapNote) : undefined,
+    replies: options.includeReplies ? (ticket.replies ?? []).map(mapReply) : undefined,
   };
 }
 
@@ -317,6 +353,8 @@ function ticketMatchesSearch(ticket: ReturnType<typeof mapTicket>, search: strin
     ticket.vendorName,
     ticket.contextType,
     ticket.contextId,
+    ticket.assigneeName,
+    ticket.assigneeUserId,
     JSON.stringify(ticket.contextSnapshot ?? {}),
   ]
     .filter(Boolean)
@@ -436,10 +474,13 @@ export async function getAdminSupportTicket(ticketId: string): Promise<SupportTi
       notes: {
         orderBy: { createdAt: 'asc' },
       },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+      },
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: true }) : null;
+  return ticket ? mapTicket(ticket, { includeNotes: true, includeReplies: true }) : null;
 }
 
 export async function getVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
@@ -452,10 +493,13 @@ export async function getVendorSupportTicket(ticketId: string, vendorId: string)
       vendor: {
         select: { name: true },
       },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+      },
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: false }) : null;
+  return ticket ? mapTicket(ticket, { includeNotes: false, includeReplies: true }) : null;
 }
 
 export async function updateAdminSupportTicketStatus(ticketId: string, input: UpdateSupportTicketStatusInput): Promise<SupportTicketDto> {
@@ -475,10 +519,13 @@ export async function updateAdminSupportTicketStatus(ticketId: string, input: Up
       notes: {
         orderBy: { createdAt: 'asc' },
       },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+      },
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true });
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
 }
 
 export async function addAdminSupportTicketNote(
@@ -506,4 +553,165 @@ export async function addAdminSupportTicketNote(
   });
 
   return mapNote(note);
+}
+
+async function loadTicketForReply(ticketId: string, vendorId?: string) {
+  if (vendorId) {
+    return prisma.supportTicket.findFirst({
+      where: { id: ticketId, vendorId },
+      select: { id: true, status: true },
+    });
+  }
+
+  return prisma.supportTicket.findUnique({
+    where: { id: ticketId },
+    select: { id: true, status: true },
+  });
+}
+
+async function loadTicketDetailForActor(ticketId: string, includeNotes: boolean, vendorId?: string) {
+  if (vendorId) {
+    return getVendorSupportTicket(ticketId, vendorId);
+  }
+  return getAdminSupportTicket(ticketId).then((ticket) => ticket ? {
+    ...ticket,
+    notes: includeNotes ? ticket.notes : undefined,
+  } : null);
+}
+
+export async function addVendorSupportTicketReply(
+  ticketId: string,
+  vendorId: string,
+  authUser: AuthUserContext,
+  input: AddSupportTicketReplyInput,
+): Promise<SupportTicketDto> {
+  const message = readText(input.message, 'Reply', 2000);
+  const ticket = await loadTicketForReply(ticketId, vendorId);
+  if (!ticket) {
+    throw new SupportTicketError('Support ticket not found.', 404);
+  }
+
+  const currentStatus = normalizeStatus(ticket.status);
+  if (currentStatus === 'CLOSED') {
+    throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
+  }
+
+  await prisma.supportTicketReply.create({
+    data: {
+      supportTicketId: ticketId,
+      authorUserId: authUser.id,
+      authorName: authUser.name,
+      authorRole: 'VENDOR',
+      message,
+    },
+  });
+
+  await prisma.supportTicket.update({
+    where: { id: ticketId },
+    data: {
+      status: currentStatus === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : currentStatus,
+      resolvedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+      closedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+    },
+  });
+
+  const updated = await loadTicketDetailForActor(ticketId, false, vendorId);
+  if (!updated) {
+    throw new SupportTicketError('Support ticket not found.', 404);
+  }
+  return updated;
+}
+
+export async function addAdminSupportTicketReply(
+  ticketId: string,
+  authUser: AuthUserContext,
+  input: AddSupportTicketReplyInput,
+): Promise<SupportTicketDto> {
+  const message = readText(input.message, 'Reply', 2000);
+  const requestedStatus = readStatus(input.status);
+  const ticket = await loadTicketForReply(ticketId);
+  if (!ticket) {
+    throw new SupportTicketError('Support ticket not found.', 404);
+  }
+
+  const currentStatus = normalizeStatus(ticket.status);
+  if (currentStatus === 'CLOSED') {
+    throw new SupportTicketError('Closed support tickets cannot receive replies.', 400);
+  }
+
+  const nextStatus = requestedStatus ?? currentStatus;
+  if (nextStatus === 'CLOSED') {
+    throw new SupportTicketError('Use the ticket status action to close support tickets.', 400);
+  }
+
+  await prisma.supportTicketReply.create({
+    data: {
+      supportTicketId: ticketId,
+      authorUserId: authUser.id,
+      authorName: authUser.name,
+      authorRole: 'ADMIN',
+      message,
+    },
+  });
+
+  await prisma.supportTicket.update({
+    where: { id: ticketId },
+    data: {
+      status: nextStatus,
+      resolvedAt: nextStatus === 'RESOLVED' ? new Date() : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+      closedAt: nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' || nextStatus === 'RESOLVED' ? null : undefined,
+    },
+  });
+
+  const updated = await loadTicketDetailForActor(ticketId, true);
+  if (!updated) {
+    throw new SupportTicketError('Support ticket not found.', 404);
+  }
+  return updated;
+}
+
+export async function assignSupportTicketToSelf(ticketId: string, authUser: AuthUserContext): Promise<SupportTicketDto> {
+  const ticket = await prisma.supportTicket.update({
+    where: { id: ticketId },
+    data: {
+      assigneeUserId: authUser.id,
+      assigneeName: authUser.name,
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+      notes: {
+        orderBy: { createdAt: 'asc' },
+      },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
+}
+
+export async function unassignSupportTicket(ticketId: string): Promise<SupportTicketDto> {
+  const ticket = await prisma.supportTicket.update({
+    where: { id: ticketId },
+    data: {
+      assigneeUserId: null,
+      assigneeName: null,
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+      notes: {
+        orderBy: { createdAt: 'asc' },
+      },
+      replies: {
+        orderBy: { createdAt: 'asc' },
+      },
+    },
+  });
+
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
 }

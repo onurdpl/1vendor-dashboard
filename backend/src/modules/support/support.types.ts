@@ -29,6 +29,11 @@ export type AddSupportTicketNoteInput = {
   content?: unknown;
 };
 
+export type AddSupportTicketReplyInput = {
+  message?: unknown;
+  status?: unknown;
+};
+
 export type SupportTicketNoteDto = {
   id: string;
   supportTicketId: string;
@@ -36,6 +41,16 @@ export type SupportTicketNoteDto = {
   authorName: string;
   authorRole: string;
   content: string;
+  createdAt: string;
+};
+
+export type SupportTicketReplyDto = {
+  id: string;
+  supportTicketId: string;
+  authorUserId: string;
+  authorName: string;
+  authorRole: 'ADMIN' | 'VENDOR';
+  message: string;
   createdAt: string;
 };
 
@@ -52,10 +67,13 @@ export type SupportTicketDto = {
   priority: SupportTicketPriority;
   status: SupportTicketStatus;
   category: SupportTicketCategory;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;
   resolvedAt: string | null;
   closedAt: string | null;
   notes?: SupportTicketNoteDto[];
+  replies?: SupportTicketReplyDto[];
 };

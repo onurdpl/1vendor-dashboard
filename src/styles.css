@@ -6432,6 +6432,64 @@ h3 {
   align-items: stretch;
 }
 
+.support-assignee-box {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 10px;
+  background: #f8fafc;
+}
+
+.support-assignee-box span,
+.support-assignee-box small {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.support-assignee-box strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+}
+
+.support-reply-list {
+  display: grid;
+  gap: 10px;
+}
+
+.support-reply {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.support-reply > div {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.support-reply strong,
+.support-reply p {
+  margin: 0;
+}
+
+.support-reply span {
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.support-reply p {
+  margin-top: 8px;
+  color: #334155;
+  line-height: 1.5;
+}
+
 .support-notes-list {
   display: grid;
   gap: 10px;
@@ -6467,6 +6525,15 @@ h3 {
   padding: 10px 12px;
   font: inherit;
   resize: vertical;
+}
+
+.support-note-form select {
+  width: 100%;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #0f172a;
+  font: inherit;
 }
 
 @media (max-width: 980px) {

@@ -280,6 +280,16 @@ export type SupportTicketNote = {
   createdAt: string;
 };
 
+export type SupportTicketReply = {
+  id: string;
+  supportTicketId: string;
+  authorUserId: string;
+  authorName: string;
+  authorRole: 'ADMIN' | 'VENDOR';
+  message: string;
+  createdAt: string;
+};
+
 export type SupportTicket = {
   id: string;
   createdAt: string;
@@ -293,12 +303,15 @@ export type SupportTicket = {
   priority: SupportTicketPriority;
   status: SupportTicketStatus;
   category: SupportTicketCategory;
+  assigneeUserId: string | null;
+  assigneeName: string | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;
   resolvedAt: string | null;
   closedAt: string | null;
   notes?: SupportTicketNote[];
+  replies?: SupportTicketReply[];
 };
 
 export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed' | 'Recorded';

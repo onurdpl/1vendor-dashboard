@@ -12,12 +12,14 @@ import {
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
+import { getCurrentUser } from '../lib/auth';
 import { listAdminSupportTickets, type SupportTicket, type SupportTicketCategory, type SupportTicketStatus } from '../features/support/api';
 import { toTitleCaseLabel } from '../services/real/formatting';
 
 const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
 const ALL_PRIORITIES = ['all', 'low', 'normal', 'high'] as const;
+const ASSIGNEE_FILTERS = ['all', 'unassigned', 'me'] as const;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -77,6 +79,8 @@ function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
     ticket.subject,
     ticket.vendorId,
     ticket.vendorName,
+    ticket.assigneeName,
+    ticket.assigneeUserId,
     ticket.contextId,
     JSON.stringify(ticket.contextSnapshot ?? {}),
   ]
@@ -87,6 +91,7 @@ function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
 }
 
 export function AdminSupportTicketsPage() {
+  const currentUser = getCurrentUser();
   const { data: tickets, isLoading, isError, error } = useQueryResource(
     queryKeys.admin.support.tickets(),
     listAdminSupportTickets,
@@ -95,6 +100,7 @@ export function AdminSupportTicketsPage() {
   const [statusFilter, setStatusFilter] = useState<(typeof ALL_STATUSES)[number]>('all');
   const [categoryFilter, setCategoryFilter] = useState<(typeof ALL_CATEGORIES)[number]>('all');
   const [priorityFilter, setPriorityFilter] = useState<(typeof ALL_PRIORITIES)[number]>('all');
+  const [assigneeFilter, setAssigneeFilter] = useState<(typeof ASSIGNEE_FILTERS)[number]>('all');
   const [unresolvedOnly, setUnresolvedOnly] = useState(true);
 
   const filteredTickets = useMemo(() => {
@@ -111,9 +117,18 @@ export function AdminSupportTicketsPage() {
       if (priorityFilter !== 'all' && ticket.priority !== priorityFilter) {
         return false;
       }
+      if (assigneeFilter === 'unassigned' && ticket.assigneeUserId) {
+        return false;
+      }
+      if (assigneeFilter === 'me' && currentUser?.name && ticket.assigneeName !== currentUser.name) {
+        return false;
+      }
+      if (assigneeFilter === 'me' && !currentUser?.name) {
+        return false;
+      }
       return ticketMatchesSearch(ticket, searchTerm);
     });
-  }, [categoryFilter, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
+  }, [assigneeFilter, categoryFilter, currentUser?.name, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 
   if (isLoading) {
     return (
@@ -169,6 +184,11 @@ export function AdminSupportTicketsPage() {
               <option key={priority} value={priority}>{priority === 'all' ? 'All priorities' : formatSupportLabel(priority)}</option>
             ))}
           </select>
+          <select value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value as typeof assigneeFilter)}>
+            <option value="all">All assignees</option>
+            <option value="unassigned">Unassigned</option>
+            {currentUser?.name ? <option value="me">Assigned to me</option> : null}
+          </select>
           <label className="support-toggle">
             <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
             Unresolved only
@@ -177,7 +197,7 @@ export function AdminSupportTicketsPage() {
       </OperationalToolbar>
 
       {filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Updated', 'Action']}>
+        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Assignee', 'Updated', 'Action']}>
           {filteredTickets.map((ticket) => (
             <OperationalTableRow key={ticket.id}>
               <td>
@@ -193,6 +213,7 @@ export function AdminSupportTicketsPage() {
               <td>
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
               </td>
+              <td>{ticket.assigneeName ?? 'Unassigned'}</td>
               <td>{formatDate(ticket.updatedAt)}</td>
               <td>
                 <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
