@@ -219,6 +219,7 @@ model User {
   vendorLinks  UserVendorAccess[]
   assignments  AllocationAssignmentHistory[] @relation("assignmentActor")
   supportTickets SupportTicket[]
+  supportNotes   SupportTicketNote[]
 }
 
 model Vendor {
@@ -255,16 +256,35 @@ model SupportTicket {
   subject         String
   message         String
   priority        String   @default("normal")
-  status          String   @default("open")
+  status          String   @default("OPEN")
+  category        String   @default("OTHER")
   contextType     String
   contextId       String?
   contextSnapshot Json?
+  resolvedAt      DateTime?
+  closedAt        DateTime?
   createdBy       User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
   vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  notes           SupportTicketNote[]
 
   @@index([vendorId, status, createdAt])
+  @@index([category, status])
   @@index([contextType, contextId])
   @@index([createdAt])
+}
+
+model SupportTicketNote {
+  id              String        @id @default(cuid())
+  supportTicketId String
+  authorUserId    String
+  authorName      String
+  authorRole      String
+  content         String
+  createdAt       DateTime      @default(now())
+  supportTicket   SupportTicket @relation(fields: [supportTicketId], references: [id], onDelete: Cascade)
+  author          User          @relation(fields: [authorUserId], references: [id], onDelete: Cascade)
+
+  @@index([supportTicketId, createdAt])
 }
 
 model VendorFinancialProfile {

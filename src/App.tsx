@@ -26,6 +26,12 @@ const AdminDiagnosticsPage = lazy(() =>
 const AdminSupportTicketsPage = lazy(() =>
   import('./pages/AdminSupportTicketsPage').then((module) => ({ default: module.AdminSupportTicketsPage })),
 );
+const VendorSupportTicketsPage = lazy(() =>
+  import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
+);
+const SupportTicketDetailPage = lazy(() =>
+  import('./pages/SupportTicketDetailPage').then((module) => ({ default: module.SupportTicketDetailPage })),
+);
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then((module) => ({ default: module.ReturnsPage })));
 const ReturnDetailPage = lazy(() =>
   import('./pages/ReturnDetailPage').then((module) => ({ default: module.ReturnDetailPage })),
@@ -110,6 +116,16 @@ export default function App() {
             }
           />
           <Route
+            path="/admin/support/:ticketId"
+            element={
+              <RequirePermission permission="orders:write">
+                <Suspense fallback={loadingFallback}>
+                  <SupportTicketDetailPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
             path="/admin/orders/:shopifyOrderId"
             element={
               <RequirePermission permission="orders:write">
@@ -155,6 +171,26 @@ export default function App() {
               <RequirePermission permission="automation:read">
                 <Suspense fallback={loadingFallback}>
                   <AutomationPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support"
+            element={
+              <RequirePermission permission="orders:read">
+                <Suspense fallback={loadingFallback}>
+                  <VendorSupportTicketsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support/:ticketId"
+            element={
+              <RequirePermission permission="orders:read">
+                <Suspense fallback={loadingFallback}>
+                  <SupportTicketDetailPage />
                 </Suspense>
               </RequirePermission>
             }

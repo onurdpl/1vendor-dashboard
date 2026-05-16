@@ -3,10 +3,20 @@ import { registerSupportRoutes } from '../backend/src/modules/support/support.ro
 
 const createSupportTicketMock = vi.hoisted(() => vi.fn());
 const listAdminSupportTicketsMock = vi.hoisted(() => vi.fn());
+const listVendorSupportTicketsMock = vi.hoisted(() => vi.fn());
+const getAdminSupportTicketMock = vi.hoisted(() => vi.fn());
+const getVendorSupportTicketMock = vi.hoisted(() => vi.fn());
+const updateAdminSupportTicketStatusMock = vi.hoisted(() => vi.fn());
+const addAdminSupportTicketNoteMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/support/support.service.js', () => ({
   createSupportTicket: createSupportTicketMock,
+  addAdminSupportTicketNote: addAdminSupportTicketNoteMock,
+  getAdminSupportTicket: getAdminSupportTicketMock,
+  getVendorSupportTicket: getVendorSupportTicketMock,
   listAdminSupportTickets: listAdminSupportTicketsMock,
+  listVendorSupportTickets: listVendorSupportTicketsMock,
+  updateAdminSupportTicketStatus: updateAdminSupportTicketStatusMock,
   SupportTicketError: class SupportTicketError extends Error {
     statusCode: number;
 
@@ -78,5 +88,66 @@ describe('support route contract', () => {
 
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual([{ id: 'ticket-1' }]);
+  });
+
+  it('registers vendor ticket list and detail without internal notes', async () => {
+    listVendorSupportTicketsMock.mockResolvedValueOnce([{ id: 'ticket-1', notes: undefined }]);
+    getVendorSupportTicketMock.mockResolvedValueOnce({ id: 'ticket-1', notes: undefined });
+    const gets = new Map<string, (request: { vendorContext?: { vendorId?: string }; params?: { ticketId: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn(),
+      get: vi.fn((path: string, _options: unknown, handler: (request: { vendorContext?: { vendorId?: string }; params?: { ticketId: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const list = await gets.get('/support/tickets')?.({ vendorContext: { vendorId: 'vendor-a' }, query: {} }, reply);
+    const detail = await gets.get('/support/tickets/:ticketId')?.({
+      vendorContext: { vendorId: 'vendor-a' },
+      params: { ticketId: 'ticket-1' },
+    }, reply);
+
+    expect(list).toEqual([{ id: 'ticket-1', notes: undefined }]);
+    expect(detail).toEqual({ id: 'ticket-1', notes: undefined });
+    expect(listVendorSupportTicketsMock).toHaveBeenCalledWith('vendor-a', {});
+    expect(getVendorSupportTicketMock).toHaveBeenCalledWith('ticket-1', 'vendor-a');
+  });
+
+  it('registers admin status and internal note actions', async () => {
+    updateAdminSupportTicketStatusMock.mockResolvedValueOnce({ id: 'ticket-1', status: 'IN_REVIEW' });
+    addAdminSupportTicketNoteMock.mockResolvedValueOnce({ id: 'note-1', content: 'Internal note.' });
+    const posts = new Map<string, (request: { authUser?: { id?: string; role?: string }; params: { ticketId: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { id?: string; role?: string }; params: { ticketId: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const status = await posts.get('/admin/support/tickets/:ticketId/status')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { ticketId: 'ticket-1' },
+      body: { status: 'IN_REVIEW' },
+    }, reply);
+    const note = await posts.get('/admin/support/tickets/:ticketId/notes')?.({
+      authUser: { id: 'admin-1', role: 'admin' },
+      params: { ticketId: 'ticket-1' },
+      body: { content: 'Internal note.' },
+    }, reply);
+
+    expect(status).toEqual({ id: 'ticket-1', status: 'IN_REVIEW' });
+    expect(note).toEqual({ id: 'note-1', content: 'Internal note.' });
   });
 });

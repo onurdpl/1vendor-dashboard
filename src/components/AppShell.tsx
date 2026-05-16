@@ -9,6 +9,7 @@ import { ActionFeedback } from './ActionFeedback';
 
 const workspaceNavItems = [
   { to: '/', label: 'Dashboard', icon: 'D' },
+  { to: '/support', label: 'Support', icon: 'S' },
 ];
 
 const operationsNavItems = [
@@ -66,6 +67,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
     void queryClient.invalidateQueries({ queryKey: ['finance'] });
     void queryClient.invalidateQueries({ queryKey: ['automation'] });
+    void queryClient.invalidateQueries({ queryKey: ['support'] });
     void queryClient.invalidateQueries({ queryKey: ['admin', 'support'] });
     void queryClient.invalidateQueries({ queryKey: ['admin', 'diagnostics'] });
   }

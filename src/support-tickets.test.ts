@@ -4,6 +4,12 @@ const prismaMock = vi.hoisted(() => ({
   supportTicket: {
     create: vi.fn(),
     findMany: vi.fn(),
+    findFirst: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
+  },
+  supportTicketNote: {
+    create: vi.fn(),
   },
   vendorAllocation: {
     findFirst: vi.fn(),
@@ -21,9 +27,13 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const {
+  addAdminSupportTicketNote,
   createSupportTicket,
+  getAdminSupportTicket,
+  getVendorSupportTicket,
   listAdminSupportTickets,
   sanitizeSupportContextSnapshot,
+  updateAdminSupportTicketStatus,
 } = await import('../backend/src/modules/support/support.service.js');
 
 const authUser = {
@@ -52,11 +62,15 @@ function ticketRecord(overrides: Record<string, unknown> = {}) {
     subject: 'Return help',
     message: 'Please review this return.',
     priority: 'normal',
-    status: 'open',
+    status: 'OPEN',
+    category: 'RETURN',
     contextType: 'return',
     contextId: 'return-1',
     contextSnapshot: { route: '/returns/return-1' },
+    resolvedAt: null,
+    closedAt: null,
     vendor: { name: 'Vendor A' },
+    notes: [],
     ...overrides,
   };
 }
@@ -65,6 +79,10 @@ describe('support tickets', () => {
   beforeEach(() => {
     prismaMock.supportTicket.create.mockReset();
     prismaMock.supportTicket.findMany.mockReset();
+    prismaMock.supportTicket.findFirst.mockReset();
+    prismaMock.supportTicket.findUnique.mockReset();
+    prismaMock.supportTicket.update.mockReset();
+    prismaMock.supportTicketNote.create.mockReset();
     prismaMock.vendorAllocation.findFirst.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
@@ -95,6 +113,8 @@ describe('support tickets', () => {
         createdByUserId: 'user-vendor',
         createdByRole: 'vendor',
         vendorId: 'vendor-a',
+        status: 'OPEN',
+        category: 'RETURN',
         contextType: 'return',
         contextId: 'return-1',
         contextSnapshot: {
@@ -154,6 +174,8 @@ describe('support tickets', () => {
         id: 'ticket-2',
         vendorName: 'Vendor A',
         priority: 'high',
+        status: 'OPEN',
+        category: 'RETURN',
       }),
     ]);
     expect(prismaMock.supportTicket.findMany).toHaveBeenCalledWith({
@@ -163,9 +185,95 @@ describe('support tickets', () => {
         },
       },
       orderBy: {
-        createdAt: 'desc',
+        updatedAt: 'desc',
       },
-      take: 100,
+      take: 250,
     });
+  });
+
+  it('filters the admin queue by unresolved status and category', async () => {
+    prismaMock.supportTicket.findMany.mockResolvedValueOnce([
+      ticketRecord({ id: 'ticket-open', status: 'OPEN', category: 'RETURN', subject: 'Return help' }),
+      ticketRecord({ id: 'ticket-closed', status: 'CLOSED', category: 'ORDER', subject: 'Order help' }),
+    ]);
+
+    const result = await listAdminSupportTickets({ unresolvedOnly: 'true', category: 'RETURN', search: 'return' });
+
+    expect(result.map((ticket) => ticket.id)).toEqual(['ticket-open']);
+  });
+
+  it('updates lifecycle status and resolution timestamps', async () => {
+    prismaMock.supportTicket.update.mockResolvedValueOnce(ticketRecord({
+      status: 'RESOLVED',
+      resolvedAt: new Date('2026-05-16T12:00:00Z'),
+    }));
+
+    const result = await updateAdminSupportTicketStatus('ticket-1', { status: 'RESOLVED' });
+
+    expect(result.status).toBe('RESOLVED');
+    expect(result.resolvedAt).toBe('2026-05-16T12:00:00.000Z');
+    expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
+      where: { id: 'ticket-1' },
+      data: expect.objectContaining({
+        status: 'RESOLVED',
+        resolvedAt: expect.any(Date),
+      }),
+      include: expect.any(Object),
+    });
+  });
+
+  it('stores admin-only internal notes', async () => {
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce({ id: 'ticket-1' });
+    prismaMock.supportTicketNote.create.mockResolvedValueOnce({
+      id: 'note-1',
+      supportTicketId: 'ticket-1',
+      authorUserId: 'admin-1',
+      authorName: 'Admin User',
+      authorRole: 'admin',
+      content: 'Investigating carrier status.',
+      createdAt: new Date('2026-05-16T12:05:00Z'),
+    });
+
+    const result = await addAdminSupportTicketNote('ticket-1', {
+      id: 'admin-1',
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      status: 'active',
+    }, { content: 'Investigating carrier status.' });
+
+    expect(result.content).toBe('Investigating carrier status.');
+    expect(prismaMock.supportTicketNote.create).toHaveBeenCalledWith({
+      data: {
+        supportTicketId: 'ticket-1',
+        authorUserId: 'admin-1',
+        authorName: 'Admin User',
+        authorRole: 'admin',
+        content: 'Investigating carrier status.',
+      },
+    });
+  });
+
+  it('shows internal notes to admin detail but hides them from vendor detail', async () => {
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce(ticketRecord({
+      notes: [
+        {
+          id: 'note-1',
+          supportTicketId: 'ticket-1',
+          authorUserId: 'admin-1',
+          authorName: 'Admin User',
+          authorRole: 'admin',
+          content: 'Internal investigation note.',
+          createdAt: new Date('2026-05-16T12:05:00Z'),
+        },
+      ],
+    }));
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord());
+
+    const adminTicket = await getAdminSupportTicket('ticket-1');
+    const vendorTicket = await getVendorSupportTicket('ticket-1', 'vendor-a');
+
+    expect(adminTicket?.notes?.[0]?.content).toBe('Internal investigation note.');
+    expect(vendorTicket?.notes).toBeUndefined();
   });
 });

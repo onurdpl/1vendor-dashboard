@@ -24,6 +24,7 @@ export const queryKeys = {
     },
     support: {
       tickets: () => ['admin', 'support', 'tickets'] as const,
+      detail: (ticketId: string) => ['admin', 'support', 'tickets', ticketId] as const,
     },
   },
   dashboard: {
@@ -49,5 +50,9 @@ export const queryKeys = {
   },
   notifications: {
     list: () => ['notifications', 'list', getCurrentVendorContext().vendorId] as const,
+  },
+  support: {
+    tickets: (vendorId = getCurrentVendorContext().vendorId) => ['support', 'tickets', vendorId] as const,
+    detail: (ticketId: string, vendorId = getCurrentVendorContext().vendorId) => ['support', 'tickets', vendorId, ticketId] as const,
   },
 } as const;

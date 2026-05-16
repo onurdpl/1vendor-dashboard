@@ -18,12 +18,14 @@ import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
-import type { CreateSupportTicketInput } from '../lib/api/contracts';
+import type { CreateSupportTicketInput, SupportTicket, SupportTicketStatus } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
 }
+
+const mockSupportTickets: SupportTicket[] = [];
 
 export const runtimeServices = {
   auth: {
@@ -464,29 +466,98 @@ export const runtimeServices = {
           }),
   },
   support: {
-    create: (input: CreateSupportTicketInput) =>
-      runtimeConfig.apiMode === 'real'
-        ? realSupport.createSupportTicket(input)
-        : Promise.resolve({
-            id: `mock-support-${Date.now()}`,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            createdByUserId: 'mock-user',
-            createdByRole: 'vendor',
-            vendorId: getCurrentVendorId(),
-            vendorName: getCurrentVendorContext().vendorName,
-            subject: input.subject,
-            message: input.message,
-            priority: input.priority,
-            status: 'open' as const,
-            contextType: input.contextType,
-            contextId: input.contextId ?? null,
-            contextSnapshot: input.contextSnapshot ?? null,
-          }),
+    async create(input: CreateSupportTicketInput) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.createSupportTicket(input);
+      }
+
+      const now = new Date().toISOString();
+      const ticket: SupportTicket = {
+        id: `mock-support-${Date.now()}`,
+        createdAt: now,
+        updatedAt: now,
+        createdByUserId: 'mock-user',
+        createdByRole: 'vendor',
+        vendorId: getCurrentVendorId(),
+        vendorName: getCurrentVendorContext().vendorName,
+        subject: input.subject,
+        message: input.message,
+        priority: input.priority,
+        status: 'OPEN',
+        category: input.category ?? (input.contextType === 'return' ? 'RETURN' : input.contextType === 'order' ? 'ORDER' : input.contextType === 'shipment' ? 'SHIPMENT' : 'OTHER'),
+        contextType: input.contextType,
+        contextId: input.contextId ?? null,
+        contextSnapshot: input.contextSnapshot ?? null,
+        resolvedAt: null,
+        closedAt: null,
+        notes: [],
+      };
+      mockSupportTickets.unshift(ticket);
+      return ticket;
+    },
     listAdmin: () =>
       runtimeConfig.apiMode === 'real'
         ? realSupport.listAdminSupportTickets()
-        : Promise.resolve([]),
+        : Promise.resolve(mockSupportTickets),
+    listVendor: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.listVendorSupportTickets()
+        : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId())),
+    async detailAdmin(ticketId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.getAdminSupportTicket(ticketId);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      return ticket;
+    },
+    async detailVendor(ticketId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.getVendorSupportTicket(ticketId);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId && item.vendorId === getCurrentVendorId());
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      return { ...ticket, notes: undefined };
+    },
+    async updateStatus(ticketId: string, status: SupportTicketStatus) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.updateAdminSupportTicketStatus(ticketId, status);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      ticket.status = status;
+      ticket.updatedAt = new Date().toISOString();
+      ticket.resolvedAt = status === 'RESOLVED' ? ticket.updatedAt : ticket.resolvedAt;
+      ticket.closedAt = status === 'CLOSED' ? ticket.updatedAt : ticket.closedAt;
+      return ticket;
+    },
+    async addNote(ticketId: string, content: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.addAdminSupportTicketNote(ticketId, content);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId);
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      const note = {
+        id: `mock-note-${Date.now()}`,
+        supportTicketId: ticketId,
+        authorUserId: 'mock-admin',
+        authorName: 'Mock Admin',
+        authorRole: 'admin',
+        content,
+        createdAt: new Date().toISOString(),
+      };
+      ticket.notes = [...(ticket.notes ?? []), note];
+      ticket.updatedAt = note.createdAt;
+      return note;
+    },
   },
   diagnostics: {
     webhooks: () =>

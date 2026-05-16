@@ -4,11 +4,21 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
+  addAdminSupportTicketNote,
   createSupportTicket,
+  getAdminSupportTicket,
+  getVendorSupportTicket,
   listAdminSupportTickets,
+  listVendorSupportTickets,
   SupportTicketError,
+  updateAdminSupportTicketStatus,
 } from './support.service.js';
-import type { CreateSupportTicketInput } from './support.types.js';
+import type {
+  AddSupportTicketNoteInput,
+  CreateSupportTicketInput,
+  SupportTicketFilters,
+  UpdateSupportTicketStatusInput,
+} from './support.types.js';
 
 function sendSupportError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof SupportTicketError) {
@@ -40,7 +50,40 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
     },
   );
 
-  app.get(
+  app.get<{ Querystring: SupportTicketFilters }>(
+    '/support/tickets',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (!request.vendorContext) {
+        return reply.code(401).send({ message: 'Unauthorized' });
+      }
+
+      return listVendorSupportTickets(request.vendorContext.vendorId, request.query ?? {});
+    },
+  );
+
+  app.get<{ Params: { ticketId: string } }>(
+    '/support/tickets/:ticketId',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (!request.vendorContext) {
+        return reply.code(401).send({ message: 'Unauthorized' });
+      }
+
+      const ticket = await getVendorSupportTicket(request.params.ticketId, request.vendorContext.vendorId);
+      if (!ticket) {
+        return reply.code(404).send({ message: 'Support ticket not found.' });
+      }
+
+      return ticket;
+    },
+  );
+
+  app.get<{ Querystring: SupportTicketFilters }>(
     '/admin/support/tickets',
     {
       preHandler: [authMiddleware.authenticateRequest],
@@ -50,7 +93,62 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      return listAdminSupportTickets();
+      return listAdminSupportTickets(request.query ?? {});
+    },
+  );
+
+  app.get<{ Params: { ticketId: string } }>(
+    '/admin/support/tickets/:ticketId',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const ticket = await getAdminSupportTicket(request.params.ticketId);
+      if (!ticket) {
+        return reply.code(404).send({ message: 'Support ticket not found.' });
+      }
+
+      return ticket;
+    },
+  );
+
+  app.post<{ Params: { ticketId: string }; Body: UpdateSupportTicketStatusInput }>(
+    '/admin/support/tickets/:ticketId/status',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await updateAdminSupportTicketStatus(request.params.ticketId, request.body ?? {});
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { ticketId: string }; Body: AddSupportTicketNoteInput }>(
+    '/admin/support/tickets/:ticketId/notes',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await addAdminSupportTicketNote(request.params.ticketId, request.authUser, request.body ?? {});
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
     },
   );
 }

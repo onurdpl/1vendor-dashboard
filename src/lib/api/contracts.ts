@@ -256,16 +256,28 @@ export type ReturnDetail = ReturnSummary & {
 };
 
 export type SupportTicketPriority = 'low' | 'normal' | 'high';
-export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved';
+export type SupportTicketStatus = 'OPEN' | 'IN_REVIEW' | 'WAITING_FOR_VENDOR' | 'RESOLVED' | 'CLOSED';
+export type SupportTicketCategory = 'ORDER' | 'RETURN' | 'REFUND' | 'SHIPMENT' | 'TRACKING' | 'PAYOUT' | 'INVOICE' | 'OTHER';
 export type SupportTicketContextType = 'order' | 'return' | 'shipment' | 'general';
 
 export type CreateSupportTicketInput = {
   subject: string;
   message: string;
   priority: SupportTicketPriority;
+  category?: SupportTicketCategory;
   contextType: SupportTicketContextType;
   contextId?: string | null;
   contextSnapshot?: Record<string, unknown> | null;
+};
+
+export type SupportTicketNote = {
+  id: string;
+  supportTicketId: string;
+  authorUserId: string;
+  authorName: string;
+  authorRole: string;
+  content: string;
+  createdAt: string;
 };
 
 export type SupportTicket = {
@@ -280,9 +292,13 @@ export type SupportTicket = {
   message: string;
   priority: SupportTicketPriority;
   status: SupportTicketStatus;
+  category: SupportTicketCategory;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;
+  resolvedAt: string | null;
+  closedAt: string | null;
+  notes?: SupportTicketNote[];
 };
 
 export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed' | 'Recorded';

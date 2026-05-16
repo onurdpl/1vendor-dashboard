@@ -1,10 +1,23 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, OperationalTable, OperationalTableRow, StatusBadge } from '../components/OperationalPrimitives';
+import {
+  EmptyStatePanel,
+  FilterBar,
+  OperationalTable,
+  OperationalTableRow,
+  OperationalToolbar,
+  SearchInput,
+  StatusBadge,
+} from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
-import { listAdminSupportTickets, type SupportTicket } from '../features/support/api';
+import { listAdminSupportTickets, type SupportTicket, type SupportTicketCategory, type SupportTicketStatus } from '../features/support/api';
 import { toTitleCaseLabel } from '../services/real/formatting';
+
+const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
+const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
+const ALL_PRIORITIES = ['all', 'low', 'normal', 'high'] as const;
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -26,18 +39,51 @@ function getPriorityTone(priority: SupportTicket['priority']) {
   return 'info' as const;
 }
 
-function getContextPath(ticket: SupportTicket) {
+export function getSupportStatusTone(status: SupportTicketStatus) {
+  if (status === 'OPEN') {
+    return 'attention' as const;
+  }
+  if (status === 'IN_REVIEW') {
+    return 'info' as const;
+  }
+  if (status === 'WAITING_FOR_VENDOR') {
+    return 'warning' as const;
+  }
+  if (status === 'RESOLVED') {
+    return 'success' as const;
+  }
+  return 'neutral' as const;
+}
+
+export function formatSupportLabel(value: string) {
+  return toTitleCaseLabel(value.toLowerCase());
+}
+
+function getContextLabel(ticket: SupportTicket) {
   if (!ticket.contextId) {
-    return null;
+    return formatSupportLabel(ticket.contextType);
+  }
+  return `${formatSupportLabel(ticket.contextType)} ${ticket.contextId}`;
+}
+
+function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
+  const query = searchTerm.trim().toLowerCase();
+  if (!query) {
+    return true;
   }
 
-  if (ticket.contextType === 'return') {
-    return `/returns/${ticket.contextId}`;
-  }
-  if (ticket.contextType === 'order') {
-    return `/orders/${ticket.contextId}`;
-  }
-  return null;
+  return [
+    ticket.id,
+    ticket.subject,
+    ticket.vendorId,
+    ticket.vendorName,
+    ticket.contextId,
+    JSON.stringify(ticket.contextSnapshot ?? {}),
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+    .includes(query);
 }
 
 export function AdminSupportTicketsPage() {
@@ -45,6 +91,29 @@ export function AdminSupportTicketsPage() {
     queryKeys.admin.support.tickets(),
     listAdminSupportTickets,
   );
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<(typeof ALL_STATUSES)[number]>('all');
+  const [categoryFilter, setCategoryFilter] = useState<(typeof ALL_CATEGORIES)[number]>('all');
+  const [priorityFilter, setPriorityFilter] = useState<(typeof ALL_PRIORITIES)[number]>('all');
+  const [unresolvedOnly, setUnresolvedOnly] = useState(true);
+
+  const filteredTickets = useMemo(() => {
+    return (tickets ?? []).filter((ticket) => {
+      if (unresolvedOnly && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) {
+        return false;
+      }
+      if (statusFilter !== 'all' && ticket.status !== statusFilter) {
+        return false;
+      }
+      if (categoryFilter !== 'all' && ticket.category !== categoryFilter) {
+        return false;
+      }
+      if (priorityFilter !== 'all' && ticket.priority !== priorityFilter) {
+        return false;
+      }
+      return ticketMatchesSearch(ticket, searchTerm);
+    });
+  }, [categoryFilter, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 
   if (isLoading) {
     return (
@@ -69,48 +138,72 @@ export function AdminSupportTicketsPage() {
   }
 
   return (
-    <section className="op-page">
+    <section className="op-page support-ops-page">
       <div className="op-page-heading">
         <div>
-          <p className="eyebrow">Admin support</p>
-          <h1>Support tickets</h1>
-          <p>Internal vendor support requests with operational context.</p>
+          <p className="eyebrow">Support operations</p>
+          <h1>Support Operations Workspace</h1>
+          <p>Review vendor support requests, operational context, and internal investigation notes.</p>
         </div>
       </div>
 
-      {tickets.length ? (
-        <OperationalTable columns={['Created', 'Vendor', 'Subject', 'Priority', 'Context', 'Status']}>
-          {tickets.map((ticket) => {
-            const contextPath = getContextPath(ticket);
-            return (
-              <OperationalTableRow key={ticket.id}>
-                <td>{formatDate(ticket.createdAt)}</td>
-                <td>{ticket.vendorName ?? ticket.vendorId}</td>
-                <td>
-                  <strong>{ticket.subject}</strong>
-                  <span>{ticket.message}</span>
-                </td>
-                <td>
-                  <StatusBadge tone={getPriorityTone(ticket.priority)}>{toTitleCaseLabel(ticket.priority)}</StatusBadge>
-                </td>
-                <td>
-                  {contextPath ? (
-                    <Link to={contextPath}>{toTitleCaseLabel(ticket.contextType)} {ticket.contextId}</Link>
-                  ) : (
-                    <span>{toTitleCaseLabel(ticket.contextType)}</span>
-                  )}
-                </td>
-                <td>
-                  <StatusBadge tone={ticket.status === 'resolved' ? 'success' : 'attention'}>
-                    {toTitleCaseLabel(ticket.status)}
-                  </StatusBadge>
-                </td>
-              </OperationalTableRow>
-            );
-          })}
+      <OperationalToolbar>
+        <SearchInput
+          placeholder="Search ticket, order, return, subject, or vendor..."
+          value={searchTerm}
+          onChange={(event) => setSearchTerm(event.target.value)}
+        />
+        <FilterBar>
+          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+            {ALL_STATUSES.map((status) => (
+              <option key={status} value={status}>{status === 'all' ? 'All statuses' : formatSupportLabel(status)}</option>
+            ))}
+          </select>
+          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as typeof categoryFilter)}>
+            {ALL_CATEGORIES.map((category) => (
+              <option key={category} value={category}>{category === 'all' ? 'All categories' : formatSupportLabel(category)}</option>
+            ))}
+          </select>
+          <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as typeof priorityFilter)}>
+            {ALL_PRIORITIES.map((priority) => (
+              <option key={priority} value={priority}>{priority === 'all' ? 'All priorities' : formatSupportLabel(priority)}</option>
+            ))}
+          </select>
+          <label className="support-toggle">
+            <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
+            Unresolved only
+          </label>
+        </FilterBar>
+      </OperationalToolbar>
+
+      {filteredTickets.length ? (
+        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Updated', 'Action']}>
+          {filteredTickets.map((ticket) => (
+            <OperationalTableRow key={ticket.id}>
+              <td>
+                <strong>{ticket.subject}</strong>
+                <span>{ticket.id}</span>
+              </td>
+              <td>{ticket.vendorName ?? ticket.vendorId}</td>
+              <td>{getContextLabel(ticket)}</td>
+              <td>{formatSupportLabel(ticket.category)}</td>
+              <td>
+                <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
+              </td>
+              <td>
+                <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
+              </td>
+              <td>{formatDate(ticket.updatedAt)}</td>
+              <td>
+                <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
+                  Open
+                </Link>
+              </td>
+            </OperationalTableRow>
+          ))}
         </OperationalTable>
       ) : (
-        <EmptyStatePanel title="No support tickets" description="Vendor support requests will appear here." />
+        <EmptyStatePanel title="No support tickets" description="No tickets match the current filters." />
       )}
     </section>
   );
