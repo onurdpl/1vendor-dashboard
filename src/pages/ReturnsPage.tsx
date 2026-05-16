@@ -26,11 +26,18 @@ type ReturnRowItemCandidate = {
   productName?: unknown;
   lineItemTitle?: unknown;
   orderLineItemTitle?: unknown;
+  merchandiseTitle?: unknown;
+  merchandiseName?: unknown;
   variantTitle?: unknown;
   variant?: unknown;
   optionTitle?: unknown;
   options?: unknown;
   sku?: unknown;
+  product?: ReturnRowItemCandidate;
+  merchandise?: ReturnRowItemCandidate & { product?: ReturnRowItemCandidate };
+  lineItem?: ReturnRowItemCandidate;
+  orderLineItem?: ReturnRowItemCandidate;
+  shopifyOrderLineItem?: ReturnRowItemCandidate;
 };
 
 function formatDate(value: string | null | undefined) {
@@ -141,7 +148,7 @@ function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
 
 function getVariantText(value: string | null | undefined) {
   const text = value?.trim();
-  if (!text || text === 'Details pending' || text === 'Default') {
+  if (!text || text === 'Details pending' || text === 'Default' || text === 'Return item') {
     return '';
   }
 
@@ -162,7 +169,16 @@ function getSkuText(value: string | null | undefined) {
 }
 
 function readText(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const text = value.trim();
+  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+    return '';
+  }
+
+  return text;
 }
 
 function readFirstText(...values: unknown[]) {
@@ -181,6 +197,8 @@ function getRowItemCandidates(summary: ReturnSummary) {
     product?: ReturnRowItemCandidate;
     productTitle?: unknown;
     productName?: unknown;
+    merchandiseTitle?: unknown;
+    merchandiseName?: unknown;
     title?: unknown;
     name?: unknown;
     lineItemTitle?: unknown;
@@ -202,6 +220,41 @@ function getRowItemCandidates(summary: ReturnSummary) {
   return [firstNestedItem, record.item, record.product, record].filter(Boolean) as ReturnRowItemCandidate[];
 }
 
+function resolveCandidateTitle(item: ReturnRowItemCandidate) {
+  return readFirstText(
+    item.productTitle,
+    item.productName,
+    item.product?.title,
+    item.product?.name,
+    item.lineItemTitle,
+    item.lineItem?.productTitle,
+    item.lineItem?.productName,
+    item.lineItem?.title,
+    item.lineItem?.name,
+    item.orderLineItemTitle,
+    item.orderLineItem?.productTitle,
+    item.orderLineItem?.productName,
+    item.orderLineItem?.title,
+    item.orderLineItem?.name,
+    item.shopifyOrderLineItem?.productTitle,
+    item.shopifyOrderLineItem?.productName,
+    item.shopifyOrderLineItem?.title,
+    item.shopifyOrderLineItem?.name,
+    item.merchandiseTitle,
+    item.merchandiseName,
+    item.merchandise?.product?.title,
+    item.merchandise?.product?.name,
+    item.merchandise?.title,
+    item.merchandise?.name,
+    item.title,
+    item.name,
+  );
+}
+
+function resolveCandidateVariant(item: ReturnRowItemCandidate) {
+  return readFirstText(item.variantTitle, item.variant, item.optionTitle, item.options);
+}
+
 function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   const detailItems = detail?.refundedItems ?? [];
   if (detailItems.length > 0) {
@@ -219,8 +272,8 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   if (summaryItems.length > 0) {
     return summaryItems.map((item) => ({
       sku: item.sku,
-      title: item.name || 'Return item',
-      variantTitle: getVariantText(item.variantTitle),
+      title: resolveCandidateTitle(item as ReturnRowItemCandidate) || 'Return item',
+      variantTitle: getVariantText(resolveCandidateVariant(item as ReturnRowItemCandidate)),
       quantity: item.quantity,
       amount: item.refundAmount,
       condition: item.condition,
@@ -238,27 +291,11 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
 }
 
 function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null) {
-  const rowItem = getRowItemCandidates(summary).find((item) =>
-    readFirstText(
-      item.productTitle,
-      item.productName,
-      item.lineItemTitle,
-      item.orderLineItemTitle,
-      item.title,
-      item.name,
-    ),
-  );
+  const rowItem = getRowItemCandidates(summary).find((item) => resolveCandidateTitle(item));
   const firstItem = rowItem
     ? {
-        title: readFirstText(
-          rowItem.productTitle,
-          rowItem.productName,
-          rowItem.lineItemTitle,
-          rowItem.orderLineItemTitle,
-          rowItem.title,
-          rowItem.name,
-        ),
-        variantTitle: readFirstText(rowItem.variantTitle, rowItem.variant, rowItem.optionTitle, rowItem.options),
+        title: resolveCandidateTitle(rowItem),
+        variantTitle: resolveCandidateVariant(rowItem),
         sku: readText(rowItem.sku),
       }
     : getItemPreview(summary, detail)[0];
@@ -360,8 +397,28 @@ export function ReturnsPage() {
               [
                 lineItem.productTitle,
                 lineItem.productName,
+                lineItem.product?.title,
+                lineItem.product?.name,
                 lineItem.lineItemTitle,
+                lineItem.lineItem?.productTitle,
+                lineItem.lineItem?.productName,
+                lineItem.lineItem?.title,
+                lineItem.lineItem?.name,
                 lineItem.orderLineItemTitle,
+                lineItem.orderLineItem?.productTitle,
+                lineItem.orderLineItem?.productName,
+                lineItem.orderLineItem?.title,
+                lineItem.orderLineItem?.name,
+                lineItem.shopifyOrderLineItem?.productTitle,
+                lineItem.shopifyOrderLineItem?.productName,
+                lineItem.shopifyOrderLineItem?.title,
+                lineItem.shopifyOrderLineItem?.name,
+                lineItem.merchandiseTitle,
+                lineItem.merchandiseName,
+                lineItem.merchandise?.product?.title,
+                lineItem.merchandise?.product?.name,
+                lineItem.merchandise?.title,
+                lineItem.merchandise?.name,
                 lineItem.title,
                 lineItem.name,
                 lineItem.variantTitle,

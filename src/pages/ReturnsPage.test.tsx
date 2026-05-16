@@ -112,6 +112,32 @@ const otherVendorReturn: ReturnDetail = {
   refundedSkus: ['SKU-B-1'],
 };
 
+const nestedProductReturn = {
+  ...pendingReturn,
+  id: 'RET-A-REQUEST-1018',
+  sourceShopifyOrderNumber: 1018,
+  refundedItems: [
+    {
+      id: 'line-a-nested',
+      originalVendorId: 'demo-vendor-a',
+      assignedVendorId: 'demo-vendor-a',
+      vendorId: 'demo-vendor-a',
+      sku: 'SKU-NESTED',
+      variantTitle: 'Return item',
+      name: 'Return item',
+      quantity: 1,
+      condition: 'Opened',
+      refundAmount: '$0.00',
+      merchandise: {
+        product: {
+          title: 'Nested product trainer',
+        },
+        title: 'Nested variant name',
+      },
+    },
+  ],
+} as ReturnDetail;
+
 function toSummary(detail: ReturnDetail): ReturnSummary {
   const { resolution: _resolution, refundMethod: _refundMethod, processedBy: _processedBy, items: _items, timeline: _timeline, ...summary } = detail;
   return summary;
@@ -212,5 +238,16 @@ describe('ReturnsPage control center', () => {
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('İncele return for order 1001').length).toBeGreaterThan(0);
+  });
+
+  it('resolves table item names from nested row product data without selecting the row', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(nestedProductReturn)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Nested product trainer')).toBeInTheDocument();
+    expect(screen.getByText('SKU-NESTED')).toBeInTheDocument();
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 });

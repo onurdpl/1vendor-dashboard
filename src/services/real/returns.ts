@@ -23,6 +23,38 @@ type ReturnSummaryDto = {
     sourceVariantId: string | null;
     sku: string | null;
     title: string | null;
+    name?: string | null;
+    productTitle?: string | null;
+    productName?: string | null;
+    lineItemTitle?: string | null;
+    orderLineItemTitle?: string | null;
+    variantTitle?: string | null;
+    variant?: string | null;
+    optionTitle?: string | null;
+    product?: {
+      title?: string | null;
+      name?: string | null;
+    } | null;
+    merchandise?: {
+      title?: string | null;
+      name?: string | null;
+      product?: {
+        title?: string | null;
+        name?: string | null;
+      } | null;
+    } | null;
+    lineItem?: {
+      title?: string | null;
+      name?: string | null;
+      productTitle?: string | null;
+      productName?: string | null;
+    } | null;
+    orderLineItem?: {
+      title?: string | null;
+      name?: string | null;
+      productTitle?: string | null;
+      productName?: string | null;
+    } | null;
     quantity: number;
     refundAmount: string;
   }>;
@@ -66,6 +98,54 @@ function mapStatus(status: string, sourceType: ReturnSummary['sourceType']): Ret
   return toTitleCaseLabel(status) as ReturnSummary['status'];
 }
 
+function readDtoText(value: unknown) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+
+  const text = value.trim();
+  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+    return '';
+  }
+
+  return text;
+}
+
+function readFirstDtoText(...values: unknown[]) {
+  return values.map(readDtoText).find(Boolean) ?? '';
+}
+
+type ReturnItemDto = NonNullable<ReturnSummaryDto['refundedItems']>[number];
+
+function resolveReturnItemName(item: ReturnItemDto) {
+  return readFirstDtoText(
+    item.productTitle,
+    item.productName,
+    item.product?.title,
+    item.product?.name,
+    item.lineItemTitle,
+    item.lineItem?.productTitle,
+    item.lineItem?.productName,
+    item.lineItem?.title,
+    item.lineItem?.name,
+    item.orderLineItemTitle,
+    item.orderLineItem?.productTitle,
+    item.orderLineItem?.productName,
+    item.orderLineItem?.title,
+    item.orderLineItem?.name,
+    item.merchandise?.product?.title,
+    item.merchandise?.product?.name,
+    item.merchandise?.title,
+    item.merchandise?.name,
+    item.title,
+    item.name,
+  ) || 'Return item';
+}
+
+function resolveReturnItemVariant(item: ReturnItemDto) {
+  return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle, item.sourceVariantId, 'Default');
+}
+
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
   const sourceType = dto.returnRequestSource === 'shopify_return_request' ? 'shopify_return_request' : 'shopify_refund';
   const sourceLabel = dto.returnRequestSource === 'shopify_return_request'
@@ -83,8 +163,8 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     assignedVendorId: dto.assignedVendorId,
     vendorId: dto.assignedVendorId,
     sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: item.sourceVariantId ?? 'Default',
-    name: item.title ?? 'Return item',
+    variantTitle: resolveReturnItemVariant(item),
+    name: resolveReturnItemName(item),
     quantity: item.quantity,
     condition: 'Opened' as const,
     refundAmount: formatCurrency(item.refundAmount),
@@ -140,8 +220,8 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     assignedVendorId: response.assignedVendorId,
     vendorId: response.assignedVendorId,
     sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: item.sourceVariantId ?? 'Default',
-    name: item.title ?? 'Refunded line item',
+    variantTitle: resolveReturnItemVariant(item),
+    name: resolveReturnItemName(item),
     quantity: item.quantity,
     condition: 'Opened' as const,
     refundAmount: formatCurrency(item.refundAmount),
