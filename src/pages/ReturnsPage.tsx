@@ -4,7 +4,6 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   FilterBar,
-  KPIStatCard,
   OperationalActionGroup,
   OperationalTable,
   OperationalTableRow,
@@ -23,7 +22,7 @@ type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
-    return 'Not synced';
+    return '—';
   }
 
   return new Intl.DateTimeFormat('en-US', {
@@ -35,20 +34,12 @@ function formatDate(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
-function parseAmount(value: string) {
-  return Number.parseFloat(value.replace(/[^0-9.-]/g, '') || '0');
-}
-
 function getReturnKind(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' ? 'Return request' : 'Refund completed';
+  return item.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refunded';
 }
 
 function getRefundStatusLabel(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refunded';
-}
-
-function getPayoutImpactLabel(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' ? 'Not applied yet' : 'Included in payout calculations';
 }
 
 function getVendorStatusLabel(item: ReturnSummary) {
@@ -114,8 +105,8 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
 
   return (summary.refundedSkus ?? []).map((sku) => ({
     sku,
-    title: 'Line item detail available in return detail',
-    variantTitle: 'Pending detail',
+    title: 'Return item',
+    variantTitle: 'Details pending',
     quantity: 1,
     amount: summary.sourceType === 'shopify_return_request' ? 'Not posted' : summary.amount,
     condition: 'Opened' as ReturnLineItem['condition'],
@@ -134,31 +125,44 @@ function getSourceFilterLabel(filter: ReturnSourceFilter) {
 
 function getVendorTimelineLabel(label: string) {
   const normalized = label.toLowerCase();
-  if (normalized.includes('refund')) {
-    return 'Refund processed';
-  }
   if (normalized.includes('requested') || normalized.includes('return')) {
     return 'Return requested';
   }
   if (normalized.includes('approved')) {
-    return 'Return approved';
+    return 'Refund approved';
   }
-  if (normalized.includes('declined') || normalized.includes('cancelled') || normalized.includes('rejected')) {
-    return 'Return closed';
+  if (normalized.includes('refund')) {
+    return 'Refund approved';
   }
   if (normalized.includes('pending') || normalized.includes('review')) {
-    return 'Team reviewing return';
+    return 'Vendor reviewed';
   }
-  return label;
+  if (normalized.includes('received') || normalized.includes('delivered')) {
+    return 'Shipment received';
+  }
+  return '';
 }
 
 function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
   const detailTimeline = detail?.timeline ?? [];
   if (detailTimeline.length > 0) {
-    return detailTimeline.map((item) => ({
-      label: getVendorTimelineLabel(item.label),
-      at: formatDate(item.at),
-    }));
+    const seenLabels = new Set<string>();
+    const items = detailTimeline
+      .map((item) => ({
+        label: getVendorTimelineLabel(item.label),
+        at: formatDate(item.at),
+      }))
+      .filter((item) => {
+        if (!item.label || seenLabels.has(item.label)) {
+          return false;
+        }
+        seenLabels.add(item.label);
+        return true;
+      });
+
+    if (items.length > 0) {
+      return items;
+    }
   }
 
   return [
@@ -167,7 +171,7 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
       at: formatDate(summary.date),
     },
     {
-      label: getVendorStatusLabel(summary),
+      label: summary.sourceType === 'shopify_return_request' ? 'Vendor reviewed' : 'Refund approved',
       at: formatDate(summary.updatedAt ?? summary.date),
     },
   ];
@@ -265,46 +269,52 @@ export function ReturnsPage() {
     );
   }
 
-  const totalReturns = returns.length;
   const pendingCount = returns.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
   const approvedCount = returns.filter((item) => item.status === 'Approved').length;
   const processedCount = returns.filter((item) => item.sourceType !== 'shopify_return_request').length;
   const attentionCount = returns.filter(needsAttention).length;
-  const totalRefundAmount = returns
-    .filter((item) => item.sourceType !== 'shopify_return_request')
-    .reduce((total, item) => total + parseAmount(item.amount), 0);
   const statuses = Array.from(new Set(returns.map((item) => item.status)));
   const vendors = Array.from(new Set(returns.map((item) => item.assignedVendorId)));
   const selectedDetail = detailQuery.data;
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
+  const kpis = [
+    { label: 'Pending review', value: pendingCount, meta: 'Review queue', icon: 'P', tone: 'attention' },
+    { label: 'Awaiting shipment', value: approvedCount, meta: 'Ready to move', icon: 'S', tone: 'info' },
+    { label: 'Refunded', value: processedCount, meta: 'Completed', icon: 'R', tone: 'success' },
+    { label: 'Needs action', value: attentionCount, meta: 'Open items', icon: 'A', tone: attentionCount > 0 ? 'warning' : 'success' },
+  ] as const;
 
   return (
     <section className="op-page returns-control-center">
-      <div className="op-page-heading">
+      <div className="op-page-heading returns-compact-heading">
         <div>
           <p className="eyebrow">Returns</p>
-          <h2>{currentVendor.vendorName} returns workspace</h2>
-          <p className="page-description">
-            Track return requests, refund progress, returned items, and action needed for your vendor orders.
-          </p>
+          <h2>Return requests</h2>
         </div>
-        <div className="op-heading-meta">
-          <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
-          <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
-          <StatusBadge tone={attentionCount > 0 ? 'attention' : 'success'}>{attentionCount} attention</StatusBadge>
-        </div>
+        <StatusBadge tone="info">Phase 16A foundation</StatusBadge>
       </div>
 
-      <div className="op-kpi-row returns-kpi-row">
-        <KPIStatCard label="Pending returns" value={pendingCount} detail="Awaiting review" tone="attention" />
-        <KPIStatCard label="Approved" value={approvedCount} detail="Ready for next step" tone="success" />
-        <KPIStatCard label="Refunds completed" value={processedCount} detail={`${totalReturns} total records`} tone="info" />
-        <KPIStatCard label="Refund amount" value={`TRY ${totalRefundAmount.toFixed(2)}`} detail="Completed refunds" tone="neutral" />
-        <KPIStatCard label="Needs attention" value={attentionCount} detail="Action required" tone={attentionCount > 0 ? 'warning' : 'success'} />
+      <div className="returns-kpi-strip" aria-label="Returns summary">
+        {kpis.map((kpi) => (
+          <article key={kpi.label} className={`returns-mini-kpi returns-mini-kpi-${kpi.tone}`}>
+            <span className="returns-mini-kpi-icon" aria-hidden="true">{kpi.icon}</span>
+            <div>
+              <strong>{kpi.value}</strong>
+              <span>{kpi.label}</span>
+              <small>{kpi.meta}</small>
+            </div>
+          </article>
+        ))}
       </div>
 
       <div className="op-control-layout returns-control-layout">
         <div className="op-main-column">
+          <div className="returns-status-row" aria-label="Return workspace status">
+            <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
+            <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+            <StatusBadge tone={attentionCount > 0 ? 'attention' : 'success'}>{attentionCount} attention</StatusBadge>
+          </div>
+
           <OperationalToolbar>
             <SearchInput
               placeholder="Search returns by order, return #, customer or SKU..."
@@ -365,11 +375,10 @@ export function ReturnsPage() {
           ) : (
             <OperationalTable
               columns={[
-                'Items',
-                'Return',
-                'Status',
-                'Refund',
-                'Updated',
+                'Product',
+                'Order #',
+                'Return status',
+                'Requested',
                 'Action',
               ]}
               className="returns-op-table returns-op-table-v2"
@@ -385,38 +394,32 @@ export function ReturnsPage() {
                   >
                     <div className="return-item-preview">
                       <span className="return-item-thumb" aria-hidden="true">
-                        {itemCount > 1 ? itemCount : 'SKU'}
+                        {itemCount > 1 ? itemCount : 'R'}
                       </span>
                       <span>
-                        <strong>{itemCount} item{itemCount === 1 ? '' : 's'}</strong>
-                        <small>{item.refundedSkus?.slice(0, 2).join(', ') || 'No SKU in summary'}</small>
+                        <strong>{getItemPreview(item, isSelected ? selectedDetail : null)[0]?.title ?? 'Return item'}</strong>
+                        <small>{itemCount} item{itemCount === 1 ? '' : 's'}</small>
                       </span>
                     </div>
                     <span>
                       <strong>Order #{item.sourceShopifyOrderNumber}</strong>
-                      <small>{item.customer || 'Customer unavailable'}</small>
-                    </span>
-                    <span>
-                      <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
                       <small>{getReturnKind(item)}</small>
                     </span>
                     <span>
-                      <strong className={item.sourceType === 'shopify_return_request' ? 'muted' : 'op-money finance-negative'}>
-                        {item.sourceType === 'shopify_return_request' ? 'Refund pending' : `-${item.amount}`}
-                      </strong>
-                      <small>{getPayoutImpactLabel(item)}</small>
+                      <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
+                      <small>{getRefundStatusLabel(item)}</small>
                     </span>
                     <span>
-                      <strong>{formatDate(item.updatedAt ?? item.date)}</strong>
-                      <small>Requested {formatDate(item.date)}</small>
+                      <strong>{formatDate(item.date)}</strong>
+                      <small>{formatDate(item.updatedAt ?? item.date)}</small>
                     </span>
                     <OperationalActionGroup>
                       <Link
                         to={`/returns/${item.id}`}
-                        className="button button-secondary button-link"
+                        className="button button-ghost button-link returns-row-action"
                         onClick={(event) => event.stopPropagation()}
                       >
-                        Open
+                        View
                       </Link>
                     </OperationalActionGroup>
                   </OperationalTableRow>
@@ -431,19 +434,9 @@ export function ReturnsPage() {
           title={selectedReturn ? `Order #${selectedReturn.sourceShopifyOrderNumber}` : 'No return selected'}
           action={
             selectedReturn ? (
-              <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
+              <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link returns-panel-action">
                 Review return
               </Link>
-            ) : null
-          }
-          footer={
-            selectedReturn ? (
-              <OperationalActionGroup>
-                <StatusBadge tone={selectedReturn.sourceType === 'shopify_return_request' ? 'warning' : 'success'}>
-                  {getRefundStatusLabel(selectedReturn)}
-                </StatusBadge>
-                <span className="queue-muted-action">For {getVendorName(selectedReturn.assignedVendorId, vendorLookup)}</span>
-              </OperationalActionGroup>
             ) : null
           }
         >
@@ -451,13 +444,10 @@ export function ReturnsPage() {
             <>
               <div className="op-detail-status-row">
                 <StatusBadge tone={getStatusTone(selectedReturn)}>{getVendorStatusLabel(selectedReturn)}</StatusBadge>
-                <StatusBadge tone={selectedReturn.sourceType === 'shopify_return_request' ? 'warning' : 'success'}>
-                  {getRefundStatusLabel(selectedReturn)}
-                </StatusBadge>
               </div>
 
               <div className="returns-summary-card">
-                <h4>Return summary</h4>
+                <h4>Summary</h4>
                 <div className="returns-summary-grid-v2">
                   <div>
                     <span>Requested</span>
@@ -475,10 +465,6 @@ export function ReturnsPage() {
                     <span>Reason</span>
                     <strong>{selectedReturn.reason || 'Unknown'}</strong>
                   </div>
-                  <div>
-                    <span>Payout impact</span>
-                    <strong>{getPayoutImpactLabel(selectedReturn)}</strong>
-                  </div>
                 </div>
               </div>
 
@@ -493,7 +479,7 @@ export function ReturnsPage() {
                         </span>
                         <div>
                           <strong>{item.title}</strong>
-                          <small>{item.variantTitle} · {item.sku}</small>
+                          <small>{item.variantTitle || item.sku || '—'}</small>
                         </div>
                         <div className="return-detail-item-meta">
                           <span>Qty {item.quantity}</span>
@@ -510,13 +496,7 @@ export function ReturnsPage() {
               <div className="op-panel-section">
                 <h4>Timeline</h4>
                 <ol className="returns-timeline">
-                  {[
-                    ...buildTimeline(selectedReturn, selectedDetail),
-                    {
-                      label: selectedReturn.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refund processed',
-                      at: formatDate(selectedReturn.updatedAt ?? selectedReturn.date),
-                    },
-                  ].map((item, index) => (
+                  {buildTimeline(selectedReturn, selectedDetail).map((item, index) => (
                     <li key={`${item.label}-${item.at}-${index}`}>
                       <span className="returns-timeline-dot" aria-hidden="true" />
                       <div>
@@ -549,7 +529,7 @@ export function ReturnsPage() {
       <div className="returns-support-footer">
         <div>
           <h3>Need help?</h3>
-          <p>If you have questions about returns or refunds, contact support.</p>
+          <p>Questions about a return or refund? Contact support.</p>
         </div>
         <button type="button" className="button button-secondary">
           Contact support

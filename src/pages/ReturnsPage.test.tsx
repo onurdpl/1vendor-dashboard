@@ -161,12 +161,13 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect(await screen.findByRole('heading', { name: /returns workspace/i })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /return requests/i })).toBeInTheDocument();
     expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
-    expect(screen.getAllByText('Return request').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Refund completed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Included in payout calculations').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
+    expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
   });
 
   it('renders selected drawer item details from the scoped return detail endpoint', async () => {
@@ -175,14 +176,14 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    await screen.findByText('Wireless label printer');
-    await userEvent.click(screen.getAllByText('Northwind Retail')[0]);
+    expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    await userEvent.click(screen.getAllByText('Order #1002')[0]);
 
-    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
     expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
-    expect(screen.getAllByText(/SKU-A-2/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Standard').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Included in payout calculations').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
   });
 
   it('preserves vendor-scoped visibility in mock mode data', async () => {
@@ -191,7 +192,7 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect((await screen.findAllByText('Acme Supply Co.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Order #1001')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.queryByText(otherVendorReturn.customer)).not.toBeInTheDocument());
   });
 
