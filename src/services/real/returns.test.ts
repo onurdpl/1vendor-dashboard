@@ -91,4 +91,45 @@ describe('real returns service item title mapping', () => {
     expect(returns[0].refundedItems?.[0]?.name).toBe('SKU-ONLY');
     expect(returns[0].refundedItems?.[0]?.name).not.toBe('Return item');
   });
+
+  it('uses variant title before SKU when title is unavailable but variant is descriptive', async () => {
+    apiClientGet.mockResolvedValueOnce([
+      {
+        id: 'return-3',
+        sourceShopifyOrderId: 'gid://shopify/Order/1025',
+        sourceShopifyOrderNumber: '#1025',
+        sourceShopifyRefundId: '',
+        sourceShopifyReturnId: '23165600083',
+        sourceShopifyReturnGid: 'gid://shopify/Return/23165600083',
+        returnLifecycleStatus: 'requested',
+        returnRequestSource: 'shopify_return_request',
+        vendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        status: 'requested',
+        refundAmount: '0.00',
+        refundedItemCount: 1,
+        refundedSkus: ['DJ1196-002-40,5'],
+        refundedItems: [
+          {
+            id: 'line-3',
+            sourceLineItemId: 'line-3',
+            sourceVariantId: null,
+            sku: 'DJ1196-002-40,5',
+            title: null,
+            name: 'DJ1196-002-40,5',
+            variantTitle: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5',
+            quantity: 1,
+            refundAmount: '0.00',
+          },
+        ],
+        createdAt: '2026-05-13T04:44:00Z',
+        updatedAt: '2026-05-13T04:44:00Z',
+      },
+    ]);
+
+    const returns = await listReturns();
+
+    expect(returns[0].refundedItems?.[0]?.name).toBe('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5');
+    expect(returns[0].refundedItems?.[0]?.sku).toBe('DJ1196-002-40,5');
+  });
 });

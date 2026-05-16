@@ -186,8 +186,22 @@ function readText(value: unknown) {
   return text;
 }
 
+function readProductText(value: unknown, sku?: string | null) {
+  const text = readText(value);
+  const normalizedSku = readText(sku);
+  if (!text || (normalizedSku && text === normalizedSku)) {
+    return '';
+  }
+
+  return text;
+}
+
 function readFirstText(...values: unknown[]) {
   return values.map(readText).find(Boolean) ?? '';
+}
+
+function readFirstProductText(sku: string | null | undefined, ...values: unknown[]) {
+  return values.map((value) => readProductText(value, sku)).find(Boolean) ?? '';
 }
 
 function getRowItemCandidates(summary: ReturnSummary) {
@@ -226,7 +240,8 @@ function getRowItemCandidates(summary: ReturnSummary) {
 }
 
 function resolveCandidateTitle(item: ReturnRowItemCandidate) {
-  return readFirstText(
+  return readFirstProductText(
+    readText(item.sku),
     item.productTitle,
     item.productName,
     item.product?.title,
@@ -253,6 +268,9 @@ function resolveCandidateTitle(item: ReturnRowItemCandidate) {
     item.merchandise?.name,
     item.title,
     item.name,
+    item.variantTitle,
+    item.variant,
+    item.optionTitle,
   );
 }
 
@@ -265,7 +283,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   if (detailItems.length > 0) {
     return detailItems.map((item) => ({
       sku: item.sku,
-      title: readText(item.name) || getItemTitleFallback(item.sku),
+      title: readProductText(item.name, item.sku) || readProductText(item.variantTitle, item.sku) || getItemTitleFallback(item.sku),
       variantTitle: getVariantText(item.variantTitle),
       quantity: item.quantity,
       amount: item.refundAmount,
@@ -307,7 +325,7 @@ function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null
 
   return {
     title: firstItem?.title || getItemTitleFallback(firstItem?.sku),
-    variant: getVariantText(firstItem?.variantTitle),
+    variant: getVariantText(firstItem?.variantTitle) === firstItem?.title ? '' : getVariantText(firstItem?.variantTitle),
     sku: getSkuText(firstItem?.sku),
   };
 }

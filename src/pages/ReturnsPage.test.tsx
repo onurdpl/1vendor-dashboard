@@ -251,7 +251,31 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
-  it('falls back to SKU in the table when a returned item title is missing', async () => {
+  it('uses variant title before SKU when the item name is only the SKU', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        refundedSkus: ['DJ1196-002-40,5'],
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'DJ1196-002-40,5',
+            name: 'DJ1196-002-40,5',
+            variantTitle: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5')).toBeInTheDocument();
+    expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
+  it('falls back to SKU in the table only when a returned item title is missing', async () => {
     listReturnsMock.mockResolvedValue([
       {
         ...toSummary(pendingReturn),

@@ -111,8 +111,22 @@ function readDtoText(value: unknown) {
   return text;
 }
 
+function readDtoProductText(value: unknown, sku?: string | null) {
+  const text = readDtoText(value);
+  const normalizedSku = readDtoText(sku);
+  if (!text || (normalizedSku && text === normalizedSku)) {
+    return '';
+  }
+
+  return text;
+}
+
 function readFirstDtoText(...values: unknown[]) {
   return values.map(readDtoText).find(Boolean) ?? '';
+}
+
+function readFirstDtoProductText(sku: string | null | undefined, ...values: unknown[]) {
+  return values.map((value) => readDtoProductText(value, sku)).find(Boolean) ?? '';
 }
 
 type ReturnItemDto = NonNullable<ReturnSummaryDto['refundedItems']>[number];
@@ -122,7 +136,8 @@ function getReturnItemFallbackName(item: Pick<ReturnItemDto, 'sku'>) {
 }
 
 function resolveReturnItemName(item: ReturnItemDto) {
-  return readFirstDtoText(
+  return readFirstDtoProductText(
+    item.sku,
     item.productTitle,
     item.productName,
     item.product?.title,
@@ -143,6 +158,9 @@ function resolveReturnItemName(item: ReturnItemDto) {
     item.merchandise?.name,
     item.title,
     item.name,
+    item.variantTitle,
+    item.variant,
+    item.optionTitle,
   ) || getReturnItemFallbackName(item);
 }
 
