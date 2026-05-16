@@ -5,6 +5,12 @@ import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { getVendorReturnById, listVendorReturns } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
+
+type ReturnReasonBackfillBody = {
+  dryRun?: boolean;
+  limit?: number;
+};
 
 export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -42,6 +48,20 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return returnRecord;
+    },
+  );
+
+  app.post<{ Body: ReturnReasonBackfillBody }>(
+    '/admin/returns/reasons/backfill',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return backfillShopifyReturnReasons(env, request.body ?? {});
     },
   );
 }

@@ -2,10 +2,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerReturnsRoutes } from '../backend/src/modules/returns/returns.routes.js';
 
 const listVendorReturnsMock = vi.hoisted(() => vi.fn());
+const backfillShopifyReturnReasonsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   getVendorReturnById: vi.fn(),
   listVendorReturns: listVendorReturnsMock,
+}));
+
+vi.mock('../backend/src/modules/returns/return-reason-backfill.service.js', () => ({
+  backfillShopifyReturnReasons: backfillShopifyReturnReasonsMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -69,6 +74,7 @@ describe('backend returns list route contract', () => {
       get: vi.fn((path: string, _options: unknown, handler: (request: { vendorContext?: { vendorId?: string }; query?: unknown }) => unknown) => {
         routes.set(path, handler);
       }),
+      post: vi.fn(),
     };
 
     registerReturnsRoutes(app as never, {} as never);
@@ -91,5 +97,35 @@ describe('backend returns list route contract', () => {
         ],
       }),
     ]);
+  });
+
+  it('registers an admin-only Shopify return reason backfill route', async () => {
+    backfillShopifyReturnReasonsMock.mockResolvedValueOnce({ dryRun: true, scanned: 0, results: [] });
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerReturnsRoutes(app as never, {} as never);
+    const blocked = await posts.get('/admin/returns/reasons/backfill')?.({
+      authUser: { role: 'vendor' },
+      body: { dryRun: true },
+    }, reply);
+    const allowed = await posts.get('/admin/returns/reasons/backfill')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true },
+    }, reply);
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(allowed).toEqual({ dryRun: true, scanned: 0, results: [] });
+    expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true });
   });
 });
