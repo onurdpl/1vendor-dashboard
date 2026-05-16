@@ -22,6 +22,9 @@ export const queryKeys = {
     shipments: {
       providerConfig: (provider: string) => ['admin', 'shipments', 'provider-config', provider] as const,
     },
+    support: {
+      tickets: () => ['admin', 'support', 'tickets'] as const,
+    },
   },
   dashboard: {
     overview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'overview', vendorId] as const,

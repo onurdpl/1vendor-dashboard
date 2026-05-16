@@ -17,6 +17,8 @@ import * as realDiagnostics from './real/diagnostics';
 import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
+import * as realSupport from './real/support';
+import type { CreateSupportTicketInput } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -460,6 +462,31 @@ export const runtimeServices = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }),
+  },
+  support: {
+    create: (input: CreateSupportTicketInput) =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.createSupportTicket(input)
+        : Promise.resolve({
+            id: `mock-support-${Date.now()}`,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            createdByUserId: 'mock-user',
+            createdByRole: 'vendor',
+            vendorId: getCurrentVendorId(),
+            vendorName: getCurrentVendorContext().vendorName,
+            subject: input.subject,
+            message: input.message,
+            priority: input.priority,
+            status: 'open' as const,
+            contextType: input.contextType,
+            contextId: input.contextId ?? null,
+            contextSnapshot: input.contextSnapshot ?? null,
+          }),
+    listAdmin: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.listAdminSupportTickets()
+        : Promise.resolve([]),
   },
   diagnostics: {
     webhooks: () =>

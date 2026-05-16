@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
@@ -18,6 +18,7 @@ import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type Re
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { SupportTicketModal } from '../components/SupportTicketModal';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -416,6 +417,7 @@ function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) 
 }
 
 export function ReturnsPage() {
+  const location = useLocation();
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
   const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
@@ -429,6 +431,7 @@ export function ReturnsPage() {
   const [vendorFilter, setVendorFilter] = useState('all');
   const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
+  const [supportOpen, setSupportOpen] = useState(false);
   const isRealMode = runtimeConfig.apiMode === 'real';
   const isAdmin = currentUser?.role === 'admin';
 
@@ -563,6 +566,17 @@ export function ReturnsPage() {
   const hasReturnShipment = Boolean(
     selectedShipment?.carrierName || selectedShipment?.trackingNumber || selectedShipment?.trackingUrl,
   );
+  const supportSnapshot = selectedReturn
+    ? {
+        route: location.pathname,
+        orderNumber: formatShopifyOrderNumber(selectedReturn.sourceShopifyOrderNumber),
+        returnStatus: getVendorStatusLabel(selectedReturn),
+        refundStatus: getRefundStatusLabel(selectedReturn),
+        itemTitle: selectedItems[0]?.title ?? null,
+        sku: selectedItems[0]?.sku ?? null,
+        returnTrackingPresent: Boolean(selectedShipment?.trackingNumber || selectedShipment?.trackingUrl),
+      }
+    : null;
   const kpis = [
     { label: 'Pending review', value: pendingCount, icon: 'P', tone: 'attention' },
     { label: 'Awaiting shipment', value: approvedCount, icon: 'S', tone: 'info' },
@@ -831,7 +845,7 @@ export function ReturnsPage() {
                   <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
                     Review return
                   </Link>
-                  <button type="button" className="button button-secondary">
+                  <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
                     Contact support
                   </button>
                 </OperationalActionGroup>
@@ -842,6 +856,16 @@ export function ReturnsPage() {
           )}
         </SideDetailPanel>
       </div>
+      {selectedReturn ? (
+        <SupportTicketModal
+          open={supportOpen}
+          contextType="return"
+          contextId={selectedReturn.id}
+          contextSnapshot={supportSnapshot}
+          defaultSubject={`Help with return ${formatShopifyOrderNumber(selectedReturn.sourceShopifyOrderNumber)}`}
+          onClose={() => setSupportOpen(false)}
+        />
+      ) : null}
 
     </section>
   );

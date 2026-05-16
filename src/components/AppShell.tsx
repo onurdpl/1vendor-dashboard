@@ -20,6 +20,7 @@ const operationsNavItems = [
 
 const adminNavItems = [
   { to: '/admin/operations', label: 'Operations Queue', icon: 'Q' },
+  { to: '/admin/support', label: 'Support Tickets', icon: 'S' },
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
 ];
 
@@ -65,6 +66,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
     void queryClient.invalidateQueries({ queryKey: ['finance'] });
     void queryClient.invalidateQueries({ queryKey: ['automation'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin', 'support'] });
     void queryClient.invalidateQueries({ queryKey: ['admin', 'diagnostics'] });
   }
 

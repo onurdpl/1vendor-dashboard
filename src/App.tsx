@@ -23,6 +23,9 @@ const AdminOperationsQueuePage = lazy(() =>
 const AdminDiagnosticsPage = lazy(() =>
   import('./pages/AdminDiagnosticsPage').then((module) => ({ default: module.AdminDiagnosticsPage })),
 );
+const AdminSupportTicketsPage = lazy(() =>
+  import('./pages/AdminSupportTicketsPage').then((module) => ({ default: module.AdminSupportTicketsPage })),
+);
 const ReturnsPage = lazy(() => import('./pages/ReturnsPage').then((module) => ({ default: module.ReturnsPage })));
 const ReturnDetailPage = lazy(() =>
   import('./pages/ReturnDetailPage').then((module) => ({ default: module.ReturnDetailPage })),
@@ -92,6 +95,16 @@ export default function App() {
               <RequirePermission permission="orders:write">
                 <Suspense fallback={loadingFallback}>
                   <AdminDiagnosticsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/support"
+            element={
+              <RequirePermission permission="orders:write">
+                <Suspense fallback={loadingFallback}>
+                  <AdminSupportTicketsPage />
                 </Suspense>
               </RequirePermission>
             }

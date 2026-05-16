@@ -255,6 +255,36 @@ export type ReturnDetail = ReturnSummary & {
   timeline: Array<{ label: string; at: string }>;
 };
 
+export type SupportTicketPriority = 'low' | 'normal' | 'high';
+export type SupportTicketStatus = 'open' | 'in_progress' | 'resolved';
+export type SupportTicketContextType = 'order' | 'return' | 'shipment' | 'general';
+
+export type CreateSupportTicketInput = {
+  subject: string;
+  message: string;
+  priority: SupportTicketPriority;
+  contextType: SupportTicketContextType;
+  contextId?: string | null;
+  contextSnapshot?: Record<string, unknown> | null;
+};
+
+export type SupportTicket = {
+  id: string;
+  createdAt: string;
+  updatedAt: string;
+  createdByUserId: string;
+  createdByRole: string;
+  vendorId: VendorId;
+  vendorName: string | null;
+  subject: string;
+  message: string;
+  priority: SupportTicketPriority;
+  status: SupportTicketStatus;
+  contextType: SupportTicketContextType;
+  contextId: string | null;
+  contextSnapshot: unknown;
+};
+
 export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed' | 'Recorded';
 
 export type FinanceSummary = {

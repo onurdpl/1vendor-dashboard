@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -15,6 +15,7 @@ import {
 import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { useActionFeedback } from '../lib/ui';
+import { SupportTicketModal } from '../components/SupportTicketModal';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -199,10 +200,12 @@ function getItemKey(item: ReturnLineItem) {
 
 export function ReturnDetailPage() {
   const { returnId } = useParams();
+  const location = useLocation();
   const currentVendor = getCurrentVendorContext();
   const currentUser = getCurrentUser();
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
+  const [supportOpen, setSupportOpen] = useState(false);
   const { data: returnRequest, isLoading, isError, error, refetch } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
     () => {
@@ -291,6 +294,16 @@ export function ReturnDetailPage() {
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
   const hasReceivedReturn = Boolean(returnRequest.vendorReceivedAt);
   const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
+  const supportSnapshot = {
+    route: location.pathname,
+    orderNumber: formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber),
+    returnStatus: getStatusLabel(returnRequest),
+    refundStatus: getRefundStatus(returnRequest),
+    itemCount: returnedItems.length,
+    itemTitle: returnedItems[0]?.name ?? null,
+    returnCarrierPresent: Boolean(returnRequest.returnCarrierName),
+    returnTrackingPresent: Boolean(returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl),
+  };
 
   return (
     <section className="return-review-page">
@@ -413,7 +426,9 @@ export function ReturnDetailPage() {
                   Approve return
                 </button>
               ) : null}
-              <button type="button" className="button button-secondary">Contact support</button>
+              <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
+                Contact support
+              </button>
             </div>
             {canReviewReturn && hasReceivedReturn && !hasReviewedReturn ? (
               <div className="return-review-reject-box">
@@ -516,6 +531,15 @@ export function ReturnDetailPage() {
           </article>
         </aside>
       </div>
+      <SupportTicketModal
+        open={supportOpen}
+        contextType="return"
+        contextId={returnRequest.id}
+        contextSnapshot={supportSnapshot}
+        defaultSubject={`Help with return ${formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}`}
+        onClose={() => setSupportOpen(false)}
+        onCreated={() => showFeedback('Support ticket created.', 'success')}
+      />
     </section>
   );
 }

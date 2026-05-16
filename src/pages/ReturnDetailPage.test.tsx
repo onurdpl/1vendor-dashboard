@@ -12,6 +12,7 @@ const markReturnReceivedMock = vi.fn<(returnId: string) => Promise<ReturnDetail>
 const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
 >();
+const createSupportTicketMock = vi.fn();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
@@ -21,6 +22,14 @@ vi.mock('../features/returns/api', async () => {
     markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
     reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
       reviewReturnMock(returnId, input),
+  };
+});
+
+vi.mock('../features/support/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
+  return {
+    ...actual,
+    createSupportTicket: (input: unknown) => createSupportTicketMock(input),
   };
 });
 
@@ -110,6 +119,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     getReturnMock.mockReset();
     markReturnReceivedMock.mockReset();
     reviewReturnMock.mockReset();
+    createSupportTicketMock.mockReset();
   });
 
   it('renders a vendor-facing return review without internal lifecycle wording', async () => {
@@ -265,6 +275,49 @@ describe('ReturnDetailPage vendor review screen', () => {
       decision: 'rejected',
       reason: 'Item is damaged.',
     });
+  });
+
+  it('creates a context-aware support ticket from return detail', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue(returnDetail);
+    createSupportTicketMock.mockResolvedValueOnce({
+      id: 'ticket-1',
+      createdAt: '2026-05-16T10:00:00Z',
+      updatedAt: '2026-05-16T10:00:00Z',
+      createdByUserId: 'user-1',
+      createdByRole: 'vendor',
+      vendorId: 'demo-vendor-a',
+      vendorName: 'Demo Vendor A',
+      subject: 'Help with return #1023',
+      message: 'Can you help with this return?',
+      priority: 'normal',
+      status: 'open',
+      contextType: 'return',
+      contextId: returnDetail.id,
+      contextSnapshot: {},
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Contact support' }));
+    expect(screen.getByRole('dialog', { name: 'Contact support' })).toBeInTheDocument();
+    await user.type(screen.getByLabelText('Message'), 'Can you help with this return?');
+    await user.click(screen.getByRole('button', { name: 'Create ticket' }));
+
+    expect(createSupportTicketMock).toHaveBeenCalledWith(expect.objectContaining({
+      contextType: 'return',
+      contextId: returnDetail.id,
+      priority: 'normal',
+      subject: 'Help with return #1023',
+      message: 'Can you help with this return?',
+      contextSnapshot: expect.objectContaining({
+        route: `/returns/${returnDetail.id}`,
+        orderNumber: '#1023',
+        returnStatus: 'Awaiting review',
+        refundStatus: 'Refund pending',
+      }),
+    }));
+    expect((await screen.findAllByText('Support ticket created.')).length).toBeGreaterThan(0);
   });
 
   it('hides vendor review actions from a vendor outside the assigned return scope', async () => {

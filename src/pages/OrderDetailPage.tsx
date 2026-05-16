@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom';
+import { Link, useLocation, useParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
@@ -18,6 +18,7 @@ import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
+import { SupportTicketModal } from '../components/SupportTicketModal';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -114,6 +115,7 @@ function getTrackingMutationErrorMessage(error: unknown) {
 
 export function OrderDetailPage() {
   const { orderId } = useParams();
+  const location = useLocation();
   const currentUser = getCurrentUser();
   const isAdmin = currentUser?.role === 'admin';
   const isRealMode = runtimeConfig.apiMode === 'real';
@@ -122,6 +124,7 @@ export function OrderDetailPage() {
   const [trackingNumber, setTrackingNumber] = useState('');
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const { data: order, isLoading, isError, error, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
     () => {
@@ -137,17 +140,6 @@ export function OrderDetailPage() {
     () => getShippingProviderDiagnostics(),
     {
       enabled: isAdmin,
-    },
-  );
-  const { mutateAsync: reportFulfillmentIssue, isPending: isReportingIssue } = useMutationAction(
-    async (issueOrderId: string) => {
-      await new Promise((resolve) => {
-        globalThis.setTimeout(resolve, 300);
-      });
-      return issueOrderId;
-    },
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
     },
   );
   const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
@@ -225,6 +217,18 @@ export function OrderDetailPage() {
     !shipmentExecution.providerShipmentId &&
     !shipmentExecution.trackingNumber &&
     Boolean(shipmentProviderSummary?.dryRun === true || (shipmentProviderSummary?.disabledGates.length ?? 0) > 0);
+  const supportSnapshot = order
+    ? {
+        route: location.pathname,
+        orderNumber: formatShopifyOrderNumber(order.sourceShopifyOrderNumber),
+        allocationStatus: order.allocationStatus,
+        fulfillmentStatus: order.fulfillmentStatus,
+        shippingStatus: order.shippingStatus,
+        trackingPresent: Boolean(order.trackingNumber || order.trackingUrl),
+        shipmentExecutionId: shipmentExecution?.id ?? null,
+        shipmentStatus: shipmentExecution?.shipmentStatus ?? null,
+      }
+    : null;
 
   const handleRetryShipment = () => {
     if (!shipmentExecution || !canRetryDryRunShipment) {
@@ -925,21 +929,8 @@ export function OrderDetailPage() {
                     <button
                       type="button"
                       className="button button-secondary"
-                      onClick={() => {
-                        if (!canReportIssue || !order) {
-                          showFeedback('This order is already under review.', 'info');
-                          return;
-                        }
-
-                        void reportFulfillmentIssue(order.id)
-                          .then(() => {
-                            showFeedback('Fulfillment issue reported for review.', 'success');
-                          })
-                          .catch(() => {
-                            showFeedback('Unable to report fulfillment issue right now.', 'error');
-                          });
-                      }}
-                      disabled={isReportingIssue || !canReportIssue}
+                      onClick={() => setSupportOpen(true)}
+                      disabled={!canReportIssue}
                     >
                       Contact support
                     </button>
@@ -952,6 +943,17 @@ export function OrderDetailPage() {
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
+      {order ? (
+        <SupportTicketModal
+          open={supportOpen}
+          contextType="order"
+          contextId={order.id}
+          contextSnapshot={supportSnapshot}
+          defaultSubject={`Help with order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}`}
+          onClose={() => setSupportOpen(false)}
+          onCreated={() => showFeedback('Support ticket created.', 'success')}
+        />
+      ) : null}
     </section>
   );
 }

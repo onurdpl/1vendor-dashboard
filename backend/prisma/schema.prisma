@@ -218,6 +218,7 @@ model User {
   updatedAt    DateTime                      @updatedAt
   vendorLinks  UserVendorAccess[]
   assignments  AllocationAssignmentHistory[] @relation("assignmentActor")
+  supportTickets SupportTicket[]
 }
 
 model Vendor {
@@ -239,8 +240,31 @@ model Vendor {
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
   notifications         NotificationIntent[]
+  supportTickets        SupportTicket[]
   assignmentHistoryFrom AllocationAssignmentHistory[] @relation("assignmentFromVendor")
   assignmentHistoryTo   AllocationAssignmentHistory[] @relation("assignmentToVendor")
+}
+
+model SupportTicket {
+  id              String   @id @default(cuid())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  createdByUserId String
+  createdByRole   String
+  vendorId        String
+  subject         String
+  message         String
+  priority        String   @default("normal")
+  status          String   @default("open")
+  contextType     String
+  contextId       String?
+  contextSnapshot Json?
+  createdBy       User     @relation(fields: [createdByUserId], references: [id], onDelete: Cascade)
+  vendor          Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@index([vendorId, status, createdAt])
+  @@index([contextType, contextId])
+  @@index([createdAt])
 }
 
 model VendorFinancialProfile {
