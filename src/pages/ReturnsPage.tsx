@@ -169,6 +169,10 @@ function getSkuText(value: string | null | undefined) {
   return text;
 }
 
+function getItemTitleFallback(sku?: string | null) {
+  return getSkuText(sku) === '—' ? 'Unknown item' : getSkuText(sku);
+}
+
 function readText(value: unknown) {
   if (typeof value !== 'string') {
     return '';
@@ -261,7 +265,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   if (detailItems.length > 0) {
     return detailItems.map((item) => ({
       sku: item.sku,
-      title: item.name || 'Return item',
+      title: readText(item.name) || getItemTitleFallback(item.sku),
       variantTitle: getVariantText(item.variantTitle),
       quantity: item.quantity,
       amount: item.refundAmount,
@@ -273,7 +277,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   if (summaryItems.length > 0) {
     return summaryItems.map((item) => ({
       sku: item.sku,
-      title: resolveCandidateTitle(item as ReturnRowItemCandidate) || 'Return item',
+      title: resolveCandidateTitle(item as ReturnRowItemCandidate) || getItemTitleFallback(item.sku),
       variantTitle: getVariantText(resolveCandidateVariant(item as ReturnRowItemCandidate)),
       quantity: item.quantity,
       amount: item.refundAmount,
@@ -283,7 +287,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
 
   return (summary.refundedSkus ?? []).map((sku) => ({
     sku,
-    title: 'Return item',
+    title: getItemTitleFallback(sku),
     variantTitle: 'Details pending',
     quantity: 1,
     amount: summary.sourceType === 'shopify_return_request' ? 'Not posted' : summary.amount,
@@ -302,7 +306,7 @@ function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null
     : getItemPreview(summary, detail)[0];
 
   return {
-    title: firstItem?.title || 'Return item',
+    title: firstItem?.title || getItemTitleFallback(firstItem?.sku),
     variant: getVariantText(firstItem?.variantTitle),
     sku: getSkuText(firstItem?.sku),
   };

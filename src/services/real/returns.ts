@@ -117,6 +117,10 @@ function readFirstDtoText(...values: unknown[]) {
 
 type ReturnItemDto = NonNullable<ReturnSummaryDto['refundedItems']>[number];
 
+function getReturnItemFallbackName(item: Pick<ReturnItemDto, 'sku'>) {
+  return readDtoText(item.sku) || 'Unknown item';
+}
+
 function resolveReturnItemName(item: ReturnItemDto) {
   return readFirstDtoText(
     item.productTitle,
@@ -139,7 +143,7 @@ function resolveReturnItemName(item: ReturnItemDto) {
     item.merchandise?.name,
     item.title,
     item.name,
-  ) || 'Return item';
+  ) || getReturnItemFallbackName(item);
 }
 
 function resolveReturnItemVariant(item: ReturnItemDto) {

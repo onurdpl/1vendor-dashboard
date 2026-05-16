@@ -250,4 +250,50 @@ describe('ReturnsPage control center', () => {
     expect(screen.getByText('SKU-NESTED')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
+
+  it('falls back to SKU in the table when a returned item title is missing', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        refundedSkus: ['SKU-ONLY'],
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'SKU-ONLY',
+            name: 'Return item',
+            variantTitle: 'Return item',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect((await screen.findAllByText('SKU-ONLY')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
+  it('uses Unknown item only when no title or SKU exists', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        refundedSkus: [],
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'UNKNOWN-SKU',
+            name: 'Return item',
+            variantTitle: 'Return item',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Unknown item')).toBeInTheDocument();
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
 });
