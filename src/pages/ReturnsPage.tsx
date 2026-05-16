@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -18,7 +18,6 @@ import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type Re
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
-import { isReturnsTitleDebugEnabled, logReturnsTitleDebugSnapshot, summarizeReturnTitlePayload } from '../lib/returnsTitleDebug';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -152,7 +151,14 @@ function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
 
 function getVariantText(value: string | null | undefined) {
   const text = value?.trim();
-  if (!text || text === 'Details pending' || text === 'Default' || text === 'Return item') {
+  const normalized = text?.toLowerCase();
+  if (
+    !text ||
+    text === 'Details pending' ||
+    normalized === 'default' ||
+    normalized === 'default title' ||
+    text === 'Return item'
+  ) {
     return '';
   }
 
@@ -182,7 +188,15 @@ function readText(value: unknown) {
   }
 
   const text = value.trim();
-  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+  const normalized = text.toLowerCase();
+  if (
+    !text ||
+    text === 'Return item' ||
+    normalized === 'default' ||
+    normalized === 'default title' ||
+    /^gid:\/\//i.test(text) ||
+    /^unknown-sku$/i.test(text)
+  ) {
     return '';
   }
 
@@ -190,7 +204,9 @@ function readText(value: unknown) {
 }
 
 function readProductText(value: unknown, sku?: string | null) {
-  const text = readText(value);
+  const text = readText(value)
+    .replace(/\s*\/\s*default(?:\s+title)?$/i, '')
+    .trim();
   const normalizedSku = readText(sku);
   if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
     return '';
@@ -516,32 +532,6 @@ export function ReturnsPage() {
     },
   );
   const selectedDetail = detailQuery.data;
-
-  useEffect(() => {
-    if (!isAdmin || !isReturnsTitleDebugEnabled()) {
-      return;
-    }
-
-    const tableRows = filteredReturns.map((item) => {
-      const itemDisplay = getTableItemDisplay(item, null);
-      return {
-        returnId: item.id,
-        orderNumber: item.sourceShopifyOrderNumber,
-        renderedItemColumnTitle: itemDisplay.title,
-        renderedVariantLine: itemDisplay.variant || '—',
-        renderedSkuColumn: itemDisplay.sku,
-        mappedSummary: summarizeReturnTitlePayload(item),
-      };
-    });
-
-    logReturnsTitleDebugSnapshot('ReturnsPage mapped table rows', tableRows);
-    logReturnsTitleDebugSnapshot('ReturnsPage selected summary/detail comparison', {
-      selectedReturnId: selectedReturn?.id ?? null,
-      selectedSummary: selectedReturn ? summarizeReturnTitlePayload(selectedReturn) : null,
-      selectedDetail: selectedDetail ? summarizeReturnTitlePayload(selectedDetail) : null,
-      selectedDetailItemPreview: selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [],
-    });
-  }, [filteredReturns, isAdmin, selectedDetail, selectedReturn]);
 
   if (!authContextReady || isLoading) {
     return (

@@ -357,6 +357,33 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
+  it('does not render Shopify Default placeholders as the item title', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        displayTitle: 'Default',
+        itemTitle: 'Default Title',
+        variantTitle: 'Default',
+        refundedSkus: ['DJ1196-002-40,5'],
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'DJ1196-002-40,5',
+            name: 'Default',
+            variantTitle: 'Default Title',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect((await screen.findAllByText('DJ1196-002-40,5')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Default')).not.toBeInTheDocument();
+    expect(screen.queryByText('Default Title')).not.toBeInTheDocument();
+  });
+
   it('does not concatenate numeric product ids under the item title', async () => {
     listReturnsMock.mockResolvedValue([
       {

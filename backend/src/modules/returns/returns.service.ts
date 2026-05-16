@@ -31,7 +31,15 @@ function isReturnRequestRecord(record: { returnRequestSource: string | null }) {
 
 function readText(value: string | null | undefined) {
   const text = value?.trim();
-  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+  const normalized = text?.toLowerCase();
+  if (
+    !text ||
+    text === 'Return item' ||
+    normalized === 'default' ||
+    normalized === 'default title' ||
+    /^gid:\/\//i.test(text) ||
+    /^unknown-sku$/i.test(text)
+  ) {
     return null;
   }
 
@@ -39,7 +47,9 @@ function readText(value: string | null | undefined) {
 }
 
 function readProductText(value: string | null | undefined, sku: string | null | undefined) {
-  const text = readText(value);
+  const text = readText(value)
+    ?.replace(/\s*\/\s*default(?:\s+title)?$/i, '')
+    .trim();
   const normalizedSku = readText(sku);
   if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
     return null;

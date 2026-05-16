@@ -1,6 +1,5 @@
 import { apiClient } from '../../lib/api-client';
 import type { ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
-import { logReturnsTitleDebugPayload } from '../../lib/returnsTitleDebug';
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
@@ -110,7 +109,15 @@ function readDtoText(value: unknown) {
   }
 
   const text = value.trim();
-  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+  const normalized = text.toLowerCase();
+  if (
+    !text ||
+    text === 'Return item' ||
+    normalized === 'default' ||
+    normalized === 'default title' ||
+    /^gid:\/\//i.test(text) ||
+    /^unknown-sku$/i.test(text)
+  ) {
     return '';
   }
 
@@ -118,7 +125,9 @@ function readDtoText(value: unknown) {
 }
 
 function readDtoProductText(value: unknown, sku?: string | null) {
-  const text = readDtoText(value);
+  const text = readDtoText(value)
+    .replace(/\s*\/\s*default(?:\s+title)?$/i, '')
+    .trim();
   const normalizedSku = readDtoText(sku);
   if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
     return '';
@@ -173,7 +182,7 @@ function resolveReturnItemName(item: ReturnItemDto) {
 }
 
 function resolveReturnItemVariant(item: ReturnItemDto) {
-  return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle, 'Default');
+  return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle) || 'Details pending';
 }
 
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
@@ -187,17 +196,24 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
       ? `Refund ${dto.sourceShopifyRefundId}`
       : 'Pending Shopify source link';
 
+  const summaryDisplayTitle = readFirstDtoProductText(
+    dto.refundedSkus[0],
+    dto.displayTitle,
+    dto.itemTitle,
+    dto.variantTitle,
+  );
+  const summaryVariantTitle = readFirstDtoText(dto.variantTitle);
   const summaryFallbackItem =
-    dto.displayTitle || dto.itemTitle || dto.variantTitle || dto.refundedSkus[0]
+    summaryDisplayTitle || summaryVariantTitle || dto.refundedSkus[0]
       ? [{
           id: `${dto.id}-summary-item`,
           sourceLineItemId: undefined,
           sourceVariantId: null,
           sku: dto.refundedSkus[0] ?? null,
-          title: dto.displayTitle ?? dto.itemTitle ?? null,
-          itemTitle: dto.itemTitle ?? null,
-          displayTitle: dto.displayTitle ?? null,
-          variantTitle: dto.variantTitle ?? null,
+          title: summaryDisplayTitle || null,
+          itemTitle: summaryDisplayTitle || null,
+          displayTitle: summaryDisplayTitle || null,
+          variantTitle: summaryVariantTitle || null,
           quantity: dto.refundedItemCount || 1,
           refundAmount: dto.refundAmount,
         }]
@@ -233,9 +249,9 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     customer: 'Customer unavailable',
     reason: `${sourceLabel} · ${sourceId}`,
     amount: formatCurrency(dto.refundAmount),
-    itemTitle: dto.itemTitle ?? dto.displayTitle ?? null,
-    displayTitle: dto.displayTitle ?? dto.itemTitle ?? null,
-    variantTitle: dto.variantTitle ?? null,
+    itemTitle: summaryDisplayTitle || null,
+    displayTitle: summaryDisplayTitle || null,
+    variantTitle: summaryVariantTitle || null,
     refundedSkus: dto.refundedSkus,
     refundedItems,
   };
@@ -255,8 +271,6 @@ export async function listReturns(options: { limit?: number; offset?: number; ve
     ? apiClient.get<ReturnSummaryDto[]>(path, requestOptions)
     : apiClient.get<ReturnSummaryDto[]>(path));
   const mapped = response.map(mapSummary);
-  logReturnsTitleDebugPayload('raw returns list API response', response);
-  logReturnsTitleDebugPayload('mapped returns list summaries', mapped);
   return mapped;
 }
 
@@ -306,7 +320,5 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
       { label: 'Latest backend update', at: response.updatedAt },
     ],
   };
-  logReturnsTitleDebugPayload('raw selected return detail API response', response);
-  logReturnsTitleDebugPayload('mapped selected return detail', detail);
   return detail;
 }
