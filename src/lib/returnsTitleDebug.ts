@@ -1,4 +1,5 @@
 const RETURNS_TITLE_DEBUG_KEY = 'vendor-dashboard.debug.returns-title';
+let enabledMarkerLogged = false;
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -18,25 +19,18 @@ function read(value: unknown) {
   return undefined;
 }
 
-function isLocalRuntime() {
-  if (import.meta.env.DEV) {
-    return true;
-  }
-
+export function isReturnsTitleDebugEnabled() {
   if (typeof window === 'undefined') {
     return false;
   }
 
-  return ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname);
-}
-
-export function isReturnsTitleDebugEnabled() {
-  if (!isLocalRuntime() || typeof window === 'undefined') {
-    return false;
-  }
-
   try {
-    return window.localStorage.getItem(RETURNS_TITLE_DEBUG_KEY) === '1';
+    const enabled = window.localStorage.getItem(RETURNS_TITLE_DEBUG_KEY) === '1';
+    if (enabled && !enabledMarkerLogged) {
+      enabledMarkerLogged = true;
+      console.info('[returns-title-debug] enabled');
+    }
+    return enabled;
   } catch {
     return false;
   }
