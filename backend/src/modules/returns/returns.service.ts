@@ -64,8 +64,8 @@ function resolveReturnedItemDisplayTitle(item: {
   orderLineItemTitle?: string | null;
 }) {
   return (
-    readProductText(item.title, item.sku) ??
     readProductText(item.orderLineItemTitle, item.sku) ??
+    readProductText(item.title, item.sku) ??
     readText(item.sku) ??
     null
   );
@@ -93,6 +93,82 @@ function withReturnedItemDisplayFields<T extends {
     displayTitle,
     variantTitle: resolveReturnedItemVariantTitle(item),
   };
+}
+
+type ReturnRecordLineItemSource = {
+  id: string;
+  sourceLineItemId: string;
+  sourceVariantId: string | null;
+  sku: string | null;
+  title: string | null;
+  orderLineItemTitle: string | null;
+  quantity: number;
+  refundAmount: string;
+};
+
+function toAllocationReturnedItem(item: {
+  id: string;
+  quantity: number;
+  lineAmount: unknown;
+  shopifyOrderLineItem: {
+    sourceLineItemId: string;
+    sourceVariantId: string | null;
+    sku: string | null;
+    title: string | null;
+  };
+}): ReturnRecordLineItemSource {
+  return {
+    id: item.id,
+    sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
+    sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+    sku: item.shopifyOrderLineItem.sku,
+    title: item.shopifyOrderLineItem.title,
+    orderLineItemTitle: item.shopifyOrderLineItem.title,
+    quantity: item.quantity,
+    refundAmount: toAmountString(toNumber(item.lineAmount)),
+  };
+}
+
+function toRefundReturnedItem(item: {
+  id: string;
+  sourceLineItemId: string;
+  sku: string | null;
+  title: string | null;
+  quantity: number;
+  subtotal: unknown;
+  shopifyOrderLineItem: {
+    sourceVariantId: string | null;
+    sku: string | null;
+    title: string | null;
+  };
+}): ReturnRecordLineItemSource {
+  return {
+    id: item.id,
+    sourceLineItemId: item.sourceLineItemId,
+    sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+    sku: item.shopifyOrderLineItem.sku ?? item.sku,
+    title: item.title,
+    orderLineItemTitle: item.shopifyOrderLineItem.title,
+    quantity: item.quantity,
+    refundAmount: toAmountString(toNumber(item.subtotal)),
+  };
+}
+
+function buildReturnedItemsForRecord(record: {
+  returnRequestSource: string | null;
+  sourceShopifyLineItemId: string | null;
+  vendorAllocation: {
+    lineItems: Array<Parameters<typeof toAllocationReturnedItem>[0]>;
+  };
+}, refundLineItems: Array<Parameters<typeof toRefundReturnedItem>[0]>) {
+  const returnRequestLineItems = filterReturnRequestAllocationLineItems(record, record.vendorAllocation.lineItems);
+  const itemSources = isReturnRequestRecord(record)
+    ? returnRequestLineItems.map(toAllocationReturnedItem)
+    : refundLineItems.length > 0
+      ? refundLineItems.map(toRefundReturnedItem)
+      : record.vendorAllocation.lineItems.map(toAllocationReturnedItem);
+
+  return itemSources.map(withReturnedItemDisplayFields);
 }
 
 function filterReturnRequestAllocationLineItems<
@@ -192,43 +268,8 @@ export async function listVendorReturns(
             ),
           ),
         );
-    const refundedItems = isReturnRequestRecord(record)
-      ? returnRequestLineItems.map((item) => ({
-          id: item.id,
-          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
-          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-          sku: item.shopifyOrderLineItem.sku,
-          title: item.shopifyOrderLineItem.title,
-          orderLineItemTitle: item.shopifyOrderLineItem.title,
-          quantity: item.quantity,
-          refundAmount: toAmountString(toNumber(item.lineAmount)),
-        }))
-      : matchingRefundRecords.flatMap((refund) =>
-          refund.lineItems.map((item) => ({
-            id: item.id,
-            sourceLineItemId: item.sourceLineItemId,
-            sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-            sku: item.shopifyOrderLineItem.sku,
-            title: item.title,
-            orderLineItemTitle: item.shopifyOrderLineItem.title,
-            quantity: item.quantity,
-            refundAmount: toAmountString(toNumber(item.subtotal)),
-          })),
-        );
-    const fallbackRefundedItems =
-      refundedItems.length > 0
-        ? refundedItems
-        : record.vendorAllocation.lineItems.map((item) => ({
-            id: item.id,
-            sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
-            sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-            sku: item.shopifyOrderLineItem.sku,
-            title: item.shopifyOrderLineItem.title,
-            orderLineItemTitle: item.shopifyOrderLineItem.title,
-            quantity: item.quantity,
-            refundAmount: toAmountString(toNumber(item.lineAmount)),
-          }));
-    const summaryRefundedItems = fallbackRefundedItems.map(withReturnedItemDisplayFields);
+    const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
+    const summaryRefundedItems = buildReturnedItemsForRecord(record, refundLineItems);
     const primaryReturnedItem = summaryRefundedItems[0] ?? null;
     return {
       id: record.id,
@@ -305,41 +346,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
   );
   const sourceRefundId = isReturnRequestRecord(record) ? '' : getRefundSourceId(record);
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
-  const returnRequestLineItems = filterReturnRequestAllocationLineItems(record, record.vendorAllocation.lineItems);
-  const refundedItems =
-    isReturnRequestRecord(record)
-      ? returnRequestLineItems.map((item) => ({
-          id: item.id,
-          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
-          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-          sku: item.shopifyOrderLineItem.sku,
-          title: item.shopifyOrderLineItem.title,
-          orderLineItemTitle: item.shopifyOrderLineItem.title,
-          quantity: item.quantity,
-          refundAmount: toAmountString(toNumber(item.lineAmount)),
-        }))
-      : refundLineItems.length > 0
-      ? refundLineItems.map((item) => ({
-          id: item.id,
-          sourceLineItemId: item.sourceLineItemId,
-          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-          sku: item.shopifyOrderLineItem.sku,
-          title: item.title,
-          orderLineItemTitle: item.shopifyOrderLineItem.title,
-          quantity: item.quantity,
-          refundAmount: toAmountString(toNumber(item.subtotal)),
-        }))
-      : record.vendorAllocation.lineItems.map((item) => ({
-          id: item.id,
-          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
-          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
-          sku: item.shopifyOrderLineItem.sku,
-          title: item.shopifyOrderLineItem.title,
-          orderLineItemTitle: item.shopifyOrderLineItem.title,
-          quantity: item.quantity,
-          refundAmount: toAmountString(toNumber(item.lineAmount)),
-        }));
-  const detailRefundedItems = refundedItems.map(withReturnedItemDisplayFields);
+  const detailRefundedItems = buildReturnedItemsForRecord(record, refundLineItems);
   const refundedSkus = Array.from(
     new Set(
       detailRefundedItems

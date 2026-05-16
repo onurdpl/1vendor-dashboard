@@ -336,31 +336,20 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   }));
 }
 
-function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null) {
-  const summaryTitle = readFirstProductText(
-    summary.refundedSkus?.[0],
-    summary.displayTitle,
-    summary.itemTitle,
-  );
-  const rowItem = summaryTitle
-    ? ({
-        title: summaryTitle,
-        variantTitle: summary.variantTitle,
-        sku: summary.refundedSkus?.[0],
-      } satisfies ReturnRowItemCandidate)
-    : getRowItemCandidates(summary).find((item) => resolveCandidateTitle(item));
-  const firstItem = rowItem
-    ? {
-        title: resolveCandidateTitle(rowItem),
-        variantTitle: resolveCandidateVariant(rowItem),
-        sku: readText(rowItem.sku),
-      }
-    : getItemPreview(summary, detail)[0];
+function getTableItemDisplay(summary: ReturnSummary) {
+  const firstSummaryItem = summary.refundedItems?.[0];
+  const sku = firstSummaryItem?.sku ?? summary.refundedSkus?.[0] ?? null;
+  const title =
+    readFirstProductText(sku, summary.displayTitle, summary.itemTitle) ||
+    (firstSummaryItem ? resolveCandidateTitle(firstSummaryItem as ReturnRowItemCandidate) : '') ||
+    getItemTitleFallback(sku);
+  const variant = getVariantText(summary.variantTitle) ||
+    (firstSummaryItem ? getVariantText(resolveCandidateVariant(firstSummaryItem as ReturnRowItemCandidate)) : '');
 
   return {
-    title: firstItem?.title || getItemTitleFallback(firstItem?.sku),
-    variant: getVariantText(firstItem?.variantTitle) === firstItem?.title ? '' : getVariantText(firstItem?.variantTitle),
-    sku: getSkuText(firstItem?.sku),
+    title,
+    variant: variant === title ? '' : variant,
+    sku: getSkuText(sku),
   };
 }
 
@@ -676,7 +665,7 @@ export function ReturnsPage() {
             >
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemDisplay = getTableItemDisplay(item, null);
+                const itemDisplay = getTableItemDisplay(item);
                 const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow

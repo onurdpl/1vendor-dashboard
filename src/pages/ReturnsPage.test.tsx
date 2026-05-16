@@ -357,6 +357,45 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
+  it('renders the same list item title as the returned item detail source for order 1026', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        sourceShopifyOrderNumber: '#1026',
+        itemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+        displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+        variantTitle: null,
+        refundedSkus: ['SWOOSH-WHITE-S'],
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'SWOOSH-WHITE-S',
+            name: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+            variantTitle: 'Details pending',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue({
+      ...pendingReturn,
+      sourceShopifyOrderNumber: '#1026',
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'SWOOSH-WHITE-S',
+          name: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+          variantTitle: 'Details pending',
+        },
+      ],
+    });
+
+    renderReturnsPage();
+
+    expect((await screen.findAllByText('Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Details pending')).not.toBeInTheDocument();
+    expect(screen.queryByText('Default')).not.toBeInTheDocument();
+  });
+
   it('does not render Shopify Default placeholders as the item title', async () => {
     listReturnsMock.mockResolvedValue([
       {

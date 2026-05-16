@@ -200,7 +200,6 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     dto.refundedSkus[0],
     dto.displayTitle,
     dto.itemTitle,
-    dto.variantTitle,
   );
   const summaryVariantTitle = readFirstDtoText(dto.variantTitle);
   const summaryFallbackItem =

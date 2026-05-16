@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { listReturns } from './returns';
+import { getReturn, listReturns } from './returns';
 
 const apiClientGet = vi.hoisted(() => vi.fn());
 
@@ -361,5 +361,58 @@ describe('real returns service item title mapping', () => {
     expect(returns[0].itemTitle).toBe('Nike Court Vision Kadın Krem Günlük Ayakkabı');
     expect(returns[0].refundedItems?.[0]?.name).toBe('Nike Court Vision Kadın Krem Günlük Ayakkabı');
     expect(returns[0].refundedItems?.[0]?.sku).toBe('DJ1196-002-40,5');
+  });
+
+  it('keeps list summary and detail item titles in parity for the same return item', async () => {
+    const returnedItem = {
+      id: 'line-1026',
+      sourceLineItemId: 'line-1026',
+      sourceVariantId: null,
+      sku: 'SWOOSH-WHITE-S',
+      title: 'SWOOSH-WHITE-S',
+      itemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      orderLineItemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      variantTitle: null,
+      quantity: 1,
+      refundAmount: '0.00',
+    };
+    const dto = {
+      id: 'return-1026',
+      sourceShopifyOrderId: 'gid://shopify/Order/1026',
+      sourceShopifyOrderNumber: '#1026',
+      sourceShopifyRefundId: '',
+      sourceShopifyReturnId: '23165600086',
+      sourceShopifyReturnGid: 'gid://shopify/Return/23165600086',
+      returnLifecycleStatus: 'requested',
+      returnRequestSource: 'shopify_return_request',
+      vendorId: 'sporjinal',
+      assignedVendorId: 'sporjinal',
+      status: 'requested',
+      refundAmount: '0.00',
+      refundedItemCount: 1,
+      refundedSkus: ['SWOOSH-WHITE-S'],
+      itemTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',
+      variantTitle: null,
+      refundedItems: [returnedItem],
+      createdAt: '2026-05-13T04:44:00Z',
+      updatedAt: '2026-05-13T04:44:00Z',
+    };
+    apiClientGet.mockResolvedValueOnce([dto]);
+    apiClientGet.mockResolvedValueOnce({
+      ...dto,
+      sourceShopifyInternalOrderId: 'gid://shopify/Order/1026',
+      originalVendorId: 'sporjinal',
+      requestCreatedAt: '2026-05-13T04:44:00Z',
+      requestUpdatedAt: '2026-05-13T04:44:00Z',
+    });
+
+    const [summary] = await listReturns();
+    const detail = await getReturn('return-1026');
+
+    expect(summary.refundedItems?.[0]?.name).toBe('Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S');
+    expect(detail.refundedItems[0].name).toBe(summary.refundedItems?.[0]?.name);
+    expect(summary.refundedItems?.[0]?.name).not.toBe('SWOOSH-WHITE-S');
   });
 });
