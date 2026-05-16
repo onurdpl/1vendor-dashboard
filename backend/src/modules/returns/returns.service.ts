@@ -64,7 +64,11 @@ export async function listVendorReturns(
         include: {
           refundRecords: {
             include: {
-              lineItems: true,
+              lineItems: {
+                include: {
+                  shopifyOrderLineItem: true,
+                },
+              },
             },
             orderBy: {
               createdAt: 'asc',
@@ -122,6 +126,39 @@ export async function listVendorReturns(
             ),
           ),
         );
+    const refundedItems = isReturnRequestRecord(record)
+      ? returnRequestLineItems.map((item) => ({
+          id: item.id,
+          sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
+          sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+          sku: item.shopifyOrderLineItem.sku,
+          title: item.shopifyOrderLineItem.title,
+          quantity: item.quantity,
+          refundAmount: toAmountString(toNumber(item.lineAmount)),
+        }))
+      : matchingRefundRecords.flatMap((refund) =>
+          refund.lineItems.map((item) => ({
+            id: item.id,
+            sourceLineItemId: item.sourceLineItemId,
+            sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+            sku: item.shopifyOrderLineItem.sku,
+            title: item.title ?? item.shopifyOrderLineItem.title,
+            quantity: item.quantity,
+            refundAmount: toAmountString(toNumber(item.subtotal)),
+          })),
+        );
+    const fallbackRefundedItems =
+      refundedItems.length > 0
+        ? refundedItems
+        : record.vendorAllocation.lineItems.map((item) => ({
+            id: item.id,
+            sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
+            sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
+            sku: item.shopifyOrderLineItem.sku,
+            title: item.shopifyOrderLineItem.title,
+            quantity: item.quantity,
+            refundAmount: toAmountString(toNumber(item.lineAmount)),
+          }));
     return {
       id: record.id,
       sourceShopifyOrderId: record.sourceShopifyOrderId,
@@ -137,6 +174,7 @@ export async function listVendorReturns(
       refundAmount: toAmountString(refundAmount),
       refundedItemCount,
       refundedSkus,
+      refundedItems: fallbackRefundedItems,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };

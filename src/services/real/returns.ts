@@ -17,6 +17,15 @@ type ReturnSummaryDto = {
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
+  refundedItems?: Array<{
+    id: string;
+    sourceLineItemId: string;
+    sourceVariantId: string | null;
+    sku: string | null;
+    title: string | null;
+    quantity: number;
+    refundAmount: string;
+  }>;
   createdAt: string;
   updatedAt: string;
 };
@@ -26,15 +35,7 @@ type ReturnDetailDto = ReturnSummaryDto & {
   originalVendorId: string;
   requestCreatedAt: string | null;
   requestUpdatedAt: string | null;
-  refundedItems: Array<{
-    id: string;
-    sourceLineItemId: string;
-    sourceVariantId: string | null;
-    sku: string | null;
-    title: string | null;
-    quantity: number;
-    refundAmount: string;
-  }>;
+  refundedItems: NonNullable<ReturnSummaryDto['refundedItems']>;
 };
 
 function mapStatus(status: string, sourceType: ReturnSummary['sourceType']): ReturnSummary['status'] {
@@ -76,6 +77,19 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
       ? `Refund ${dto.sourceShopifyRefundId}`
       : 'Pending Shopify source link';
 
+  const refundedItems = (dto.refundedItems ?? []).map((item) => ({
+    id: item.id,
+    originalVendorId: dto.assignedVendorId,
+    assignedVendorId: dto.assignedVendorId,
+    vendorId: dto.assignedVendorId,
+    sku: item.sku ?? 'UNKNOWN-SKU',
+    variantTitle: item.sourceVariantId ?? 'Default',
+    name: item.title ?? 'Return item',
+    quantity: item.quantity,
+    condition: 'Opened' as const,
+    refundAmount: formatCurrency(item.refundAmount),
+  }));
+
   return {
     id: dto.id,
     originalVendorId: dto.assignedVendorId,
@@ -94,6 +108,7 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     reason: `${sourceLabel} · ${sourceId}`,
     amount: formatCurrency(dto.refundAmount),
     refundedSkus: dto.refundedSkus,
+    refundedItems,
   };
 }
 

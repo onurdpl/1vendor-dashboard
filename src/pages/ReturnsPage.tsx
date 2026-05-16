@@ -107,10 +107,6 @@ function getVendorName(vendorId: string, vendorLookup: Map<string, string>) {
   return vendorLookup.get(vendorId) ?? vendorId;
 }
 
-function getItemCount(summary: ReturnSummary, detail: ReturnDetail | null) {
-  return detail?.refundedItems.length ?? summary.refundedSkus?.length ?? 0;
-}
-
 function getVariantText(value: string | null | undefined) {
   const text = value?.trim();
   if (!text || text === 'Details pending' || text === 'Default') {
@@ -137,6 +133,18 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
     }));
   }
 
+  const summaryItems = summary.refundedItems ?? [];
+  if (summaryItems.length > 0) {
+    return summaryItems.map((item) => ({
+      sku: item.sku,
+      title: item.name || 'Return item',
+      variantTitle: getVariantText(item.variantTitle),
+      quantity: item.quantity,
+      amount: item.refundAmount,
+      condition: item.condition,
+    }));
+  }
+
   return (summary.refundedSkus ?? []).map((sku) => ({
     sku,
     title: 'Return item',
@@ -153,16 +161,6 @@ function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null
     title: firstItem?.title || 'Return item',
     variant: getVariantText(firstItem?.variantTitle),
   };
-}
-
-function getSourceFilterLabel(filter: ReturnSourceFilter) {
-  if (filter === 'pending') {
-    return 'Pending returns';
-  }
-  if (filter === 'refunded') {
-    return 'Refunds completed';
-  }
-  return 'All returns';
 }
 
 function getVendorTimelineLabel(label: string) {
@@ -250,6 +248,7 @@ export function ReturnsPage() {
           item.customer,
           item.reason,
           String(item.sourceShopifyOrderNumber),
+          item.refundedItems?.map((lineItem) => `${lineItem.name} ${lineItem.variantTitle}`).join(' ') ?? '',
           item.sourceShopifyOrderId,
           item.sourceShopifyRefundId,
           item.sourceShopifyReturnId ?? '',
@@ -348,14 +347,14 @@ export function ReturnsPage() {
         ))}
       </div>
 
+      <div className="returns-status-row" aria-label="Return workspace status">
+        <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
+        <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
+        <StatusBadge tone={attentionCount > 0 ? 'attention' : 'success'}>{attentionCount} attention</StatusBadge>
+      </div>
+
       <div className="op-control-layout returns-control-layout">
         <div className="op-main-column">
-          <div className="returns-status-row" aria-label="Return workspace status">
-            <StatusBadge tone={isRealMode ? 'success' : 'neutral'}>{isRealMode ? 'Real API' : 'Mock mode'}</StatusBadge>
-            <StatusBadge tone="info">Vendor {currentVendor.vendorName}</StatusBadge>
-            <StatusBadge tone={attentionCount > 0 ? 'attention' : 'success'}>{attentionCount} attention</StatusBadge>
-          </div>
-
           <OperationalToolbar>
             <SearchInput
               placeholder="Search returns by order, return #, customer or SKU..."
@@ -402,10 +401,16 @@ export function ReturnsPage() {
           </OperationalToolbar>
 
           <div className="returns-filter-summary">
-            <span>{filteredReturns.length} records</span>
-            <span>{getSourceFilterLabel(sourceFilter)}</span>
-            <span>{statusFilter === 'all' ? 'All statuses' : statusFilter}</span>
-            {isAdmin ? <span>{vendorFilter === 'all' ? 'All visible returns' : getVendorName(vendorFilter, vendorLookup)}</span> : null}
+            <button type="button" className={sourceFilter === 'all' ? 'is-active' : ''} onClick={() => setSourceFilter('all')}>
+              All returns <strong>{returns.length}</strong>
+            </button>
+            <button type="button" className={sourceFilter === 'pending' ? 'is-active' : ''} onClick={() => setSourceFilter('pending')}>
+              Pending review <strong>{pendingCount}</strong>
+            </button>
+            <button type="button" className={sourceFilter === 'refunded' ? 'is-active' : ''} onClick={() => setSourceFilter('refunded')}>
+              Refunded <strong>{processedCount}</strong>
+            </button>
+            <span>Needs action <strong>{attentionCount}</strong></span>
           </div>
 
           {filteredReturns.length === 0 ? (
@@ -426,7 +431,6 @@ export function ReturnsPage() {
             >
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemCount = getItemCount(item, isSelected ? selectedDetail : null);
                 const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail : null);
                 return (
                   <OperationalTableRow
@@ -436,7 +440,7 @@ export function ReturnsPage() {
                   >
                     <div className="return-item-preview">
                       <span className="return-item-thumb" aria-hidden="true">
-                        {itemCount > 1 ? itemCount : 'R'}
+                        ↩
                       </span>
                       <span>
                         <strong>{itemDisplay.title}</strong>
@@ -476,18 +480,12 @@ export function ReturnsPage() {
           title={selectedReturn ? `Order #${selectedReturn.sourceShopifyOrderNumber}` : 'No return selected'}
           action={
             selectedReturn ? (
-              <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link returns-panel-action">
-                Review return
-              </Link>
+              <StatusBadge tone={getStatusTone(selectedReturn)}>{getVendorStatusLabel(selectedReturn)}</StatusBadge>
             ) : null
           }
         >
           {selectedReturn ? (
             <>
-              <div className="op-detail-status-row">
-                <StatusBadge tone={getStatusTone(selectedReturn)}>{getVendorStatusLabel(selectedReturn)}</StatusBadge>
-              </div>
-
               <div className="returns-summary-card">
                 <h4>Summary</h4>
                 <div className="returns-summary-grid-v2">
@@ -568,15 +566,6 @@ export function ReturnsPage() {
         </SideDetailPanel>
       </div>
 
-      <div className="returns-support-footer">
-        <div>
-          <h3>Need help?</h3>
-          <p>Questions about a return or refund? Contact support.</p>
-        </div>
-        <button type="button" className="button button-secondary">
-          Contact support
-        </button>
-      </div>
     </section>
   );
 }

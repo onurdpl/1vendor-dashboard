@@ -218,6 +218,7 @@ export type ReturnSummary = {
   reason: string;
   amount: string;
   refundedSkus?: string[];
+  refundedItems?: ReturnLineItem[];
 };
 
 export type ReturnLineItem = {

@@ -13,6 +13,7 @@ export type ReturnSummaryDto = {
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
+  refundedItems: RefundedItemDto[];
   createdAt: string;
   updatedAt: string;
 };

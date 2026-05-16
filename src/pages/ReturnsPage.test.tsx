@@ -113,7 +113,7 @@ const otherVendorReturn: ReturnDetail = {
 };
 
 function toSummary(detail: ReturnDetail): ReturnSummary {
-  const { resolution: _resolution, refundMethod: _refundMethod, processedBy: _processedBy, refundedItems: _refundedItems, items: _items, timeline: _timeline, ...summary } = detail;
+  const { resolution: _resolution, refundMethod: _refundMethod, processedBy: _processedBy, items: _items, timeline: _timeline, ...summary } = detail;
   return summary;
 }
 
@@ -164,6 +164,7 @@ describe('ReturnsPage control center', () => {
     expect(await screen.findByRole('heading', { name: /return requests/i })).toBeInTheDocument();
     expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Wireless label printer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
@@ -208,7 +209,7 @@ describe('ReturnsPage control center', () => {
 
     expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Need help?').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('View return for order 1001').length).toBeGreaterThan(0);
   });
 });
