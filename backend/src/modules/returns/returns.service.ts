@@ -214,6 +214,26 @@ function filterReturnRequestAllocationLineItems<
   );
 }
 
+function getMatchingRefundRecords(record: {
+  sourceShopifyRefundId: string | null;
+  returnRequestSource: string | null;
+  vendorAllocation: {
+    refundRecords: Array<{
+      sourceShopifyRefundId: string;
+      amount?: unknown;
+      lineItems: Array<Parameters<typeof toRefundReturnedItem>[0]>;
+    }>;
+  };
+}) {
+  if (record.sourceShopifyRefundId) {
+    return record.vendorAllocation.refundRecords.filter(
+      (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
+    );
+  }
+
+  return isReturnRequestRecord(record) ? [] : record.vendorAllocation.refundRecords;
+}
+
 export async function listVendorReturns(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -255,18 +275,12 @@ export async function listVendorReturns(
   });
 
   return records.map((record) => {
-    const matchingRefundRecords = isReturnRequestRecord(record)
-      ? []
-      : record.sourceShopifyRefundId
-        ? record.vendorAllocation.refundRecords.filter(
-            (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
-          )
-        : record.vendorAllocation.refundRecords;
+    const matchingRefundRecords = getMatchingRefundRecords(record);
     const refundAmount = matchingRefundRecords.reduce(
       (sum, refund) => sum + toNumber(refund.amount),
       0,
     );
-    const sourceRefundId = isReturnRequestRecord(record) ? '' : getRefundSourceId(record);
+    const sourceRefundId = record.sourceShopifyRefundId ?? (isReturnRequestRecord(record) ? '' : getRefundSourceId(record));
     const returnRequestLineItems = filterReturnRequestAllocationLineItems(record, record.vendorAllocation.lineItems);
     const refundLineItemCount = matchingRefundRecords.reduce((sum, refund) => {
       return sum + (refund.lineItems.length > 0 ? refund.lineItems.length : 0);
@@ -365,18 +379,12 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     return null;
   }
 
-  const matchingRefundRecords = isReturnRequestRecord(record)
-    ? []
-    : record.sourceShopifyRefundId
-      ? record.vendorAllocation.refundRecords.filter(
-          (refund) => refund.sourceShopifyRefundId === record.sourceShopifyRefundId,
-        )
-      : record.vendorAllocation.refundRecords;
+  const matchingRefundRecords = getMatchingRefundRecords(record);
   const refundAmount = matchingRefundRecords.reduce(
     (sum, refund) => sum + toNumber(refund.amount),
     0,
   );
-  const sourceRefundId = isReturnRequestRecord(record) ? '' : getRefundSourceId(record);
+  const sourceRefundId = record.sourceShopifyRefundId ?? (isReturnRequestRecord(record) ? '' : getRefundSourceId(record));
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
   const detailRefundedItems = buildReturnedItemsForRecord(record, refundLineItems);
   const refundedSkus = Array.from(

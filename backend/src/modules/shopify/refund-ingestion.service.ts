@@ -222,9 +222,27 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
       for (const [vendorId, vendorLineItems] of groupedByVendor.entries()) {
         const vendorAllocationId = vendorLineItems[0].vendorAllocationId;
         const refundRecordId = `refund-${vendorId}-${parsedRefund.sourceShopifyRefundId}`;
-        const returnRecordId = `return-${vendorId}-${parsedRefund.sourceShopifyRefundId}`;
         const totalRefundAmount = sumAmounts(vendorLineItems.map((lineItem) => lineItem.refundAmount));
         const orderNumber = vendorLineItems[0].sourceShopifyOrderNumber;
+        const sourceLineItemIds = vendorLineItems
+          .map((lineItem) => lineItem.sourceLineItemId)
+          .filter((sourceLineItemId): sourceLineItemId is string => Boolean(sourceLineItemId));
+        const linkedReturnRequest = sourceLineItemIds.length > 0
+          ? await tx.returnRecord.findFirst({
+              where: {
+                vendorAllocationId,
+                sourceShopifyOrderId: parsedRefund.sourceShopifyOrderId,
+                returnRequestSource: 'shopify_return_request',
+                sourceShopifyLineItemId: {
+                  in: sourceLineItemIds,
+                },
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            })
+          : null;
+        const returnRecordId = linkedReturnRequest?.id ?? `return-${vendorId}-${parsedRefund.sourceShopifyRefundId}`;
 
         await tx.returnRecord.upsert({
           where: {
@@ -236,7 +254,7 @@ export async function ingestShopifyRefundWebhook(input: RefundIngestionInput): P
             sourceShopifyOrderNumber: orderNumber,
             sourceShopifyRefundId: parsedRefund.sourceShopifyRefundId,
             status: 'processed',
-            reason: parsedRefund.note,
+            reason: parsedRefund.note ?? linkedReturnRequest?.reason ?? null,
           },
           create: {
             id: returnRecordId,

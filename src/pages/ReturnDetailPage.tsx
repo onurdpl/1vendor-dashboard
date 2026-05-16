@@ -59,7 +59,9 @@ function getStatusTone(returnRequest: ReturnDetail) {
 }
 
 function getRefundStatus(returnRequest: ReturnDetail) {
-  return returnRequest.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refunded';
+  return returnRequest.sourceType === 'shopify_return_request' && !returnRequest.sourceShopifyRefundId
+    ? 'Refund pending'
+    : 'Refunded';
 }
 
 function sanitizeText(value: string | null | undefined, fallback = 'Return requested') {

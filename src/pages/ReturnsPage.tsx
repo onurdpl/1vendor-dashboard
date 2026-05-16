@@ -81,7 +81,7 @@ function getReturnKind(item: ReturnSummary) {
 }
 
 function getRefundStatusLabel(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refunded';
+  return item.sourceType === 'shopify_return_request' && !item.sourceShopifyRefundId ? 'Refund pending' : 'Refunded';
 }
 
 function getVendorReason(reason: string | null | undefined, fallback = 'Return requested') {
