@@ -275,7 +275,7 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
-  it('uses selected detail returned item title when the list row only has SKU', async () => {
+  it('uses list row order line title for unselected rows instead of selected detail', async () => {
     const summaryOnlyReturn: ReturnSummary = {
       ...toSummary(pendingReturn),
       refundedSkus: ['DJ1196-002-40,5'],
@@ -285,9 +285,10 @@ describe('ReturnsPage control center', () => {
           sku: 'DJ1196-002-40,5',
           name: 'DJ1196-002-40,5',
           variantTitle: 'Return item',
+          orderLineItemTitle: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5',
         },
       ],
-    };
+    } as ReturnSummary;
     const detailedReturn: ReturnDetail = {
       ...pendingReturn,
       refundedSkus: ['DJ1196-002-40,5'],
@@ -309,13 +310,43 @@ describe('ReturnsPage control center', () => {
       ],
     };
     listReturnsMock.mockResolvedValue([summaryOnlyReturn]);
-    getReturnMock.mockResolvedValue(detailedReturn);
+    getReturnMock.mockResolvedValue({
+      ...detailedReturn,
+      refundedItems: [
+        {
+          ...detailedReturn.refundedItems[0],
+          name: 'Detail title should not be required',
+        },
+      ],
+    });
 
     renderReturnsPage();
 
     expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5')).toBeInTheDocument();
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
+  it('does not concatenate numeric product ids under the item title', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        refundedItems: [
+          {
+            ...pendingReturn.refundedItems[0],
+            sku: 'DJ1196-002-40,5',
+            name: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı',
+            variantTitle: '1234567890123',
+          },
+        ],
+      },
+    ]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı')).toBeInTheDocument();
+    expect(screen.queryByText('1234567890123')).not.toBeInTheDocument();
   });
 
   it('falls back to SKU in the table only when a returned item title is missing', async () => {

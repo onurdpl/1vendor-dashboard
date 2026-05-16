@@ -133,6 +133,7 @@ export async function listVendorReturns(
           sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
           sku: item.shopifyOrderLineItem.sku,
           title: item.shopifyOrderLineItem.title,
+          orderLineItemTitle: item.shopifyOrderLineItem.title,
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.lineAmount)),
         }))
@@ -142,7 +143,8 @@ export async function listVendorReturns(
             sourceLineItemId: item.sourceLineItemId,
             sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
             sku: item.shopifyOrderLineItem.sku,
-            title: item.title ?? item.shopifyOrderLineItem.title,
+            title: item.title,
+            orderLineItemTitle: item.shopifyOrderLineItem.title,
             quantity: item.quantity,
             refundAmount: toAmountString(toNumber(item.subtotal)),
           })),
@@ -156,6 +158,7 @@ export async function listVendorReturns(
             sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
             sku: item.shopifyOrderLineItem.sku,
             title: item.shopifyOrderLineItem.title,
+            orderLineItemTitle: item.shopifyOrderLineItem.title,
             quantity: item.quantity,
             refundAmount: toAmountString(toNumber(item.lineAmount)),
           }));
@@ -240,6 +243,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
           sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
           sku: item.shopifyOrderLineItem.sku,
           title: item.shopifyOrderLineItem.title,
+          orderLineItemTitle: item.shopifyOrderLineItem.title,
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.lineAmount)),
         }))
@@ -249,7 +253,8 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
           sourceLineItemId: item.sourceLineItemId,
           sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
           sku: item.shopifyOrderLineItem.sku,
-          title: item.title ?? item.shopifyOrderLineItem.title,
+          title: item.title,
+          orderLineItemTitle: item.shopifyOrderLineItem.title,
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.subtotal)),
         }))
@@ -259,6 +264,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
           sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
           sku: item.shopifyOrderLineItem.sku,
           title: item.shopifyOrderLineItem.title,
+          orderLineItemTitle: item.shopifyOrderLineItem.title,
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.lineAmount)),
         }));

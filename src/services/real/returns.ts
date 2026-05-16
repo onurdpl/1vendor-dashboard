@@ -114,7 +114,7 @@ function readDtoText(value: unknown) {
 function readDtoProductText(value: unknown, sku?: string | null) {
   const text = readDtoText(value);
   const normalizedSku = readDtoText(sku);
-  if (!text || (normalizedSku && text === normalizedSku)) {
+  if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
     return '';
   }
 
@@ -165,7 +165,7 @@ function resolveReturnItemName(item: ReturnItemDto) {
 }
 
 function resolveReturnItemVariant(item: ReturnItemDto) {
-  return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle, item.sourceVariantId, 'Default');
+  return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle, 'Default');
 }
 
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {

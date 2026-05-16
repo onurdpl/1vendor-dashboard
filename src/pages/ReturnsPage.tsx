@@ -153,7 +153,7 @@ function getVariantText(value: string | null | undefined) {
     return '';
   }
 
-  if (/^(gid:\/\/|sku[-_:]|unknown-sku)/i.test(text)) {
+  if (/^(gid:\/\/|sku[-_:]|unknown-sku)/i.test(text) || /^\d{6,}$/.test(text)) {
     return '';
   }
 
@@ -189,7 +189,7 @@ function readText(value: unknown) {
 function readProductText(value: unknown, sku?: string | null) {
   const text = readText(value);
   const normalizedSku = readText(sku);
-  if (!text || (normalizedSku && text === normalizedSku)) {
+  if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
     return '';
   }
 
@@ -637,7 +637,7 @@ export function ReturnsPage() {
             >
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail ?? null : null);
+                const itemDisplay = getTableItemDisplay(item, null);
                 const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow

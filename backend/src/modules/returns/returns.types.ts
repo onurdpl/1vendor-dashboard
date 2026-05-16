@@ -24,6 +24,7 @@ export type RefundedItemDto = {
   sourceVariantId: string | null;
   sku: string | null;
   title: string | null;
+  orderLineItemTitle?: string | null;
   quantity: number;
   refundAmount: string;
 };
