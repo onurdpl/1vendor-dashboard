@@ -29,6 +29,62 @@ function isReturnRequestRecord(record: { returnRequestSource: string | null }) {
   return record.returnRequestSource === 'shopify_return_request';
 }
 
+function readText(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text || text === 'Return item' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
+    return null;
+  }
+
+  return text;
+}
+
+function readProductText(value: string | null | undefined, sku: string | null | undefined) {
+  const text = readText(value);
+  const normalizedSku = readText(sku);
+  if (!text || (normalizedSku && text === normalizedSku) || /^\d{6,}$/.test(text)) {
+    return null;
+  }
+
+  return text;
+}
+
+function resolveReturnedItemDisplayTitle(item: {
+  sku: string | null;
+  title: string | null;
+  orderLineItemTitle?: string | null;
+}) {
+  return (
+    readProductText(item.title, item.sku) ??
+    readProductText(item.orderLineItemTitle, item.sku) ??
+    readText(item.sku) ??
+    null
+  );
+}
+
+function resolveReturnedItemVariantTitle(item: {
+  sku: string | null;
+  title: string | null;
+  orderLineItemTitle?: string | null;
+}) {
+  const displayTitle = resolveReturnedItemDisplayTitle(item);
+  const variantTitle = readProductText(item.orderLineItemTitle, item.sku);
+  return variantTitle && variantTitle !== displayTitle ? variantTitle : null;
+}
+
+function withReturnedItemDisplayFields<T extends {
+  sku: string | null;
+  title: string | null;
+  orderLineItemTitle?: string | null;
+}>(item: T) {
+  const displayTitle = resolveReturnedItemDisplayTitle(item);
+  return {
+    ...item,
+    itemTitle: displayTitle,
+    displayTitle,
+    variantTitle: resolveReturnedItemVariantTitle(item),
+  };
+}
+
 function filterReturnRequestAllocationLineItems<
   T extends {
     shopifyOrderLineItem: {
@@ -162,6 +218,8 @@ export async function listVendorReturns(
             quantity: item.quantity,
             refundAmount: toAmountString(toNumber(item.lineAmount)),
           }));
+    const summaryRefundedItems = fallbackRefundedItems.map(withReturnedItemDisplayFields);
+    const primaryReturnedItem = summaryRefundedItems[0] ?? null;
     return {
       id: record.id,
       sourceShopifyOrderId: record.sourceShopifyOrderId,
@@ -177,7 +235,10 @@ export async function listVendorReturns(
       refundAmount: toAmountString(refundAmount),
       refundedItemCount,
       refundedSkus,
-      refundedItems: fallbackRefundedItems,
+      itemTitle: primaryReturnedItem?.itemTitle ?? null,
+      displayTitle: primaryReturnedItem?.displayTitle ?? null,
+      variantTitle: primaryReturnedItem?.variantTitle ?? null,
+      refundedItems: summaryRefundedItems,
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
@@ -268,13 +329,15 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
           quantity: item.quantity,
           refundAmount: toAmountString(toNumber(item.lineAmount)),
         }));
+  const detailRefundedItems = refundedItems.map(withReturnedItemDisplayFields);
   const refundedSkus = Array.from(
     new Set(
-      refundedItems
+      detailRefundedItems
         .map((item) => item.sku)
         .filter((sku): sku is string => Boolean(sku)),
     ),
   );
+  const primaryReturnedItem = detailRefundedItems[0] ?? null;
 
   return {
     id: record.id,
@@ -289,14 +352,17 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     assignedVendorId: record.vendorAllocation.assignedVendorId,
     status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
     refundAmount: toAmountString(refundAmount),
-    refundedItemCount: refundedItems.length,
+    refundedItemCount: detailRefundedItems.length,
     refundedSkus,
+    itemTitle: primaryReturnedItem?.itemTitle ?? null,
+    displayTitle: primaryReturnedItem?.displayTitle ?? null,
+    variantTitle: primaryReturnedItem?.variantTitle ?? null,
     createdAt: record.createdAt.toISOString(),
     updatedAt: record.updatedAt.toISOString(),
     sourceShopifyInternalOrderId: record.vendorAllocation.sourceShopifyOrderId,
     originalVendorId: record.vendorAllocation.originalVendorId,
     requestCreatedAt: record.requestCreatedAt ? record.requestCreatedAt.toISOString() : null,
     requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
-    refundedItems,
+    refundedItems: detailRefundedItems,
   };
 }

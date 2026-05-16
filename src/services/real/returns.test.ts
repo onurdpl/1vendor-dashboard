@@ -172,4 +172,36 @@ describe('real returns service item title mapping', () => {
     expect(returns[0].refundedItems?.[0]?.name).toBe('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5');
     expect(returns[0].refundedItems?.[0]?.variantTitle).toBe('Default');
   });
+
+  it('maps minimal list summary item titles when refunded items are omitted', async () => {
+    apiClientGet.mockResolvedValueOnce([
+      {
+        id: 'return-5',
+        sourceShopifyOrderId: 'gid://shopify/Order/1027',
+        sourceShopifyOrderNumber: '#1027',
+        sourceShopifyRefundId: '',
+        sourceShopifyReturnId: '23165600085',
+        sourceShopifyReturnGid: 'gid://shopify/Return/23165600085',
+        returnLifecycleStatus: 'requested',
+        returnRequestSource: 'shopify_return_request',
+        vendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        status: 'requested',
+        refundAmount: '0.00',
+        refundedItemCount: 1,
+        refundedSkus: ['DJ1196-002-40,5'],
+        itemTitle: 'Nike Court Vision Kadın Krem Günlük Ayakkabı',
+        displayTitle: 'Nike Court Vision Kadın Krem Günlük Ayakkabı',
+        variantTitle: 'Krem / 36.5',
+        createdAt: '2026-05-13T04:44:00Z',
+        updatedAt: '2026-05-13T04:44:00Z',
+      },
+    ]);
+
+    const returns = await listReturns();
+
+    expect(returns[0].itemTitle).toBe('Nike Court Vision Kadın Krem Günlük Ayakkabı');
+    expect(returns[0].refundedItems?.[0]?.name).toBe('Nike Court Vision Kadın Krem Günlük Ayakkabı');
+    expect(returns[0].refundedItems?.[0]?.sku).toBe('DJ1196-002-40,5');
+  });
 });

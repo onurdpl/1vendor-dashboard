@@ -217,6 +217,9 @@ export type ReturnSummary = {
   customer: string;
   reason: string;
   amount: string;
+  itemTitle?: string | null;
+  displayTitle?: string | null;
+  variantTitle?: string | null;
   refundedSkus?: string[];
   refundedItems?: ReturnLineItem[];
 };

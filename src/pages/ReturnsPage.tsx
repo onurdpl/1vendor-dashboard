@@ -24,6 +24,8 @@ type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
   name?: unknown;
   title?: unknown;
+  itemTitle?: unknown;
+  displayTitle?: unknown;
   productTitle?: unknown;
   productName?: unknown;
   lineItemTitle?: unknown;
@@ -215,6 +217,8 @@ function getRowItemCandidates(summary: ReturnSummary) {
     refundLineItems?: ReturnRowItemCandidate[];
     item?: ReturnRowItemCandidate;
     product?: ReturnRowItemCandidate;
+    itemTitle?: unknown;
+    displayTitle?: unknown;
     productTitle?: unknown;
     productName?: unknown;
     merchandiseTitle?: unknown;
@@ -243,6 +247,8 @@ function getRowItemCandidates(summary: ReturnSummary) {
 function resolveCandidateTitle(item: ReturnRowItemCandidate) {
   return readFirstProductText(
     readText(item.sku),
+    item.displayTitle,
+    item.itemTitle,
     item.productTitle,
     item.productName,
     item.product?.title,
@@ -315,7 +321,18 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
 }
 
 function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null) {
-  const rowItem = getRowItemCandidates(summary).find((item) => resolveCandidateTitle(item));
+  const summaryTitle = readFirstProductText(
+    summary.refundedSkus?.[0],
+    summary.displayTitle,
+    summary.itemTitle,
+  );
+  const rowItem = summaryTitle
+    ? ({
+        title: summaryTitle,
+        variantTitle: summary.variantTitle,
+        sku: summary.refundedSkus?.[0],
+      } satisfies ReturnRowItemCandidate)
+    : getRowItemCandidates(summary).find((item) => resolveCandidateTitle(item));
   const firstItem = rowItem
     ? {
         title: resolveCandidateTitle(rowItem),
@@ -415,10 +432,15 @@ export function ReturnsPage() {
           item.id,
           item.customer,
           item.reason,
+          item.displayTitle ?? '',
+          item.itemTitle ?? '',
+          item.variantTitle ?? '',
           String(item.sourceShopifyOrderNumber),
           getRowItemCandidates(item)
             .map((lineItem) =>
               [
+                lineItem.displayTitle,
+                lineItem.itemTitle,
                 lineItem.productTitle,
                 lineItem.productName,
                 lineItem.product?.title,

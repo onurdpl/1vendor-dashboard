@@ -18,12 +18,17 @@ type ReturnSummaryDto = {
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
+  itemTitle?: string | null;
+  displayTitle?: string | null;
+  variantTitle?: string | null;
   refundedItems?: Array<{
     id: string;
-    sourceLineItemId: string;
+    sourceLineItemId?: string;
     sourceVariantId: string | null;
     sku: string | null;
     title: string | null;
+    itemTitle?: string | null;
+    displayTitle?: string | null;
     name?: string | null;
     productTitle?: string | null;
     productName?: string | null;
@@ -139,6 +144,8 @@ function getReturnItemFallbackName(item: Pick<ReturnItemDto, 'sku'>) {
 function resolveReturnItemName(item: ReturnItemDto) {
   return readFirstDtoProductText(
     item.sku,
+    item.displayTitle,
+    item.itemTitle,
     item.productTitle,
     item.productName,
     item.product?.title,
@@ -180,7 +187,23 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
       ? `Refund ${dto.sourceShopifyRefundId}`
       : 'Pending Shopify source link';
 
-  const refundedItems = (dto.refundedItems ?? []).map((item) => ({
+  const summaryFallbackItem =
+    dto.displayTitle || dto.itemTitle || dto.variantTitle || dto.refundedSkus[0]
+      ? [{
+          id: `${dto.id}-summary-item`,
+          sourceLineItemId: undefined,
+          sourceVariantId: null,
+          sku: dto.refundedSkus[0] ?? null,
+          title: dto.displayTitle ?? dto.itemTitle ?? null,
+          itemTitle: dto.itemTitle ?? null,
+          displayTitle: dto.displayTitle ?? null,
+          variantTitle: dto.variantTitle ?? null,
+          quantity: dto.refundedItemCount || 1,
+          refundAmount: dto.refundAmount,
+        }]
+      : [];
+  const refundedItemsSource = dto.refundedItems?.length ? dto.refundedItems : summaryFallbackItem;
+  const refundedItems = refundedItemsSource.map((item) => ({
     id: item.id,
     originalVendorId: dto.assignedVendorId,
     assignedVendorId: dto.assignedVendorId,
@@ -210,6 +233,9 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     customer: 'Customer unavailable',
     reason: `${sourceLabel} · ${sourceId}`,
     amount: formatCurrency(dto.refundAmount),
+    itemTitle: dto.itemTitle ?? dto.displayTitle ?? null,
+    displayTitle: dto.displayTitle ?? dto.itemTitle ?? null,
+    variantTitle: dto.variantTitle ?? null,
     refundedSkus: dto.refundedSkus,
     refundedItems,
   };

@@ -13,6 +13,9 @@ export type ReturnSummaryDto = {
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
+  itemTitle: string | null;
+  displayTitle: string | null;
+  variantTitle: string | null;
   refundedItems: RefundedItemDto[];
   createdAt: string;
   updatedAt: string;
@@ -24,7 +27,10 @@ export type RefundedItemDto = {
   sourceVariantId: string | null;
   sku: string | null;
   title: string | null;
+  itemTitle?: string | null;
+  displayTitle?: string | null;
   orderLineItemTitle?: string | null;
+  variantTitle?: string | null;
   quantity: number;
   refundAmount: string;
 };

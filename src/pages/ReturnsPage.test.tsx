@@ -327,6 +327,36 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
+  it('renders summary item title without depending on selected detail data', async () => {
+    listReturnsMock.mockResolvedValue([
+      {
+        ...toSummary(pendingReturn),
+        itemTitle: 'Nike Court Vision Kadın Krem Günlük Ayakkabı',
+        displayTitle: 'Nike Court Vision Kadın Krem Günlük Ayakkabı',
+        variantTitle: 'Krem / 36.5',
+        refundedSkus: ['DJ1196-002-40,5'],
+        refundedItems: undefined,
+      },
+    ]);
+    getReturnMock.mockResolvedValue({
+      ...pendingReturn,
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'DJ1196-002-40,5',
+          name: 'Detail title should not be required',
+          variantTitle: 'Krem / 36.5',
+        },
+      ],
+    });
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Nike Court Vision Kadın Krem Günlük Ayakkabı')).toBeInTheDocument();
+    expect(screen.getAllByText('DJ1196-002-40,5').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
   it('does not concatenate numeric product ids under the item title', async () => {
     listReturnsMock.mockResolvedValue([
       {
