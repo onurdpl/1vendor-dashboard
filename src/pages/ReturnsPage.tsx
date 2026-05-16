@@ -19,6 +19,19 @@ import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken 
 import { runtimeConfig } from '../config/runtime';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
+type ReturnRowItemCandidate = {
+  name?: unknown;
+  title?: unknown;
+  productTitle?: unknown;
+  productName?: unknown;
+  lineItemTitle?: unknown;
+  orderLineItemTitle?: unknown;
+  variantTitle?: unknown;
+  variant?: unknown;
+  optionTitle?: unknown;
+  options?: unknown;
+  sku?: unknown;
+};
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -148,6 +161,47 @@ function getSkuText(value: string | null | undefined) {
   return text;
 }
 
+function readText(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function readFirstText(...values: unknown[]) {
+  return values.map(readText).find(Boolean) ?? '';
+}
+
+function getRowItemCandidates(summary: ReturnSummary) {
+  const record = summary as ReturnSummary & {
+    refundedItems?: ReturnRowItemCandidate[];
+    items?: ReturnRowItemCandidate[];
+    returnedItems?: ReturnRowItemCandidate[];
+    returnItems?: ReturnRowItemCandidate[];
+    lineItems?: ReturnRowItemCandidate[];
+    refundLineItems?: ReturnRowItemCandidate[];
+    item?: ReturnRowItemCandidate;
+    product?: ReturnRowItemCandidate;
+    productTitle?: unknown;
+    productName?: unknown;
+    title?: unknown;
+    name?: unknown;
+    lineItemTitle?: unknown;
+    orderLineItemTitle?: unknown;
+    variantTitle?: unknown;
+    variant?: unknown;
+    optionTitle?: unknown;
+    sku?: unknown;
+  };
+  const collections = [
+    record.refundedItems,
+    record.items,
+    record.returnedItems,
+    record.returnItems,
+    record.lineItems,
+    record.refundLineItems,
+  ];
+  const firstNestedItem = collections.find((items) => Array.isArray(items) && items.length > 0)?.[0];
+  return [firstNestedItem, record.item, record.product, record].filter(Boolean) as ReturnRowItemCandidate[];
+}
+
 function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   const detailItems = detail?.refundedItems ?? [];
   if (detailItems.length > 0) {
@@ -184,7 +238,31 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
 }
 
 function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null) {
-  const firstItem = getItemPreview(summary, detail)[0];
+  const rowItem = getRowItemCandidates(summary).find((item) =>
+    readFirstText(
+      item.productTitle,
+      item.productName,
+      item.lineItemTitle,
+      item.orderLineItemTitle,
+      item.title,
+      item.name,
+    ),
+  );
+  const firstItem = rowItem
+    ? {
+        title: readFirstText(
+          rowItem.productTitle,
+          rowItem.productName,
+          rowItem.lineItemTitle,
+          rowItem.orderLineItemTitle,
+          rowItem.title,
+          rowItem.name,
+        ),
+        variantTitle: readFirstText(rowItem.variantTitle, rowItem.variant, rowItem.optionTitle, rowItem.options),
+        sku: readText(rowItem.sku),
+      }
+    : getItemPreview(summary, detail)[0];
+
   return {
     title: firstItem?.title || 'Return item',
     variant: getVariantText(firstItem?.variantTitle),
@@ -277,7 +355,25 @@ export function ReturnsPage() {
           item.customer,
           item.reason,
           String(item.sourceShopifyOrderNumber),
-          item.refundedItems?.map((lineItem) => `${lineItem.name} ${lineItem.variantTitle}`).join(' ') ?? '',
+          getRowItemCandidates(item)
+            .map((lineItem) =>
+              [
+                lineItem.productTitle,
+                lineItem.productName,
+                lineItem.lineItemTitle,
+                lineItem.orderLineItemTitle,
+                lineItem.title,
+                lineItem.name,
+                lineItem.variantTitle,
+                lineItem.variant,
+                lineItem.optionTitle,
+                lineItem.sku,
+              ]
+                .map(readText)
+                .filter(Boolean)
+                .join(' '),
+            )
+            .join(' '),
           item.sourceShopifyOrderId,
           item.sourceShopifyRefundId,
           item.sourceShopifyReturnId ?? '',
@@ -461,7 +557,7 @@ export function ReturnsPage() {
             >
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail : null);
+                const itemDisplay = getTableItemDisplay(item, null);
                 const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow

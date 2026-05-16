@@ -213,8 +213,7 @@ export function listMockReturns(vendorId?: VendorId): ReturnSummary[] {
         resolution,
         refundMethod,
         processedBy,
-        refundedItems,
-        items,
+        items: _items,
         timeline,
         ...summary
       }) => ({
