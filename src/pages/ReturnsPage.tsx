@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -18,6 +18,7 @@ import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type Re
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { isReturnsTitleDebugEnabled, logReturnsTitleDebugSnapshot, summarizeReturnTitlePayload } from '../lib/returnsTitleDebug';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -492,6 +493,33 @@ export function ReturnsPage() {
       enabled: authContextReady && Boolean(selectedReturn),
     },
   );
+  const selectedDetail = detailQuery.data;
+
+  useEffect(() => {
+    if (!isAdmin || !isReturnsTitleDebugEnabled()) {
+      return;
+    }
+
+    const tableRows = filteredReturns.map((item) => {
+      const itemDisplay = getTableItemDisplay(item, null);
+      return {
+        returnId: item.id,
+        orderNumber: item.sourceShopifyOrderNumber,
+        renderedItemColumnTitle: itemDisplay.title,
+        renderedVariantLine: itemDisplay.variant || '—',
+        renderedSkuColumn: itemDisplay.sku,
+        mappedSummary: summarizeReturnTitlePayload(item),
+      };
+    });
+
+    logReturnsTitleDebugSnapshot('ReturnsPage mapped table rows', tableRows);
+    logReturnsTitleDebugSnapshot('ReturnsPage selected summary/detail comparison', {
+      selectedReturnId: selectedReturn?.id ?? null,
+      selectedSummary: selectedReturn ? summarizeReturnTitlePayload(selectedReturn) : null,
+      selectedDetail: selectedDetail ? summarizeReturnTitlePayload(selectedDetail) : null,
+      selectedDetailItemPreview: selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [],
+    });
+  }, [filteredReturns, isAdmin, selectedDetail, selectedReturn]);
 
   if (!authContextReady || isLoading) {
     return (
@@ -521,7 +549,6 @@ export function ReturnsPage() {
   const attentionCount = returns.filter(needsAttention).length;
   const statuses = Array.from(new Set(returns.map((item) => item.status)));
   const vendors = Array.from(new Set(returns.map((item) => item.assignedVendorId)));
-  const selectedDetail = detailQuery.data;
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
   const kpis = [
     { label: 'Pending review', value: pendingCount, icon: 'P', tone: 'attention' },

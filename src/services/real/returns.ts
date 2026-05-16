@@ -1,5 +1,6 @@
 import { apiClient } from '../../lib/api-client';
 import type { ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
+import { logReturnsTitleDebugPayload } from '../../lib/returnsTitleDebug';
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
@@ -227,7 +228,10 @@ export async function listReturns(options: { limit?: number; offset?: number; ve
   const response = await (requestOptions
     ? apiClient.get<ReturnSummaryDto[]>(path, requestOptions)
     : apiClient.get<ReturnSummaryDto[]>(path));
-  return response.map(mapSummary);
+  const mapped = response.map(mapSummary);
+  logReturnsTitleDebugPayload('raw returns list API response', response);
+  logReturnsTitleDebugPayload('mapped returns list summaries', mapped);
+  return mapped;
 }
 
 export async function getReturn(returnId: string, options: { vendorId?: string | null } = {}): Promise<ReturnDetail> {
@@ -249,7 +253,7 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     refundAmount: formatCurrency(item.refundAmount),
   }));
 
-  return {
+  const detail = {
     ...summary,
     originalVendorId: response.originalVendorId,
     resolution:
@@ -276,4 +280,7 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
       { label: 'Latest backend update', at: response.updatedAt },
     ],
   };
+  logReturnsTitleDebugPayload('raw selected return detail API response', response);
+  logReturnsTitleDebugPayload('mapped selected return detail', detail);
+  return detail;
 }
