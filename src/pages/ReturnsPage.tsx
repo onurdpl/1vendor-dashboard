@@ -637,7 +637,7 @@ export function ReturnsPage() {
             >
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
-                const itemDisplay = getTableItemDisplay(item, null);
+                const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail ?? null : null);
                 const requestedAt = formatDateParts(item.date);
                 return (
                   <OperationalTableRow

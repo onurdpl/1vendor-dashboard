@@ -275,6 +275,49 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 
+  it('uses selected detail returned item title when the list row only has SKU', async () => {
+    const summaryOnlyReturn: ReturnSummary = {
+      ...toSummary(pendingReturn),
+      refundedSkus: ['DJ1196-002-40,5'],
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'DJ1196-002-40,5',
+          name: 'DJ1196-002-40,5',
+          variantTitle: 'Return item',
+        },
+      ],
+    };
+    const detailedReturn: ReturnDetail = {
+      ...pendingReturn,
+      refundedSkus: ['DJ1196-002-40,5'],
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'DJ1196-002-40,5',
+          name: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5',
+          variantTitle: 'Siyah / 40,5',
+        },
+      ],
+      items: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'DJ1196-002-40,5',
+          name: 'Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5',
+          variantTitle: 'Siyah / 40,5',
+        },
+      ],
+    };
+    listReturnsMock.mockResolvedValue([summaryOnlyReturn]);
+    getReturnMock.mockResolvedValue(detailedReturn);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Nike Defy All Day Erkek Siyah Antrenman Ayakkabısı / Siyah / 40,5')).toBeInTheDocument();
+    expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
+    expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
   it('falls back to SKU in the table only when a returned item title is missing', async () => {
     listReturnsMock.mockResolvedValue([
       {
@@ -299,25 +342,29 @@ describe('ReturnsPage control center', () => {
   });
 
   it('uses Unknown item only when no title or SKU exists', async () => {
+    const unknownReturn: ReturnDetail = {
+      ...pendingReturn,
+      refundedSkus: [],
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          sku: 'UNKNOWN-SKU',
+          name: 'Return item',
+          variantTitle: 'Return item',
+        },
+      ],
+      items: [],
+    };
     listReturnsMock.mockResolvedValue([
       {
-        ...toSummary(pendingReturn),
-        refundedSkus: [],
-        refundedItems: [
-          {
-            ...pendingReturn.refundedItems[0],
-            sku: 'UNKNOWN-SKU',
-            name: 'Return item',
-            variantTitle: 'Return item',
-          },
-        ],
+        ...toSummary(unknownReturn),
       },
     ]);
-    getReturnMock.mockResolvedValue(pendingReturn);
+    getReturnMock.mockResolvedValue(unknownReturn);
 
     renderReturnsPage();
 
-    expect(await screen.findByText('Unknown item')).toBeInTheDocument();
+    expect((await screen.findAllByText('Unknown item')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
   });
 });
