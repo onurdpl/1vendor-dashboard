@@ -5,6 +5,7 @@ const listVendorReturnsMock = vi.hoisted(() => vi.fn());
 const markReturnReceivedMock = vi.hoisted(() => vi.fn());
 const reviewReturnMock = vi.hoisted(() => vi.fn());
 const backfillShopifyReturnReasonsMock = vi.hoisted(() => vi.fn());
+const cleanupDuplicateReturnRecordsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   getVendorReturnById: vi.fn(),
@@ -23,6 +24,10 @@ vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
 
 vi.mock('../backend/src/modules/returns/return-reason-backfill.service.js', () => ({
   backfillShopifyReturnReasons: backfillShopifyReturnReasonsMock,
+}));
+
+vi.mock('../backend/src/modules/returns/duplicate-return-cleanup.service.js', () => ({
+  cleanupDuplicateReturnRecords: cleanupDuplicateReturnRecordsMock,
 }));
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
@@ -157,6 +162,36 @@ describe('backend returns list route contract', () => {
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual({ dryRun: true, scanned: 0, results: [] });
     expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true });
+  });
+
+  it('registers an admin-only duplicate return cleanup dry-run route', async () => {
+    cleanupDuplicateReturnRecordsMock.mockResolvedValueOnce({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
+    const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerReturnsRoutes(app as never, {} as never);
+    const blocked = await posts.get('/admin/returns/duplicates/cleanup')?.({
+      authUser: { role: 'vendor' },
+      body: { dryRun: true },
+    }, reply);
+    const allowed = await posts.get('/admin/returns/duplicates/cleanup')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true },
+    }, reply);
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(allowed).toEqual({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
+    expect(cleanupDuplicateReturnRecordsMock).toHaveBeenCalledWith({ dryRun: true });
   });
 
   it('registers vendor return review actions without Shopify refund execution', async () => {

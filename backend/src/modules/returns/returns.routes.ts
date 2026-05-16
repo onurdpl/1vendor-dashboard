@@ -15,8 +15,14 @@ import {
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
+import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
 
 type ReturnReasonBackfillBody = {
+  dryRun?: boolean;
+  limit?: number;
+};
+
+type DuplicateReturnCleanupBody = {
   dryRun?: boolean;
   limit?: number;
 };
@@ -105,6 +111,20 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return backfillShopifyReturnReasons(env, request.body ?? {});
+    },
+  );
+
+  app.post<{ Body: DuplicateReturnCleanupBody }>(
+    '/admin/returns/duplicates/cleanup',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return cleanupDuplicateReturnRecords(request.body ?? {});
     },
   );
 

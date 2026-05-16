@@ -99,3 +99,36 @@ Existing duplicate rows require a separate safe cleanup/backfill step. Recommend
    - remove or hide the duplicate refund-derived `ReturnRecord` only after verification
 
 No historical delete/merge was run as part of this investigation.
+
+## Admin Cleanup Endpoint
+
+A safe admin-only cleanup endpoint is available:
+
+```text
+POST /admin/returns/duplicates/cleanup
+```
+
+Default behavior is dry-run:
+
+```json
+{
+  "dryRun": true,
+  "limit": 100
+}
+```
+
+The report includes:
+
+- duplicate pair candidates
+- canonical Shopify return-request row
+- duplicate refund-derived row
+- fields proposed for copy
+- `safeToExecute`
+- `archiveAvailable`
+
+Because `ReturnRecord` does not currently have an archive/suppression field, execution does not delete or hide the duplicate row. Execution only copies refund metadata to the canonical return-request row:
+
+- `sourceShopifyRefundId`
+- internal refund status marker
+
+Finance ledger entries, refund records, refund line items, and Shopify state are not modified.
