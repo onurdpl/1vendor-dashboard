@@ -19,6 +19,10 @@ type ReturnSummaryDto = {
   returnCarrierName?: string | null;
   returnTrackingNumber?: string | null;
   returnTrackingUrl?: string | null;
+  vendorReceivedAt?: string | null;
+  vendorReviewedAt?: string | null;
+  vendorDecision?: 'approved' | 'rejected' | null;
+  vendorDecisionReason?: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
@@ -274,6 +278,10 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     returnCarrierName: readDtoText(dto.returnCarrierName) || null,
     returnTrackingNumber: readDtoText(dto.returnTrackingNumber) || null,
     returnTrackingUrl: readDtoText(dto.returnTrackingUrl) || null,
+    vendorReceivedAt: dto.vendorReceivedAt ?? null,
+    vendorReviewedAt: dto.vendorReviewedAt ?? null,
+    vendorDecision: dto.vendorDecision ?? null,
+    vendorDecisionReason: readDtoText(dto.vendorDecisionReason) || null,
     amount: formatCurrency(dto.refundAmount),
     itemTitle: summaryDisplayTitle || null,
     displayTitle: summaryDisplayTitle || null,
@@ -349,4 +357,97 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     ],
   };
   return detail;
+}
+
+export async function markReturnReceived(
+  returnId: string,
+  options: { vendorId?: string | null } = {},
+): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/mark-received`, {}, requestOptions)
+    : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/mark-received`, {}));
+  const summary = mapSummary(response);
+  return {
+    ...summary,
+    originalVendorId: response.originalVendorId,
+    resolution: response.returnReasonNote ?? '',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Original payment method (Shopify refund flow)',
+    processedBy: '',
+    refundedItems: response.refundedItems.map((item) => ({
+      id: item.id,
+      originalVendorId: response.originalVendorId,
+      assignedVendorId: response.assignedVendorId,
+      vendorId: response.assignedVendorId,
+      sku: item.sku ?? 'UNKNOWN-SKU',
+      variantTitle: resolveReturnItemVariant(item),
+      name: resolveReturnItemName(item),
+      quantity: item.quantity,
+      condition: 'Opened' as const,
+      refundAmount: formatCurrency(item.refundAmount),
+    })),
+    items: response.refundedItems.map((item) => ({
+      id: item.id,
+      originalVendorId: response.originalVendorId,
+      assignedVendorId: response.assignedVendorId,
+      vendorId: response.assignedVendorId,
+      sku: item.sku ?? 'UNKNOWN-SKU',
+      variantTitle: resolveReturnItemVariant(item),
+      name: resolveReturnItemName(item),
+      quantity: item.quantity,
+      condition: 'Opened' as const,
+      refundAmount: formatCurrency(item.refundAmount),
+    })),
+    timeline: [],
+  };
+}
+
+export async function reviewReturn(
+  returnId: string,
+  input: { decision: 'approved' | 'rejected'; reason?: string },
+  options: { vendorId?: string | null } = {},
+): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/review`, input, requestOptions)
+    : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/review`, input));
+  const summary = mapSummary(response);
+  return {
+    ...summary,
+    originalVendorId: response.originalVendorId,
+    resolution: response.returnReasonNote ?? '',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Original payment method (Shopify refund flow)',
+    processedBy: '',
+    refundedItems: response.refundedItems.map((item) => ({
+      id: item.id,
+      originalVendorId: response.originalVendorId,
+      assignedVendorId: response.assignedVendorId,
+      vendorId: response.assignedVendorId,
+      sku: item.sku ?? 'UNKNOWN-SKU',
+      variantTitle: resolveReturnItemVariant(item),
+      name: resolveReturnItemName(item),
+      quantity: item.quantity,
+      condition: 'Opened' as const,
+      refundAmount: formatCurrency(item.refundAmount),
+    })),
+    items: response.refundedItems.map((item) => ({
+      id: item.id,
+      originalVendorId: response.originalVendorId,
+      assignedVendorId: response.assignedVendorId,
+      vendorId: response.assignedVendorId,
+      sku: item.sku ?? 'UNKNOWN-SKU',
+      variantTitle: resolveReturnItemVariant(item),
+      name: resolveReturnItemName(item),
+      quantity: item.quantity,
+      condition: 'Opened' as const,
+      refundAmount: formatCurrency(item.refundAmount),
+    })),
+    timeline: [],
+  };
 }

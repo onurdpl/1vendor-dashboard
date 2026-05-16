@@ -1,6 +1,21 @@
 import { prisma } from '../../db/prisma.js';
 import type { ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 
+export class ReturnReviewError extends Error {
+  statusCode: number;
+
+  constructor(message: string, statusCode: number) {
+    super(message);
+    this.name = 'ReturnReviewError';
+    this.statusCode = statusCode;
+  }
+}
+
+export type ReturnActorScope = {
+  role: 'admin' | 'vendor' | 'support' | 'finance';
+  vendorId?: string | null;
+};
+
 function toAmountString(value: number) {
   return value.toFixed(2);
 }
@@ -27,6 +42,14 @@ function getLifecycleStatus(status: string, lifecycleStatus: string | null) {
 
 function isReturnRequestRecord(record: { returnRequestSource: string | null }) {
   return record.returnRequestSource === 'shopify_return_request';
+}
+
+function normalizeVendorDecision(value: string | null): 'approved' | 'rejected' | null {
+  return value === 'approved' || value === 'rejected' ? value : null;
+}
+
+function canActOnReturn(record: { vendorAllocation: { assignedVendorId: string } }, actor: ReturnActorScope) {
+  return actor.role === 'admin' || record.vendorAllocation.assignedVendorId === actor.vendorId;
 }
 
 function readText(value: string | null | undefined) {
@@ -288,6 +311,10 @@ export async function listVendorReturns(
       returnCarrierName: record.returnCarrierName,
       returnTrackingNumber: record.returnTrackingNumber,
       returnTrackingUrl: record.returnTrackingUrl,
+      vendorReceivedAt: record.vendorReceivedAt ? record.vendorReceivedAt.toISOString() : null,
+      vendorReviewedAt: record.vendorReviewedAt ? record.vendorReviewedAt.toISOString() : null,
+      vendorDecision: normalizeVendorDecision(record.vendorDecision),
+      vendorDecisionReason: record.vendorDecisionReason,
       refundAmount: toAmountString(refundAmount),
       refundedItemCount,
       refundedSkus,
@@ -378,6 +405,10 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     returnCarrierName: record.returnCarrierName,
     returnTrackingNumber: record.returnTrackingNumber,
     returnTrackingUrl: record.returnTrackingUrl,
+    vendorReceivedAt: record.vendorReceivedAt ? record.vendorReceivedAt.toISOString() : null,
+    vendorReviewedAt: record.vendorReviewedAt ? record.vendorReviewedAt.toISOString() : null,
+    vendorDecision: normalizeVendorDecision(record.vendorDecision),
+    vendorDecisionReason: record.vendorDecisionReason,
     refundAmount: toAmountString(refundAmount),
     refundedItemCount: detailRefundedItems.length,
     refundedSkus,
@@ -392,4 +423,123 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     requestUpdatedAt: record.requestUpdatedAt ? record.requestUpdatedAt.toISOString() : null,
     refundedItems: detailRefundedItems,
   };
+}
+
+export async function getReturnByIdForActor(returnId: string, actor: ReturnActorScope): Promise<ReturnDetailDto | null> {
+  if (actor.role !== 'admin' && !actor.vendorId) {
+    return null;
+  }
+
+  const record = await prisma.returnRecord.findFirst({
+    where: {
+      id: returnId,
+      ...(actor.role === 'admin'
+        ? {}
+        : {
+            vendorAllocation: {
+              assignedVendorId: actor.vendorId ?? '',
+            },
+          }),
+    },
+    select: {
+      vendorAllocation: {
+        select: {
+          assignedVendorId: true,
+        },
+      },
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    return null;
+  }
+
+  return getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+}
+
+export async function markReturnReceived(returnId: string, actor: ReturnActorScope): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    select: {
+      id: true,
+      vendorReceivedAt: true,
+      vendorAllocation: {
+        select: {
+          assignedVendorId: true,
+        },
+      },
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (!record.vendorReceivedAt) {
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        vendorReceivedAt: new Date(),
+      },
+    });
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  return updated;
+}
+
+export async function reviewReturn(
+  returnId: string,
+  actor: ReturnActorScope,
+  input: { decision: 'approved' | 'rejected'; reason?: string | null },
+): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    select: {
+      id: true,
+      vendorReceivedAt: true,
+      vendorAllocation: {
+        select: {
+          assignedVendorId: true,
+        },
+      },
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (!record.vendorReceivedAt) {
+    throw new ReturnReviewError('Return must be marked received before review.', 409);
+  }
+
+  if (input.decision !== 'approved' && input.decision !== 'rejected') {
+    throw new ReturnReviewError('Return review decision must be approved or rejected.', 400);
+  }
+
+  const reason = input.reason?.trim() ?? '';
+  if (input.decision === 'rejected' && !reason) {
+    throw new ReturnReviewError('Rejected returns require a reason.', 400);
+  }
+
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      vendorReviewedAt: new Date(),
+      vendorDecision: input.decision,
+      vendorDecisionReason: input.decision === 'rejected' ? reason : null,
+    },
+  });
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  return updated;
 }

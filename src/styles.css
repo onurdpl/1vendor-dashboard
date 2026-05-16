@@ -4865,6 +4865,35 @@ h3 {
   font-size: 0.78rem;
 }
 
+.return-review-reject-box {
+  display: grid;
+  gap: 8px;
+}
+
+.return-review-reject-box label {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.return-review-reject-box textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 74px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 12px;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.84rem;
+}
+
+.return-review-state-list {
+  margin-top: 4px;
+}
+
 .return-review-summary-list {
   display: grid;
   gap: 9px;

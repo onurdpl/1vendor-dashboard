@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
@@ -7,12 +8,19 @@ import type { ReturnDetail } from '../features/returns/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getReturnMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const markReturnReceivedMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const reviewReturnMock = vi.fn<
+  (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
+>();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
   return {
     ...actual,
     getReturn: (returnId: string) => getReturnMock(returnId),
+    markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
+    reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
+      reviewReturnMock(returnId, input),
   };
 });
 
@@ -35,6 +43,10 @@ const returnDetail: ReturnDetail = {
   returnCarrierName: null,
   returnTrackingNumber: null,
   returnTrackingUrl: null,
+  vendorReceivedAt: null,
+  vendorReviewedAt: null,
+  vendorDecision: null,
+  vendorDecisionReason: null,
   amount: '$0.00',
   refundedSkus: ['DJ1196-002-40,5'],
   resolution: 'Pending return request synced from Shopify return lifecycle.',
@@ -96,6 +108,8 @@ describe('ReturnDetailPage vendor review screen', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getReturnMock.mockReset();
+    markReturnReceivedMock.mockReset();
+    reviewReturnMock.mockReset();
   });
 
   it('renders a vendor-facing return review without internal lifecycle wording', async () => {
@@ -108,7 +122,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.getByText('White / 42')).toBeInTheDocument();
-    expect(screen.getByText('Review return')).toBeInTheDocument();
+    expect(screen.getByText('Vendor review')).toBeInTheDocument();
+    expect(screen.getByText('Mark received')).toBeInTheDocument();
     expect(screen.getByText('Contact support')).toBeInTheDocument();
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
 
@@ -193,5 +208,82 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByText('Refund processed')).toBeInTheDocument();
+  });
+
+  it('lets a vendor mark their own return received and approve it without issuing a refund', async () => {
+    const user = userEvent.setup();
+    getReturnMock
+      .mockResolvedValueOnce(returnDetail)
+      .mockResolvedValueOnce({ ...returnDetail, vendorReceivedAt: '2026-05-14T10:00:00Z' })
+      .mockResolvedValueOnce({
+        ...returnDetail,
+        vendorReceivedAt: '2026-05-14T10:00:00Z',
+        vendorReviewedAt: '2026-05-14T10:05:00Z',
+        vendorDecision: 'approved',
+      });
+    markReturnReceivedMock.mockResolvedValueOnce({ ...returnDetail, vendorReceivedAt: '2026-05-14T10:00:00Z' });
+    reviewReturnMock.mockResolvedValueOnce({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+      vendorReviewedAt: '2026-05-14T10:05:00Z',
+      vendorDecision: 'approved',
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Mark received' }));
+    expect(markReturnReceivedMock).toHaveBeenCalledWith(returnDetail.id);
+    expect(await screen.findByText('Received by vendor')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Approve return' }));
+    expect(reviewReturnMock).toHaveBeenCalledWith(returnDetail.id, { decision: 'approved' });
+    expect(await screen.findByText('Approved by vendor')).toBeInTheDocument();
+    expect(screen.queryByText(/refund issued/i)).not.toBeInTheDocument();
+  });
+
+  it('requires a reason before rejecting a received return', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+    });
+    reviewReturnMock.mockResolvedValueOnce({
+      ...returnDetail,
+      vendorReceivedAt: '2026-05-14T10:00:00Z',
+      vendorReviewedAt: '2026-05-14T10:05:00Z',
+      vendorDecision: 'rejected',
+      vendorDecisionReason: 'Item is damaged.',
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('button', { name: 'Reject return' })).toBeDisabled();
+    await user.type(screen.getByLabelText('Reject reason'), 'Item is damaged.');
+    await user.click(screen.getByRole('button', { name: 'Reject return' }));
+
+    expect(reviewReturnMock).toHaveBeenCalledWith(returnDetail.id, {
+      decision: 'rejected',
+      reason: 'Item is damaged.',
+    });
+  });
+
+  it('hides vendor review actions from a vendor outside the assigned return scope', async () => {
+    setCurrentUser({
+      email: 'vendor-b@example.com',
+      name: 'Vendor B',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-b'],
+      vendorDetails: [{ vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-b',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+
+    renderPage();
+
+    expect(await screen.findByText('Vendor review')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mark received' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve return' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject return' })).not.toBeInTheDocument();
   });
 });

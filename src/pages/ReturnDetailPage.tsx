@@ -1,11 +1,20 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getReturn, type ReturnDetail, type ReturnLineItem } from '../features/returns/api';
-import { getCurrentVendorContext } from '../lib/auth';
+import { useMutationAction } from '../hooks/useMutationAction';
+import {
+  getReturn,
+  markReturnReceived,
+  reviewReturn,
+  type ReturnDetail,
+  type ReturnLineItem,
+} from '../features/returns/api';
+import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { useActionFeedback } from '../lib/ui';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -142,6 +151,16 @@ function getTimeline(returnRequest: ReturnDetail) {
         normalizedStatus === 'processed' ||
         normalizedStatus === 'refunded',
     },
+    {
+      label: 'Received by vendor',
+      at: formatDate(returnRequest.vendorReceivedAt),
+      enabled: Boolean(returnRequest.vendorReceivedAt),
+    },
+    {
+      label: returnRequest.vendorDecision === 'rejected' ? 'Rejected by vendor' : 'Approved by vendor',
+      at: formatDate(returnRequest.vendorReviewedAt),
+      enabled: Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision),
+    },
   ].filter((entry) => entry.enabled);
 
   if (dataBackedTimeline.length > 1 || hasReturnTracking) {
@@ -179,7 +198,10 @@ function getItemKey(item: ReturnLineItem) {
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const currentVendor = getCurrentVendorContext();
-  const { data: returnRequest, isLoading, isError, error } = useQueryResource(
+  const currentUser = getCurrentUser();
+  const { message, tone, showFeedback } = useActionFeedback();
+  const [rejectReason, setRejectReason] = useState('');
+  const { data: returnRequest, isLoading, isError, error, refetch } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
     () => {
       if (!returnId) {
@@ -187,6 +209,46 @@ export function ReturnDetailPage() {
       }
 
       return getReturn(returnId);
+    },
+  );
+  const markReceivedMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return markReturnReceived(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: async () => {
+        await refetch();
+        showFeedback('Return marked received.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Return could not be marked received.', 'error');
+      },
+    },
+  );
+  const reviewMutation = useMutationAction(
+    (input: { decision: 'approved' | 'rejected'; reason?: string }) => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return reviewReturn(returnId, input, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: async (_data, variables) => {
+        await refetch();
+        setRejectReason('');
+        showFeedback(
+          variables.decision === 'approved' ? 'Return approved for admin review.' : 'Return rejected with vendor reason.',
+          'success',
+        );
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Return review could not be saved.', 'error');
+      },
     },
   );
 
@@ -222,6 +284,11 @@ export function ReturnDetailPage() {
   const hasReturnShipment = Boolean(
     returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
   );
+  const canReviewReturn =
+    currentUser?.role === 'admin' ||
+    (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
+  const hasReceivedReturn = Boolean(returnRequest.vendorReceivedAt);
+  const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
 
   return (
     <section className="return-review-page">
@@ -300,12 +367,72 @@ export function ReturnDetailPage() {
         <aside className="return-review-side">
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
-            <h3>{getStatusLabel(returnRequest)}</h3>
-            <p>Review the item details and continue with the return decision.</p>
+            <h3>Vendor review</h3>
+            <p>Internal vendor review only. This does not issue a Shopify refund.</p>
+            <div className="return-review-summary-list return-review-state-list">
+              <div>
+                <span>Receipt</span>
+                <strong>{returnRequest.vendorReceivedAt ? `Received ${formatDate(returnRequest.vendorReceivedAt)}` : 'Not received yet'}</strong>
+              </div>
+              <div>
+                <span>Decision</span>
+                <strong>
+                  {returnRequest.vendorDecision
+                    ? `${returnRequest.vendorDecision === 'approved' ? 'Approved' : 'Rejected'}${returnRequest.vendorReviewedAt ? ` ${formatDate(returnRequest.vendorReviewedAt)}` : ''}`
+                    : 'Pending vendor review'}
+                </strong>
+              </div>
+              {returnRequest.vendorDecision === 'rejected' && returnRequest.vendorDecisionReason ? (
+                <div>
+                  <span>Reason</span>
+                  <strong>{returnRequest.vendorDecisionReason}</strong>
+                </div>
+              ) : null}
+            </div>
+            {message ? <p className={`action-feedback action-${tone}`}>{message}</p> : null}
             <div className="return-review-actions">
-              <button type="button" className="button button-primary">Review return</button>
+              {canReviewReturn ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={markReceivedMutation.isPending || hasReceivedReturn}
+                  onClick={() => void markReceivedMutation.mutateAsync(undefined)}
+                >
+                  {markReceivedMutation.isPending ? 'Marking...' : hasReceivedReturn ? 'Received' : 'Mark received'}
+                </button>
+              ) : null}
+              {canReviewReturn ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn}
+                  onClick={() => void reviewMutation.mutateAsync({ decision: 'approved' })}
+                >
+                  Approve return
+                </button>
+              ) : null}
               <button type="button" className="button button-secondary">Contact support</button>
             </div>
+            {canReviewReturn && hasReceivedReturn && !hasReviewedReturn ? (
+              <div className="return-review-reject-box">
+                <label htmlFor="return-reject-reason">Reject reason</label>
+                <textarea
+                  id="return-reject-reason"
+                  value={rejectReason}
+                  onChange={(event) => setRejectReason(event.target.value)}
+                  placeholder="Required when rejecting this return"
+                  rows={3}
+                />
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={reviewMutation.isPending || !rejectReason.trim()}
+                  onClick={() => void reviewMutation.mutateAsync({ decision: 'rejected', reason: rejectReason })}
+                >
+                  Reject return
+                </button>
+              </div>
+            ) : null}
           </article>
 
           {hasReturnShipment ? (

@@ -403,6 +403,10 @@ model ReturnRecord {
   returnCarrierName        String?
   returnTrackingNumber     String?
   returnTrackingUrl        String?
+  vendorReceivedAt         DateTime?
+  vendorReviewedAt         DateTime?
+  vendorDecision           String?
+  vendorDecisionReason     String?
   createdAt                DateTime         @default(now())
   updatedAt                DateTime         @updatedAt
   vendorAllocation         VendorAllocation @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)

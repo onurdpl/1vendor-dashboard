@@ -2,11 +2,23 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerReturnsRoutes } from '../backend/src/modules/returns/returns.routes.js';
 
 const listVendorReturnsMock = vi.hoisted(() => vi.fn());
+const markReturnReceivedMock = vi.hoisted(() => vi.fn());
+const reviewReturnMock = vi.hoisted(() => vi.fn());
 const backfillShopifyReturnReasonsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   getVendorReturnById: vi.fn(),
   listVendorReturns: listVendorReturnsMock,
+  markReturnReceived: markReturnReceivedMock,
+  reviewReturn: reviewReturnMock,
+  ReturnReviewError: class ReturnReviewError extends Error {
+    statusCode: number;
+
+    constructor(message: string, statusCode: number) {
+      super(message);
+      this.statusCode = statusCode;
+    }
+  },
 }));
 
 vi.mock('../backend/src/modules/returns/return-reason-backfill.service.js', () => ({
@@ -25,6 +37,18 @@ vi.mock('../backend/src/modules/auth/auth.middleware.js', () => ({
 
 vi.mock('../backend/src/modules/vendor-access/vendor-access.middleware.js', () => ({
   requireVendorAccess: vi.fn(),
+}));
+
+vi.mock('../backend/src/modules/vendor-access/vendor-access.service.js', () => ({
+  resolveRequestVendorContext: vi.fn(async (_user: unknown, header: string | undefined) => ({
+    ok: true,
+    context: {
+      vendorId: header ?? 'sporjinal',
+      vendorName: 'Sporjinal',
+      role: 'vendor',
+      accessScope: 'vendor',
+    },
+  })),
 }));
 
 describe('backend returns list route contract', () => {
@@ -133,5 +157,43 @@ describe('backend returns list route contract', () => {
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual({ dryRun: true, scanned: 0, results: [] });
     expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true });
+  });
+
+  it('registers vendor return review actions without Shopify refund execution', async () => {
+    markReturnReceivedMock.mockResolvedValueOnce({ id: 'return-1', vendorReceivedAt: '2026-05-14T10:00:00Z' });
+    reviewReturnMock.mockResolvedValueOnce({ id: 'return-1', vendorDecision: 'approved' });
+    const posts = new Map<string, (request: { authUser?: { role?: string }; headers?: Record<string, string>; params: { returnId: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      post: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; headers?: Record<string, string>; params: { returnId: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerReturnsRoutes(app as never, {} as never);
+    const received = await posts.get('/returns/:returnId/mark-received')?.({
+      authUser: { role: 'vendor' },
+      headers: { 'x-vendor-id': 'sporjinal' },
+      params: { returnId: 'return-1' },
+    }, reply);
+    const reviewed = await posts.get('/returns/:returnId/review')?.({
+      authUser: { role: 'vendor' },
+      headers: { 'x-vendor-id': 'sporjinal' },
+      params: { returnId: 'return-1' },
+      body: { decision: 'approved' },
+    }, reply);
+
+    expect(received).toEqual({ id: 'return-1', vendorReceivedAt: '2026-05-14T10:00:00Z' });
+    expect(reviewed).toEqual({ id: 'return-1', vendorDecision: 'approved' });
+    expect(markReturnReceivedMock).toHaveBeenCalledWith('return-1', { role: 'vendor', vendorId: 'sporjinal' });
+    expect(reviewReturnMock).toHaveBeenCalledWith('return-1', { role: 'vendor', vendorId: 'sporjinal' }, {
+      decision: 'approved',
+      reason: undefined,
+    });
   });
 });

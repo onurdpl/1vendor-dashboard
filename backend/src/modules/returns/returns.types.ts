@@ -15,6 +15,10 @@ export type ReturnSummaryDto = {
   returnCarrierName: string | null;
   returnTrackingNumber: string | null;
   returnTrackingUrl: string | null;
+  vendorReceivedAt: string | null;
+  vendorReviewedAt: string | null;
+  vendorDecision: 'approved' | 'rejected' | null;
+  vendorDecisionReason: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];

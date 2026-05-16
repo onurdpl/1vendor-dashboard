@@ -216,6 +216,37 @@ export const runtimeServices = {
       }
       return returnRecord;
     },
+    async markReceived(returnId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.markReturnReceived(returnId, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      return {
+        ...returnRecord,
+        vendorReceivedAt: new Date().toISOString(),
+      };
+    },
+    async review(returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.reviewReturn(returnId, input, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      return {
+        ...returnRecord,
+        vendorReceivedAt: returnRecord.vendorReceivedAt ?? new Date().toISOString(),
+        vendorReviewedAt: new Date().toISOString(),
+        vendorDecision: input.decision,
+        vendorDecisionReason: input.decision === 'rejected' ? input.reason ?? null : null,
+      };
+    },
   },
   finance: {
     dashboard: (vendorId = getCurrentVendorId()) =>
