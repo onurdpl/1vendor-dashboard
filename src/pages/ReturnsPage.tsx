@@ -42,6 +42,27 @@ function getRefundStatusLabel(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request' ? 'Refund pending' : 'Refunded';
 }
 
+function getVendorReason(reason: string | null | undefined) {
+  const value = reason?.trim();
+  if (!value) {
+    return 'Return requested';
+  }
+
+  const normalized = value.toLowerCase();
+  if (
+    normalized.includes('webhook') ||
+    normalized.includes('backend') ||
+    normalized.includes('allocation') ||
+    normalized.includes('lifecycle') ||
+    normalized.includes('shopify return request') ||
+    normalized.includes('shopify refund')
+  ) {
+    return 'Return requested';
+  }
+
+  return value;
+}
+
 function getVendorStatusLabel(item: ReturnSummary) {
   const normalized = item.status.toLowerCase();
   if (item.sourceType === 'shopify_return_request' && normalized === 'requested') {
@@ -90,13 +111,26 @@ function getItemCount(summary: ReturnSummary, detail: ReturnDetail | null) {
   return detail?.refundedItems.length ?? summary.refundedSkus?.length ?? 0;
 }
 
+function getVariantText(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text || text === 'Details pending' || text === 'Default') {
+    return '';
+  }
+
+  if (/^(gid:\/\/|sku[-_:]|unknown-sku)/i.test(text)) {
+    return '';
+  }
+
+  return text;
+}
+
 function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
   const detailItems = detail?.refundedItems ?? [];
   if (detailItems.length > 0) {
     return detailItems.map((item) => ({
       sku: item.sku,
-      title: item.name,
-      variantTitle: item.variantTitle,
+      title: item.name || 'Return item',
+      variantTitle: getVariantText(item.variantTitle),
       quantity: item.quantity,
       amount: item.refundAmount,
       condition: item.condition,
@@ -111,6 +145,14 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
     amount: summary.sourceType === 'shopify_return_request' ? 'Not posted' : summary.amount,
     condition: 'Opened' as ReturnLineItem['condition'],
   }));
+}
+
+function getTableItemDisplay(summary: ReturnSummary, detail: ReturnDetail | null) {
+  const firstItem = getItemPreview(summary, detail)[0];
+  return {
+    title: firstItem?.title || 'Return item',
+    variant: getVariantText(firstItem?.variantTitle),
+  };
 }
 
 function getSourceFilterLabel(filter: ReturnSourceFilter) {
@@ -167,7 +209,7 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
 
   return [
     {
-      label: summary.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refund processed',
+      label: summary.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refund approved',
       at: formatDate(summary.date),
     },
     {
@@ -278,10 +320,10 @@ export function ReturnsPage() {
   const selectedDetail = detailQuery.data;
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
   const kpis = [
-    { label: 'Pending review', value: pendingCount, meta: 'Review queue', icon: 'P', tone: 'attention' },
-    { label: 'Awaiting shipment', value: approvedCount, meta: 'Ready to move', icon: 'S', tone: 'info' },
-    { label: 'Refunded', value: processedCount, meta: 'Completed', icon: 'R', tone: 'success' },
-    { label: 'Needs action', value: attentionCount, meta: 'Open items', icon: 'A', tone: attentionCount > 0 ? 'warning' : 'success' },
+    { label: 'Pending review', value: pendingCount, icon: 'P', tone: 'attention' },
+    { label: 'Awaiting shipment', value: approvedCount, icon: 'S', tone: 'info' },
+    { label: 'Refunded', value: processedCount, icon: 'R', tone: 'success' },
+    { label: 'Needs action', value: attentionCount, icon: 'A', tone: attentionCount > 0 ? 'warning' : 'success' },
   ] as const;
 
   return (
@@ -301,7 +343,6 @@ export function ReturnsPage() {
             <div>
               <strong>{kpi.value}</strong>
               <span>{kpi.label}</span>
-              <small>{kpi.meta}</small>
             </div>
           </article>
         ))}
@@ -386,6 +427,7 @@ export function ReturnsPage() {
               {filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
                 const itemCount = getItemCount(item, isSelected ? selectedDetail : null);
+                const itemDisplay = getTableItemDisplay(item, isSelected ? selectedDetail : null);
                 return (
                   <OperationalTableRow
                     key={item.id}
@@ -397,12 +439,12 @@ export function ReturnsPage() {
                         {itemCount > 1 ? itemCount : 'R'}
                       </span>
                       <span>
-                        <strong>{getItemPreview(item, isSelected ? selectedDetail : null)[0]?.title ?? 'Return item'}</strong>
-                        <small>{itemCount} item{itemCount === 1 ? '' : 's'}</small>
+                        <strong>{itemDisplay.title}</strong>
+                        {itemDisplay.variant ? <small>{itemDisplay.variant}</small> : null}
                       </span>
                     </div>
                     <span>
-                      <strong>Order #{item.sourceShopifyOrderNumber}</strong>
+                      <strong>#{item.sourceShopifyOrderNumber}</strong>
                       <small>{getReturnKind(item)}</small>
                     </span>
                     <span>
@@ -411,15 +453,15 @@ export function ReturnsPage() {
                     </span>
                     <span>
                       <strong>{formatDate(item.date)}</strong>
-                      <small>{formatDate(item.updatedAt ?? item.date)}</small>
                     </span>
                     <OperationalActionGroup>
                       <Link
                         to={`/returns/${item.id}`}
                         className="button button-ghost button-link returns-row-action"
+                        aria-label={`View return for order ${item.sourceShopifyOrderNumber}`}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        View
+                        ›
                       </Link>
                     </OperationalActionGroup>
                   </OperationalTableRow>
@@ -463,7 +505,7 @@ export function ReturnsPage() {
                   </div>
                   <div>
                     <span>Reason</span>
-                    <strong>{selectedReturn.reason || 'Unknown'}</strong>
+                    <strong>{getVendorReason(selectedReturn.reason)}</strong>
                   </div>
                 </div>
               </div>
@@ -479,7 +521,7 @@ export function ReturnsPage() {
                         </span>
                         <div>
                           <strong>{item.title}</strong>
-                          <small>{item.variantTitle || item.sku || '—'}</small>
+                          {item.variantTitle ? <small>{item.variantTitle}</small> : null}
                         </div>
                         <div className="return-detail-item-meta">
                           <span>Qty {item.quantity}</span>

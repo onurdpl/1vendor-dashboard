@@ -168,6 +168,8 @@ describe('ReturnsPage control center', () => {
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
     expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Return item1 item/)).not.toBeInTheDocument();
+    expect(screen.queryByText('1 item')).not.toBeInTheDocument();
   });
 
   it('renders selected drawer item details from the scoped return detail endpoint', async () => {
@@ -177,13 +179,15 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage();
 
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
-    await userEvent.click(screen.getAllByText('Order #1002')[0]);
+    await userEvent.click(screen.getAllByText('#1002')[0]);
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
     expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
     expect(screen.getAllByText('Standard').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
+    expect(screen.queryByText(/webhook/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/backend/i)).not.toBeInTheDocument();
   });
 
   it('preserves vendor-scoped visibility in mock mode data', async () => {
@@ -192,7 +196,7 @@ describe('ReturnsPage control center', () => {
 
     renderReturnsPage();
 
-    expect((await screen.findAllByText('Order #1001')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     await waitFor(() => expect(screen.queryByText(otherVendorReturn.customer)).not.toBeInTheDocument());
   });
 
@@ -205,5 +209,6 @@ describe('ReturnsPage control center', () => {
     expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Need help?').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('View return for order 1001').length).toBeGreaterThan(0);
   });
 });
