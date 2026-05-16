@@ -17,6 +17,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useActionFeedback } from '../lib/ui';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import {
   attachShippingCost,
   createInvoiceExecution,
@@ -862,7 +863,7 @@ export function FinancePage() {
 
         <SideDetailPanel
           eyebrow="Payout summary"
-          title={selectedRecord?.shopifyOrderNumber ? `Order #${selectedRecord.shopifyOrderNumber}` : 'Payout summary'}
+          title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : 'Payout summary'}
         >
           {selectedRecord ? (
             <>

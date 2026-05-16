@@ -17,6 +17,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
 import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -633,7 +634,7 @@ export function ReturnsPage() {
                     </div>
                     <span className="returns-sku-cell">{itemDisplay.sku}</span>
                     <span>
-                      <strong>#{item.sourceShopifyOrderNumber}</strong>
+                      <strong>{formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}</strong>
                       <small>{getReturnKind(item)}</small>
                     </span>
                     <span>
@@ -648,7 +649,7 @@ export function ReturnsPage() {
                       <Link
                         to={`/returns/${item.id}`}
                         className="button button-ghost button-link returns-row-action"
-                        aria-label={`İncele return for order ${item.sourceShopifyOrderNumber}`}
+                        aria-label={`İncele return for order ${formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}`}
                         onClick={(event) => event.stopPropagation()}
                       >
                         İncele
@@ -663,7 +664,7 @@ export function ReturnsPage() {
 
         <SideDetailPanel
           eyebrow="Return summary"
-          title={selectedReturn ? `Order #${selectedReturn.sourceShopifyOrderNumber}` : 'No return selected'}
+          title={selectedReturn ? `Order ${formatShopifyOrderNumber(selectedReturn.sourceShopifyOrderNumber)}` : 'No return selected'}
           action={
             selectedReturn ? (
               <StatusBadge tone={getStatusTone(selectedReturn)}>{getVendorStatusLabel(selectedReturn)}</StatusBadge>

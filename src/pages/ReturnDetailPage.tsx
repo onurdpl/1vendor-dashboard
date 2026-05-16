@@ -5,6 +5,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, type ReturnDetail, type ReturnLineItem } from '../features/returns/api';
 import { getCurrentVendorContext } from '../lib/auth';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -192,7 +193,7 @@ export function ReturnDetailPage() {
           <Link to="/returns" className="return-review-back">← Back to returns</Link>
           <div className="return-review-title-row">
             <h2>Return request</h2>
-            <span>Order #{returnRequest.sourceShopifyOrderNumber}</span>
+            <span>Order {formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</span>
           </div>
           <p>Review the returned item and take the required action.</p>
         </div>
@@ -280,7 +281,7 @@ export function ReturnDetailPage() {
             <div className="return-review-summary-list">
               <div>
                 <span>Order number</span>
-                <strong>#{returnRequest.sourceShopifyOrderNumber}</strong>
+                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
               </div>
               <div>
                 <span>Requested</span>

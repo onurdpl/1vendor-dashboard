@@ -295,7 +295,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Order ##1028')).toBeInTheDocument();
+    expect(await screen.findByText('Order #1028')).toBeInTheDocument();
+    expect(screen.queryByText('Order ##1028')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByText('message, shipment_id')).not.toBeInTheDocument();

@@ -237,7 +237,7 @@ describe('ReturnsPage control center', () => {
     expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
-    expect(screen.getAllByLabelText('İncele return for order 1001').length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('İncele return for order #1001').length).toBeGreaterThan(0);
   });
 
   it('resolves table item names from nested row product data without selecting the row', async () => {

@@ -18,6 +18,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../features/orders/api';
 import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -336,7 +337,7 @@ export function OrdersPage() {
                     onSelect={() => setSelectedOrderId(order.id)}
                   >
                     <span className="orders-table-order-cell">
-                      <strong>#{order.sourceShopifyOrderNumber}</strong>
+                      <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
                       <small>{getCustomerLabel(order.customer)}</small>
                       <small>{currentVendor.vendorName} · {order.channel}</small>
                     </span>
@@ -375,7 +376,7 @@ export function OrdersPage() {
 
           <SideDetailPanel
             eyebrow="Order detail"
-            title={selectedOrder ? `Shopify #${selectedOrder.sourceShopifyOrderNumber}` : 'No order selected'}
+            title={selectedOrder ? `Shopify ${formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber)}` : 'No order selected'}
             action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open</Link> : null}
           >
           {selectedOrder ? (
@@ -383,7 +384,7 @@ export function OrdersPage() {
               <div className="orders-detail-hero">
                 <div>
                   <span>Order number</span>
-                  <strong>#{selectedOrder.sourceShopifyOrderNumber}</strong>
+                  <strong>{formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber)}</strong>
                 </div>
                 <StatusBadge tone={getStatusTone(selectedOrder.status)}>{selectedOrder.status}</StatusBadge>
               </div>
@@ -535,7 +536,7 @@ export function OrdersPage() {
                   <div key={order.id} className="orders-activity-row">
                     <span className="orders-activity-dot" aria-hidden="true" />
                     <div>
-                      <strong>#{order.sourceShopifyOrderNumber}</strong>
+                      <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
                       <small>{order.shippingStatus} · {formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</small>
                     </div>
                   </div>

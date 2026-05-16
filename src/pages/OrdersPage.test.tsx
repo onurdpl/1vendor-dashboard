@@ -25,7 +25,7 @@ const orderDetail: OrderDetail = {
   vendorId: 'demo-vendor-a',
   id: 'ORD-A-1002',
   sourceShopifyOrderId: 'gid://shopify/Order/1002',
-  sourceShopifyOrderNumber: 1002,
+  sourceShopifyOrderNumber: '#1002',
   status: 'Delivered',
   allocationStatus: 'fulfilled',
   reassignmentRequired: false,
@@ -122,6 +122,8 @@ describe('OrdersPage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /^orders$/i })).toBeInTheDocument();
     expect(listOrdersMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+    expect(screen.getAllByText('#1002').length).toBeGreaterThan(0);
+    expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
   });

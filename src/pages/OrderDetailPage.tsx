@@ -16,6 +16,7 @@ import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
 import { ApiError } from '../lib/api/errors';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
 
 function formatDate(value: string) {
@@ -326,7 +327,7 @@ export function OrderDetailPage() {
         <div className="order-detail-title-row">
           <div className="order-detail-title-stack">
             <div className="order-detail-heading-line">
-              <h1>Order #{order.sourceShopifyOrderNumber}</h1>
+              <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
               <span className="order-source-pill">{order.channel || 'Unknown'}</span>
               <span className={`status-badge status-${getStatusClass(order.status)}`}>{order.status}</span>
             </div>

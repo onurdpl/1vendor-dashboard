@@ -6,6 +6,7 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
+import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -71,7 +72,7 @@ export function AdminShopifyOrderPage() {
       <div className="hero-card operational-card">
         <div>
           <p className="eyebrow">Admin orders</p>
-          <h2>Shopify Order #{breakdown.sourceShopifyOrderNumber}</h2>
+          <h2>Shopify Order {formatShopifyOrderNumber(breakdown.sourceShopifyOrderNumber)}</h2>
           <p className="page-description">Operational allocation overview across assigned vendors.</p>
         </div>
         <div className="operational-meta-grid">
