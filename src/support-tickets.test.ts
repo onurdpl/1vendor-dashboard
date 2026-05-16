@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
     findFirst: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   supportTicketNote: {
     create: vi.fn(),
@@ -78,6 +79,10 @@ function ticketRecord(overrides: Record<string, unknown> = {}) {
     closedAt: null,
     assigneeUserId: null,
     assigneeName: null,
+    vendorUnreadCount: 0,
+    adminUnreadCount: 0,
+    lastReplyAt: null,
+    lastReplyByRole: null,
     vendor: { name: 'Vendor A' },
     notes: [],
     replies: [],
@@ -92,6 +97,7 @@ describe('support tickets', () => {
     prismaMock.supportTicket.findFirst.mockReset();
     prismaMock.supportTicket.findUnique.mockReset();
     prismaMock.supportTicket.update.mockReset();
+    prismaMock.supportTicket.updateMany.mockReset();
     prismaMock.supportTicketNote.create.mockReset();
     prismaMock.supportTicketReply.create.mockReset();
     prismaMock.vendorAllocation.findFirst.mockReset();
@@ -352,7 +358,13 @@ describe('support tickets', () => {
     });
     expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
       where: { id: 'ticket-1' },
-      data: expect.objectContaining({ status: 'IN_REVIEW' }),
+      data: expect.objectContaining({
+        status: 'IN_REVIEW',
+        adminUnreadCount: { increment: 1 },
+        vendorUnreadCount: 0,
+        lastReplyByRole: 'VENDOR',
+        lastReplyAt: expect.any(Date),
+      }),
     });
   });
 
@@ -409,6 +421,58 @@ describe('support tickets', () => {
         authorRole: 'ADMIN',
         message: 'Can you send a photo?',
       }),
+    });
+    expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
+      where: { id: 'ticket-1' },
+      data: expect.objectContaining({
+        vendorUnreadCount: { increment: 1 },
+        adminUnreadCount: 0,
+        lastReplyByRole: 'ADMIN',
+        lastReplyAt: expect.any(Date),
+      }),
+    });
+  });
+
+  it('marks admin unread as read only when admin opens detail', async () => {
+    prismaMock.supportTicket.findUnique.mockResolvedValueOnce(ticketRecord({
+      adminUnreadCount: 0,
+      vendorUnreadCount: 2,
+    }));
+
+    const result = await getAdminSupportTicket('ticket-1');
+
+    expect(result?.adminUnreadCount).toBe(0);
+    expect(result?.vendorUnreadCount).toBe(2);
+    expect(prismaMock.supportTicket.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'ticket-1',
+        adminUnreadCount: { gt: 0 },
+      },
+      data: {
+        adminUnreadCount: 0,
+      },
+    });
+  });
+
+  it('marks vendor unread as read only when vendor opens own detail', async () => {
+    prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord({
+      vendorUnreadCount: 0,
+      adminUnreadCount: 3,
+    }));
+
+    const result = await getVendorSupportTicket('ticket-1', 'vendor-a');
+
+    expect(result?.vendorUnreadCount).toBe(0);
+    expect(result?.adminUnreadCount).toBe(3);
+    expect(prismaMock.supportTicket.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'ticket-1',
+        vendorId: 'vendor-a',
+        vendorUnreadCount: { gt: 0 },
+      },
+      data: {
+        vendorUnreadCount: 0,
+      },
     });
   });
 

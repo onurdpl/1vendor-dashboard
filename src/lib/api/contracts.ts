@@ -305,6 +305,10 @@ export type SupportTicket = {
   category: SupportTicketCategory;
   assigneeUserId: string | null;
   assigneeName: string | null;
+  vendorUnreadCount: number;
+  adminUnreadCount: number;
+  lastReplyAt: string | null;
+  lastReplyByRole: 'ADMIN' | 'VENDOR' | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;

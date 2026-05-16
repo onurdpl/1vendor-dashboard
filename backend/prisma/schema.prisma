@@ -261,6 +261,10 @@ model SupportTicket {
   category        String   @default("OTHER")
   assigneeUserId  String?
   assigneeName    String?
+  vendorUnreadCount Int    @default(0)
+  adminUnreadCount  Int    @default(0)
+  lastReplyAt     DateTime?
+  lastReplyByRole String?
   contextType     String
   contextId       String?
   contextSnapshot Json?
@@ -274,6 +278,8 @@ model SupportTicket {
   @@index([vendorId, status, createdAt])
   @@index([category, status])
   @@index([assigneeUserId])
+  @@index([adminUnreadCount])
+  @@index([vendorUnreadCount])
   @@index([contextType, contextId])
   @@index([createdAt])
 }

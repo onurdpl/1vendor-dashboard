@@ -287,6 +287,10 @@ function mapTicket(ticket: {
   category: string;
   assigneeUserId?: string | null;
   assigneeName?: string | null;
+  vendorUnreadCount?: number;
+  adminUnreadCount?: number;
+  lastReplyAt?: Date | null;
+  lastReplyByRole?: string | null;
   contextType: string;
   contextId: string | null;
   contextSnapshot: Prisma.JsonValue | null;
@@ -327,6 +331,10 @@ function mapTicket(ticket: {
     category: normalizeCategory(ticket.category),
     assigneeUserId: ticket.assigneeUserId ?? null,
     assigneeName: ticket.assigneeName ?? null,
+    vendorUnreadCount: ticket.vendorUnreadCount ?? 0,
+    adminUnreadCount: ticket.adminUnreadCount ?? 0,
+    lastReplyAt: ticket.lastReplyAt?.toISOString() ?? null,
+    lastReplyByRole: ticket.lastReplyByRole === 'ADMIN' ? 'ADMIN' : ticket.lastReplyByRole === 'VENDOR' ? 'VENDOR' : null,
     contextType: ticket.contextType as SupportTicketContextType,
     contextId: ticket.contextId,
     contextSnapshot: ticket.contextSnapshot,
@@ -355,6 +363,8 @@ function ticketMatchesSearch(ticket: ReturnType<typeof mapTicket>, search: strin
     ticket.contextId,
     ticket.assigneeName,
     ticket.assigneeUserId,
+    ticket.lastReplyByRole,
+    ticket.lastReplyAt,
     JSON.stringify(ticket.contextSnapshot ?? {}),
   ]
     .filter(Boolean)
@@ -465,6 +475,16 @@ export async function listVendorSupportTickets(vendorId: string, filters: Suppor
 }
 
 export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicketDto | null> {
+  await prisma.supportTicket.updateMany({
+    where: {
+      id: ticketId,
+      adminUnreadCount: { gt: 0 },
+    },
+    data: {
+      adminUnreadCount: 0,
+    },
+  });
+
   const ticket = await prisma.supportTicket.findUnique({
     where: { id: ticketId },
     include: {
@@ -484,6 +504,17 @@ export async function getAdminSupportTicket(ticketId: string): Promise<SupportTi
 }
 
 export async function getVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
+  await prisma.supportTicket.updateMany({
+    where: {
+      id: ticketId,
+      vendorId,
+      vendorUnreadCount: { gt: 0 },
+    },
+    data: {
+      vendorUnreadCount: 0,
+    },
+  });
+
   const ticket = await prisma.supportTicket.findFirst({
     where: {
       id: ticketId,
@@ -606,12 +637,17 @@ export async function addVendorSupportTicketReply(
     },
   });
 
+  const now = new Date();
   await prisma.supportTicket.update({
     where: { id: ticketId },
     data: {
       status: currentStatus === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : currentStatus,
       resolvedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
       closedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+      adminUnreadCount: { increment: 1 },
+      vendorUnreadCount: 0,
+      lastReplyAt: now,
+      lastReplyByRole: 'VENDOR',
     },
   });
 
@@ -654,12 +690,17 @@ export async function addAdminSupportTicketReply(
     },
   });
 
+  const now = new Date();
   await prisma.supportTicket.update({
     where: { id: ticketId },
     data: {
       status: nextStatus,
-      resolvedAt: nextStatus === 'RESOLVED' ? new Date() : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+      resolvedAt: nextStatus === 'RESOLVED' ? now : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
       closedAt: nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' || nextStatus === 'RESOLVED' ? null : undefined,
+      vendorUnreadCount: { increment: 1 },
+      adminUnreadCount: 0,
+      lastReplyAt: now,
+      lastReplyByRole: 'ADMIN',
     },
   });
 

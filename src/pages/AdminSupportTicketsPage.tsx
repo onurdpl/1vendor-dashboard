@@ -31,6 +31,13 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatLastReply(ticket: SupportTicket) {
+  if (!ticket.lastReplyAt || !ticket.lastReplyByRole) {
+    return 'No replies';
+  }
+  return `${formatSupportLabel(ticket.lastReplyByRole)} · ${formatDate(ticket.lastReplyAt)}`;
+}
+
 function getPriorityTone(priority: SupportTicket['priority']) {
   if (priority === 'high') {
     return 'warning' as const;
@@ -90,6 +97,10 @@ function ticketMatchesSearch(ticket: SupportTicket, searchTerm: string) {
     .includes(query);
 }
 
+export function isAdminSupportNeedsResponse(ticket: SupportTicket) {
+  return ticket.adminUnreadCount > 0 || (ticket.status === 'OPEN' && !ticket.assigneeUserId && !ticket.assigneeName);
+}
+
 export function AdminSupportTicketsPage() {
   const currentUser = getCurrentUser();
   const { data: tickets, isLoading, isError, error } = useQueryResource(
@@ -102,6 +113,7 @@ export function AdminSupportTicketsPage() {
   const [priorityFilter, setPriorityFilter] = useState<(typeof ALL_PRIORITIES)[number]>('all');
   const [assigneeFilter, setAssigneeFilter] = useState<(typeof ASSIGNEE_FILTERS)[number]>('all');
   const [unresolvedOnly, setUnresolvedOnly] = useState(true);
+  const [needsResponseOnly, setNeedsResponseOnly] = useState(false);
 
   const filteredTickets = useMemo(() => {
     return (tickets ?? []).filter((ticket) => {
@@ -126,9 +138,14 @@ export function AdminSupportTicketsPage() {
       if (assigneeFilter === 'me' && !currentUser?.name) {
         return false;
       }
+      if (needsResponseOnly) {
+        if (!isAdminSupportNeedsResponse(ticket)) {
+          return false;
+        }
+      }
       return ticketMatchesSearch(ticket, searchTerm);
     });
-  }, [assigneeFilter, categoryFilter, currentUser?.name, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
+  }, [assigneeFilter, categoryFilter, currentUser?.name, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 
   if (isLoading) {
     return (
@@ -193,16 +210,23 @@ export function AdminSupportTicketsPage() {
             <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
             Unresolved only
           </label>
+          <label className="support-toggle">
+            <input type="checkbox" checked={needsResponseOnly} onChange={(event) => setNeedsResponseOnly(event.target.checked)} />
+            Needs response
+          </label>
         </FilterBar>
       </OperationalToolbar>
 
       {filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Assignee', 'Updated', 'Action']}>
+        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Assignee', 'Last reply', 'Updated', 'Action']}>
           {filteredTickets.map((ticket) => (
             <OperationalTableRow key={ticket.id}>
               <td>
                 <strong>{ticket.subject}</strong>
                 <span>{ticket.id}</span>
+                {ticket.adminUnreadCount > 0 ? (
+                  <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
+                ) : null}
               </td>
               <td>{ticket.vendorName ?? ticket.vendorId}</td>
               <td>{getContextLabel(ticket)}</td>
@@ -214,6 +238,7 @@ export function AdminSupportTicketsPage() {
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
               </td>
               <td>{ticket.assigneeName ?? 'Unassigned'}</td>
+              <td>{formatLastReply(ticket)}</td>
               <td>{formatDate(ticket.updatedAt)}</td>
               <td>
                 <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">

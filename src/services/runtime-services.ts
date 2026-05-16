@@ -492,6 +492,10 @@ export const runtimeServices = {
         closedAt: null,
         assigneeUserId: null,
         assigneeName: null,
+        vendorUnreadCount: 0,
+        adminUnreadCount: 0,
+        lastReplyAt: null,
+        lastReplyByRole: null,
         notes: [],
         replies: [],
       };
@@ -514,6 +518,7 @@ export const runtimeServices = {
       if (!ticket) {
         throw new ApiError('Support ticket not found.', 'server', { status: 404 });
       }
+      ticket.adminUnreadCount = 0;
       return ticket;
     },
     async detailVendor(ticketId: string) {
@@ -524,6 +529,7 @@ export const runtimeServices = {
       if (!ticket) {
         throw new ApiError('Support ticket not found.', 'server', { status: 404 });
       }
+      ticket.vendorUnreadCount = 0;
       return { ...ticket, notes: undefined };
     },
     async updateStatus(ticketId: string, status: SupportTicketStatus) {
@@ -587,6 +593,10 @@ export const runtimeServices = {
         },
       ];
       ticket.status = status ?? ticket.status;
+      ticket.vendorUnreadCount += 1;
+      ticket.adminUnreadCount = 0;
+      ticket.lastReplyAt = now;
+      ticket.lastReplyByRole = 'ADMIN';
       ticket.updatedAt = now;
       return ticket;
     },
@@ -616,6 +626,10 @@ export const runtimeServices = {
         },
       ];
       ticket.status = ticket.status === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : ticket.status;
+      ticket.adminUnreadCount += 1;
+      ticket.vendorUnreadCount = 0;
+      ticket.lastReplyAt = now;
+      ticket.lastReplyByRole = 'VENDOR';
       ticket.updatedAt = now;
       return { ...ticket, notes: undefined };
     },

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
@@ -209,6 +209,17 @@ export function SupportTicketDetailPage() {
   );
 
   const snapshotEntries = useMemo(() => getSnapshotEntries(ticket?.contextSnapshot), [ticket?.contextSnapshot]);
+
+  useEffect(() => {
+    if (!ticket) {
+      return;
+    }
+    if (isAdmin) {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() });
+      return;
+    }
+    void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) });
+  }, [currentVendor.vendorId, isAdmin, ticket?.id]);
 
   if (isLoading) {
     return (

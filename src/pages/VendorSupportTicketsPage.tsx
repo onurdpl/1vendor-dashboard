@@ -1,6 +1,7 @@
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, OperationalTable, OperationalTableRow, StatusBadge } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, FilterBar, OperationalTable, OperationalTableRow, OperationalToolbar, StatusBadge } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { getCurrentVendorContext } from '../lib/auth';
@@ -17,12 +18,28 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
+function formatLastReply(ticket: SupportTicket) {
+  if (!ticket.lastReplyAt || !ticket.lastReplyByRole) {
+    return 'No replies';
+  }
+  return `${formatSupportLabel(ticket.lastReplyByRole)} · ${formatDate(ticket.lastReplyAt)}`;
+}
+
+export function isVendorSupportUnread(ticket: SupportTicket) {
+  return ticket.vendorUnreadCount > 0;
+}
+
 export function VendorSupportTicketsPage() {
   const currentVendor = getCurrentVendorContext();
+  const [unreadOnly, setUnreadOnly] = useState(false);
   const { data: tickets, isLoading, isError, error } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     listVendorSupportTickets,
   );
+
+  const filteredTickets = useMemo(() => {
+    return (tickets ?? []).filter((ticket) => !unreadOnly || isVendorSupportUnread(ticket));
+  }, [tickets, unreadOnly]);
 
   if (isLoading) {
     return (
@@ -56,12 +73,24 @@ export function VendorSupportTicketsPage() {
         </div>
       </div>
 
-      {tickets.length ? (
-        <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Updated']}>
-          {tickets.map((ticket: SupportTicket) => (
+      <OperationalToolbar>
+        <FilterBar>
+          <label className="support-toggle">
+            <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.target.checked)} />
+            Unread only
+          </label>
+        </FilterBar>
+      </OperationalToolbar>
+
+      {filteredTickets.length ? (
+        <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']}>
+          {filteredTickets.map((ticket: SupportTicket) => (
             <OperationalTableRow key={ticket.id}>
               <td>
                 <Link to={`/support/${ticket.id}`}>{ticket.id}</Link>
+                {ticket.vendorUnreadCount > 0 ? (
+                  <StatusBadge tone="attention">{ticket.vendorUnreadCount} unread</StatusBadge>
+                ) : null}
               </td>
               <td>
                 <strong>{ticket.subject}</strong>
@@ -71,6 +100,7 @@ export function VendorSupportTicketsPage() {
               <td>
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
               </td>
+              <td>{formatLastReply(ticket)}</td>
               <td>{formatDate(ticket.updatedAt)}</td>
             </OperationalTableRow>
           ))}
