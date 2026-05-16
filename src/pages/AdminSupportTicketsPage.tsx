@@ -38,6 +38,26 @@ function formatLastReply(ticket: SupportTicket) {
   return `${formatSupportLabel(ticket.lastReplyByRole)} · ${formatDate(ticket.lastReplyAt)}`;
 }
 
+function getSlaTone(ticket: SupportTicket) {
+  if (ticket.sla?.escalationLevel === 'escalated' || ticket.sla?.isOverdue) {
+    return 'danger' as const;
+  }
+  if (ticket.sla?.escalationLevel === 'due_soon') {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
+}
+
+function getSlaLabel(ticket: SupportTicket) {
+  if (!ticket.sla || ticket.sla.escalationLevel === 'none') {
+    return ticket.sla?.dueLabel ?? 'No active SLA';
+  }
+  if (ticket.sla.escalationLevel === 'due_soon') {
+    return 'Due soon';
+  }
+  return ticket.sla.escalationLevel === 'escalated' ? 'Escalated' : 'Overdue';
+}
+
 function getPriorityTone(priority: SupportTicket['priority']) {
   if (priority === 'high') {
     return 'warning' as const;
@@ -101,6 +121,10 @@ export function isAdminSupportNeedsResponse(ticket: SupportTicket) {
   return ticket.adminUnreadCount > 0 || (ticket.status === 'OPEN' && !ticket.assigneeUserId && !ticket.assigneeName);
 }
 
+export function isAdminSupportEscalated(ticket: SupportTicket) {
+  return Boolean(ticket.sla?.isOverdue || ticket.sla?.escalationLevel === 'escalated');
+}
+
 export function AdminSupportTicketsPage() {
   const currentUser = getCurrentUser();
   const { data: tickets, isLoading, isError, error } = useQueryResource(
@@ -114,6 +138,7 @@ export function AdminSupportTicketsPage() {
   const [assigneeFilter, setAssigneeFilter] = useState<(typeof ASSIGNEE_FILTERS)[number]>('all');
   const [unresolvedOnly, setUnresolvedOnly] = useState(true);
   const [needsResponseOnly, setNeedsResponseOnly] = useState(false);
+  const [escalatedOnly, setEscalatedOnly] = useState(false);
 
   const filteredTickets = useMemo(() => {
     return (tickets ?? []).filter((ticket) => {
@@ -143,9 +168,19 @@ export function AdminSupportTicketsPage() {
           return false;
         }
       }
+      if (escalatedOnly && !isAdminSupportEscalated(ticket)) {
+        return false;
+      }
       return ticketMatchesSearch(ticket, searchTerm);
+    }).sort((left, right) => {
+      const leftRank = left.sla?.isOverdue ? 0 : left.sla?.escalationLevel === 'due_soon' ? 1 : 2;
+      const rightRank = right.sla?.isOverdue ? 0 : right.sla?.escalationLevel === 'due_soon' ? 1 : 2;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
     });
-  }, [assigneeFilter, categoryFilter, currentUser?.name, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
+  }, [assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 
   if (isLoading) {
     return (
@@ -214,11 +249,15 @@ export function AdminSupportTicketsPage() {
             <input type="checkbox" checked={needsResponseOnly} onChange={(event) => setNeedsResponseOnly(event.target.checked)} />
             Needs response
           </label>
+          <label className="support-toggle">
+            <input type="checkbox" checked={escalatedOnly} onChange={(event) => setEscalatedOnly(event.target.checked)} />
+            Escalated
+          </label>
         </FilterBar>
       </OperationalToolbar>
 
       {filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'Assignee', 'Last reply', 'Updated', 'Action']}>
+        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'SLA', 'Assignee', 'Last reply', 'Updated', 'Action']}>
           {filteredTickets.map((ticket) => (
             <OperationalTableRow key={ticket.id}>
               <td>
@@ -236,6 +275,10 @@ export function AdminSupportTicketsPage() {
               </td>
               <td>
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
+              </td>
+              <td>
+                <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
+                <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
               </td>
               <td>{ticket.assigneeName ?? 'Unassigned'}</td>
               <td>{formatLastReply(ticket)}</td>

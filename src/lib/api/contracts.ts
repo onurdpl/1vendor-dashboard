@@ -290,6 +290,14 @@ export type SupportTicketReply = {
   createdAt: string;
 };
 
+export type SupportTicketSla = {
+  isOverdue: boolean;
+  dueLabel: string;
+  escalationLevel: 'none' | 'due_soon' | 'overdue' | 'escalated';
+  dueAt: string | null;
+  overdueByHours: number | null;
+};
+
 export type SupportTicket = {
   id: string;
   createdAt: string;
@@ -309,6 +317,11 @@ export type SupportTicket = {
   adminUnreadCount: number;
   lastReplyAt: string | null;
   lastReplyByRole: 'ADMIN' | 'VENDOR' | null;
+  firstResponseDueAt: string | null;
+  nextResponseDueAt: string | null;
+  escalatedAt: string | null;
+  escalationReason: string | null;
+  sla: SupportTicketSla | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;

@@ -265,6 +265,10 @@ model SupportTicket {
   adminUnreadCount  Int    @default(0)
   lastReplyAt     DateTime?
   lastReplyByRole String?
+  firstResponseDueAt DateTime?
+  nextResponseDueAt  DateTime?
+  escalatedAt        DateTime?
+  escalationReason   String?
   contextType     String
   contextId       String?
   contextSnapshot Json?
@@ -280,6 +284,9 @@ model SupportTicket {
   @@index([assigneeUserId])
   @@index([adminUnreadCount])
   @@index([vendorUnreadCount])
+  @@index([firstResponseDueAt])
+  @@index([nextResponseDueAt])
+  @@index([escalatedAt])
   @@index([contextType, contextId])
   @@index([createdAt])
 }

@@ -34,8 +34,10 @@ const {
   addAdminSupportTicketNote,
   addAdminSupportTicketReply,
   addVendorSupportTicketReply,
+  calculateSupportResponseDueAt,
   assignSupportTicketToSelf,
   createSupportTicket,
+  deriveSupportSlaState,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
@@ -83,6 +85,10 @@ function ticketRecord(overrides: Record<string, unknown> = {}) {
     adminUnreadCount: 0,
     lastReplyAt: null,
     lastReplyByRole: null,
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
     vendor: { name: 'Vendor A' },
     notes: [],
     replies: [],
@@ -132,6 +138,7 @@ describe('support tickets', () => {
         vendorId: 'vendor-a',
         status: 'OPEN',
         category: 'RETURN',
+        firstResponseDueAt: expect.any(Date),
         contextType: 'return',
         contextId: 'return-1',
         contextSnapshot: {
@@ -234,6 +241,8 @@ describe('support tickets', () => {
       data: expect.objectContaining({
         status: 'RESOLVED',
         resolvedAt: expect.any(Date),
+        firstResponseDueAt: null,
+        nextResponseDueAt: null,
       }),
       include: expect.any(Object),
     });
@@ -354,12 +363,13 @@ describe('support tickets', () => {
     expect(result.replies?.[0]?.message).toBe('Here is the requested context.');
     expect(prismaMock.supportTicket.findFirst).toHaveBeenNthCalledWith(1, {
       where: { id: 'ticket-1', vendorId: 'vendor-a' },
-      select: { id: true, status: true },
+      select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
     });
     expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
       where: { id: 'ticket-1' },
       data: expect.objectContaining({
         status: 'IN_REVIEW',
+        nextResponseDueAt: expect.any(Date),
         adminUnreadCount: { increment: 1 },
         vendorUnreadCount: 0,
         lastReplyByRole: 'VENDOR',
@@ -425,6 +435,8 @@ describe('support tickets', () => {
     expect(prismaMock.supportTicket.update).toHaveBeenCalledWith({
       where: { id: 'ticket-1' },
       data: expect.objectContaining({
+        firstResponseDueAt: null,
+        nextResponseDueAt: null,
         vendorUnreadCount: { increment: 1 },
         adminUnreadCount: 0,
         lastReplyByRole: 'ADMIN',
@@ -521,5 +533,27 @@ describe('support tickets', () => {
         assigneeName: null,
       },
     }));
+  });
+
+  it('calculates support response due dates from priority', () => {
+    const base = new Date('2026-05-16T10:00:00Z');
+
+    expect(calculateSupportResponseDueAt('high', base).toISOString()).toBe('2026-05-16T14:00:00.000Z');
+    expect(calculateSupportResponseDueAt('normal', base).toISOString()).toBe('2026-05-17T10:00:00.000Z');
+    expect(calculateSupportResponseDueAt('low', base).toISOString()).toBe('2026-05-18T10:00:00.000Z');
+  });
+
+  it('derives overdue SLA state for admin queues', () => {
+    const result = deriveSupportSlaState({
+      status: 'OPEN',
+      firstResponseDueAt: new Date('2026-05-16T09:00:00Z'),
+      nextResponseDueAt: null,
+      escalatedAt: null,
+      escalationReason: null,
+    }, new Date('2026-05-16T12:00:00Z'));
+
+    expect(result.isOverdue).toBe(true);
+    expect(result.escalationLevel).toBe('overdue');
+    expect(result.dueLabel).toBe('Overdue by 3h');
   });
 });

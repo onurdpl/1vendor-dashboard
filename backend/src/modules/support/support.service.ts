@@ -13,6 +13,7 @@ import type {
   SupportTicketNoteDto,
   SupportTicketPriority,
   SupportTicketReplyDto,
+  SupportTicketSlaDto,
   SupportTicketStatus,
   UpdateSupportTicketStatusInput,
 } from './support.types.js';
@@ -32,6 +33,8 @@ const VALID_CATEGORIES = new Set<SupportTicketCategory>([
 ]);
 const UNRESOLVED_STATUSES = new Set<SupportTicketStatus>(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
 const SENSITIVE_KEY_PATTERN = /(address|phone|email|token|secret|password|payload|hmac|authorization|customer)/i;
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const DUE_SOON_WINDOW_MS = 2 * ONE_HOUR_MS;
 
 export class SupportTicketError extends Error {
   constructor(message: string, readonly statusCode: number) {
@@ -146,6 +149,80 @@ function normalizeStatus(value: string): SupportTicketStatus {
 function normalizeCategory(value: string | null | undefined): SupportTicketCategory {
   const normalized = value?.trim().toUpperCase() as SupportTicketCategory | undefined;
   return normalized && VALID_CATEGORIES.has(normalized) ? normalized : 'OTHER';
+}
+
+export function calculateSupportResponseDueAt(priority: SupportTicketPriority, baseDate = new Date()) {
+  const hours = priority === 'high' ? 4 : priority === 'low' ? 48 : 24;
+  return new Date(baseDate.getTime() + hours * ONE_HOUR_MS);
+}
+
+function getActiveDueAt(ticket: {
+  firstResponseDueAt?: Date | null;
+  nextResponseDueAt?: Date | null;
+}) {
+  return ticket.firstResponseDueAt ?? ticket.nextResponseDueAt ?? null;
+}
+
+function getDueLabel(dueAt: Date | null, now = new Date()) {
+  if (!dueAt) {
+    return 'No active SLA';
+  }
+
+  const deltaMs = dueAt.getTime() - now.getTime();
+  const absHours = Math.max(1, Math.ceil(Math.abs(deltaMs) / ONE_HOUR_MS));
+  if (deltaMs < 0) {
+    return `Overdue by ${absHours}h`;
+  }
+  return `Due in ${absHours}h`;
+}
+
+export function deriveSupportSlaState(ticket: {
+  status: string;
+  firstResponseDueAt?: Date | null;
+  nextResponseDueAt?: Date | null;
+  escalatedAt?: Date | null;
+  escalationReason?: string | null;
+}, now = new Date()): SupportTicketSlaDto {
+  const status = normalizeStatus(ticket.status);
+  if (status === 'RESOLVED' || status === 'CLOSED') {
+    return {
+      isOverdue: false,
+      dueLabel: 'Closed',
+      escalationLevel: 'none',
+      dueAt: null,
+      overdueByHours: null,
+    };
+  }
+
+  const dueAt = getActiveDueAt(ticket);
+  if (!dueAt) {
+    return {
+      isOverdue: false,
+      dueLabel: 'No active SLA',
+      escalationLevel: 'none',
+      dueAt: null,
+      overdueByHours: null,
+    };
+  }
+
+  const deltaMs = dueAt.getTime() - now.getTime();
+  const isOverdue = deltaMs < 0;
+  const overdueByHours = isOverdue ? Math.max(1, Math.ceil(Math.abs(deltaMs) / ONE_HOUR_MS)) : null;
+  const escalationLevel = ticket.escalatedAt
+    ? 'escalated'
+    : isOverdue
+      ? 'overdue'
+      : deltaMs <= DUE_SOON_WINDOW_MS
+        ? 'due_soon'
+        : 'none';
+
+  return {
+    isOverdue,
+    dueLabel: getDueLabel(dueAt, now),
+    escalationLevel,
+    dueAt: dueAt.toISOString(),
+    overdueByHours,
+  };
 }
 
 function sanitizeSnapshotValue(value: unknown, depth = 0): unknown {
@@ -291,6 +368,10 @@ function mapTicket(ticket: {
   adminUnreadCount?: number;
   lastReplyAt?: Date | null;
   lastReplyByRole?: string | null;
+  firstResponseDueAt?: Date | null;
+  nextResponseDueAt?: Date | null;
+  escalatedAt?: Date | null;
+  escalationReason?: string | null;
   contextType: string;
   contextId: string | null;
   contextSnapshot: Prisma.JsonValue | null;
@@ -315,7 +396,8 @@ function mapTicket(ticket: {
     message: string;
     createdAt: Date;
   }>;
-}, options: { includeNotes?: boolean; includeReplies?: boolean } = {}): SupportTicketDto {
+}, options: { includeNotes?: boolean; includeReplies?: boolean; includeSla?: boolean } = {}): SupportTicketDto {
+  const includeSla = options.includeSla ?? false;
   return {
     id: ticket.id,
     createdAt: ticket.createdAt.toISOString(),
@@ -335,6 +417,17 @@ function mapTicket(ticket: {
     adminUnreadCount: ticket.adminUnreadCount ?? 0,
     lastReplyAt: ticket.lastReplyAt?.toISOString() ?? null,
     lastReplyByRole: ticket.lastReplyByRole === 'ADMIN' ? 'ADMIN' : ticket.lastReplyByRole === 'VENDOR' ? 'VENDOR' : null,
+    firstResponseDueAt: includeSla ? ticket.firstResponseDueAt?.toISOString() ?? null : null,
+    nextResponseDueAt: includeSla ? ticket.nextResponseDueAt?.toISOString() ?? null : null,
+    escalatedAt: includeSla ? ticket.escalatedAt?.toISOString() ?? null : null,
+    escalationReason: includeSla ? ticket.escalationReason ?? null : null,
+    sla: includeSla ? deriveSupportSlaState({
+      status: ticket.status,
+      firstResponseDueAt: ticket.firstResponseDueAt,
+      nextResponseDueAt: ticket.nextResponseDueAt,
+      escalatedAt: ticket.escalatedAt,
+      escalationReason: ticket.escalationReason,
+    }) : null,
     contextType: ticket.contextType as SupportTicketContextType,
     contextId: ticket.contextId,
     contextSnapshot: ticket.contextSnapshot,
@@ -365,6 +458,9 @@ function ticketMatchesSearch(ticket: ReturnType<typeof mapTicket>, search: strin
     ticket.assigneeUserId,
     ticket.lastReplyByRole,
     ticket.lastReplyAt,
+    ticket.firstResponseDueAt,
+    ticket.nextResponseDueAt,
+    ticket.escalationReason,
     JSON.stringify(ticket.contextSnapshot ?? {}),
   ]
     .filter(Boolean)
@@ -427,6 +523,7 @@ export async function createSupportTicket(
       priority,
       status: 'OPEN',
       category,
+      firstResponseDueAt: calculateSupportResponseDueAt(priority),
       contextType,
       contextId,
       contextSnapshot: sanitizeSupportContextSnapshot(input.contextSnapshot) ?? Prisma.JsonNull,
@@ -454,7 +551,15 @@ export async function listAdminSupportTickets(filters: SupportTicketFilters = {}
     take: 250,
   });
 
-  return applyFilters(tickets.map((ticket) => mapTicket(ticket)), filters);
+  return applyFilters(tickets.map((ticket) => mapTicket(ticket, { includeSla: true })), filters)
+    .sort((left, right) => {
+      const leftRank = left.sla?.isOverdue ? 0 : left.sla?.escalationLevel === 'due_soon' ? 1 : 2;
+      const rightRank = right.sla?.isOverdue ? 0 : right.sla?.escalationLevel === 'due_soon' ? 1 : 2;
+      if (leftRank !== rightRank) {
+        return leftRank - rightRank;
+      }
+      return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+    });
 }
 
 export async function listVendorSupportTickets(vendorId: string, filters: SupportTicketFilters = {}): Promise<SupportTicketDto[]> {
@@ -471,7 +576,7 @@ export async function listVendorSupportTickets(vendorId: string, filters: Suppor
     take: 100,
   });
 
-  return applyFilters(tickets.map((ticket) => mapTicket(ticket)), filters);
+  return applyFilters(tickets.map((ticket) => mapTicket(ticket, { includeSla: false })), filters);
 }
 
 export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicketDto | null> {
@@ -500,7 +605,7 @@ export async function getAdminSupportTicket(ticketId: string): Promise<SupportTi
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: true, includeReplies: true }) : null;
+  return ticket ? mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true }) : null;
 }
 
 export async function getVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
@@ -530,7 +635,7 @@ export async function getVendorSupportTicket(ticketId: string, vendorId: string)
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: false, includeReplies: true }) : null;
+  return ticket ? mapTicket(ticket, { includeNotes: false, includeReplies: true, includeSla: false }) : null;
 }
 
 export async function updateAdminSupportTicketStatus(ticketId: string, input: UpdateSupportTicketStatusInput): Promise<SupportTicketDto> {
@@ -542,6 +647,10 @@ export async function updateAdminSupportTicketStatus(ticketId: string, input: Up
       status,
       resolvedAt: status === 'RESOLVED' ? now : status === 'OPEN' || status === 'IN_REVIEW' || status === 'WAITING_FOR_VENDOR' ? null : undefined,
       closedAt: status === 'CLOSED' ? now : status === 'OPEN' || status === 'IN_REVIEW' || status === 'WAITING_FOR_VENDOR' ? null : undefined,
+      firstResponseDueAt: status === 'RESOLVED' || status === 'CLOSED' ? null : undefined,
+      nextResponseDueAt: status === 'RESOLVED' || status === 'CLOSED' ? null : undefined,
+      escalatedAt: status === 'RESOLVED' || status === 'CLOSED' ? null : undefined,
+      escalationReason: status === 'RESOLVED' || status === 'CLOSED' ? null : undefined,
     },
     include: {
       vendor: {
@@ -556,7 +665,7 @@ export async function updateAdminSupportTicketStatus(ticketId: string, input: Up
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }
 
 export async function addAdminSupportTicketNote(
@@ -590,13 +699,13 @@ async function loadTicketForReply(ticketId: string, vendorId?: string) {
   if (vendorId) {
     return prisma.supportTicket.findFirst({
       where: { id: ticketId, vendorId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
     });
   }
 
   return prisma.supportTicket.findUnique({
     where: { id: ticketId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, priority: true, firstResponseDueAt: true, nextResponseDueAt: true },
   });
 }
 
@@ -638,12 +747,16 @@ export async function addVendorSupportTicketReply(
   });
 
   const now = new Date();
+  const priority = readPriority(ticket.priority);
   await prisma.supportTicket.update({
     where: { id: ticketId },
     data: {
       status: currentStatus === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : currentStatus,
       resolvedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
       closedAt: currentStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
+      nextResponseDueAt: calculateSupportResponseDueAt(priority, now),
+      escalatedAt: null,
+      escalationReason: null,
       adminUnreadCount: { increment: 1 },
       vendorUnreadCount: 0,
       lastReplyAt: now,
@@ -697,6 +810,10 @@ export async function addAdminSupportTicketReply(
       status: nextStatus,
       resolvedAt: nextStatus === 'RESOLVED' ? now : nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' ? null : undefined,
       closedAt: nextStatus === 'OPEN' || nextStatus === 'IN_REVIEW' || nextStatus === 'WAITING_FOR_VENDOR' || nextStatus === 'RESOLVED' ? null : undefined,
+      firstResponseDueAt: null,
+      nextResponseDueAt: null,
+      escalatedAt: nextStatus === 'RESOLVED' ? null : undefined,
+      escalationReason: nextStatus === 'RESOLVED' ? null : undefined,
       vendorUnreadCount: { increment: 1 },
       adminUnreadCount: 0,
       lastReplyAt: now,
@@ -731,7 +848,7 @@ export async function assignSupportTicketToSelf(ticketId: string, authUser: Auth
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }
 
 export async function unassignSupportTicket(ticketId: string): Promise<SupportTicketDto> {
@@ -754,5 +871,5 @@ export async function unassignSupportTicket(ticketId: string): Promise<SupportTi
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true });
+  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }

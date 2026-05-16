@@ -76,6 +76,26 @@ function buildTimeline(ticket: SupportTicket) {
   ].filter((entry) => entry.enabled);
 }
 
+function getVendorSupportStatusCopy(ticket: SupportTicket) {
+  if (ticket.status === 'WAITING_FOR_VENDOR') {
+    return 'Waiting for your reply.';
+  }
+  if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+    return 'Resolved.';
+  }
+  return 'Support is reviewing this.';
+}
+
+function getSlaBadgeTone(ticket: SupportTicket) {
+  if (ticket.sla?.isOverdue || ticket.sla?.escalationLevel === 'escalated') {
+    return 'danger' as const;
+  }
+  if (ticket.sla?.escalationLevel === 'due_soon') {
+    return 'warning' as const;
+  }
+  return 'neutral' as const;
+}
+
 export function SupportTicketDetailPage() {
   const { ticketId } = useParams();
   const location = useLocation();
@@ -402,6 +422,38 @@ export function SupportTicketDetailPage() {
             <article className="support-card">
               <div className="support-card-header">
                 <div>
+                  <p className="eyebrow">SLA</p>
+                  <h3>Response timing</h3>
+                </div>
+                <StatusBadge tone={getSlaBadgeTone(ticket)}>
+                  {ticket.sla?.isOverdue ? 'Overdue' : ticket.sla?.escalationLevel === 'due_soon' ? 'Due soon' : 'On track'}
+                </StatusBadge>
+              </div>
+              <div className="support-summary-grid">
+                <div>
+                  <span>First response due</span>
+                  <strong>{formatDate(ticket.firstResponseDueAt)}</strong>
+                </div>
+                <div>
+                  <span>Next response due</span>
+                  <strong>{formatDate(ticket.nextResponseDueAt)}</strong>
+                </div>
+                <div>
+                  <span>Status</span>
+                  <strong>{ticket.sla?.dueLabel ?? 'No active SLA'}</strong>
+                </div>
+                <div>
+                  <span>Escalation</span>
+                  <strong>{ticket.escalationReason ?? formatSupportLabel(ticket.sla?.escalationLevel ?? 'none')}</strong>
+                </div>
+              </div>
+            </article>
+          ) : null}
+
+          {isAdmin ? (
+            <article className="support-card">
+              <div className="support-card-header">
+                <div>
                   <p className="eyebrow">Actions</p>
                   <h3>Manage ticket</h3>
                 </div>
@@ -499,7 +551,7 @@ export function SupportTicketDetailPage() {
                 </div>
               </div>
               <p className="page-description">
-                Your support request is visible to the operations team. Status changes will appear here.
+                {getVendorSupportStatusCopy(ticket)}
               </p>
             </article>
           )}

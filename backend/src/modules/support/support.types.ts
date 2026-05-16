@@ -54,6 +54,16 @@ export type SupportTicketReplyDto = {
   createdAt: string;
 };
 
+export type SupportTicketEscalationLevel = 'none' | 'due_soon' | 'overdue' | 'escalated';
+
+export type SupportTicketSlaDto = {
+  isOverdue: boolean;
+  dueLabel: string;
+  escalationLevel: SupportTicketEscalationLevel;
+  dueAt: string | null;
+  overdueByHours: number | null;
+};
+
 export type SupportTicketDto = {
   id: string;
   createdAt: string;
@@ -73,6 +83,11 @@ export type SupportTicketDto = {
   adminUnreadCount: number;
   lastReplyAt: string | null;
   lastReplyByRole: 'ADMIN' | 'VENDOR' | null;
+  firstResponseDueAt: string | null;
+  nextResponseDueAt: string | null;
+  escalatedAt: string | null;
+  escalationReason: string | null;
+  sla: SupportTicketSlaDto | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
   contextSnapshot: unknown;

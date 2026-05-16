@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isAdminSupportNeedsResponse } from './pages/AdminSupportTicketsPage';
+import { isAdminSupportEscalated, isAdminSupportNeedsResponse } from './pages/AdminSupportTicketsPage';
 import { isVendorSupportUnread } from './pages/VendorSupportTicketsPage';
 import type { SupportTicket } from './lib/api/contracts';
 
@@ -23,6 +23,11 @@ function ticket(overrides: Partial<SupportTicket> = {}): SupportTicket {
     adminUnreadCount: 0,
     lastReplyAt: null,
     lastReplyByRole: null,
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
+    sla: null,
     contextType: 'return',
     contextId: 'return-1',
     contextSnapshot: null,
@@ -52,5 +57,17 @@ describe('support unread UI filters', () => {
   it('filters vendor unread tickets by vendor unread count', () => {
     expect(isVendorSupportUnread(ticket({ vendorUnreadCount: 2 }))).toBe(true);
     expect(isVendorSupportUnread(ticket({ vendorUnreadCount: 0 }))).toBe(false);
+  });
+
+  it('treats overdue SLA tickets as escalated for admin filtering', () => {
+    expect(isAdminSupportEscalated(ticket({
+      sla: {
+        isOverdue: true,
+        dueLabel: 'Overdue by 2h',
+        escalationLevel: 'overdue',
+        dueAt: '2026-05-16T10:00:00.000Z',
+        overdueByHours: 2,
+      },
+    }))).toBe(true);
   });
 });

@@ -27,6 +27,11 @@ function getCurrentVendorId() {
 
 const mockSupportTickets: SupportTicket[] = [];
 
+function calculateMockSupportDueAt(priority: SupportTicket['priority'], baseDate = new Date()) {
+  const hours = priority === 'high' ? 4 : priority === 'low' ? 48 : 24;
+  return new Date(baseDate.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
 export const runtimeServices = {
   auth: {
     async login(email: string, password: string): Promise<{ token: string; user: CurrentUser }> {
@@ -496,6 +501,11 @@ export const runtimeServices = {
         adminUnreadCount: 0,
         lastReplyAt: null,
         lastReplyByRole: null,
+        firstResponseDueAt: calculateMockSupportDueAt(input.priority),
+        nextResponseDueAt: null,
+        escalatedAt: null,
+        escalationReason: null,
+        sla: null,
         notes: [],
         replies: [],
       };
@@ -544,6 +554,12 @@ export const runtimeServices = {
       ticket.updatedAt = new Date().toISOString();
       ticket.resolvedAt = status === 'RESOLVED' ? ticket.updatedAt : ticket.resolvedAt;
       ticket.closedAt = status === 'CLOSED' ? ticket.updatedAt : ticket.closedAt;
+      if (status === 'RESOLVED' || status === 'CLOSED') {
+        ticket.firstResponseDueAt = null;
+        ticket.nextResponseDueAt = null;
+        ticket.escalatedAt = null;
+        ticket.escalationReason = null;
+      }
       return ticket;
     },
     async addNote(ticketId: string, content: string) {
@@ -593,6 +609,8 @@ export const runtimeServices = {
         },
       ];
       ticket.status = status ?? ticket.status;
+      ticket.firstResponseDueAt = null;
+      ticket.nextResponseDueAt = null;
       ticket.vendorUnreadCount += 1;
       ticket.adminUnreadCount = 0;
       ticket.lastReplyAt = now;
@@ -626,6 +644,9 @@ export const runtimeServices = {
         },
       ];
       ticket.status = ticket.status === 'WAITING_FOR_VENDOR' ? 'IN_REVIEW' : ticket.status;
+      ticket.nextResponseDueAt = calculateMockSupportDueAt(ticket.priority);
+      ticket.escalatedAt = null;
+      ticket.escalationReason = null;
       ticket.adminUnreadCount += 1;
       ticket.vendorUnreadCount = 0;
       ticket.lastReplyAt = now;
