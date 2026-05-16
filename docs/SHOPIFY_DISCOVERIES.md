@@ -195,6 +195,47 @@ query GetReturn($id: ID!) {
     - `fulfillmentLineItem.lineItem.sku`
   - `reverseFulfillmentOrders` fallback was not needed for the verified return sample.
 
+### Return Shipping / Tracking Visibility
+- Confirmed from Shopify Admin GraphQL docs:
+  - `Return.reverseFulfillmentOrders` exposes reverse fulfillment orders for a return.
+  - `ReverseFulfillmentOrder.reverseDeliveries` exposes reverse deliveries.
+  - `ReverseDelivery.deliverable` can be a `ReverseDeliveryShippingDeliverable`.
+  - `ReverseDeliveryShippingDeliverable.tracking` exposes:
+    - `carrierName`
+    - `number`
+    - `url`
+- Use this GraphQL path for customer-entered return shipment visibility:
+
+```graphql
+return(id: $id) {
+  reverseFulfillmentOrders(first: 20) {
+    edges {
+      node {
+        reverseDeliveries(first: 20) {
+          edges {
+            node {
+              deliverable {
+                ... on ReverseDeliveryShippingDeliverable {
+                  tracking {
+                    carrierName
+                    number
+                    url
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- These fields are for return shipment visibility only.
+- Do not use them to mutate refund, payout, outbound fulfillment, or lifecycle status logic.
+- If Shopify does not provide return tracking, keep local return shipment fields empty and do not invent carrier, tracking number, or tracking URL.
+
 ### Vendor Attribution for Return Requests
 - Preferred mapping path:
   - `RETURNS_REQUEST` webhook
@@ -331,7 +372,7 @@ POST /fulfillments.json
 - Whether `RETURNS_APPROVE`, `RETURNS_DECLINE`, and `RETURNS_CLOSE` payloads all include `return.id`.
 - Whether `returnLineItems` can span multiple vendors in a single return request and how UI should present that.
 - Whether return request cancellation exists as a separate event or topic.
-- Whether return shipping or tracking data is included directly or must be fetched separately.
+- Whether every return workflow in this store creates reverse deliveries with tracking immediately, or only after customer/merchant shipping information is entered.
 - Whether all stores emit `RETURNS_CANCEL`, `RETURNS_REOPEN`, `RETURNS_UPDATE`, and `RETURNS_PROCESS` consistently.
 - Whether `RETURNS_CANCEL` payload clearly differentiates customer cancellation vs. merchant cancellation.
 - Whether this store emits `FULFILLMENT_EVENTS_CREATE` for every manual Shopify Admin delivered-state change.

@@ -863,7 +863,7 @@ async function processWebhookEvent(
     event.topic === 'returns/close' ||
     event.topic === 'returns/cancel'
   ) {
-    const ingestionResult = await applyReturnLifecycleStatusWebhook(event.topic, {
+    const ingestionResult = await applyReturnLifecycleStatusWebhook(env, event.topic, {
       event,
       payload: payload as ReturnLifecycleWebhookPayload,
     });

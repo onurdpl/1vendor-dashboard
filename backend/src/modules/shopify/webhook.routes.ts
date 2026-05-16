@@ -210,7 +210,7 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
                 event: idempotencyResult.event,
                 payload,
               })
-            : await applyReturnLifecycleStatusWebhook(topic, {
+            : await applyReturnLifecycleStatusWebhook(env, topic, {
                 event: idempotencyResult.event,
                 payload,
               });

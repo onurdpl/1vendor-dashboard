@@ -407,6 +407,14 @@ function buildTimeline(summary: ReturnSummary, detail: ReturnDetail | null) {
   ];
 }
 
+function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) {
+  return {
+    carrierName: detail?.returnCarrierName ?? summary.returnCarrierName ?? null,
+    trackingNumber: detail?.returnTrackingNumber ?? summary.returnTrackingNumber ?? null,
+    trackingUrl: detail?.returnTrackingUrl ?? summary.returnTrackingUrl ?? null,
+  };
+}
+
 export function ReturnsPage() {
   const currentUser = getCurrentUser();
   const currentVendor = getCurrentVendorContext();
@@ -551,6 +559,10 @@ export function ReturnsPage() {
   const statuses = Array.from(new Set(returns.map((item) => item.status)));
   const vendors = Array.from(new Set(returns.map((item) => item.assignedVendorId)));
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
+  const selectedShipment = selectedReturn ? getReturnShipment(selectedReturn, selectedDetail ?? null) : null;
+  const hasReturnShipment = Boolean(
+    selectedShipment?.carrierName || selectedShipment?.trackingNumber || selectedShipment?.trackingUrl,
+  );
   const kpis = [
     { label: 'Pending review', value: pendingCount, icon: 'P', tone: 'attention' },
     { label: 'Awaiting shipment', value: approvedCount, icon: 'S', tone: 'info' },
@@ -750,6 +762,28 @@ export function ReturnsPage() {
                   ) : null}
                 </div>
               </div>
+
+              {hasReturnShipment && selectedShipment ? (
+                <div className="op-panel-section returns-shipment-card">
+                  <h4>Return shipment</h4>
+                  <div className="returns-summary-grid-v2">
+                    <div>
+                      <span>Carrier</span>
+                      <strong>{selectedShipment.carrierName ?? 'Not provided'}</strong>
+                    </div>
+                    <div>
+                      <span>Tracking</span>
+                      {selectedShipment.trackingUrl ? (
+                        <a href={selectedShipment.trackingUrl} target="_blank" rel="noreferrer">
+                          {selectedShipment.trackingNumber ?? 'Open tracking'}
+                        </a>
+                      ) : (
+                        <strong>{selectedShipment.trackingNumber ?? 'Not provided'}</strong>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : null}
 
               <div className="op-panel-section">
                 <h4>Returned items</h4>

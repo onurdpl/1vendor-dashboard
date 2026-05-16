@@ -44,6 +44,9 @@ describe('backend returns list route contract', () => {
         status: 'requested',
         reason: 'SIZE_TOO_LARGE',
         returnReasonNote: 'Beden büyük geldi.',
+        returnCarrierName: 'Yurtiçi Kargo',
+        returnTrackingNumber: 'returnkargo-123',
+        returnTrackingUrl: 'https://tracking.example/returnkargo-123',
         refundAmount: '0.00',
         refundedItemCount: 1,
         refundedSkus: ['SWOOSH-WHITE-S'],
@@ -90,6 +93,9 @@ describe('backend returns list route contract', () => {
         variantTitle: null,
         reason: 'SIZE_TOO_LARGE',
         returnReasonNote: 'Beden büyük geldi.',
+        returnCarrierName: 'Yurtiçi Kargo',
+        returnTrackingNumber: 'returnkargo-123',
+        returnTrackingUrl: 'https://tracking.example/returnkargo-123',
         refundedItems: [
           expect.objectContaining({
             displayTitle: 'Nike Swoosh Medium Support Kadın Beyaz Sütyen / Beyaz / S',

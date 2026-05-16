@@ -433,6 +433,9 @@ describe('real returns service item title mapping', () => {
       status: 'requested',
       reason: 'SIZE_TOO_LARGE',
       returnReasonNote: 'Beden büyük geldi.',
+      returnCarrierName: 'Yurtiçi Kargo',
+      returnTrackingNumber: 'returnkargo-123',
+      returnTrackingUrl: 'https://tracking.example/returnkargo-123',
       refundAmount: '0.00',
       refundedItemCount: 1,
       refundedSkus: ['SWOOSH-WHITE-S'],
@@ -461,5 +464,8 @@ describe('real returns service item title mapping', () => {
     expect(detail.reason).toBe('Size Too Large');
     expect(detail.returnReasonNote).toBe('Beden büyük geldi.');
     expect(detail.resolution).toBe('Beden büyük geldi.');
+    expect(detail.returnCarrierName).toBe('Yurtiçi Kargo');
+    expect(detail.returnTrackingNumber).toBe('returnkargo-123');
+    expect(detail.returnTrackingUrl).toBe('https://tracking.example/returnkargo-123');
   });
 });

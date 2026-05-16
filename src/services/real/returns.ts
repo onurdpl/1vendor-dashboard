@@ -16,6 +16,9 @@ type ReturnSummaryDto = {
   status: string;
   reason?: string | null;
   returnReasonNote?: string | null;
+  returnCarrierName?: string | null;
+  returnTrackingNumber?: string | null;
+  returnTrackingUrl?: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];
@@ -268,6 +271,9 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     customer: 'Customer unavailable',
     reason: formatReturnReason(dto.reason) || `${sourceLabel} · ${sourceId}`,
     returnReasonNote: readDtoText(dto.returnReasonNote) || null,
+    returnCarrierName: readDtoText(dto.returnCarrierName) || null,
+    returnTrackingNumber: readDtoText(dto.returnTrackingNumber) || null,
+    returnTrackingUrl: readDtoText(dto.returnTrackingUrl) || null,
     amount: formatCurrency(dto.refundAmount),
     itemTitle: summaryDisplayTitle || null,
     displayTitle: summaryDisplayTitle || null,

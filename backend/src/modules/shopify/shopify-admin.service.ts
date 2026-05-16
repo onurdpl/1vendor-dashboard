@@ -10,6 +10,7 @@ import type {
   ShopifyGraphqlResponse,
   ShopifyOrderFulfillmentState,
   ShopifyReturnLineItem,
+  ShopifyReturnTrackingInfo,
 } from './shopify-admin.types.js';
 
 type OrderSellerInfoQueryResponse = {
@@ -46,6 +47,19 @@ type ShopifyReturnQueryResponse = {
     reverseFulfillmentOrders: {
       edges: Array<{
         node: {
+          reverseDeliveries?: {
+            edges: Array<{
+              node: {
+                deliverable?: {
+                  tracking?: {
+                    carrierName?: string | null;
+                    number?: string | null;
+                    url?: string | null;
+                  } | null;
+                } | null;
+              };
+            }>;
+          };
           lineItems: {
             edges: Array<{
               node: {
@@ -64,6 +78,8 @@ type ShopifyReturnQueryResponse = {
     };
   } | null;
 };
+
+type ShopifyReturnNode = NonNullable<ShopifyReturnQueryResponse['return']>;
 
 type ShopifyOrderFulfillmentStateQueryResponse = {
   order: {
@@ -230,6 +246,7 @@ function parseMockReturnDetailsByReturnGid(
       returnGid,
       orderGid,
       source: 'mock',
+      returnTracking: parseReturnTracking(objectValue.returnTracking ?? objectValue),
       lineItems: lineItems
         .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
         .map((entry) => {
@@ -254,6 +271,56 @@ function parseMockReturnDetailsByReturnGid(
 
     return acc;
   }, {});
+}
+
+function readOptionalString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  return text || null;
+}
+
+function parseReturnTracking(value: unknown): ShopifyReturnTrackingInfo | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const carrierName = readOptionalString(record.carrierName ?? record.carrier ?? record.company);
+  const trackingNumber = readOptionalString(record.trackingNumber ?? record.number);
+  const trackingUrl = readOptionalString(record.trackingUrl ?? record.url);
+
+  if (!carrierName && !trackingNumber && !trackingUrl) {
+    return null;
+  }
+
+  return {
+    carrierName,
+    trackingNumber,
+    trackingUrl,
+  };
+}
+
+function getReturnTrackingFromReverseFulfillmentOrders(
+  reverseFulfillmentOrders: ShopifyReturnNode['reverseFulfillmentOrders'],
+): ShopifyReturnTrackingInfo | null {
+  for (const edge of reverseFulfillmentOrders.edges || []) {
+    for (const deliveryEdge of edge.node.reverseDeliveries?.edges || []) {
+      const tracking = deliveryEdge.node.deliverable?.tracking;
+      const parsed = parseReturnTracking({
+        carrierName: tracking?.carrierName,
+        number: tracking?.number,
+        url: tracking?.url,
+      });
+      if (parsed) {
+        return parsed;
+      }
+    }
+  }
+
+  return null;
 }
 
 function parseMockOrderFulfillmentStateByOrderId(
@@ -456,6 +523,21 @@ export function createShopifyAdminService(env: AppEnv) {
                 reverseFulfillmentOrders(first: 20) {
                   edges {
                     node {
+                      reverseDeliveries(first: 20) {
+                        edges {
+                          node {
+                            deliverable {
+                              ... on ReverseDeliveryShippingDeliverable {
+                                tracking {
+                                  carrierName
+                                  number
+                                  url
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
                       lineItems(first: 20) {
                         edges {
                           node {
@@ -526,6 +608,7 @@ export function createShopifyAdminService(env: AppEnv) {
       returnGid: returnNode.id,
       orderGid: returnNode.order.id,
       lineItems: inlineLineItems.length > 0 ? inlineLineItems : fallbackLineItems,
+      returnTracking: getReturnTrackingFromReverseFulfillmentOrders(returnNode.reverseFulfillmentOrders),
       source: 'shopify_admin',
     };
   }

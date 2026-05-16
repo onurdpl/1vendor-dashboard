@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,6 +35,9 @@ const pendingReturn: ReturnDetail = {
   updatedAt: '2026-05-10T08:32:00Z',
   customer: 'Acme Supply Co.',
   reason: 'Customer requested a return.',
+  returnCarrierName: null,
+  returnTrackingNumber: null,
+  returnTrackingUrl: null,
   amount: '$0.00',
   refundedSkus: ['SKU-A-1'],
   resolution: 'Pending merchant review.',
@@ -77,6 +80,9 @@ const processedRefund: ReturnDetail = {
   updatedAt: '2026-05-09T16:18:00Z',
   customer: 'Northwind Retail',
   reason: 'Refund processed from Shopify.',
+  returnCarrierName: null,
+  returnTrackingNumber: null,
+  returnTrackingUrl: null,
   amount: '$650.00',
   refundedSkus: ['SKU-A-2', 'SKU-A-3'],
   resolution: 'Refund processed.',
@@ -163,6 +169,7 @@ function renderReturnsPage() {
 
 describe('ReturnsPage control center', () => {
   beforeEach(() => {
+    cleanup();
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -493,5 +500,35 @@ describe('ReturnsPage control center', () => {
 
     expect((await screen.findAllByText('Unknown item')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return item')).not.toBeInTheDocument();
+  });
+
+  it('renders customer return shipment tracking when Shopify provides it', async () => {
+    const returnWithTracking: ReturnDetail = {
+      ...pendingReturn,
+      returnCarrierName: 'Yurtiçi Kargo',
+      returnTrackingNumber: 'returnkargo-123',
+      returnTrackingUrl: 'https://tracking.example/returnkargo-123',
+    };
+    listReturnsMock.mockResolvedValue([toSummary(returnWithTracking)]);
+    getReturnMock.mockResolvedValue(returnWithTracking);
+
+    renderReturnsPage();
+
+    expect(await screen.findByText('Return shipment')).toBeInTheDocument();
+    expect(screen.getByText('Yurtiçi Kargo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'returnkargo-123' })).toHaveAttribute(
+      'href',
+      'https://tracking.example/returnkargo-123',
+    );
+  });
+
+  it('hides the return shipment card when tracking is unavailable', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    await screen.findAllByRole('heading', { name: /return requests/i });
+    expect(screen.queryByText('Return shipment')).not.toBeInTheDocument();
   });
 });

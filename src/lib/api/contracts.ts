@@ -217,6 +217,9 @@ export type ReturnSummary = {
   customer: string;
   reason: string;
   returnReasonNote?: string | null;
+  returnCarrierName?: string | null;
+  returnTrackingNumber?: string | null;
+  returnTrackingUrl?: string | null;
   amount: string;
   itemTitle?: string | null;
   displayTitle?: string | null;

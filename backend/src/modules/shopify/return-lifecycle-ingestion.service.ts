@@ -86,6 +86,20 @@ function resolveReturnReasonNote(lineItem: { returnReasonNote: string | null; cu
   return readReturnReason(lineItem.customerNote) ?? readReturnReason(lineItem.returnReasonNote);
 }
 
+function toReturnTrackingUpdate(returnDetails: {
+  returnTracking: {
+    carrierName: string | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+  } | null;
+}) {
+  return {
+    returnCarrierName: returnDetails.returnTracking?.carrierName ?? null,
+    returnTrackingNumber: returnDetails.returnTracking?.trackingNumber ?? null,
+    returnTrackingUrl: returnDetails.returnTracking?.trackingUrl ?? null,
+  };
+}
+
 async function failWebhook(eventId: string, errorMessage: string): Promise<ReturnLifecycleIngestionResult> {
   await prisma.webhookEvent.update({
     where: { id: eventId },
@@ -125,6 +139,7 @@ export async function ingestReturnRequestWebhook(
       });
 
       const returnDetails = await shopifyAdminService.fetchReturnDetails(identity.sourceShopifyReturnGid);
+      const returnTrackingUpdate = toReturnTrackingUpdate(returnDetails);
       const sourceShopifyOrderId = extractShopifyGidTail(returnDetails.orderGid);
       if (!sourceShopifyOrderId) {
         throw new Error('Shopify return detail did not include a usable order id.');
@@ -216,6 +231,7 @@ export async function ingestReturnRequestWebhook(
             status: lifecycleStatus,
             reason: readReturnReason(mappedItem.lineItem.returnReason) ?? deriveReasonFromPayload(input.payload),
             returnReasonNote: resolveReturnReasonNote(mappedItem.lineItem),
+            ...returnTrackingUpdate,
           },
           create: {
             id,
@@ -233,6 +249,7 @@ export async function ingestReturnRequestWebhook(
             status: lifecycleStatus,
             reason: readReturnReason(mappedItem.lineItem.returnReason) ?? deriveReasonFromPayload(input.payload),
             returnReasonNote: resolveReturnReasonNote(mappedItem.lineItem),
+            ...returnTrackingUpdate,
           },
         });
 
@@ -271,6 +288,7 @@ export async function ingestReturnRequestWebhook(
 }
 
 export async function applyReturnLifecycleStatusWebhook(
+  env: AppEnv,
   topic: ReturnLifecycleTopic,
   input: ReturnLifecycleIngestionInput,
 ): Promise<ReturnLifecycleIngestionResult> {
@@ -281,6 +299,11 @@ export async function applyReturnLifecycleStatusWebhook(
 
   try {
     const lifecycleStatus = mapLifecycleStatus(topic);
+    const shopifyAdminService = createShopifyAdminService(env);
+    const returnTrackingUpdate = await shopifyAdminService
+      .fetchReturnDetails(identity.sourceShopifyReturnGid)
+      .then(toReturnTrackingUpdate)
+      .catch(() => ({}));
     const updateResult = await prisma.$transaction(async (tx) => {
       await tx.webhookEvent.update({
         where: { id: input.event.id },
@@ -301,6 +324,7 @@ export async function applyReturnLifecycleStatusWebhook(
           returnLifecycleStatus: lifecycleStatus,
           requestUpdatedAt: new Date(),
           status: lifecycleStatus,
+          ...returnTrackingUpdate,
         },
       });
 

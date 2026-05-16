@@ -12,6 +12,9 @@ export type ReturnSummaryDto = {
   status: string;
   reason: string | null;
   returnReasonNote: string | null;
+  returnCarrierName: string | null;
+  returnTrackingNumber: string | null;
+  returnTrackingUrl: string | null;
   refundAmount: string;
   refundedItemCount: number;
   refundedSkus: string[];

@@ -15,10 +15,17 @@ export type ShopifyReturnLineItem = {
   customerNote: string | null;
 };
 
+export type ShopifyReturnTrackingInfo = {
+  carrierName: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+};
+
 export type FetchShopifyReturnDetailsResult = {
   returnGid: string;
   orderGid: string;
   lineItems: ShopifyReturnLineItem[];
+  returnTracking: ShopifyReturnTrackingInfo | null;
   source: 'mock' | 'shopify_admin';
 };
 
