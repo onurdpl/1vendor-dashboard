@@ -26,6 +26,9 @@ const AdminDiagnosticsPage = lazy(() =>
 const AdminSupportTicketsPage = lazy(() =>
   import('./pages/AdminSupportTicketsPage').then((module) => ({ default: module.AdminSupportTicketsPage })),
 );
+const AdminSupportAnalyticsPage = lazy(() =>
+  import('./pages/AdminSupportAnalyticsPage').then((module) => ({ default: module.AdminSupportAnalyticsPage })),
+);
 const VendorSupportTicketsPage = lazy(() =>
   import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
 );
@@ -111,6 +114,16 @@ export default function App() {
               <RequirePermission permission="orders:write">
                 <Suspense fallback={loadingFallback}>
                   <AdminSupportTicketsPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/support/analytics"
+            element={
+              <RequirePermission permission="orders:write">
+                <Suspense fallback={loadingFallback}>
+                  <AdminSupportAnalyticsPage />
                 </Suspense>
               </RequirePermission>
             }

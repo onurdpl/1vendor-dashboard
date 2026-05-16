@@ -4,6 +4,7 @@ export {
   addVendorSupportTicketReply,
   assignAdminSupportTicketToSelf,
   createSupportTicket,
+  getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
@@ -13,6 +14,8 @@ export {
 } from '../../lib/api/support';
 export type {
   CreateSupportTicketInput,
+  SupportAnalytics,
+  SupportAnalyticsCategoryInsight,
   SupportTicket,
   SupportTicketCategory,
   SupportTicketContextType,

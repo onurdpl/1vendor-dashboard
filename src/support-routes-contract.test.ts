@@ -3,6 +3,7 @@ import { registerSupportRoutes } from '../backend/src/modules/support/support.ro
 
 const createSupportTicketMock = vi.hoisted(() => vi.fn());
 const listAdminSupportTicketsMock = vi.hoisted(() => vi.fn());
+const getAdminSupportAnalyticsMock = vi.hoisted(() => vi.fn());
 const listVendorSupportTicketsMock = vi.hoisted(() => vi.fn());
 const getAdminSupportTicketMock = vi.hoisted(() => vi.fn());
 const getVendorSupportTicketMock = vi.hoisted(() => vi.fn());
@@ -15,6 +16,7 @@ const unassignSupportTicketMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/support/support.service.js', () => ({
   createSupportTicket: createSupportTicketMock,
+  getAdminSupportAnalytics: getAdminSupportAnalyticsMock,
   addAdminSupportTicketNote: addAdminSupportTicketNoteMock,
   addAdminSupportTicketReply: addAdminSupportTicketReplyMock,
   addVendorSupportTicketReply: addVendorSupportTicketReplyMock,
@@ -96,6 +98,29 @@ describe('support route contract', () => {
 
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual([{ id: 'ticket-1' }]);
+  });
+
+  it('serves support analytics for admins only', async () => {
+    getAdminSupportAnalyticsMock.mockResolvedValueOnce({ kpis: { openTickets: 1 } });
+    const gets = new Map<string, (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      post: vi.fn(),
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerSupportRoutes(app as never, {} as never);
+    const blocked = await gets.get('/admin/support/analytics')?.({ authUser: { role: 'vendor' } }, reply);
+    const allowed = await gets.get('/admin/support/analytics')?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
+    expect(allowed).toEqual({ kpis: { openTickets: 1 } });
   });
 
   it('registers vendor ticket list and detail without internal notes', async () => {

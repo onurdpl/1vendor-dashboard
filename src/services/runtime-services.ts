@@ -18,7 +18,7 @@ import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
-import type { CreateSupportTicketInput, SupportTicket, SupportTicketStatus } from '../lib/api/contracts';
+import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketCategory, SupportTicketStatus } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -30,6 +30,110 @@ const mockSupportTickets: SupportTicket[] = [];
 function calculateMockSupportDueAt(priority: SupportTicket['priority'], baseDate = new Date()) {
   const hours = priority === 'high' ? 4 : priority === 'low' ? 48 : 24;
   return new Date(baseDate.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
+const supportCategories: SupportTicketCategory[] = ['ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
+
+function buildMockSupportAnalytics(): SupportAnalytics {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const tickets = mockSupportTickets;
+  const openTickets = tickets.filter((ticket) => ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'].includes(ticket.status));
+  const overdueTickets = tickets.filter((ticket) => ticket.sla?.isOverdue);
+  const resolvedTickets = tickets.filter((ticket) => ticket.resolvedAt || ticket.closedAt);
+  const vendorMap = new Map<string, {
+    vendorId: string;
+    vendorName: string | null;
+    ticketCount: number;
+    unresolvedCount: number;
+    overdueCount: number;
+  }>();
+  const assigneeMap = new Map<string, {
+    assigneeName: string;
+    ticketCount: number;
+    overdueCount: number;
+    unassignedOpenTickets: number;
+  }>();
+
+  for (const ticket of tickets) {
+    const vendorEntry = vendorMap.get(ticket.vendorId) ?? {
+      vendorId: ticket.vendorId,
+      vendorName: ticket.vendorName,
+      ticketCount: 0,
+      unresolvedCount: 0,
+      overdueCount: 0,
+    };
+    vendorEntry.ticketCount += 1;
+    vendorEntry.unresolvedCount += ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'].includes(ticket.status) ? 1 : 0;
+    vendorEntry.overdueCount += ticket.sla?.isOverdue ? 1 : 0;
+    vendorMap.set(ticket.vendorId, vendorEntry);
+
+    const assigneeName = ticket.assigneeName ?? 'Unassigned';
+    const assigneeEntry = assigneeMap.get(assigneeName) ?? {
+      assigneeName,
+      ticketCount: 0,
+      overdueCount: 0,
+      unassignedOpenTickets: 0,
+    };
+    assigneeEntry.ticketCount += 1;
+    assigneeEntry.overdueCount += ticket.sla?.isOverdue ? 1 : 0;
+    assigneeEntry.unassignedOpenTickets += assigneeName === 'Unassigned' && ticket.status === 'OPEN' ? 1 : 0;
+    assigneeMap.set(assigneeName, assigneeEntry);
+  }
+
+  return {
+    generatedAt: now.toISOString(),
+    kpis: {
+      openTickets: openTickets.length,
+      overdueTickets: overdueTickets.length,
+      avgFirstResponseHours: null,
+      avgResolutionHours: null,
+      waitingOnVendor: tickets.filter((ticket) => ticket.status === 'WAITING_FOR_VENDOR').length,
+      resolvedToday: resolvedTickets.filter((ticket) => (ticket.resolvedAt ?? ticket.closedAt)?.slice(0, 10) === today).length,
+    },
+    categoryInsights: supportCategories.map((category) => {
+      const categoryTickets = tickets.filter((ticket) => ticket.category === category);
+      const categoryOverdue = categoryTickets.filter((ticket) => ticket.sla?.isOverdue).length;
+      return {
+        category,
+        ticketCount: categoryTickets.length,
+        overdueCount: categoryOverdue,
+        overduePercent: categoryTickets.length ? Math.round((categoryOverdue / categoryTickets.length) * 1000) / 10 : 0,
+        avgResolutionHours: null,
+      };
+    }),
+    vendorInsights: [...vendorMap.values()].map((entry) => ({
+      ...entry,
+      overduePercent: entry.ticketCount ? Math.round((entry.overdueCount / entry.ticketCount) * 1000) / 10 : 0,
+      avgResolutionHours: null,
+      needsAttention: entry.overdueCount > 0 || entry.unresolvedCount >= 3,
+    })),
+    slaInsights: {
+      overdueTickets: overdueTickets.length,
+      overduePercent: tickets.length ? Math.round((overdueTickets.length / tickets.length) * 1000) / 10 : 0,
+      avgResponseDelayHours: null,
+      avgResolutionHours: null,
+      breachesByCategory: supportCategories
+        .map((category) => ({
+          category,
+          overdueCount: tickets.filter((ticket) => ticket.category === category && ticket.sla?.isOverdue).length,
+        }))
+        .filter((entry) => entry.overdueCount > 0),
+    },
+    assignmentInsights: [...assigneeMap.values()].map((entry) => ({
+      ...entry,
+      avgFirstResponseHours: null,
+    })),
+    trends: Array.from({ length: 7 }, (_, index) => {
+      const date = new Date(now.getTime() - (6 - index) * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      return {
+        date,
+        created: tickets.filter((ticket) => ticket.createdAt.slice(0, 10) === date).length,
+        resolved: resolvedTickets.filter((ticket) => (ticket.resolvedAt ?? ticket.closedAt)?.slice(0, 10) === date).length,
+        overdue: 0,
+      };
+    }),
+  };
 }
 
 export const runtimeServices = {
@@ -516,6 +620,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realSupport.listAdminSupportTickets()
         : Promise.resolve(mockSupportTickets),
+    analytics: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realSupport.getAdminSupportAnalytics()
+        : Promise.resolve(buildMockSupportAnalytics()),
     listVendor: () =>
       runtimeConfig.apiMode === 'real'
         ? realSupport.listVendorSupportTickets()

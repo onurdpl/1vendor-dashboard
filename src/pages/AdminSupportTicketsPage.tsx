@@ -212,6 +212,9 @@ export function AdminSupportTicketsPage() {
           <h1>Support Operations Workspace</h1>
           <p>Review vendor support requests, operational context, and internal investigation notes.</p>
         </div>
+        <Link to="/admin/support/analytics" className="button button-secondary button-link">
+          View analytics
+        </Link>
       </div>
 
       <OperationalToolbar>

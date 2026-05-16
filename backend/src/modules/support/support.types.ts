@@ -96,3 +96,67 @@ export type SupportTicketDto = {
   notes?: SupportTicketNoteDto[];
   replies?: SupportTicketReplyDto[];
 };
+
+export type SupportAnalyticsKpisDto = {
+  openTickets: number;
+  overdueTickets: number;
+  avgFirstResponseHours: number | null;
+  avgResolutionHours: number | null;
+  waitingOnVendor: number;
+  resolvedToday: number;
+};
+
+export type SupportAnalyticsCategoryInsightDto = {
+  category: SupportTicketCategory;
+  ticketCount: number;
+  overdueCount: number;
+  overduePercent: number;
+  avgResolutionHours: number | null;
+};
+
+export type SupportAnalyticsVendorInsightDto = {
+  vendorId: string;
+  vendorName: string | null;
+  ticketCount: number;
+  unresolvedCount: number;
+  overdueCount: number;
+  overduePercent: number;
+  avgResolutionHours: number | null;
+  needsAttention: boolean;
+};
+
+export type SupportAnalyticsAssignmentInsightDto = {
+  assigneeName: string;
+  ticketCount: number;
+  overdueCount: number;
+  avgFirstResponseHours: number | null;
+  unassignedOpenTickets: number;
+};
+
+export type SupportAnalyticsTrendPointDto = {
+  date: string;
+  created: number;
+  resolved: number;
+  overdue: number;
+};
+
+export type SupportAnalyticsSlaDto = {
+  overdueTickets: number;
+  overduePercent: number;
+  avgResponseDelayHours: number | null;
+  avgResolutionHours: number | null;
+  breachesByCategory: Array<{
+    category: SupportTicketCategory;
+    overdueCount: number;
+  }>;
+};
+
+export type SupportAnalyticsDto = {
+  generatedAt: string;
+  kpis: SupportAnalyticsKpisDto;
+  categoryInsights: SupportAnalyticsCategoryInsightDto[];
+  vendorInsights: SupportAnalyticsVendorInsightDto[];
+  slaInsights: SupportAnalyticsSlaDto;
+  assignmentInsights: SupportAnalyticsAssignmentInsightDto[];
+  trends: SupportAnalyticsTrendPointDto[];
+};

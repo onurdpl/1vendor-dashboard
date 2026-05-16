@@ -331,6 +331,70 @@ export type SupportTicket = {
   replies?: SupportTicketReply[];
 };
 
+export type SupportAnalyticsKpis = {
+  openTickets: number;
+  overdueTickets: number;
+  avgFirstResponseHours: number | null;
+  avgResolutionHours: number | null;
+  waitingOnVendor: number;
+  resolvedToday: number;
+};
+
+export type SupportAnalyticsCategoryInsight = {
+  category: SupportTicketCategory;
+  ticketCount: number;
+  overdueCount: number;
+  overduePercent: number;
+  avgResolutionHours: number | null;
+};
+
+export type SupportAnalyticsVendorInsight = {
+  vendorId: VendorId;
+  vendorName: string | null;
+  ticketCount: number;
+  unresolvedCount: number;
+  overdueCount: number;
+  overduePercent: number;
+  avgResolutionHours: number | null;
+  needsAttention: boolean;
+};
+
+export type SupportAnalyticsSla = {
+  overdueTickets: number;
+  overduePercent: number;
+  avgResponseDelayHours: number | null;
+  avgResolutionHours: number | null;
+  breachesByCategory: Array<{
+    category: SupportTicketCategory;
+    overdueCount: number;
+  }>;
+};
+
+export type SupportAnalyticsAssignmentInsight = {
+  assigneeName: string;
+  ticketCount: number;
+  overdueCount: number;
+  avgFirstResponseHours: number | null;
+  unassignedOpenTickets: number;
+};
+
+export type SupportAnalyticsTrendPoint = {
+  date: string;
+  created: number;
+  resolved: number;
+  overdue: number;
+};
+
+export type SupportAnalytics = {
+  generatedAt: string;
+  kpis: SupportAnalyticsKpis;
+  categoryInsights: SupportAnalyticsCategoryInsight[];
+  vendorInsights: SupportAnalyticsVendorInsight[];
+  slaInsights: SupportAnalyticsSla;
+  assignmentInsights: SupportAnalyticsAssignmentInsight[];
+  trends: SupportAnalyticsTrendPoint[];
+};
+
 export type FinanceTransactionStatus = 'Completed' | 'Pending' | 'Reconciled' | 'Failed' | 'Recorded';
 
 export type FinanceSummary = {

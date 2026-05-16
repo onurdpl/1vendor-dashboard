@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { CreateSupportTicketInput, SupportTicket, SupportTicketNote, SupportTicketStatus } from '../../lib/api/contracts';
+import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketNote, SupportTicketStatus } from '../../lib/api/contracts';
 
 export async function createSupportTicket(input: CreateSupportTicketInput): Promise<SupportTicket> {
   return apiClient.post<SupportTicket>('/support/tickets', input);
@@ -7,6 +7,10 @@ export async function createSupportTicket(input: CreateSupportTicketInput): Prom
 
 export async function listAdminSupportTickets(): Promise<SupportTicket[]> {
   return apiClient.get<SupportTicket[]>('/admin/support/tickets');
+}
+
+export async function getAdminSupportAnalytics(): Promise<SupportAnalytics> {
+  return apiClient.get<SupportAnalytics>('/admin/support/analytics');
 }
 
 export async function listVendorSupportTickets(): Promise<SupportTicket[]> {

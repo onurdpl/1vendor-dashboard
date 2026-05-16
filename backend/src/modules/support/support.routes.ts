@@ -9,6 +9,7 @@ import {
   addVendorSupportTicketReply,
   assignSupportTicketToSelf,
   createSupportTicket,
+  getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
@@ -122,6 +123,20 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return listAdminSupportTickets(request.query ?? {});
+    },
+  );
+
+  app.get(
+    '/admin/support/analytics',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      return getAdminSupportAnalytics();
     },
   );
 

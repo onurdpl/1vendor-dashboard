@@ -34,10 +34,12 @@ const {
   addAdminSupportTicketNote,
   addAdminSupportTicketReply,
   addVendorSupportTicketReply,
+  buildSupportAnalytics,
   calculateSupportResponseDueAt,
   assignSupportTicketToSelf,
   createSupportTicket,
   deriveSupportSlaState,
+  getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
@@ -555,5 +557,85 @@ describe('support tickets', () => {
     expect(result.isOverdue).toBe(true);
     expect(result.escalationLevel).toBe('overdue');
     expect(result.dueLabel).toBe('Overdue by 3h');
+  });
+
+  it('aggregates support analytics by SLA, vendor, category, and assignment', () => {
+    const now = new Date('2026-05-16T12:00:00Z');
+    const analytics = buildSupportAnalytics([
+      ticketRecord({
+        id: 'ticket-overdue',
+        priority: 'high',
+        category: 'RETURN',
+        assigneeName: 'Admin User',
+        firstResponseDueAt: new Date('2026-05-16T08:00:00Z'),
+        replies: [
+          {
+            id: 'reply-admin',
+            supportTicketId: 'ticket-overdue',
+            authorUserId: 'admin-1',
+            authorName: 'Admin User',
+            authorRole: 'ADMIN',
+            message: 'First response.',
+            createdAt: new Date('2026-05-16T11:00:00Z'),
+          },
+        ],
+      }),
+      ticketRecord({
+        id: 'ticket-resolved',
+        status: 'RESOLVED',
+        category: 'ORDER',
+        vendorId: 'vendor-b',
+        vendor: { name: 'Vendor B' },
+        resolvedAt: new Date('2026-05-16T12:00:00Z'),
+        replies: [
+          {
+            id: 'reply-admin-2',
+            supportTicketId: 'ticket-resolved',
+            authorUserId: 'admin-1',
+            authorName: 'Admin User',
+            authorRole: 'ADMIN',
+            message: 'Resolved.',
+            createdAt: new Date('2026-05-16T11:00:00Z'),
+          },
+        ],
+      }),
+    ], now);
+
+    expect(analytics.kpis.openTickets).toBe(1);
+    expect(analytics.kpis.overdueTickets).toBe(1);
+    expect(analytics.kpis.avgFirstResponseHours).toBe(1);
+    expect(analytics.kpis.resolvedToday).toBe(1);
+    expect(analytics.categoryInsights.find((entry) => entry.category === 'RETURN')?.overdueCount).toBe(1);
+    expect(analytics.vendorInsights.find((entry) => entry.vendorId === 'vendor-a')?.needsAttention).toBe(true);
+    expect(analytics.assignmentInsights.find((entry) => entry.assigneeName === 'Admin User')?.overdueCount).toBe(1);
+    expect(analytics.slaInsights.breachesByCategory).toEqual([{ category: 'RETURN', overdueCount: 1 }]);
+  });
+
+  it('loads admin support analytics from aggregate-safe fields', async () => {
+    prismaMock.supportTicket.findMany.mockResolvedValueOnce([
+      ticketRecord({ id: 'ticket-analytics' }),
+    ]);
+
+    const analytics = await getAdminSupportAnalytics();
+
+    expect(analytics.kpis.openTickets).toBe(1);
+    expect(prismaMock.supportTicket.findMany).toHaveBeenCalledWith({
+      include: {
+        vendor: {
+          select: { name: true },
+        },
+        replies: {
+          select: {
+            authorRole: true,
+            createdAt: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 1000,
+    });
   });
 });
