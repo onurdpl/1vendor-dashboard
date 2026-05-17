@@ -1,4 +1,4 @@
-import { getCurrentVendorContext, getToken } from './auth';
+import { clearToken, getCurrentVendorContext, getToken } from './auth';
 import { ApiError } from './api/errors';
 import { runtimeConfig } from '../config/runtime';
 
@@ -83,6 +83,10 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     const payload = await parseResponse(response);
 
     if (!response.ok) {
+      if (response.status === 401) {
+        clearToken();
+      }
+
       const message =
         payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
           ? payload.message

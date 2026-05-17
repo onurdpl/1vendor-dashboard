@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './api-client';
-import { setCurrentUser, setCurrentVendorId, setToken } from './auth';
+import { getCurrentUser, getToken, setCurrentUser, setCurrentVendorId, setToken } from './auth';
+import { ApiError } from './api/errors';
 
 describe('apiClient vendor-scoped headers', () => {
   const fetchMock = vi.fn();
@@ -51,5 +52,20 @@ describe('apiClient vendor-scoped headers', () => {
     const headers = init.headers as Headers;
 
     expect(headers.get('X-Vendor-Id')).toBe('demo-vendor-a');
+  });
+
+  it('clears stale session state when the backend rejects the token', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+
+    await expect(apiClient.get('/orders', { vendorId: 'demo-vendor-a' })).rejects.toMatchObject({
+      kind: 'unauthorized',
+      status: 401,
+    } satisfies Partial<ApiError>);
+
+    expect(getToken()).toBeNull();
+    expect(getCurrentUser()).toBeNull();
   });
 });
