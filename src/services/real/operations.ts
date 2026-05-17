@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { OperationsQueueItem } from '../../lib/api/contracts';
+import type { OperationsAttentionDashboard, OperationsQueueItem } from '../../lib/api/contracts';
 
 type OperationsResponseDto = {
   summary: {
@@ -68,4 +68,8 @@ export async function listAdminOperationsQueue(options: { limit?: number; offset
     actionLabel: item.actionLabel,
     actionTo: item.destinationPath ?? undefined,
   }));
+}
+
+export async function getAdminOperationsAttention(): Promise<OperationsAttentionDashboard> {
+  return apiClient.get<OperationsAttentionDashboard>('/admin/operations/attention');
 }

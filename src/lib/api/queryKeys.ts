@@ -11,6 +11,7 @@ export const queryKeys = {
     },
     operations: {
       queue: () => ['admin', 'operations', 'queue'] as const,
+      attention: () => ['admin', 'operations', 'attention'] as const,
     },
     observability: {
       summary: () => ['admin', 'observability', 'summary'] as const,

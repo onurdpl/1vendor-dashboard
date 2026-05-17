@@ -1,22 +1,23 @@
-import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   KPIStatCard,
-  MetadataRow,
   OperationalActionGroup,
   OperationalTable,
   OperationalTableRow,
-  SideDetailPanel,
   StatusBadge,
-  TimelineBlock,
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
-import { toTitleCaseLabel } from '../services/real/formatting';
-import type { OperationsQueueItem } from '../lib/api/contracts';
+import type {
+  OperationsActivity,
+  OperationsAttentionItem,
+  OperationsAttentionSeverity,
+  OperationsAttentionType,
+  OperationsVendorRisk,
+} from '../lib/api/contracts';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -28,245 +29,238 @@ function formatDate(value: string) {
   }).format(new Date(value));
 }
 
-function classifyOperationalSource(item: OperationsQueueItem) {
-  const haystack = `${item.type} ${item.title} ${item.description}`.toLowerCase();
-
-  if (item.type === 'awaiting_shipment') {
-    return 'Awaiting shipment';
+function formatAge(hours: number) {
+  if (hours < 1) {
+    return '<1h';
   }
-  if (item.type === 'vendor_blocked') {
-    return 'Blocked allocation';
+  if (hours < 24) {
+    return `${Math.round(hours)}h`;
   }
-  if (item.type === 'pending_reassignment') {
-    return 'Pending reassignment';
-  }
-  if (item.type === 'refund_attention') {
-    return haystack.includes('return request') || haystack.includes('returns/request')
-      ? 'Pending return request'
-      : 'Refund attention';
-  }
-  if (item.type === 'automation_action') {
-    return 'Automation suggestion';
-  }
-  if (haystack.includes('webhook') || haystack.includes('reconciliation') || haystack.includes('sync failed')) {
-    return 'Webhook/reconciliation issue';
-  }
-
-  return 'Operational issue';
+  return `${Math.round(hours / 24)}d`;
 }
 
-function getLifecycleLabel(type: string) {
-  if (type === 'awaiting_shipment') {
-    return 'Fulfillment lifecycle';
+function formatType(value: OperationsAttentionType) {
+  if (value === 'vendor_risk') {
+    return 'Vendor risk';
   }
-  if (type === 'refund_attention') {
-    return 'Return/refund lifecycle';
+  if (value === 'operational_signal') {
+    return 'Operational signal';
   }
-  if (type === 'pending_reassignment' || type === 'vendor_blocked') {
-    return 'Allocation lifecycle';
-  }
-  if (type === 'automation_action') {
-    return 'Operator assist';
-  }
-  return 'Operational lifecycle';
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
 }
 
-function getSeverityTone(severity: OperationsQueueItem['severity']) {
+function getSeverityTone(severity: OperationsAttentionSeverity) {
   if (severity === 'critical') {
     return 'danger' as const;
   }
-  if (severity === 'high') {
+  if (severity === 'warning') {
     return 'warning' as const;
   }
-  if (severity === 'medium') {
-    return 'attention' as const;
-  }
-  return 'neutral' as const;
+  return 'info' as const;
 }
 
-function getActionLabel(type: string, fallback?: string) {
-  if (type === 'pending_reassignment' || type === 'vendor_blocked') {
-    return 'Review allocation';
-  }
-  if (type === 'awaiting_shipment' || type === 'refund_attention') {
-    return 'View Shopify order';
-  }
-  if (type === 'automation_action') {
-    return 'Review suggestion';
-  }
-  return fallback ?? 'View details';
+function getRiskTone(risk: OperationsVendorRisk) {
+  return getSeverityTone(risk.riskLevel);
+}
+
+function getSectionTone(item: OperationsAttentionItem) {
+  return getSeverityTone(item.severity);
+}
+
+function getActivityTone(item: OperationsActivity) {
+  return getSeverityTone(item.severity);
+}
+
+function attentionLink(item: { destinationPath: string | null }, label: string) {
+  return item.destinationPath ? (
+    <Link className="button button-secondary button-link button-compact" to={item.destinationPath}>
+      {label}
+    </Link>
+  ) : (
+    <span className="queue-muted-action">No link</span>
+  );
 }
 
 export function AdminOperationsQueuePage() {
-  const { data: queue, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.queue(), () =>
-    runtimeServices.operations.list(),
+  const { data, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.attention(), () =>
+    runtimeServices.operations.attention(),
   );
-  const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
-
-  const selectedItem = useMemo(() => {
-    if (!queue?.length) {
-      return null;
-    }
-    return queue.find((item) => item.id === selectedItemId) ?? queue[0];
-  }, [queue, selectedItemId]);
 
   if (isLoading) {
     return (
       <DataStatePanel
         tone="loading"
         eyebrow="Admin operations"
-        title="Loading operations queue"
-        description="Collecting allocation, fulfillment, and refund attention items."
+        title="Loading attention center"
+        description="Deriving operational attention signals from orders, returns, finance, shipments, and support."
       />
     );
   }
 
-  if (isError || !queue) {
+  if (isError || !data) {
     return (
       <DataStatePanel
         tone="error"
         eyebrow="Admin operations"
-        title="Queue unavailable"
-        description={error ?? 'Operations queue could not be loaded.'}
+        title="Attention center unavailable"
+        description={error ?? 'Operational attention signals could not be loaded.'}
       />
     );
   }
 
-  const summary = queue.reduce<Record<string, number>>((acc, item) => {
-    acc[item.type] = (acc[item.type] ?? 0) + 1;
-    return acc;
-  }, {});
-  const criticalCount = queue.filter((item) => item.severity === 'critical').length;
-  const warningCount = queue.filter((item) => item.severity === 'high').length;
-  const attentionCount = queue.filter((item) => item.severity === 'medium').length;
-  const severityOrder: Record<string, number> = {
-    critical: 0,
-    high: 1,
-    medium: 2,
-    low: 3,
-  };
-  const sortedQueue = [...queue].sort((a, b) => {
-    const severityDiff = (severityOrder[a.severity] ?? 99) - (severityOrder[b.severity] ?? 99);
-    if (severityDiff !== 0) {
-      return severityDiff;
-    }
-    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-  });
-
   return (
-    <section className="op-page operations-control-center">
+    <section className="op-page operations-control-center attention-center-page">
       <div className="op-page-heading">
         <div>
           <p className="eyebrow">Admin operations</p>
-          <h2>Operations queue</h2>
+          <h2>Operational attention center</h2>
           <p className="page-description">
-            Prioritized control center for shipment progress, reassignment risk, blocked allocations, and return/refund attention.
+            Unified cockpit for shipment risk, overdue support, return backlog, finance review, and vendor attention.
           </p>
         </div>
         <div className="op-heading-meta">
-          <StatusBadge tone="danger">Critical {criticalCount}</StatusBadge>
-          <StatusBadge tone="warning">Warning {warningCount}</StatusBadge>
-          <StatusBadge tone="attention">Attention {attentionCount}</StatusBadge>
+          <StatusBadge tone="danger">Critical {data.summary.critical}</StatusBadge>
+          <StatusBadge tone="warning">Warning {data.summary.warning}</StatusBadge>
+          <StatusBadge tone="info">Generated {formatDate(data.generatedAt)}</StatusBadge>
         </div>
       </div>
 
-      <div className="op-kpi-row">
-        <KPIStatCard label="Pending reassignment" value={summary.pending_reassignment ?? 0} detail="Allocation lifecycle" tone="warning" />
-        <KPIStatCard label="Awaiting shipment" value={summary.awaiting_shipment ?? 0} detail="Fulfillment lifecycle" tone="attention" />
-        <KPIStatCard label="Vendor blocked" value={summary.vendor_blocked ?? 0} detail="Vendor action required" tone="danger" />
-        <KPIStatCard label="Refund attention" value={summary.refund_attention ?? 0} detail="Return/refund lifecycle" tone="info" />
+      <div className="op-kpi-row attention-kpi-row">
+        <KPIStatCard label="Total attention" value={data.summary.total} detail="Derived active signals" tone="info" />
+        <KPIStatCard label="Critical" value={data.summary.critical} detail="Highest priority" tone="danger" />
+        <KPIStatCard label="Overdue support" value={data.summary.overdueSupport} detail="SLA breached" tone="warning" />
+        <KPIStatCard label="Shipment issues" value={data.summary.shipmentIssues} detail="Tracking or carrier state" tone="attention" />
+        <KPIStatCard label="Return backlog" value={data.summary.returnBacklog} detail="Waiting review" tone="info" />
+        <KPIStatCard label="Finance review" value={data.summary.financeReview} detail="Payout or invoice attention" tone="warning" />
       </div>
 
-      <div className="op-control-layout operations-layout">
-        <div className="op-main-column">
-          {sortedQueue.length === 0 ? (
-            <EmptyStatePanel
-              title="No active operational issues"
-              description="Reassignment, blocked allocation, shipment, and refund queues are currently clear."
-            />
-          ) : (
-            <OperationalTable
-              columns={['Urgency', 'Source', 'Vendor', 'Lifecycle', 'Shopify order', 'Status', 'Created', 'Action']}
-              className="operations-op-table"
-            >
-              {sortedQueue.map((item) => (
-                <OperationalTableRow
-                  key={item.id}
-                  selected={selectedItem?.id === item.id}
-                  onSelect={() => setSelectedItemId(item.id)}
-                >
-                  <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
-                  <span>
-                    <strong>{classifyOperationalSource(item)}</strong>
-                    <small>{item.title}</small>
-                  </span>
-                  <span>
-                    <strong>{item.vendorName ?? item.vendorId}</strong>
-                    <small>{item.vendorId}</small>
-                  </span>
-                  <span>
-                    <strong>{getLifecycleLabel(item.type)}</strong>
-                    <small>{toTitleCaseLabel(item.type)}</small>
-                  </span>
-                  <span>{item.relatedShopifyOrderId ?? 'Not synced'}</span>
-                  <StatusBadge tone="info">{toTitleCaseLabel(item.status)}</StatusBadge>
-                  <span>{formatDate(item.createdAt)}</span>
-                  <OperationalActionGroup>
-                    {item.actionTo ? (
-                      <Link className="button button-secondary button-link" to={item.actionTo}>
-                        {getActionLabel(item.type, item.actionLabel)}
-                      </Link>
-                    ) : (
-                      <span className="queue-muted-action">No action</span>
-                    )}
-                  </OperationalActionGroup>
-                </OperationalTableRow>
-              ))}
-            </OperationalTable>
-          )}
-        </div>
+      <div className="attention-layout">
+        <main className="attention-main-column">
+          <article className="attention-card">
+            <div className="attention-card-heading">
+              <div>
+                <p className="eyebrow">Critical queue</p>
+                <h3>Unified attention queue</h3>
+                <span>Sorted by severity and unresolved age.</span>
+              </div>
+            </div>
+            {data.queue.length ? (
+              <OperationalTable
+                columns={['Severity', 'Type', 'Vendor', 'Reference', 'Age', 'Recommended action', 'Action']}
+                className="attention-op-table"
+              >
+                {data.queue.map((item) => (
+                  <OperationalTableRow key={item.id}>
+                    <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
+                    <span>
+                      <strong>{formatType(item.type)}</strong>
+                      <small>{item.title}</small>
+                    </span>
+                    <span>
+                      <strong>{item.vendorName}</strong>
+                      <small>{item.vendorId}</small>
+                    </span>
+                    <span>
+                      <strong>{item.objectReference}</strong>
+                      <small>{item.status}</small>
+                    </span>
+                    <strong>{formatAge(item.ageHours)}</strong>
+                    <span>{item.recommendedAction}</span>
+                    <OperationalActionGroup>
+                      {attentionLink(item, 'Open')}
+                    </OperationalActionGroup>
+                  </OperationalTableRow>
+                ))}
+              </OperationalTable>
+            ) : (
+              <EmptyStatePanel title="No active attention items" description="Current operational queues are clear." />
+            )}
+          </article>
 
-        <SideDetailPanel
-          eyebrow="Selected task"
-          title={selectedItem ? classifyOperationalSource(selectedItem) : 'No task selected'}
-          action={
-            selectedItem?.actionTo ? (
-              <Link className="button button-primary button-link" to={selectedItem.actionTo}>
-                Open
-              </Link>
-            ) : null
-          }
-        >
-          {selectedItem ? (
-            <>
-              <div className="op-detail-status-row">
-                <StatusBadge tone={getSeverityTone(selectedItem.severity)}>{selectedItem.severity}</StatusBadge>
-                <StatusBadge tone="info">{toTitleCaseLabel(selectedItem.status)}</StatusBadge>
+          <div className="attention-sections-grid">
+            {data.sections.map((section) => (
+              <article key={section.key} className="attention-card">
+                <div className="attention-card-heading">
+                  <div>
+                    <p className="eyebrow">{formatType(section.key)}</p>
+                    <h3>{section.title}</h3>
+                    <span>
+                      {section.count} active · {section.critical} critical · {section.warning} warning
+                    </span>
+                  </div>
+                </div>
+                <div className="attention-mini-list">
+                  {section.items.length ? (
+                    section.items.map((item) => (
+                      <div key={item.id} className="attention-mini-row">
+                        <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
+                        <div>
+                          <strong>{item.title}</strong>
+                          <small>{item.vendorName} · {formatAge(item.ageHours)}</small>
+                        </div>
+                        <StatusBadge tone={getSectionTone(item)}>{item.severity}</StatusBadge>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="page-description">No current items.</p>
+                  )}
+                </div>
+              </article>
+            ))}
+          </div>
+        </main>
+
+        <aside className="attention-side-column">
+          <article className="attention-card">
+            <div className="attention-card-heading">
+              <div>
+                <p className="eyebrow">Vendor risk</p>
+                <h3>Operational health</h3>
               </div>
-              <p className="page-description">{selectedItem.description}</p>
-              <div className="op-meta-grid">
-                <MetadataRow label="Lifecycle" value={getLifecycleLabel(selectedItem.type)} />
-                <MetadataRow label="Queue type" value={toTitleCaseLabel(selectedItem.type)} />
-                <MetadataRow label="Vendor" value={selectedItem.vendorName ?? selectedItem.vendorId} />
-                <MetadataRow label="Allocation ID" value={selectedItem.relatedOrderId ?? 'Not synced'} />
-                <MetadataRow label="Shopify Order ID" value={selectedItem.relatedShopifyOrderId ?? 'Not synced'} />
-                <MetadataRow label="Created At" value={formatDate(selectedItem.createdAt)} />
+            </div>
+            <div className="attention-risk-list">
+              {data.vendorRisks.length ? (
+                data.vendorRisks.map((vendor) => (
+                  <div key={vendor.vendorId} className="attention-risk-row">
+                    <div>
+                      <strong>{vendor.vendorName}</strong>
+                      <span>{vendor.drivers.length ? vendor.drivers.join(' · ') : 'No dominant driver'}</span>
+                    </div>
+                    <StatusBadge tone={getRiskTone(vendor)}>{vendor.riskLevel}</StatusBadge>
+                  </div>
+                ))
+              ) : (
+                <p className="page-description">No vendor risk signals.</p>
+              )}
+            </div>
+          </article>
+
+          <article className="attention-card">
+            <div className="attention-card-heading">
+              <div>
+                <p className="eyebrow">Activity</p>
+                <h3>Recent operational activity</h3>
               </div>
-              <div className="op-panel-section">
-                <h4>Operational path</h4>
-                <TimelineBlock
-                  items={[
-                    { label: 'Created', at: formatDate(selectedItem.createdAt) },
-                    { label: classifyOperationalSource(selectedItem), detail: getLifecycleLabel(selectedItem.type) },
-                    { label: selectedItem.actionLabel ?? 'Review', detail: selectedItem.actionTo ? 'Linked action available' : 'No direct action available' },
-                  ]}
-                />
-              </div>
-            </>
-          ) : (
-            <EmptyStatePanel title="Select a queue item" description="Choose a task to inspect source, severity, and recommended action." />
-          )}
-        </SideDetailPanel>
+            </div>
+            <div className="attention-activity-feed">
+              {data.recentActivity.length ? (
+                data.recentActivity.map((item) => (
+                  <div key={item.id} className="attention-activity-row">
+                    <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
+                    <div>
+                      {item.destinationPath ? <Link to={item.destinationPath}>{item.title}</Link> : <strong>{item.title}</strong>}
+                      <small>{item.vendorName} · {formatDate(item.occurredAt)}</small>
+                      <span>{item.description}</span>
+                    </div>
+                    <StatusBadge tone={getActivityTone(item)}>{item.severity}</StatusBadge>
+                  </div>
+                ))
+              ) : (
+                <p className="page-description">No recent operational activity.</p>
+              )}
+            </div>
+          </article>
+        </aside>
       </div>
     </section>
   );

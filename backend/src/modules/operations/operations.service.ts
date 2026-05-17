@@ -1,12 +1,133 @@
 import { prisma } from '../../db/prisma.js';
 import type {
+  OperationsActivityDto,
+  OperationsAttentionDashboardDto,
+  OperationsAttentionItemDto,
+  OperationsAttentionSectionDto,
+  OperationsAttentionSeverity,
   OperationsQueueDashboardDto,
   OperationsQueueItemDto,
   OperationsQueueSeverity,
+  OperationsVendorRiskDto,
 } from './operations.types.js';
 import { listOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
 import { listAutomationActions } from '../automation/automation-actions.service.js';
+import { deriveSupportSlaState } from '../support/support.service.js';
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+const CLOSED_RETURN_STATUSES = new Set(['processed', 'refunded', 'closed', 'cancelled', 'declined', 'rejected']);
+
+function hoursSince(value: Date, now = new Date()) {
+  return Math.max(0, Math.round(((now.getTime() - value.getTime()) / ONE_HOUR_MS) * 10) / 10);
+}
+
+export function deriveOperationalSeverity(input: {
+  ageHours?: number;
+  overdue?: boolean;
+  priority?: string | null;
+  status?: string | null;
+}): OperationsAttentionSeverity {
+  const priority = input.priority?.trim().toLowerCase();
+  const status = input.status?.trim().toLowerCase();
+  if (input.overdue || priority === 'high' || status === 'failed' || status === 'held' || status === 'disputed') {
+    return 'critical';
+  }
+  if ((input.ageHours ?? 0) >= 24 || status === 'pending' || status === 'open' || status === 'needs_review') {
+    return 'warning';
+  }
+  return 'info';
+}
+
+function mapAttentionSeverity(severity: OperationsQueueSeverity): OperationsAttentionSeverity {
+  if (severity === 'critical') {
+    return 'critical';
+  }
+  if (severity === 'warning' || severity === 'attention') {
+    return 'warning';
+  }
+  return 'info';
+}
+
+function getSeverityWeight(severity: OperationsAttentionSeverity) {
+  if (severity === 'critical') {
+    return 0;
+  }
+  if (severity === 'warning') {
+    return 1;
+  }
+  return 2;
+}
+
+function getAttentionSection(
+  key: OperationsAttentionSectionDto['key'],
+  title: string,
+  items: OperationsAttentionItemDto[],
+): OperationsAttentionSectionDto {
+  const sectionItems = items.filter((item) => item.type === key).slice(0, 5);
+  return {
+    key,
+    title,
+    count: items.filter((item) => item.type === key).length,
+    critical: items.filter((item) => item.type === key && item.severity === 'critical').length,
+    warning: items.filter((item) => item.type === key && item.severity === 'warning').length,
+    items: sectionItems,
+  };
+}
+
+export function buildVendorRiskSummaries(items: OperationsAttentionItemDto[]): OperationsVendorRiskDto[] {
+  const grouped = new Map<string, OperationsAttentionItemDto[]>();
+  for (const item of items) {
+    if (item.vendorId === 'platform') {
+      continue;
+    }
+    const list = grouped.get(item.vendorId) ?? [];
+    list.push(item);
+    grouped.set(item.vendorId, list);
+  }
+
+  return [...grouped.entries()]
+    .map(([vendorId, vendorItems]) => {
+      const criticalItems = vendorItems.filter((item) => item.severity === 'critical').length;
+      const warningItems = vendorItems.filter((item) => item.severity === 'warning').length;
+      const supportItems = vendorItems.filter((item) => item.type === 'support').length;
+      const shipmentItems = vendorItems.filter((item) => item.type === 'shipment').length;
+      const returnItems = vendorItems.filter((item) => item.type === 'return').length;
+      const financeItems = vendorItems.filter((item) => item.type === 'finance').length;
+      const drivers = [
+        supportItems ? `${supportItems} support item${supportItems === 1 ? '' : 's'}` : null,
+        shipmentItems ? `${shipmentItems} shipment item${shipmentItems === 1 ? '' : 's'}` : null,
+        returnItems ? `${returnItems} return item${returnItems === 1 ? '' : 's'}` : null,
+        financeItems ? `${financeItems} finance item${financeItems === 1 ? '' : 's'}` : null,
+      ].filter((driver): driver is string => Boolean(driver));
+
+      const riskLevel: OperationsAttentionSeverity =
+        criticalItems > 0 || vendorItems.length >= 5 ? 'critical' : warningItems > 0 || vendorItems.length >= 2 ? 'warning' : 'info';
+
+      return {
+        vendorId,
+        vendorName: vendorItems[0]?.vendorName ?? vendorId,
+        riskLevel,
+        totalAttentionItems: vendorItems.length,
+        criticalItems,
+        warningItems,
+        supportItems,
+        shipmentItems,
+        returnItems,
+        financeItems,
+        drivers,
+      };
+    })
+    .sort((left, right) => {
+      const severityDelta = getSeverityWeight(left.riskLevel) - getSeverityWeight(right.riskLevel);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return right.totalAttentionItems - left.totalAttentionItems;
+    })
+    .slice(0, 8);
+}
 
 function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   const fulfillment = fulfillmentStatus.trim().toLowerCase();
@@ -265,5 +386,285 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   return {
     summary: createSummary(items),
     items: items.slice(offset, offset + limit),
+  };
+}
+
+export async function getAdminOperationsAttentionCenter(): Promise<OperationsAttentionDashboardDto> {
+  const now = new Date();
+  const queueDashboard = await getAdminOperationsQueue({ limit: 200, offset: 0 });
+  const attentionItems: OperationsAttentionItemDto[] = queueDashboard.items.map((item) => ({
+    id: item.id,
+    type:
+      item.type === 'awaiting_shipment'
+        ? 'shipment'
+        : item.type === 'refund_attention'
+          ? 'return'
+          : item.type === 'automation_action'
+            ? 'automation'
+            : item.type === 'operational_signal'
+              ? 'operational_signal'
+              : 'shipment',
+    severity: mapAttentionSeverity(item.severity),
+    vendorId: item.vendorId,
+    vendorName: item.vendorName,
+    objectType: item.type,
+    objectReference: item.relatedShopifyOrderId ? `Order ${item.relatedShopifyOrderId}` : item.relatedOrderId ?? item.id,
+    objectId: item.relatedOrderId,
+    status: item.status,
+    ageHours: hoursSince(new Date(item.createdAt), now),
+    title: item.title,
+    description: item.description,
+    recommendedAction: item.actionLabel,
+    destinationPath: item.destinationPath,
+    createdAt: item.createdAt,
+  }));
+
+  const supportTickets = await prisma.supportTicket.findMany({
+    where: {
+      status: {
+        in: ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'],
+      },
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 200,
+  });
+
+  for (const ticket of supportTickets) {
+    const sla = deriveSupportSlaState(ticket, now);
+    const ageHours = hoursSince(ticket.updatedAt, now);
+    const severity = deriveOperationalSeverity({
+      ageHours,
+      overdue: sla.isOverdue,
+      priority: ticket.priority,
+      status: ticket.status,
+    });
+    const needsResponse = ticket.adminUnreadCount > 0 || (ticket.status === 'OPEN' && !ticket.assigneeName);
+    attentionItems.push({
+      id: `attention-support-${ticket.id}`,
+      type: 'support',
+      severity,
+      vendorId: ticket.vendorId,
+      vendorName: ticket.vendor?.name ?? ticket.vendorId,
+      objectType: 'Support ticket',
+      objectReference: ticket.subject,
+      objectId: ticket.id,
+      status: ticket.status,
+      ageHours,
+      title: sla.isOverdue ? 'Overdue support ticket' : needsResponse ? 'Support needs response' : 'Support ticket active',
+      description: sla.dueLabel,
+      recommendedAction: ticket.assigneeName ? 'Review ticket' : 'Assign and respond',
+      destinationPath: `/admin/support/${ticket.id}`,
+      createdAt: ticket.updatedAt.toISOString(),
+    });
+  }
+
+  const shipmentExecutions = await prisma.shipmentExecution.findMany({
+    where: {
+      shipmentStatus: {
+        in: ['PENDING', 'FAILED'],
+      },
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+      allocation: {
+        include: {
+          order: true,
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 100,
+  });
+
+  for (const shipment of shipmentExecutions) {
+    const ageHours = hoursSince(shipment.updatedAt, now);
+    attentionItems.push({
+      id: `attention-shipment-${shipment.id}`,
+      type: 'shipment',
+      severity: deriveOperationalSeverity({
+        ageHours,
+        status: shipment.shipmentStatus === 'FAILED' ? 'failed' : 'pending',
+      }),
+      vendorId: shipment.vendorId,
+      vendorName: shipment.vendor.name,
+      objectType: 'Shipment',
+      objectReference: shipment.sourceShopifyOrderNumber
+        ? `Order ${shipment.sourceShopifyOrderNumber}`
+        : shipment.allocation.order.sourceShopifyOrderNumber,
+      objectId: shipment.id,
+      status: shipment.shipmentStatus.toLowerCase(),
+      ageHours,
+      title: shipment.shipmentStatus === 'FAILED' ? 'Shipment execution failed' : 'Shipment pending carrier identifiers',
+      description: shipment.trackingNumber ? 'Carrier record exists; tracking should be reviewed.' : 'Tracking is not available yet.',
+      recommendedAction: shipment.shipmentStatus === 'FAILED' ? 'Review provider response' : 'Review shipment status',
+      destinationPath: `/orders/${shipment.allocationId}`,
+      createdAt: shipment.updatedAt.toISOString(),
+    });
+  }
+
+  const recentReturns = await prisma.returnRecord.findMany({
+    include: {
+      vendorAllocation: {
+        include: {
+          assignedVendor: true,
+          order: true,
+        },
+      },
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 150,
+  });
+
+  for (const returnRecord of recentReturns) {
+    const status = returnRecord.status.trim().toLowerCase();
+    if (CLOSED_RETURN_STATUSES.has(status)) {
+      continue;
+    }
+    const ageSource = returnRecord.requestUpdatedAt ?? returnRecord.updatedAt;
+    const ageHours = hoursSince(ageSource, now);
+    attentionItems.push({
+      id: `attention-return-${returnRecord.id}`,
+      type: 'return',
+      severity: deriveOperationalSeverity({ ageHours, status }),
+      vendorId: returnRecord.vendorAllocation.assignedVendorId,
+      vendorName: returnRecord.vendorAllocation.assignedVendor.name,
+      objectType: 'Return',
+      objectReference: `Order ${returnRecord.sourceShopifyOrderNumber}`,
+      objectId: returnRecord.id,
+      status: returnRecord.status,
+      ageHours,
+      title: 'Return waiting review',
+      description: returnRecord.sourceShopifyRefundId ? 'Refund linkage exists; review return completion.' : 'Refund is still pending.',
+      recommendedAction: 'Review return',
+      destinationPath: `/returns/${returnRecord.id}`,
+      createdAt: ageSource.toISOString(),
+    });
+  }
+
+  const financeEntries = await prisma.financeLedgerEntry.findMany({
+    where: {
+      OR: [
+        { payoutStatus: 'HOLD' },
+        { settlementStatus: { in: ['HELD', 'DISPUTED'] } },
+        {
+          invoiceExecutions: {
+            some: {
+              status: {
+                in: ['FAILED', 'UNKNOWN'],
+              },
+            },
+          },
+        },
+      ],
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+      vendorAllocation: {
+        include: {
+          order: true,
+          returnRecords: true,
+          refundRecords: true,
+        },
+      },
+      invoiceExecutions: true,
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 100,
+  });
+
+  for (const entry of financeEntries) {
+    const failedInvoice = entry.invoiceExecutions.find((execution) => execution.status === 'FAILED' || execution.status === 'UNKNOWN');
+    const ageHours = hoursSince(entry.updatedAt, now);
+    attentionItems.push({
+      id: `attention-finance-${entry.id}`,
+      type: 'finance',
+      severity: deriveOperationalSeverity({
+        ageHours,
+        status: failedInvoice ? 'failed' : entry.payoutStatus === 'HOLD' || entry.settlementStatus === 'HELD' ? 'held' : 'disputed',
+      }),
+      vendorId: entry.vendorId,
+      vendorName: entry.vendor.name,
+      objectType: 'Finance row',
+      objectReference: entry.vendorAllocation?.order.sourceShopifyOrderNumber
+        ? `Order ${entry.vendorAllocation.order.sourceShopifyOrderNumber}`
+        : entry.id,
+      objectId: entry.id,
+      status: failedInvoice ? failedInvoice.status.toLowerCase() : entry.settlementStatus.toLowerCase(),
+      ageHours,
+      title: failedInvoice ? 'Invoice visibility issue' : 'Payout review needed',
+      description: entry.description ?? 'Finance row requires admin review.',
+      recommendedAction: failedInvoice ? 'Review invoice sync' : 'Review payout status',
+      destinationPath: '/finance',
+      createdAt: entry.updatedAt.toISOString(),
+    });
+  }
+
+  const uniqueItems = new Map<string, OperationsAttentionItemDto>();
+  for (const item of attentionItems) {
+    uniqueItems.set(item.id, item);
+  }
+  const queue = [...uniqueItems.values()].sort((left, right) => {
+    const severityDelta = getSeverityWeight(left.severity) - getSeverityWeight(right.severity);
+    if (severityDelta !== 0) {
+      return severityDelta;
+    }
+    return right.ageHours - left.ageHours;
+  });
+  const vendorRisks = buildVendorRiskSummaries(queue);
+  const recentActivity: OperationsActivityDto[] = queue
+    .slice()
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 12)
+    .map((item) => ({
+      id: `activity-${item.id}`,
+      type: item.type,
+      severity: item.severity,
+      vendorId: item.vendorId,
+      vendorName: item.vendorName,
+      title: item.title,
+      description: item.objectReference,
+      occurredAt: item.createdAt,
+      destinationPath: item.destinationPath,
+    }));
+
+  return {
+    generatedAt: now.toISOString(),
+    summary: {
+      total: queue.length,
+      critical: queue.filter((item) => item.severity === 'critical').length,
+      warning: queue.filter((item) => item.severity === 'warning').length,
+      info: queue.filter((item) => item.severity === 'info').length,
+      overdueSupport: queue.filter((item) => item.type === 'support' && item.severity === 'critical').length,
+      shipmentIssues: queue.filter((item) => item.type === 'shipment').length,
+      returnBacklog: queue.filter((item) => item.type === 'return').length,
+      financeReview: queue.filter((item) => item.type === 'finance').length,
+      vendorRisks: vendorRisks.filter((vendor) => vendor.riskLevel !== 'info').length,
+    },
+    queue: queue.slice(0, 100),
+    sections: [
+      getAttentionSection('support', 'Support attention', queue),
+      getAttentionSection('shipment', 'Shipment attention', queue),
+      getAttentionSection('return', 'Return backlog', queue),
+      getAttentionSection('finance', 'Finance review', queue),
+    ],
+    vendorRisks,
+    recentActivity,
   };
 }

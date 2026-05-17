@@ -763,3 +763,85 @@ export type OperationsQueueItem = {
   actionLabel?: string;
   actionTo?: string;
 };
+
+export type OperationsAttentionSeverity = 'info' | 'warning' | 'critical';
+export type OperationsAttentionType =
+  | 'support'
+  | 'shipment'
+  | 'return'
+  | 'finance'
+  | 'vendor_risk'
+  | 'operational_signal'
+  | 'automation';
+
+export type OperationsAttentionItem = {
+  id: string;
+  type: OperationsAttentionType;
+  severity: OperationsAttentionSeverity;
+  vendorId: VendorId | string;
+  vendorName: string;
+  objectType: string;
+  objectReference: string;
+  objectId: string | null;
+  status: string;
+  ageHours: number;
+  title: string;
+  description: string;
+  recommendedAction: string;
+  destinationPath: string | null;
+  createdAt: string;
+};
+
+export type OperationsAttentionSection = {
+  key: 'support' | 'shipment' | 'return' | 'finance';
+  title: string;
+  count: number;
+  critical: number;
+  warning: number;
+  items: OperationsAttentionItem[];
+};
+
+export type OperationsVendorRisk = {
+  vendorId: VendorId | string;
+  vendorName: string;
+  riskLevel: OperationsAttentionSeverity;
+  totalAttentionItems: number;
+  criticalItems: number;
+  warningItems: number;
+  supportItems: number;
+  shipmentItems: number;
+  returnItems: number;
+  financeItems: number;
+  drivers: string[];
+};
+
+export type OperationsActivity = {
+  id: string;
+  type: OperationsAttentionType;
+  severity: OperationsAttentionSeverity;
+  vendorId: VendorId | string;
+  vendorName: string;
+  title: string;
+  description: string;
+  occurredAt: string;
+  destinationPath: string | null;
+};
+
+export type OperationsAttentionDashboard = {
+  generatedAt: string;
+  summary: {
+    total: number;
+    critical: number;
+    warning: number;
+    info: number;
+    overdueSupport: number;
+    shipmentIssues: number;
+    returnBacklog: number;
+    financeReview: number;
+    vendorRisks: number;
+  };
+  queue: OperationsAttentionItem[];
+  sections: OperationsAttentionSection[];
+  vendorRisks: OperationsVendorRisk[];
+  recentActivity: OperationsActivity[];
+};

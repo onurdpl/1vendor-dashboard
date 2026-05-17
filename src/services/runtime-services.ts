@@ -6,7 +6,10 @@ import { getMockFinanceDashboard } from '../lib/api/mockFinance';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from '../lib/api/mockOrders';
 import { getMockReturn, listMockReturns } from '../lib/api/mockReturns';
-import { listAdminOperationsQueue as listMockAdminOperationsQueue } from '../lib/api/operations';
+import {
+  getMockAdminOperationsAttention,
+  listAdminOperationsQueue as listMockAdminOperationsQueue,
+} from '../lib/api/operations';
 import * as backendAuth from './backend-auth';
 import * as realOrders from './real/orders';
 import * as realReturns from './real/returns';
@@ -507,6 +510,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realOperations.listAdminOperationsQueue()
         : Promise.resolve(listMockAdminOperationsQueue()),
+    attention: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realOperations.getAdminOperationsAttention()
+        : Promise.resolve(getMockAdminOperationsAttention()),
   },
   signals: {
     list: () =>
