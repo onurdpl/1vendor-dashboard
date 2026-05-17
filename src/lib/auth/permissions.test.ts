@@ -1,13 +1,23 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { canPerformAction, getDefaultRole, hasPermission } from './permissions';
-import { clearCurrentUser, setCurrentUser } from './session';
+import { clearToken, setCurrentUser, setToken } from './session';
 
 beforeEach(() => {
-  clearCurrentUser();
+  clearToken();
 });
 
 describe('auth permissions', () => {
+  it('denies unauthenticated permission checks even though the legacy default role remains admin', () => {
+    expect(getDefaultRole()).toBe('admin');
+    expect(canPerformAction('orders:read')).toBe(false);
+    expect(canPerformAction('orders:write')).toBe(false);
+    expect(canPerformAction('returns:write')).toBe(false);
+    expect(canPerformAction('finance:write')).toBe(false);
+    expect(canPerformAction('automation:write')).toBe(false);
+  });
+
   it('gives admin full read and write access', () => {
+    setToken('admin-session');
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -26,6 +36,7 @@ describe('auth permissions', () => {
   });
 
   it('gives vendor read access to shared dashboard resources only', () => {
+    setToken('vendor-session');
     setCurrentUser({
       email: 'vendor-a@demo.com',
       name: 'Vendor A User',

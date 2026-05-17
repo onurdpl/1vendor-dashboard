@@ -1,4 +1,4 @@
-import { getCurrentUserRole } from './session';
+import { getCurrentUserRole, isAuthenticated } from './session';
 
 export type UserRole = 'admin' | 'vendor' | 'support' | 'finance';
 
@@ -33,6 +33,10 @@ export function hasPermission(role: UserRole, permission: Permission): boolean {
 }
 
 export function canPerformAction(permission: Permission): boolean {
+  if (!isAuthenticated()) {
+    return false;
+  }
+
   return hasPermission(getCurrentUserRole(), permission);
 }
 
