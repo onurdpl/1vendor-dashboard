@@ -500,10 +500,10 @@ export const runtimeServices = {
           }),
   },
   automation: {
-    dashboard: () =>
+    dashboard: (vendorId = getCurrentVendorId()) =>
       runtimeConfig.apiMode === 'real'
-        ? realAutomation.getAutomationDashboard()
-        : Promise.resolve(getMockAutomationDashboard(getCurrentVendorId())),
+        ? realAutomation.getAutomationDashboard(vendorId)
+        : Promise.resolve(getMockAutomationDashboard(vendorId)),
   },
   operations: {
     list: () =>
@@ -516,9 +516,9 @@ export const runtimeServices = {
         : Promise.resolve(getMockAdminOperationsAttention()),
   },
   signals: {
-    list: () =>
+    list: (vendorId = getCurrentVendorId()) =>
       runtimeConfig.apiMode === 'real'
-        ? realSignals.listOperationalSignals()
+        ? realSignals.listOperationalSignals(vendorId)
         : Promise.resolve({
             summary: {
               total: 0,
@@ -531,9 +531,9 @@ export const runtimeServices = {
           }),
   },
   notifications: {
-    list: () =>
+    list: (vendorId = getCurrentVendorId()) =>
       runtimeConfig.apiMode === 'real'
-        ? realNotifications.listNotifications()
+        ? realNotifications.listNotifications(vendorId)
         : Promise.resolve({
             summary: {
               total: 0,

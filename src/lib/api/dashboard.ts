@@ -13,9 +13,42 @@ import type {
   DashboardPriorityItem,
 } from './contracts';
 import { runtimeServices } from '../../services/runtime-services';
+import { ApiError } from './errors';
 
 function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
+}
+
+function readErrorStatus(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return null;
+  }
+
+  const status = Reflect.get(error, 'status');
+  if (typeof status === 'number') {
+    return status;
+  }
+
+  const response = Reflect.get(error, 'response');
+  if (response && typeof response === 'object') {
+    const responseStatus = Reflect.get(response, 'status');
+    return typeof responseStatus === 'number' ? responseStatus : null;
+  }
+
+  return null;
+}
+
+function isDashboardAuthError(error: unknown) {
+  const status = readErrorStatus(error);
+  return (error instanceof ApiError && error.kind === 'unauthorized') || status === 401 || status === 403;
+}
+
+function throwDashboardAuthError(results: Array<PromiseSettledResult<unknown>>) {
+  const authFailure = results.find((result) => result.status === 'rejected' && isDashboardAuthError(result.reason));
+
+  if (authFailure?.status === 'rejected') {
+    throw authFailure.reason;
+  }
 }
 
 function formatCount(value: number) {
@@ -121,6 +154,20 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
   const currentUser = getCurrentUser();
 
   const partialDataWarnings: string[] = [];
+  const dashboardRequests = await Promise.allSettled([
+    runtimeServices.orders.list(currentVendorId),
+    runtimeServices.returns.list(currentVendorId),
+    runtimeServices.finance.dashboard(currentVendorId),
+    runtimeServices.automation.dashboard(currentVendorId),
+    currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
+    runtimeServices.signals.list(currentVendorId),
+    runtimeServices.notifications.list(currentVendorId),
+    currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
+    currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
+  ]);
+
+  throwDashboardAuthError(dashboardRequests);
+
   const [
     ordersResult,
     returnsResult,
@@ -131,17 +178,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     notificationsResult,
     diagnosticsResult,
     observabilityResult,
-  ] = await Promise.allSettled([
-    runtimeServices.orders.list(),
-    runtimeServices.returns.list(),
-    runtimeServices.finance.dashboard(),
-    runtimeServices.automation.dashboard(),
-    currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
-    runtimeServices.signals.list(),
-    runtimeServices.notifications.list(),
-    currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
-    currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
-  ]);
+  ] = dashboardRequests;
 
   const orders = ordersResult.status === 'fulfilled' ? ordersResult.value : [];
   if (ordersResult.status === 'rejected') {

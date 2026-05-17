@@ -5,10 +5,10 @@ import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './DashboardPage';
 import type { DashboardOverview, NotificationIntent, NotificationsResponse } from '../lib/api/contracts';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
-const getDashboardOverviewMock = vi.fn<() => Promise<DashboardOverview>>();
-const listNotificationsMock = vi.fn<() => Promise<NotificationsResponse>>();
+const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
+const listNotificationsMock = vi.fn<(vendorId?: string) => Promise<NotificationsResponse>>();
 const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 
@@ -16,14 +16,14 @@ vi.mock('../lib/api/dashboard', async () => {
   const actual = await vi.importActual<typeof import('../lib/api/dashboard')>('../lib/api/dashboard');
   return {
     ...actual,
-    getDashboardOverview: () => getDashboardOverviewMock(),
+    getDashboardOverview: (vendorId?: string) => getDashboardOverviewMock(vendorId),
   };
 });
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     notifications: {
-      list: () => listNotificationsMock(),
+      list: (vendorId?: string) => listNotificationsMock(vendorId),
       markRead: (notificationId: string) => markNotificationReadMock(notificationId),
       dismiss: (notificationId: string) => dismissNotificationMock(notificationId),
     },
@@ -181,6 +181,34 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
+  });
+
+  it('loads dashboard data and notifications with the selected vendor scope', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-b');
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      vendorId: 'demo-vendor-b',
+      vendorName: 'Demo Vendor B',
+      title: 'Demo Vendor B command center',
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
+    expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
+    expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-b');
   });
 
   it('renders the notification center list with compact metadata', async () => {

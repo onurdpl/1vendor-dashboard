@@ -149,7 +149,7 @@ export function DashboardPage() {
   const {
     data: notifications,
     refetch: refetchNotifications,
-  } = useQueryResource(queryKeys.notifications.list(vendorId), () => runtimeServices.notifications.list(), {
+  } = useQueryResource(queryKeys.notifications.list(vendorId), () => runtimeServices.notifications.list(vendorId), {
     enabled: appReadiness.ready,
   });
   const markNotificationReadMutation = useMutationAction(

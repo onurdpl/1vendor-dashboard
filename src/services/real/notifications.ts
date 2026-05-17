@@ -1,8 +1,10 @@
 import { apiClient } from '../../lib/api-client';
 import type { NotificationIntent, NotificationsResponse } from '../../lib/api/contracts';
 
-export async function listNotifications(): Promise<NotificationsResponse> {
-  return apiClient.get<NotificationsResponse>('/notifications');
+export async function listNotifications(vendorId?: string | null): Promise<NotificationsResponse> {
+  return vendorId
+    ? apiClient.get<NotificationsResponse>('/notifications', { vendorId })
+    : apiClient.get<NotificationsResponse>('/notifications');
 }
 
 export async function markNotificationRead(notificationId: string): Promise<NotificationIntent> {
