@@ -358,7 +358,7 @@ describe('FinancePage control center', () => {
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     const linkedOrder = screen.getAllByText('Order #1021').find((node) => node.closest('a'));
 
-    expect(linkedOrder?.closest('a')).toHaveAttribute('href', '/orders?shopifyOrderId=7616544244049');
+    expect(linkedOrder?.closest('a')).toHaveAttribute('href', '/orders?order=1021&shopifyOrderId=7616544244049');
   });
 
   it('links finance refund records to the targeted returns workspace query', async () => {

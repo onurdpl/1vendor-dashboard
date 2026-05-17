@@ -251,7 +251,7 @@ const targetSaleFinanceRow: FinanceTransaction = {
   amount: 'TRY 1,030.00',
   status: 'Recorded',
   shopifyOrderNumber: '1030',
-  shopifyOrderId: 'gid://shopify/Order/7616544244030',
+  shopifyOrderId: 'gid://shopify/Order/999999999',
 };
 
 const targetRefundFinanceRow: FinanceTransaction = {
@@ -439,7 +439,12 @@ describe('operational deep-link smoke navigation', () => {
     renderOperationalRoutes(`/finance?ledgerId=${targetSaleFinanceRow.id}`);
 
     await screen.findByRole('heading', { name: 'Order #1030' });
-    await user.click(getLinkedRecordAnchor('Order #1030'));
+    const linkedOrder = getLinkedRecordAnchor('Order #1030');
+    expect(linkedOrder).toHaveAttribute(
+      'href',
+      '/orders?order=1030&shopifyOrderId=gid%3A%2F%2Fshopify%2FOrder%2F999999999',
+    );
+    await user.click(linkedOrder);
 
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(targetOrder.id, { vendorId }));
     expect((await screen.findAllByText('Target order customer')).length).toBeGreaterThan(0);

@@ -93,21 +93,39 @@ function readFinanceString(record: FinanceTransaction, key: string) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function isLikelyInternalOrderRouteId(value: string | null) {
+  if (!value) {
+    return false;
+  }
+
+  return !/^gid:\/\/shopify\//i.test(value) && !/^\d+$/.test(value);
+}
+
 function buildOrdersHref(record: FinanceTransaction) {
-  const internalOrderId =
-    readFinanceString(record, 'orderId') ??
-    readFinanceString(record, 'allocationId') ??
-    readFinanceString(record, 'relatedOrderId');
+  const internalOrderId = [
+    readFinanceString(record, 'allocationId'),
+    readFinanceString(record, 'vendorAllocationId'),
+    readFinanceString(record, 'relatedAllocationId'),
+    readFinanceString(record, 'orderId'),
+  ].find(isLikelyInternalOrderRouteId);
   if (internalOrderId) {
     return `/orders/${encodeURIComponent(internalOrderId)}`;
   }
-  if (record.shopifyOrderId) {
-    return `/orders?shopifyOrderId=${encodeURIComponent(record.shopifyOrderId)}`;
-  }
+
+  const shopifyOrderId =
+    record.shopifyOrderId ??
+    readFinanceString(record, 'sourceShopifyOrderId') ??
+    readFinanceString(record, 'relatedOrderId') ??
+    readFinanceString(record, 'orderId');
+  const params = new URLSearchParams();
   if (record.shopifyOrderNumber) {
-    return `/orders?order=${encodeURIComponent(String(record.shopifyOrderNumber))}`;
+    params.set('order', String(record.shopifyOrderNumber));
   }
-  return null;
+  if (shopifyOrderId) {
+    params.set('shopifyOrderId', shopifyOrderId);
+  }
+
+  return params.size ? `/orders?${params.toString()}` : null;
 }
 
 function buildReturnsHref(record: FinanceTransaction) {
