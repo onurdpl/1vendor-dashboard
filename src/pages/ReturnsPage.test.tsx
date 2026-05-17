@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
@@ -167,6 +167,37 @@ function renderReturnsPage(initialEntries = ['/returns']) {
   );
 }
 
+function ReturnsNavigationHarness({ target }: { target: string }) {
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <button type="button" onClick={() => navigate(target)}>
+        Navigate to linked return
+      </button>
+      <ReturnsPage />
+    </>
+  );
+}
+
+function renderReturnsNavigationHarness(target: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/returns']}>
+        <ReturnsNavigationHarness target={target} />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe('ReturnsPage control center', () => {
   beforeEach(() => {
     cleanup();
@@ -230,6 +261,49 @@ describe('ReturnsPage control center', () => {
     getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
 
     renderReturnsPage([`/returns?refundId=${encodeURIComponent(processedRefund.sourceShopifyRefundId ?? '')}`]);
+
+    await waitFor(() =>
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+    );
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+  });
+
+  it('selects a return by Shopify refund numeric tail', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+
+    renderReturnsPage(['/returns?refundId=5002']);
+
+    await waitFor(() =>
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+    );
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+  });
+
+  it('selects a return by Shopify return numeric tail', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+
+    renderReturnsPage(['/returns?shopifyReturnId=9001']);
+
+    await waitFor(() =>
+      expect(getReturnMock).toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' }),
+    );
+    expect(getReturnMock).not.toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
+  });
+
+  it('clears stale selected return state when a linked query target changes', async () => {
+    const user = userEvent.setup();
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+
+    renderReturnsNavigationHarness('/returns?refundId=5002');
+
+    expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    await user.click(screen.getAllByText('#1001')[0]);
+    getReturnMock.mockClear();
+
+    await user.click(screen.getByRole('button', { name: 'Navigate to linked return' }));
 
     await waitFor(() =>
       expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),

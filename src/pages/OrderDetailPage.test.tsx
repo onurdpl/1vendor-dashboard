@@ -332,6 +332,71 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.')).toBeInTheDocument();
   });
 
+  it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listReturnsMock.mockResolvedValueOnce([
+      {
+        originalVendorId: 'sporjinal',
+        assignedVendorId: 'sporjinal',
+        vendorId: 'sporjinal',
+        id: 'return-1028',
+        sourceShopifyOrderId: 'gid://shopify/Order/7616544244049',
+        sourceShopifyOrderNumber: '#1028',
+        sourceShopifyRefundId: '',
+        sourceShopifyReturnId: 'gid://shopify/Return/9001',
+        sourceType: 'shopify_return_request',
+        status: 'Requested',
+        relatedOrderId: 'return-related-shopify-id',
+        date: '2026-05-15T12:08:00.000Z',
+        customer: 'Customer unavailable',
+        reason: 'Return requested',
+        amount: 'TRY 0.00',
+        itemTitle: 'Returned trainer',
+        displayTitle: 'Returned trainer',
+        refundedSkus: ['FQ1833-200-41'],
+      },
+    ]);
+    getFinanceDashboardMock.mockResolvedValueOnce({
+      summary: {
+        grossSales: 'TRY 0.00',
+        refunds: 'TRY 0.00',
+        netRevenue: 'TRY 0.00',
+        platformFee: 'TRY 0.00',
+        payoutEstimate: 'TRY 0.00',
+        totalRevenue: 'TRY 0.00',
+        availableBalance: 'TRY 0.00',
+        pendingPayouts: 'TRY 0.00',
+        refundsThisMonth: 'TRY 0.00',
+      },
+      transactions: [
+        {
+          id: 'finance-1028',
+          date: '2026-05-15T12:08:00.000Z',
+          description: 'Sale recorded',
+          counterparty: 'Shopify',
+          category: 'Payout',
+          amount: 'TRY 4,999.00',
+          status: 'Pending',
+          shopifyOrderNumber: null,
+          shopifyOrderId: 'gid://shopify/Order/7616544244049',
+        },
+      ],
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Returned trainer')).toBeInTheDocument();
+    expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
+  });
+
   it('does not show provider response internals to vendors', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

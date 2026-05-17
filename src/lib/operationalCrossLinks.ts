@@ -1,4 +1,5 @@
 import type { SupportTicket } from './api/contracts';
+import { normalizeOrderNumber, sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from './shopifyIdentifiers';
 
 export type OperationalAudience = 'admin' | 'vendor';
 export type OperationalVisibility = 'all' | 'admin';
@@ -39,20 +40,14 @@ function ticketMatchesAudience(ticket: SupportTicket, options: OperationalMatchO
 }
 
 export function normalizeOperationalOrderNumber(value: string | number | null | undefined) {
-  const text = String(value ?? '').trim();
-  if (!text) {
-    return '';
-  }
-  return text.replace(/^#+/, '').trim().toLowerCase();
+  return normalizeOrderNumber(value);
 }
 
 export function sameOperationalOrderNumber(
   left: string | number | null | undefined,
   right: string | number | null | undefined,
 ) {
-  const normalizedLeft = normalizeOperationalOrderNumber(left);
-  const normalizedRight = normalizeOperationalOrderNumber(right);
-  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+  return sameOrderNumber(left, right);
 }
 
 export function getSnapshotString(snapshot: unknown, key: string) {
@@ -134,8 +129,8 @@ export function supportTicketMatchesFinance(
     getSnapshotString(ticket.contextSnapshot, 'sourceShopifyOrderNumber');
 
   return Boolean(
-    (financeLedgerEntryId && snapshotFinanceId === financeLedgerEntryId) ||
-      (refundId && snapshotRefundId === refundId) ||
+    (financeLedgerEntryId && sameNormalizedIdentifier(snapshotFinanceId, financeLedgerEntryId)) ||
+      (refundId && sameShopifyIdentifier(snapshotRefundId, refundId)) ||
       sameOperationalOrderNumber(snapshotOrderNumber, orderNumber),
   );
 }

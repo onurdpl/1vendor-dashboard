@@ -47,6 +47,7 @@ function ticket(overrides: Partial<SupportTicket>): SupportTicket {
 describe('operational cross-link helpers', () => {
   it('formats Shopify order numbers without duplicated prefixes', () => {
     expect(normalizeOperationalOrderNumber('#1029')).toBe('1029');
+    expect(normalizeOperationalOrderNumber('Order #1029')).toBe('1029');
     expect(sameOperationalOrderNumber('#1029', '1029')).toBe(true);
   });
 
@@ -57,6 +58,17 @@ describe('operational cross-link helpers', () => {
         ticket({ contextId: 'other', contextSnapshot: { orderNumber: '#1029', customerEmail: 'hidden@example.com' } }),
         'alloc-1',
         '1029',
+      ),
+    ).toBe(true);
+  });
+
+  it('matches finance support links across Shopify refund GID and numeric forms', () => {
+    expect(
+      supportTicketMatchesFinance(
+        ticket({ contextSnapshot: { sourceShopifyRefundId: 'gid://shopify/Refund/5002' } }),
+        'ledger-1',
+        null,
+        '5002',
       ),
     ).toBe(true);
   });

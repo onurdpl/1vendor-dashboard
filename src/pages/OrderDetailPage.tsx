@@ -31,6 +31,7 @@ import {
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
+import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -274,7 +275,7 @@ export function OrderDetailPage() {
         (returnRecord) =>
           returnRecord.relatedOrderId === order?.id ||
           sameOperationalOrderNumber(returnRecord.sourceShopifyOrderNumber, order?.sourceShopifyOrderNumber) ||
-          returnRecord.sourceShopifyOrderId === order?.sourceShopifyOrderId,
+          sameShopifyIdentifier(returnRecord.sourceShopifyOrderId, order?.sourceShopifyOrderId),
       ),
     [order?.id, order?.sourceShopifyOrderId, order?.sourceShopifyOrderNumber, relatedReturnsData],
   );
@@ -283,7 +284,7 @@ export function OrderDetailPage() {
       (relatedFinanceData?.transactions ?? []).filter(
         (record) =>
           sameOperationalOrderNumber(record.shopifyOrderNumber, order?.sourceShopifyOrderNumber) ||
-          record.shopifyOrderId === order?.sourceShopifyOrderId,
+          sameShopifyIdentifier(record.shopifyOrderId, order?.sourceShopifyOrderId),
       ),
     [order?.sourceShopifyOrderId, order?.sourceShopifyOrderNumber, relatedFinanceData?.transactions],
   );

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -20,6 +20,7 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { SupportTicketModal } from '../components/SupportTicketModal';
+import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -417,26 +418,18 @@ function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) 
   };
 }
 
-function normalizeReturnLookup(value: string | number | null | undefined) {
-  const text = String(value ?? '').trim();
-  if (!text) {
-    return '';
-  }
-  return text.replace(/^#+/, '').toLowerCase();
-}
-
 function returnMatchesTarget(item: ReturnSummary, target: string | null) {
   if (!target) {
     return false;
   }
 
-  const normalizedTarget = normalizeReturnLookup(target);
   return (
-    item.id === target ||
-    item.sourceShopifyOrderId === target ||
-    item.sourceShopifyRefundId === target ||
-    item.sourceShopifyReturnId === target ||
-    normalizeReturnLookup(item.sourceShopifyOrderNumber) === normalizedTarget
+    sameNormalizedIdentifier(item.id, target) ||
+    sameNormalizedIdentifier(item.relatedOrderId, target) ||
+    sameNormalizedIdentifier(item.sourceShopifyOrderId, target) ||
+    sameNormalizedIdentifier(item.sourceShopifyRefundId, target) ||
+    sameNormalizedIdentifier(item.sourceShopifyReturnId, target) ||
+    sameNormalizedIdentifier(item.sourceShopifyOrderNumber, target)
   );
 }
 
@@ -462,9 +455,22 @@ export function ReturnsPage() {
   const isAdmin = currentUser?.role === 'admin';
   const requestedReturnTarget =
     searchParams.get('returnId') ??
+    searchParams.get('id') ??
+    searchParams.get('return') ??
     searchParams.get('shopifyReturnId') ??
+    searchParams.get('sourceShopifyReturnId') ??
     searchParams.get('refundId') ??
+    searchParams.get('shopifyRefundId') ??
+    searchParams.get('sourceShopifyRefundId') ??
+    searchParams.get('orderId') ??
+    searchParams.get('shopifyOrderId') ??
+    searchParams.get('shopifyOrderNumber') ??
+    searchParams.get('orderNumber') ??
     searchParams.get('order');
+
+  useEffect(() => {
+    setSelectedReturnId(null);
+  }, [requestedReturnTarget]);
 
   const vendorLookup = useMemo(() => {
     return new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));

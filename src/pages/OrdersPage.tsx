@@ -19,6 +19,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../features/orders/api';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -101,34 +102,15 @@ function getItemInitials(name: string) {
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
 }
 
-function normalizeOrderLookup(value: string | number | null | undefined) {
-  const text = String(value ?? '').trim();
-  if (!text) {
-    return '';
-  }
-  return text.replace(/^order\s*/i, '').replace(/^#+/, '').toLowerCase();
-}
-
-function normalizeShopifyOrderId(value: string | number | null | undefined) {
-  const text = String(value ?? '').trim();
-  if (!text) {
-    return '';
-  }
-  return text.split('/').filter(Boolean).pop()?.toLowerCase() ?? text.toLowerCase();
-}
-
 function orderMatchesTarget(order: OrderSummary, target: string | null) {
   if (!target) {
     return false;
   }
 
-  const normalizedTarget = normalizeOrderLookup(target);
-  const normalizedShopifyTarget = normalizeShopifyOrderId(target);
   return (
-    normalizeOrderLookup(order.id) === normalizedTarget ||
-    normalizeOrderLookup(order.sourceShopifyOrderId) === normalizedTarget ||
-    normalizeShopifyOrderId(order.sourceShopifyOrderId) === normalizedShopifyTarget ||
-    normalizeOrderLookup(order.sourceShopifyOrderNumber) === normalizedTarget
+    sameNormalizedIdentifier(order.id, target) ||
+    sameNormalizedIdentifier(order.sourceShopifyOrderId, target) ||
+    sameNormalizedIdentifier(order.sourceShopifyOrderNumber, target)
   );
 }
 

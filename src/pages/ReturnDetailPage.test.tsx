@@ -182,6 +182,38 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
   });
 
+  it('links to Orders with a query parameter when the related order id is a Shopify id', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      relatedOrderId: 'gid://shopify/Order/1023',
+      sourceShopifyOrderId: 'gid://shopify/Order/1023',
+    });
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Return request' });
+    const orderLinks = screen
+      .getAllByText('Order #1023')
+      .map((element) => element.closest('a'))
+      .filter(Boolean);
+
+    expect(orderLinks.some((link) => link?.getAttribute('href') === '/orders?shopifyOrderId=gid%3A%2F%2Fshopify%2FOrder%2F1023')).toBe(true);
+  });
+
+  it('keeps internal order route ids in the linked order route segment', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Return request' });
+    const orderLinks = screen
+      .getAllByText('Order #1023')
+      .map((element) => element.closest('a'))
+      .filter(Boolean);
+
+    expect(orderLinks.some((link) => link?.getAttribute('href') === '/orders/ORD-1023')).toBe(true);
+  });
+
   it('renders actual Shopify return reason and customer note when available', async () => {
     getReturnMock.mockResolvedValue({
       ...returnDetail,

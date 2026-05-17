@@ -27,6 +27,7 @@ import {
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
+import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -209,6 +210,28 @@ function getItemKey(item: ReturnLineItem) {
   return `${item.id}-${item.sku}-${item.name}`;
 }
 
+function buildLinkedOrderHref(returnRequest: ReturnDetail) {
+  const relatedOrderId = returnRequest.relatedOrderId?.trim();
+  const relatedOrderLooksInternal =
+    Boolean(relatedOrderId) &&
+    !sameShopifyIdentifier(relatedOrderId, returnRequest.sourceShopifyOrderId) &&
+    !sameOrderNumber(relatedOrderId, returnRequest.sourceShopifyOrderNumber);
+
+  if (relatedOrderId && relatedOrderLooksInternal) {
+    return `/orders/${encodeURIComponent(relatedOrderId)}`;
+  }
+
+  if (returnRequest.sourceShopifyOrderId) {
+    return `/orders?shopifyOrderId=${encodeURIComponent(returnRequest.sourceShopifyOrderId)}`;
+  }
+
+  if (returnRequest.sourceShopifyOrderNumber) {
+    return `/orders?order=${encodeURIComponent(String(returnRequest.sourceShopifyOrderNumber))}`;
+  }
+
+  return undefined;
+}
+
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const location = useLocation();
@@ -338,7 +361,7 @@ export function ReturnDetailPage() {
   };
   const relatedFinanceRecords = (relatedFinanceData?.transactions ?? []).filter(
     (record) =>
-      (returnRequest.sourceShopifyRefundId && record.shopifyRefundId === returnRequest.sourceShopifyRefundId) ||
+      (returnRequest.sourceShopifyRefundId && sameShopifyIdentifier(record.shopifyRefundId, returnRequest.sourceShopifyRefundId)) ||
       sameOperationalOrderNumber(record.shopifyOrderNumber, returnRequest.sourceShopifyOrderNumber),
   );
   const relatedSupportTickets = (relatedSupportTicketsData ?? []).filter((ticket) =>
@@ -355,7 +378,7 @@ export function ReturnDetailPage() {
       eyebrow: 'Order',
       title: `Order ${formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}`,
       description: 'Original order for this return.',
-      href: `/orders/${returnRequest.relatedOrderId}`,
+      href: buildLinkedOrderHref(returnRequest),
       status: 'Linked',
       tone: 'info',
     },
