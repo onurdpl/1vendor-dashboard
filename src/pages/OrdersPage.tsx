@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -106,7 +106,15 @@ function normalizeOrderLookup(value: string | number | null | undefined) {
   if (!text) {
     return '';
   }
-  return text.replace(/^#+/, '').toLowerCase();
+  return text.replace(/^order\s*/i, '').replace(/^#+/, '').toLowerCase();
+}
+
+function normalizeShopifyOrderId(value: string | number | null | undefined) {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return '';
+  }
+  return text.split('/').filter(Boolean).pop()?.toLowerCase() ?? text.toLowerCase();
 }
 
 function orderMatchesTarget(order: OrderSummary, target: string | null) {
@@ -115,9 +123,11 @@ function orderMatchesTarget(order: OrderSummary, target: string | null) {
   }
 
   const normalizedTarget = normalizeOrderLookup(target);
+  const normalizedShopifyTarget = normalizeShopifyOrderId(target);
   return (
-    order.id === target ||
-    order.sourceShopifyOrderId === target ||
+    normalizeOrderLookup(order.id) === normalizedTarget ||
+    normalizeOrderLookup(order.sourceShopifyOrderId) === normalizedTarget ||
+    normalizeShopifyOrderId(order.sourceShopifyOrderId) === normalizedShopifyTarget ||
     normalizeOrderLookup(order.sourceShopifyOrderNumber) === normalizedTarget
   );
 }
@@ -140,7 +150,14 @@ export function OrdersPage() {
   const requestedOrderTarget =
     searchParams.get('orderId') ??
     searchParams.get('shopifyOrderId') ??
+    searchParams.get('shopifyOrderNumber') ??
+    searchParams.get('orderNumber') ??
+    searchParams.get('id') ??
     searchParams.get('order');
+
+  useEffect(() => {
+    setSelectedOrderId(null);
+  }, [requestedOrderTarget]);
 
   const rankedOrders = useMemo(() => {
     const rank = (order: OrderSummary) => {

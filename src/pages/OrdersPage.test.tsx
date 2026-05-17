@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -97,8 +97,18 @@ function renderOrdersPage(initialEntries = ['/orders']) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+
+  return { promise, resolve };
+}
+
 describe('OrdersPage control center', () => {
   beforeEach(() => {
+    cleanup();
     window.localStorage.clear();
     setToken('test-token');
     setCurrentUser({
@@ -186,8 +196,63 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?order=1030']);
 
     expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
-    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' });
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
     expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+  });
+
+  it('selects the order requested by Shopify order id segment', async () => {
+    const firstOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1001',
+      sourceShopifyOrderId: 'gid://shopify/Order/7616544244001',
+      sourceShopifyOrderNumber: '#1001',
+      customer: 'First Customer',
+      date: '2026-05-09T09:20:00Z',
+    };
+    const targetOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1030',
+      sourceShopifyOrderId: 'gid://shopify/Order/7616544244030',
+      sourceShopifyOrderNumber: '#1030',
+      customer: 'Target Customer',
+      date: '2026-05-08T09:20:00Z',
+    };
+    listOrdersMock.mockResolvedValue([toSummary(firstOrder), toSummary(targetOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => {
+      if (orderId === 'ORD-A-1030') {
+        return targetOrder;
+      }
+      return firstOrder;
+    });
+
+    renderOrdersPage(['/orders?shopifyOrderId=7616544244030']);
+
+    expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
+    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+  });
+
+  it('defers linked unavailable state until async order data finishes loading', async () => {
+    const ordersResult = deferred<OrderSummary[]>();
+    const targetOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1030',
+      sourceShopifyOrderId: 'gid://shopify/Order/1030',
+      sourceShopifyOrderNumber: '#1030',
+      customer: 'Target Customer',
+    };
+    listOrdersMock.mockReturnValue(ordersResult.promise);
+    getOrderMock.mockResolvedValue(targetOrder);
+
+    renderOrdersPage(['/orders?order=1030']);
+
+    expect(screen.getAllByText('Loading orders').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Linked order unavailable')).not.toBeInTheDocument();
+
+    ordersResult.resolve([toSummary(targetOrder)]);
+
+    expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
   });
 
   it('does not select the first order when a linked query target is unavailable', async () => {
