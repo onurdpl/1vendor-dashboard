@@ -154,6 +154,10 @@ export function AdminDiagnosticsPage() {
     runtimeServices.observability.summary(),
     { enabled: appReadiness.ready },
   );
+  const runtimeHealthQuery = useQueryResource(queryKeys.admin.runtime.health(), () =>
+    runtimeServices.runtime.health(),
+    { enabled: appReadiness.ready && isRealMode },
+  );
 
   const latestWebhookEventId = selectedWebhookEventId ?? webhooksQuery.data?.events[0]?.id ?? null;
 
@@ -298,7 +302,8 @@ export function AdminDiagnosticsPage() {
     ?? reconciliationQuery.diagnostics
     ?? syncEventsQuery.diagnostics
     ?? webhookDetailQuery.diagnostics
-    ?? observabilityQuery.diagnostics;
+    ?? observabilityQuery.diagnostics
+    ?? runtimeHealthQuery.diagnostics;
 
   const combinedCounts = useMemo(() => {
     return {
@@ -383,6 +388,47 @@ export function AdminDiagnosticsPage() {
         <KPIStatCard label="Replayable" value={combinedCounts.replayable} detail="Safe idempotent retry" tone="info" />
         <KPIStatCard label="Retry pressure" value={combinedCounts.retryPressure} detail={`${combinedCounts.deadLetterReady} dead-letter`} tone={combinedCounts.retryPressure > 0 ? 'warning' : 'success'} />
       </div>
+
+      <OperationalSection
+        title="Deployment runtime"
+        description="Safe production verification metadata for frontend/backend alignment after deploys."
+      >
+        <div className="deployment-runtime-grid">
+          <MetadataGroup title="Frontend build">
+            <MetadataRow label="Mode" value={runtimeConfig.apiMode} />
+            <MetadataRow label="Environment" value={runtimeConfig.appEnvironment} />
+            <MetadataRow label="Version" value={runtimeConfig.appVersion} />
+            <MetadataRow label="Git commit" value={runtimeConfig.gitCommit ?? 'Not provided'} />
+            <MetadataRow label="Build timestamp" value={runtimeConfig.buildTimestamp ?? 'Not provided'} />
+            <MetadataRow label="API origin" value={runtimeConfig.apiBaseOrigin} />
+            <MetadataRow
+              label="Startup checks"
+              value={runtimeConfig.startupIssues.length ? runtimeConfig.startupIssues.join(' ') : 'Clear'}
+            />
+          </MetadataGroup>
+          <MetadataGroup title="Backend health">
+            <MetadataRow label="Status" value={runtimeHealthQuery.data?.status ?? (runtimeHealthQuery.isError ? 'Unavailable' : 'Checking')} />
+            <MetadataRow label="Environment" value={runtimeHealthQuery.data?.environment ?? 'Unknown'} />
+            <MetadataRow label="Version" value={runtimeHealthQuery.data?.version ?? 'Unknown'} />
+            <MetadataRow label="Git commit" value={runtimeHealthQuery.data?.gitCommit ?? 'Not provided'} />
+            <MetadataRow label="Database" value={runtimeHealthQuery.data?.dbReachable ? 'Reachable' : 'Not confirmed'} />
+            <MetadataRow label="Migration table" value={runtimeHealthQuery.data?.migrationsReachable ? 'Reachable' : 'Not confirmed'} />
+            <MetadataRow label="Checked at" value={runtimeHealthQuery.data ? formatDate(runtimeHealthQuery.data.timestamp) : 'Not checked'} />
+          </MetadataGroup>
+          <MetadataGroup title="Post-deploy verification">
+            <div className="deployment-check-links">
+              <Link to="/orders" className="button button-secondary button-compact">Orders</Link>
+              <Link to="/returns" className="button button-secondary button-compact">Returns</Link>
+              <Link to="/finance" className="button button-secondary button-compact">Finance</Link>
+              <Link to="/support" className="button button-secondary button-compact">Support</Link>
+              <Link to="/admin/operations" className="button button-secondary button-compact">Operations</Link>
+            </div>
+            <p className="page-description diagnostics-inline-note">
+              Open each workspace after deploy to confirm auth, vendor context, and API data load with the current frontend/backend build pair.
+            </p>
+          </MetadataGroup>
+        </div>
+      </OperationalSection>
 
       <div className="op-control-layout diagnostics-layout-redesign">
         <div className="op-main-column">

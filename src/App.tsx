@@ -9,6 +9,7 @@ import { RequirePermission } from './components/RequirePermission';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { runtimeConfig } from './config/runtime';
 
 const OrdersPage = lazy(() => import('./pages/OrdersPage').then((module) => ({ default: module.OrdersPage })));
 const OrderDetailPage = lazy(() =>
@@ -54,6 +55,19 @@ const loadingFallback = (
 );
 
 export default function App() {
+  const startupIssues = runtimeConfig.startupIssues ?? [];
+
+  if (startupIssues.length > 0) {
+    return (
+      <DataStatePanel
+        tone="error"
+        eyebrow="Startup configuration"
+        title="Runtime configuration needs attention"
+        description={startupIssues.join(' ')}
+      />
+    );
+  }
+
   return (
     <Routes>
       <Route element={<RedirectIfAuthed />}>

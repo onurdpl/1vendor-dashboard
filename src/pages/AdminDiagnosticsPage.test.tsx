@@ -17,12 +17,19 @@ const diagnosticsMocks = vi.hoisted(() => ({
   reconcileAllocation: vi.fn(),
   reconcileShopifyOrder: vi.fn(),
   observabilitySummary: vi.fn(),
+  runtimeHealth: vi.fn(),
 }));
 
 vi.mock('../config/runtime', () => ({
   runtimeConfig: {
     apiMode: 'real',
     apiBaseUrl: 'http://127.0.0.1:4000',
+    apiBaseOrigin: 'http://127.0.0.1:4000',
+    appEnvironment: 'test',
+    appVersion: '0.1.0',
+    buildTimestamp: '2026-05-17T10:00:00.000Z',
+    gitCommit: 'abc1234',
+    startupIssues: [],
   },
 }));
 
@@ -31,6 +38,9 @@ vi.mock('../services/runtime-services', () => ({
     diagnostics: diagnosticsMocks,
     observability: {
       summary: diagnosticsMocks.observabilitySummary,
+    },
+    runtime: {
+      health: diagnosticsMocks.runtimeHealth,
     },
   },
 }));
@@ -168,6 +178,7 @@ describe('AdminDiagnosticsPage control center', () => {
     diagnosticsMocks.reconcileAllocation.mockReset();
     diagnosticsMocks.reconcileShopifyOrder.mockReset();
     diagnosticsMocks.observabilitySummary.mockReset();
+    diagnosticsMocks.runtimeHealth.mockReset();
 
     diagnosticsMocks.webhooks.mockResolvedValue({
       summary: {
@@ -274,6 +285,17 @@ describe('AdminDiagnosticsPage control center', () => {
       },
       notes: ['1 operational job is dead-letter ready.'],
     });
+    diagnosticsMocks.runtimeHealth.mockResolvedValue({
+      ok: true,
+      status: 'ok',
+      service: 'vendor-dashboard-backend',
+      version: '0.1.0',
+      gitCommit: 'def5678',
+      environment: 'production',
+      timestamp: '2026-05-12T10:06:00Z',
+      dbReachable: true,
+      migrationsReachable: true,
+    });
   });
 
   it('surfaces blocked replay and recover reasons in the event detail panel', async () => {
@@ -290,10 +312,24 @@ describe('AdminDiagnosticsPage control center', () => {
     expect(screen.getByText('Retry pressure')).toBeInTheDocument();
   });
 
+  it('renders safe deployment runtime diagnostics without exposing secrets', async () => {
+    renderDiagnosticsPage();
+
+    expect(await screen.findByText('Deployment runtime')).toBeInTheDocument();
+    expect(screen.getAllByText('http://127.0.0.1:4000').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('def5678').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Reachable').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole('link', { name: 'Orders' })[0]).toHaveAttribute('href', '/orders');
+
+    const deploymentSectionText = screen.getAllByText('Deployment runtime')[0].closest('section')?.textContent ?? '';
+    expect(deploymentSectionText).not.toContain('Bearer');
+    expect(deploymentSectionText).not.toContain('token');
+  });
+
   it('shows operational retry action feedback for retryable jobs', async () => {
     renderDiagnosticsPage();
 
-    expect(await screen.findByText('Refund Sync')).toBeInTheDocument();
+    expect((await screen.findAllByText('Refund Sync')).length).toBeGreaterThan(0);
     await userEvent.click(screen.getAllByRole('button', { name: 'Retry' })[0]);
 
     expect(await screen.findByText('Retry scheduled after transient failure.')).toBeInTheDocument();

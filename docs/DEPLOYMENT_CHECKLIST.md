@@ -1,0 +1,112 @@
+# Deployment Checklist
+
+This checklist is for Render production deploys of the VendorOps frontend and backend. It is intentionally operational and conservative: deploy the backend first when database/API contracts change, then deploy the frontend that consumes those contracts.
+
+## Before Deploy
+
+- Confirm the branch contains the intended commit and no unrelated local changes.
+- Run local validation:
+  - `npm run build`
+  - `npm run test`
+  - `npm run backend:build`
+  - `npm run backend:typecheck`
+- Review Prisma migrations under `backend/prisma/migrations`.
+- Confirm production Render environment variables are present for the backend:
+  - `NODE_ENV=production`
+  - `DATABASE_URL`
+  - `CORS_ORIGIN`
+  - `JWT_SECRET`
+  - `JWT_EXPIRES_IN`
+  - `SHOPIFY_WEBHOOK_SECRET`
+  - `SHOPIFY_RETURN_WEBHOOK_SECRET` when return webhooks are enabled
+  - `SHOPIFY_FULFILLMENT_WEBHOOK_SECRET` when fulfillment webhooks are enabled
+  - `SHOPIFY_SHOP_DOMAIN`
+  - `SHOPIFY_ADMIN_ACCESS_TOKEN`
+  - `SHOPIFY_API_VERSION`
+  - provider gates such as `INVOICE_EXECUTION_ENABLED`, `BIZIMHESAP_ENABLED`, `SHIPPING_EXECUTION_ENABLED`, and `KARGO_ENTEGRATOR_ENABLED` only when intentionally live
+- Confirm production frontend variables:
+  - `VITE_API_MODE=real`
+  - `VITE_API_BASE_URL=<backend origin>`
+  - optional visibility metadata: `VITE_APP_ENV`, `VITE_APP_VERSION`, `VITE_BUILD_TIMESTAMP`, `VITE_GIT_COMMIT`
+
+## Backend Deploy
+
+- Deploy the backend service before the frontend when migrations or response contracts changed.
+- Render build command should install/build the backend from the monorepo context.
+- Apply Prisma migrations with the repo script:
+
+```bash
+npm run backend:db:deploy
+```
+
+- If Render shell access is unavailable, configure the backend service start command or deploy step so `prisma migrate deploy` runs before `backend:start`, for example:
+
+```bash
+npm run backend:db:deploy && npm run backend:start
+```
+
+- `prisma migrate deploy` is idempotent for already-applied migrations. If it fails, stop the deploy and inspect the migration error before restarting the service.
+- Do not use `prisma db push` for production schema changes.
+
+## Frontend Deploy
+
+- Deploy the frontend after the backend is healthy.
+- Confirm SPA fallback remains configured so direct routes such as `/orders`, `/returns/:id`, `/finance`, and `/admin/diagnostics` load the app shell.
+- Confirm `VITE_API_BASE_URL` points to the production backend origin, not localhost.
+- If auth/session code changed, expect users with old browser sessions to be redirected to login with the expired-session message.
+
+## Post-Deploy Verification
+
+- Open backend health:
+
+```bash
+curl -sS <BACKEND_URL>/health
+```
+
+Expected safe fields:
+- `ok`
+- `status`
+- `service`
+- `version`
+- `environment`
+- `dbReachable`
+- `migrationsReachable`
+- `timestamp`
+
+- Open frontend as admin and visit `/admin/diagnostics`.
+- In the Deployment runtime section, verify:
+  - frontend mode is `real`
+  - API origin matches the backend origin
+  - backend health is reachable
+  - database is reachable
+  - migration table is reachable
+  - frontend/backend version or git metadata matches the expected deploy
+- Use the post-deploy links on `/admin/diagnostics` to verify:
+  - Orders loads
+  - Returns loads
+  - Finance loads
+  - Support loads
+  - Operations loads
+  - admin vendor switching still loads scoped data
+- As a vendor user, verify one vendor-scoped page loads and does not expose admin diagnostics.
+
+## Migration Safety
+
+- Runtime health checks confirm database and `_prisma_migrations` table reachability only.
+- They do not prove whether every local migration file has been applied. Use `npm run backend:db:deploy` during backend deploy for authoritative Prisma migration application.
+- If `migrationsReachable=false` but `dbReachable=true`, do not proceed with frontend verification until the backend migration deploy path is checked.
+
+## Rollback Guidance
+
+- Prefer rolling back frontend first when the issue is display-only or a frontend/backend version mismatch.
+- Roll back backend only after confirming the previous backend can run against the current production schema.
+- Do not roll back a migration by deleting production data. Create a forward fix migration if schema repair is required.
+- If users see unexpected Unauthorized after rollback/deploy, have them sign in again; stale sessions are cleared on backend `401`.
+
+## Stop Conditions
+
+- Backend `/health` reports database unreachable.
+- Prisma migration deploy fails.
+- Admin diagnostics cannot load with a fresh admin session.
+- Vendor-scoped Orders/Returns/Finance pages return true authorization failures for a valid vendor session.
+- Frontend Deployment runtime shows API origin pointing to localhost or the wrong backend service.

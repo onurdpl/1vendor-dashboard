@@ -3,6 +3,10 @@ type ApiMode = 'mock' | 'real';
 type RuntimeEnv = ImportMeta['env'] & {
   VITE_API_MODE?: string;
   VITE_API_BASE_URL?: string;
+  VITE_APP_ENV?: string;
+  VITE_APP_VERSION?: string;
+  VITE_BUILD_TIMESTAMP?: string;
+  VITE_GIT_COMMIT?: string;
 };
 
 const env = import.meta.env as RuntimeEnv;
@@ -22,9 +26,42 @@ function resolveApiBaseUrl(mode: ApiMode) {
   return mode === 'real' ? 'http://127.0.0.1:4000' : '/api';
 }
 
+function resolveApiBaseOrigin(apiBaseUrl: string) {
+  try {
+    const fallbackOrigin = typeof window === 'undefined' ? 'https://vendor-dashboard.local' : window.location.origin;
+    return new URL(apiBaseUrl, fallbackOrigin).origin;
+  } catch {
+    return 'unavailable';
+  }
+}
+
+function getStartupIssues(mode: ApiMode, apiBaseUrl: string) {
+  const issues: string[] = [];
+
+  if (mode === 'real' && !env.VITE_API_BASE_URL?.trim()) {
+    issues.push('Real API mode requires VITE_API_BASE_URL.');
+  }
+
+  if (mode === 'real' && apiBaseUrl.includes('127.0.0.1')) {
+    issues.push('Real API mode is pointing at a local backend URL.');
+  }
+
+  return issues;
+}
+
+const apiMode = resolveApiMode();
+const apiBaseUrl = resolveApiBaseUrl(apiMode);
+const gitCommit = env.VITE_GIT_COMMIT?.trim() ? env.VITE_GIT_COMMIT.trim().slice(0, 12) : null;
+
 export const runtimeConfig = {
-  apiMode: resolveApiMode(),
-  apiBaseUrl: resolveApiBaseUrl(resolveApiMode()),
+  apiMode,
+  apiBaseUrl,
+  apiBaseOrigin: resolveApiBaseOrigin(apiBaseUrl),
+  appEnvironment: env.VITE_APP_ENV?.trim() || env.MODE || 'development',
+  appVersion: env.VITE_APP_VERSION?.trim() || '0.1.0',
+  buildTimestamp: env.VITE_BUILD_TIMESTAMP?.trim() || null,
+  gitCommit,
+  startupIssues: getStartupIssues(apiMode, apiBaseUrl),
 } as const;
 
 if (typeof console !== 'undefined') {

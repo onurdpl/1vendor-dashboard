@@ -47,6 +47,55 @@ function normalizeRequestId(value: unknown) {
   return sanitized || null;
 }
 
+function getBackendBuildInfo(env: ReturnType<typeof loadEnv>) {
+  const rawCommit =
+    process.env.RENDER_GIT_COMMIT ||
+    process.env.GIT_COMMIT ||
+    process.env.COMMIT_SHA ||
+    process.env.SOURCE_VERSION ||
+    null;
+  const gitCommit = rawCommit?.trim() ? rawCommit.trim().slice(0, 12) : null;
+
+  return {
+    service: 'vendor-dashboard-backend',
+    version: process.env.npm_package_version || '0.1.0',
+    gitCommit,
+    environment: env.NODE_ENV,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
+  if (!env.DATABASE_URL) {
+    return {
+      dbReachable: false,
+      migrationsReachable: false,
+    };
+  }
+
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+  } catch {
+    return {
+      dbReachable: false,
+      migrationsReachable: false,
+    };
+  }
+
+  try {
+    await prisma.$queryRaw`SELECT COUNT(*) FROM "_prisma_migrations"`;
+    return {
+      dbReachable: true,
+      migrationsReachable: true,
+    };
+  } catch {
+    return {
+      dbReachable: true,
+      migrationsReachable: false,
+    };
+  }
+}
+
 export function createApp() {
   const env = loadEnv();
   const app = Fastify({
@@ -125,13 +174,21 @@ export function createApp() {
   });
 
   app.get('/health', async () => {
-    return { ok: true };
+    const database = await getDatabaseHealth(env);
+    const status = database.dbReachable ? 'ok' : 'degraded';
+
+    return {
+      ok: true,
+      status,
+      ...getBackendBuildInfo(env),
+      dbReachable: database.dbReachable,
+      migrationsReachable: database.migrationsReachable,
+    };
   });
 
   app.get('/version', async () => {
     return {
-      service: 'vendor-dashboard-backend',
-      version: '0.1.0',
+      ...getBackendBuildInfo(env),
       nodeEnv: env.NODE_ENV,
     };
   });
@@ -154,7 +211,7 @@ export function createApp() {
       return {
         ok: false,
         status: 'unavailable',
-        message: error instanceof Error ? error.message : 'Database check failed.',
+        message: 'Database check failed.',
       };
     }
   });

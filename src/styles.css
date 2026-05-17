@@ -3142,6 +3142,32 @@ h3 {
   background: var(--op-surface);
 }
 
+.deployment-runtime-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.deployment-runtime-grid .op-meta-group {
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--op-border);
+  border-radius: 14px;
+  background: #f8fafc;
+}
+
+.deployment-check-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+@media (max-width: 1100px) {
+  .deployment-runtime-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .diagnostics-control-center .op-side-panel {
   gap: 8px;
   padding: 10px;

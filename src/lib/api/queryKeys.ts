@@ -17,6 +17,9 @@ export const queryKeys = {
       summary: () => ['admin', 'observability', 'summary'] as const,
       metrics: () => ['admin', 'observability', 'metrics'] as const,
     },
+    runtime: {
+      health: () => ['admin', 'runtime', 'health'] as const,
+    },
     orders: {
       breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,
     },

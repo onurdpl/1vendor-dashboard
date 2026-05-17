@@ -21,6 +21,7 @@ import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
+import * as realRuntime from './real/runtime';
 import type {
   CreateSupportTicketInput,
   SupportAnalytics,
@@ -190,6 +191,22 @@ function buildMockSupportAnalytics(): SupportAnalytics {
 }
 
 export const runtimeServices = {
+  runtime: {
+    health: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realRuntime.getBackendHealth()
+        : Promise.resolve({
+            ok: true,
+            status: 'ok' as const,
+            service: 'vendor-dashboard-backend',
+            version: 'mock',
+            gitCommit: null,
+            environment: 'mock',
+            timestamp: new Date().toISOString(),
+            dbReachable: false,
+            migrationsReachable: false,
+          }),
+  },
   auth: {
     async login(email: string, password: string): Promise<{ token: string; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
