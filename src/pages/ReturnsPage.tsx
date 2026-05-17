@@ -423,7 +423,7 @@ export function ReturnsPage() {
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
-  const { data: returns, isLoading, isError, error } = useQueryResource(
+  const { data: returns, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     () => listReturns({ vendorId: currentVendor.vendorId }),
     { enabled: authContextReady },
@@ -553,6 +553,7 @@ export function ReturnsPage() {
         eyebrow="Returns"
         title="Returns unavailable"
         description={error ?? 'Unable to load returns.'}
+        diagnostics={diagnostics}
       />
     );
   }

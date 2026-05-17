@@ -207,7 +207,7 @@ export function SupportTicketDetailPage() {
   const queryKey = isAdmin
     ? queryKeys.admin.support.detail(ticketId ?? 'missing')
     : queryKeys.support.detail(ticketId ?? 'missing', currentVendor.vendorId);
-  const { data: ticket, isLoading, isError, error, refetch } = useQueryResource(
+  const { data: ticket, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKey,
     () => {
       if (!ticketId) {
@@ -359,6 +359,7 @@ export function SupportTicketDetailPage() {
         eyebrow="Support"
         title="Support ticket unavailable"
         description={error ?? 'Unable to load support ticket.'}
+        diagnostics={diagnostics}
       />
     );
   }

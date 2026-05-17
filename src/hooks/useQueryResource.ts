@@ -1,5 +1,5 @@
 import { useQuery, type QueryKey, type UseQueryOptions } from '@tanstack/react-query';
-import { ApiError } from '../lib/api';
+import { ApiError, getApiErrorDiagnostics } from '../lib/api';
 
 type ResourceStatus = 'idle' | 'loading' | 'success' | 'error';
 
@@ -31,6 +31,8 @@ export function useQueryResource<TData>(
   return {
     data: query.data ?? null,
     error: query.error ? getErrorMessage(query.error) : null,
+    errorObject: query.error ?? null,
+    diagnostics: getApiErrorDiagnostics(query.error),
     status,
     isIdle: status === 'idle',
     isLoading: query.isPending,

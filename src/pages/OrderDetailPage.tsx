@@ -140,7 +140,7 @@ export function OrderDetailPage() {
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
-  const { data: order, isLoading, isError, error, refetch } = useQueryResource(
+  const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
       if (!orderId) {
@@ -344,6 +344,7 @@ export function OrderDetailPage() {
         eyebrow="Orders"
         title="Order unavailable"
         description={error ?? 'The selected order could not be loaded.'}
+        diagnostics={diagnostics}
         actionLabel="Back to orders"
         actionTo="/orders"
       />

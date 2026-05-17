@@ -141,7 +141,7 @@ export function DashboardPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
-  const { data: dashboard, isLoading, isError, error, refetch: refetchDashboard } = useQueryResource(
+  const { data: dashboard, isLoading, isError, error, diagnostics, refetch: refetchDashboard } = useQueryResource(
     queryKeys.dashboard.overview(vendorId),
     () => getDashboardOverview(vendorId),
     { enabled: appReadiness.ready },
@@ -286,11 +286,13 @@ export function DashboardPage() {
   if (isError || !dashboard) {
     return (
       <section className="dashboard dashboard-workspace">
-        <article className="panel operational-card">
-          <p className="eyebrow">Dashboard</p>
-          <h2>Operational overview unavailable</h2>
-          <p className="page-description">{error ?? 'The backend-derived dashboard overview could not be loaded.'}</p>
-        </article>
+        <DataStatePanel
+          tone="error"
+          eyebrow="Dashboard"
+          title="Operational overview unavailable"
+          description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
+          diagnostics={diagnostics}
+        />
         {message ? <ActionFeedback tone={tone} message={message} /> : null}
       </section>
     );

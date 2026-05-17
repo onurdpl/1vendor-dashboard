@@ -335,7 +335,7 @@ export function FinancePage() {
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
-  const { data: finance, isLoading, isError, error, refetch } = useQueryResource(
+  const { data: finance, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
     { enabled: authContextReady },
@@ -705,6 +705,7 @@ export function FinancePage() {
         eyebrow="Finance"
         title="Finance unavailable"
         description={error ?? 'The financial overview could not be loaded.'}
+        diagnostics={diagnostics}
       />
     );
   }

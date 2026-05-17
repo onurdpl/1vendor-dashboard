@@ -105,7 +105,7 @@ export function OrdersPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
-  const { data: orders, isLoading, isError, error } = useQueryResource(
+  const { data: orders, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     () => listOrders({ vendorId: currentVendor.vendorId }),
     { enabled: authContextReady },
@@ -231,6 +231,7 @@ export function OrdersPage() {
         eyebrow="Orders"
         title="Orders unavailable"
         description={error ?? 'Unable to load orders.'}
+        diagnostics={diagnostics}
       />
     );
   }

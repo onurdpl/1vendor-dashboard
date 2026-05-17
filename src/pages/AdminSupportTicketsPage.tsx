@@ -128,7 +128,7 @@ export function isAdminSupportEscalated(ticket: SupportTicket) {
 export function AdminSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
-  const { data: tickets, isLoading, isError, error } = useQueryResource(
+  const { data: tickets, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.admin.support.tickets(),
     listAdminSupportTickets,
     { enabled: appReadiness.ready },
@@ -202,6 +202,7 @@ export function AdminSupportTicketsPage() {
         eyebrow="Support"
         title="Support tickets unavailable"
         description={error ?? 'Unable to load support tickets.'}
+        diagnostics={diagnostics}
       />
     );
   }

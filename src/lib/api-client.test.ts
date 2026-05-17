@@ -58,12 +58,21 @@ describe('apiClient vendor-scoped headers', () => {
     window.history.pushState({}, '', '/orders?status=open#row-1029');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), {
       status: 401,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'req-expired-1' },
     }));
 
     await expect(apiClient.get('/orders', { vendorId: 'demo-vendor-a' })).rejects.toMatchObject({
       kind: 'unauthorized',
       status: 401,
+      diagnostics: {
+        endpoint: '/orders',
+        status: 401,
+        requestId: 'req-expired-1',
+        hasAuthHeader: true,
+        hasVendorHeader: true,
+        selectedVendorPresent: true,
+        readinessState: 'ready',
+      },
     } satisfies Partial<ApiError>);
 
     expect(getToken()).toBeNull();
@@ -72,5 +81,37 @@ describe('apiClient vendor-scoped headers', () => {
       message: EXPIRED_SESSION_MESSAGE,
       intendedPath: '/orders?status=open#row-1029',
     });
+  });
+
+  it('adds safe diagnostics to permission failures without exposing token values', async () => {
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Forbidden', requestId: 'body-req' }), {
+      status: 403,
+      headers: { 'Content-Type': 'application/json', 'X-Request-Id': 'header-req' },
+    }));
+
+    let caught: unknown;
+    try {
+      await apiClient.get('/orders?search=customer-name', { vendorId: 'demo-vendor-a' });
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(ApiError);
+    expect(caught).toMatchObject({
+      message: 'You do not have access to this workspace.',
+      kind: 'server',
+      status: 403,
+      diagnostics: {
+        endpoint: '/orders',
+        status: 403,
+        requestId: 'header-req',
+        hasAuthHeader: true,
+        hasVendorHeader: true,
+        selectedVendorPresent: true,
+        readinessState: 'ready',
+      },
+    } satisfies Partial<ApiError>);
+    expect(JSON.stringify((caught as ApiError).diagnostics)).not.toContain('test-token');
+    expect(JSON.stringify((caught as ApiError).diagnostics)).not.toContain('demo-vendor-a');
   });
 });

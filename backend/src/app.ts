@@ -1,6 +1,7 @@
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import type { OriginFunction } from '@fastify/cors';
+import { randomUUID } from 'node:crypto';
 import { loadEnv } from './config/env.js';
 import { prisma } from './db/prisma.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
@@ -26,6 +27,26 @@ import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execu
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
 
+declare module 'fastify' {
+  interface FastifyRequest {
+    requestId?: string;
+  }
+}
+
+function normalizeRequestId(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const sanitized = trimmed.slice(0, 128).replace(/[^a-zA-Z0-9._:-]/g, '');
+  return sanitized || null;
+}
+
 export function createApp() {
   const env = loadEnv();
   const app = Fastify({
@@ -45,12 +66,49 @@ export function createApp() {
     allowedHeaders: [
       'Authorization',
       'Content-Type',
+      'X-Request-Id',
       'X-Vendor-Id',
       'X-Shopify-Hmac-Sha256',
       'X-Shopify-Shop-Domain',
       'X-Shopify-Webhook-Id',
       'X-Shopify-Topic',
     ],
+    exposedHeaders: ['X-Request-Id'],
+  });
+
+  app.addHook('onRequest', async (request, reply) => {
+    const requestId = normalizeRequestId(request.headers['x-request-id']) ?? randomUUID();
+    request.requestId = requestId;
+    reply.header('X-Request-Id', requestId);
+  });
+
+  app.addHook('onSend', async (request, reply, payload) => {
+    if (request.requestId) {
+      reply.header('X-Request-Id', request.requestId);
+    }
+
+    if (reply.statusCode < 400 || !request.requestId || typeof payload !== 'string') {
+      return payload;
+    }
+
+    const contentType = String(reply.getHeader('content-type') ?? '');
+    if (!contentType.includes('application/json')) {
+      return payload;
+    }
+
+    try {
+      const parsed = JSON.parse(payload) as unknown;
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || 'requestId' in parsed) {
+        return payload;
+      }
+
+      return JSON.stringify({
+        ...parsed,
+        requestId: request.requestId,
+      });
+    } catch {
+      return payload;
+    }
   });
 
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {

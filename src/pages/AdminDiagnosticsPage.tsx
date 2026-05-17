@@ -294,6 +294,11 @@ export function AdminDiagnosticsPage() {
 
   const isLoading = !appReadiness.ready || webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? webhookDetailQuery.error;
+  const pageDiagnostics = webhooksQuery.diagnostics
+    ?? reconciliationQuery.diagnostics
+    ?? syncEventsQuery.diagnostics
+    ?? webhookDetailQuery.diagnostics
+    ?? observabilityQuery.diagnostics;
 
   const combinedCounts = useMemo(() => {
     return {
@@ -341,6 +346,7 @@ export function AdminDiagnosticsPage() {
         eyebrow="Admin diagnostics"
         title="Diagnostics unavailable"
         description={pageError ?? 'Diagnostics workspace could not be loaded.'}
+        diagnostics={pageDiagnostics}
       />
     );
   }

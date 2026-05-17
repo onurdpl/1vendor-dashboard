@@ -220,7 +220,7 @@ export function ReturnDetailPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
-  const { data: returnRequest, isLoading, isError, error, refetch } = useQueryResource(
+  const { data: returnRequest, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
     () => {
       if (!returnId) {
@@ -306,6 +306,7 @@ export function ReturnDetailPage() {
         eyebrow="Returns"
         title="Return unavailable"
         description={error ?? 'The selected return could not be loaded.'}
+        diagnostics={diagnostics}
         actionNode={
           <Link className="button button-secondary" to="/returns">
             Back to returns

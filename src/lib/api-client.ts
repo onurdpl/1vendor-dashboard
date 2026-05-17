@@ -1,5 +1,6 @@
 import { clearToken, getCurrentVendorContext, getToken } from './auth';
-import { ApiError } from './api/errors';
+import { ApiError, type ApiErrorDiagnostics } from './api/errors';
+import { getAppReadinessSnapshot } from './appReadiness';
 import { runtimeConfig } from '../config/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
@@ -55,7 +56,51 @@ function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   return headers;
 }
 
-async function parseResponse(response: Response) {
+function getDiagnosticEndpoint(path: string) {
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      return new URL(path).pathname || '/';
+    } catch {
+      return '/';
+    }
+  }
+
+  try {
+    return new URL(path, 'https://vendor-dashboard.local').pathname || '/';
+  } catch {
+    return path.startsWith('/') ? path.split('?')[0] : `/${path.split('?')[0]}`;
+  }
+}
+
+function getPayloadRequestId(payload: unknown) {
+  if (!payload || typeof payload !== 'object' || !('requestId' in payload)) {
+    return null;
+  }
+
+  const requestId = Reflect.get(payload, 'requestId');
+  return typeof requestId === 'string' && requestId.trim() ? requestId : null;
+}
+
+function createApiDiagnostics(
+  path: string,
+  headers: Headers,
+  response?: Response,
+  payload?: unknown,
+): ApiErrorDiagnostics {
+  const readiness = getAppReadinessSnapshot();
+
+  return {
+    endpoint: getDiagnosticEndpoint(path),
+    status: response?.status ?? null,
+    requestId: response?.headers.get('x-request-id') ?? getPayloadRequestId(payload),
+    hasAuthHeader: headers.has('Authorization'),
+    hasVendorHeader: headers.has('X-Vendor-Id'),
+    selectedVendorPresent: Boolean(readiness.currentVendor.vendorId),
+    readinessState: readiness.status,
+  };
+}
+
+async function parseResponse(response: Response, diagnostics?: ApiErrorDiagnostics) {
   if (response.status === 204) {
     return null;
   }
@@ -71,7 +116,10 @@ async function parseResponse(response: Response) {
     try {
       return JSON.parse(rawBody) as unknown;
     } catch {
-      throw new ApiError('Received an invalid JSON response from the backend.', 'invalid-response');
+      throw new ApiError('Received an invalid JSON response from the backend.', 'invalid-response', {
+        status: response.status,
+        diagnostics,
+      });
     }
   }
 
@@ -80,34 +128,42 @@ async function parseResponse(response: Response) {
 
 async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
   const hasBody = options.body !== undefined;
+  const headers = createHeaders(options, hasBody);
 
   try {
     const response = await fetch(buildUrl(path), {
       method: options.method ?? 'GET',
-      headers: createHeaders(options, hasBody),
+      headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
     });
 
-    const payload = await parseResponse(response);
+    const parseDiagnostics = createApiDiagnostics(path, headers, response);
+    const payload = await parseResponse(response, parseDiagnostics);
 
     if (!response.ok) {
+      const diagnostics = createApiDiagnostics(path, headers, response, payload);
+
       if (response.status === 401) {
         clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
       }
 
-      const message =
+      const backendMessage =
         payload && typeof payload === 'object' && 'message' in payload && typeof payload.message === 'string'
           ? payload.message
-          : response.status === 401
-            ? 'Unauthorized request.'
-            : response.status === 403
-              ? 'You do not have access to this resource.'
-              : 'Backend request failed.';
+          : null;
+      const message = !diagnostics.hasVendorHeader && diagnostics.readinessState === 'loading_vendor_context'
+        ? 'Vendor context is still loading. Please retry.'
+        : response.status === 401
+          ? backendMessage ?? 'Unauthorized request.'
+          : response.status === 403
+            ? 'You do not have access to this workspace.'
+            : backendMessage ?? 'Backend request failed.';
 
       throw new ApiError(message, response.status === 401 ? 'unauthorized' : 'server', {
         status: response.status,
         details: payload,
+        diagnostics,
       });
     }
 
@@ -118,13 +174,15 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     }
 
     if (error instanceof DOMException && error.name === 'AbortError') {
-      throw new ApiError('The backend request timed out.', 'network');
+      throw new ApiError('The backend request timed out.', 'network', {
+        diagnostics: createApiDiagnostics(path, headers),
+      });
     }
 
     throw new ApiError(
       'Unable to reach the backend. The app can continue in mock mode or once the backend is available.',
       'network',
-      { details: error },
+      { details: error, diagnostics: createApiDiagnostics(path, headers) },
     );
   }
 }

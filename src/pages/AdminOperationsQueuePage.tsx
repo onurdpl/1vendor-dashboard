@@ -85,7 +85,7 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
 
 export function AdminOperationsQueuePage() {
   const appReadiness = useAppReadiness();
-  const { data, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.attention(), () =>
+  const { data, isLoading, isError, error, diagnostics } = useQueryResource(queryKeys.admin.operations.attention(), () =>
     runtimeServices.operations.attention(),
     { enabled: appReadiness.ready },
   );
@@ -108,6 +108,7 @@ export function AdminOperationsQueuePage() {
         eyebrow="Admin operations"
         title="Attention center unavailable"
         description={error ?? 'Operational attention signals could not be loaded.'}
+        diagnostics={diagnostics}
       />
     );
   }

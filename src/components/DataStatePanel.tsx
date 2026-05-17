@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import type { ApiErrorDiagnostics } from '../lib/api/errors';
 
 type DataStatePanelProps = {
   tone?: 'loading' | 'error' | 'empty' | 'info';
@@ -9,6 +10,7 @@ type DataStatePanelProps = {
   actionLabel?: string;
   actionTo?: string;
   actionNode?: ReactNode;
+  diagnostics?: ApiErrorDiagnostics | null;
 };
 
 export function DataStatePanel({
@@ -19,7 +21,10 @@ export function DataStatePanel({
   actionLabel,
   actionTo,
   actionNode,
+  diagnostics,
 }: DataStatePanelProps) {
+  const showDiagnostics = tone === 'error' && diagnostics;
+
   return (
     <section className="dashboard state-workspace">
       <div className={`hero-card operational-card state-card state-${tone}`}>
@@ -30,6 +35,41 @@ export function DataStatePanel({
             <h2>{title}</h2>
           </div>
           <p className="page-description">{description}</p>
+          {showDiagnostics ? (
+            <details className="api-error-diagnostics">
+              <summary>Diagnostics</summary>
+              <dl>
+                <div>
+                  <dt>Status</dt>
+                  <dd>{diagnostics.status ?? 'Unavailable'}</dd>
+                </div>
+                <div>
+                  <dt>Endpoint</dt>
+                  <dd>{diagnostics.endpoint}</dd>
+                </div>
+                <div>
+                  <dt>Readiness</dt>
+                  <dd>{diagnostics.readinessState}</dd>
+                </div>
+                <div>
+                  <dt>Authorization header</dt>
+                  <dd>{diagnostics.hasAuthHeader ? 'Present' : 'Missing'}</dd>
+                </div>
+                <div>
+                  <dt>Vendor header</dt>
+                  <dd>{diagnostics.hasVendorHeader ? 'Present' : 'Missing'}</dd>
+                </div>
+                <div>
+                  <dt>Selected vendor</dt>
+                  <dd>{diagnostics.selectedVendorPresent ? 'Present' : 'Missing'}</dd>
+                </div>
+                <div>
+                  <dt>Request ID</dt>
+                  <dd>{diagnostics.requestId ?? 'Unavailable'}</dd>
+                </div>
+              </dl>
+            </details>
+          ) : null}
         </div>
         {actionNode || (actionLabel && actionTo) ? (
           <div className="state-actions">

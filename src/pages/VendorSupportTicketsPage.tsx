@@ -33,7 +33,7 @@ export function VendorSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const { data: tickets, isLoading, isError, error } = useQueryResource(
+  const { data: tickets, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     listVendorSupportTickets,
     { enabled: appReadiness.ready },
@@ -61,6 +61,7 @@ export function VendorSupportTicketsPage() {
         eyebrow="Support"
         title="Support requests unavailable"
         description={error ?? 'Unable to load support requests.'}
+        diagnostics={diagnostics}
       />
     );
   }

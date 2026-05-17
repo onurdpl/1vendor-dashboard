@@ -1210,6 +1210,49 @@ h3 {
   margin-bottom: 0;
 }
 
+.api-error-diagnostics {
+  max-width: 560px;
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(248, 250, 252, 0.8);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.api-error-diagnostics summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.api-error-diagnostics dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0 12px 12px;
+}
+
+.api-error-diagnostics dl div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid rgba(226, 232, 240, 0.7);
+  padding-top: 8px;
+}
+
+.api-error-diagnostics dt,
+.api-error-diagnostics dd {
+  margin: 0;
+}
+
+.api-error-diagnostics dd {
+  color: var(--text);
+  font-weight: 700;
+  text-align: right;
+}
+
 .state-loading {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.88), rgba(255, 255, 255, 0.7)),

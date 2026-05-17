@@ -20,7 +20,7 @@ function formatDate(value: string) {
 export function AutomationPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
-  const { data: automation, isLoading, isError, error } = useQueryResource(
+  const { data: automation, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.automation.alerts(currentVendor.vendorId),
     getAutomationDashboard,
     { enabled: appReadiness.ready },
@@ -47,6 +47,7 @@ export function AutomationPage() {
         eyebrow="Automation"
         title="Automation unavailable"
         description={error ?? 'The automation feed could not be loaded.'}
+        diagnostics={diagnostics}
       />
     );
   }

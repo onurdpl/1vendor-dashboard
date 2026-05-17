@@ -43,7 +43,7 @@ function getCategoryTone(entry: SupportAnalyticsCategoryInsight) {
 
 export function AdminSupportAnalyticsPage() {
   const appReadiness = useAppReadiness();
-  const { data: analytics, isLoading, isError, error } = useQueryResource(
+  const { data: analytics, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.admin.support.analytics(),
     getAdminSupportAnalytics,
     { enabled: appReadiness.ready },
@@ -67,6 +67,7 @@ export function AdminSupportAnalyticsPage() {
         eyebrow="Support analytics"
         title="Support analytics unavailable"
         description={error ?? 'Unable to load support analytics.'}
+        diagnostics={diagnostics}
       />
     );
   }
