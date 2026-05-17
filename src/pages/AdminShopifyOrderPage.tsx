@@ -4,6 +4,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { getAdminShopifyOrderBreakdown } from '../features/orders/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
@@ -17,6 +18,7 @@ function formatDate(value: string) {
 
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
+  const appReadiness = useAppReadiness();
   const { message, tone, showFeedback } = useActionFeedback();
   const reassignAllocation = useMutationAction(
     async (payload: { allocationOrderId: string; nextVendorId: string }) => payload,
@@ -41,9 +43,12 @@ export function AdminShopifyOrderPage() {
 
       return getAdminShopifyOrderBreakdown(shopifyOrderId);
     },
+    {
+      enabled: appReadiness.ready && Boolean(shopifyOrderId),
+    },
   );
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

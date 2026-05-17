@@ -12,7 +12,7 @@ import {
   type ReturnDetail,
   type ReturnLineItem,
 } from '../features/returns/api';
-import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { useActionFeedback } from '../lib/ui';
 import { SupportTicketModal } from '../components/SupportTicketModal';
@@ -212,34 +212,39 @@ function getItemKey(item: ReturnLineItem) {
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const location = useLocation();
-  const currentVendor = getCurrentVendorContext();
-  const currentUser = getCurrentUser();
+  const appReadiness = useAppReadiness();
+  const currentVendor = appReadiness.currentVendor;
+  const currentUser = appReadiness.currentUser;
+  const authContextReady = appReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
   const { data: returnRequest, isLoading, isError, error, refetch } = useQueryResource(
-    returnId ? queryKeys.returns.detail(returnId) : queryKeys.returns.list(),
+    returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
     () => {
       if (!returnId) {
         throw new Error('Return not found.');
       }
 
-      return getReturn(returnId);
+      return getReturn(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      enabled: authContextReady && Boolean(returnId),
     },
   );
   const { data: relatedFinanceData } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
     {
-      enabled: Boolean(returnRequest),
+      enabled: authContextReady && Boolean(returnRequest),
     },
   );
   const { data: relatedSupportTicketsData } = useQueryResource(
     isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
     () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
     {
-      enabled: Boolean(returnRequest),
+      enabled: authContextReady && Boolean(returnRequest),
     },
   );
   const markReceivedMutation = useMutationAction(
@@ -283,7 +288,7 @@ export function ReturnDetailPage() {
     },
   );
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

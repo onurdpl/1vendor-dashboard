@@ -21,6 +21,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeConfig } from '../config/runtime';
@@ -126,6 +127,7 @@ function getPrimaryEntityLabel(entities: {
 }
 
 export function AdminDiagnosticsPage() {
+  const appReadiness = useAppReadiness();
   const { message, tone, showFeedback } = useActionFeedback();
   const [selectedWebhookEventId, setSelectedWebhookEventId] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -138,15 +140,19 @@ export function AdminDiagnosticsPage() {
 
   const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), () =>
     runtimeServices.diagnostics.webhooks(),
+    { enabled: appReadiness.ready },
   );
   const reconciliationQuery = useQueryResource(queryKeys.admin.diagnostics.reconciliation(), () =>
     runtimeServices.diagnostics.reconciliation(),
+    { enabled: appReadiness.ready },
   );
   const syncEventsQuery = useQueryResource(queryKeys.admin.diagnostics.syncEvents(), () =>
     runtimeServices.diagnostics.syncEvents(),
+    { enabled: appReadiness.ready },
   );
   const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), () =>
     runtimeServices.observability.summary(),
+    { enabled: appReadiness.ready },
   );
 
   const latestWebhookEventId = selectedWebhookEventId ?? webhooksQuery.data?.events[0]?.id ?? null;
@@ -167,7 +173,7 @@ export function AdminDiagnosticsPage() {
       return runtimeServices.diagnostics.webhookDetail(latestWebhookEventId);
     },
     {
-      enabled: Boolean(latestWebhookEventId) && isRealMode,
+      enabled: appReadiness.ready && Boolean(latestWebhookEventId) && isRealMode,
     },
   );
 
@@ -286,7 +292,7 @@ export function AdminDiagnosticsPage() {
   const visibleSyncEvents = syncEventsQuery.data?.items.slice(0, 8) ?? [];
   const visibleReconciliationItems = reconciliationQuery.data?.items.slice(0, 8) ?? [];
 
-  const isLoading = webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
+  const isLoading = !appReadiness.ready || webhooksQuery.isLoading || reconciliationQuery.isLoading || syncEventsQuery.isLoading;
   const pageError = webhooksQuery.error ?? reconciliationQuery.error ?? syncEventsQuery.error ?? webhookDetailQuery.error;
 
   const combinedCounts = useMemo(() => {

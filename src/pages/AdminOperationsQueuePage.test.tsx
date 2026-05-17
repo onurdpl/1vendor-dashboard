@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OperationsAttentionDashboard } from '../lib/api/contracts';
+import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminOperationsQueuePage } from './AdminOperationsQueuePage';
 
 const attentionMock = vi.fn<() => Promise<OperationsAttentionDashboard>>();
@@ -168,6 +169,17 @@ function renderPage() {
 
 describe('AdminOperationsQueuePage attention center', () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    setToken('test-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
     attentionMock.mockReset();
   });
 

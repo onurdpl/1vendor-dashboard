@@ -34,6 +34,7 @@ export function useQueryResource<TData>(
     status,
     isIdle: status === 'idle',
     isLoading: query.isPending,
+    isFetching: query.isFetching,
     isError: query.isError,
     isSuccess: query.isSuccess,
     refetch: query.refetch,

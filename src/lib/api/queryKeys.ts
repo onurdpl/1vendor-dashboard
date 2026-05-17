@@ -47,11 +47,11 @@ export const queryKeys = {
       ['finance', 'invoice-response-summary', invoiceExecutionId] as const,
   },
   automation: {
-    alerts: () => ['automation', 'alerts', getCurrentVendorContext().vendorId] as const,
-    actions: () => ['automation', 'actions', getCurrentVendorContext().vendorId] as const,
+    alerts: (vendorId = getCurrentVendorContext().vendorId) => ['automation', 'alerts', vendorId] as const,
+    actions: (vendorId = getCurrentVendorContext().vendorId) => ['automation', 'actions', vendorId] as const,
   },
   notifications: {
-    list: () => ['notifications', 'list', getCurrentVendorContext().vendorId] as const,
+    list: (vendorId = getCurrentVendorContext().vendorId) => ['notifications', 'list', vendorId] as const,
   },
   support: {
     tickets: (vendorId = getCurrentVendorContext().vendorId) => ['support', 'tickets', vendorId] as const,

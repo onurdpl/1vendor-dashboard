@@ -128,6 +128,20 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
   });
 
+  it('waits for auth and vendor readiness before calling the orders API', () => {
+    window.localStorage.clear();
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    expect(screen.getByText('Loading orders')).toBeInTheDocument();
+    expect(screen.queryByText(/Unauthorized/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('Orders unavailable')).not.toBeInTheDocument();
+    expect(listOrdersMock).not.toHaveBeenCalled();
+    expect(getOrderMock).not.toHaveBeenCalled();
+  });
+
   it('opens order detail with line item and fulfillment tracking fields', async () => {
     listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
     getOrderMock.mockResolvedValue(orderDetail);

@@ -10,6 +10,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import type {
@@ -83,11 +84,13 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
 }
 
 export function AdminOperationsQueuePage() {
+  const appReadiness = useAppReadiness();
   const { data, isLoading, isError, error } = useQueryResource(queryKeys.admin.operations.attention(), () =>
     runtimeServices.operations.attention(),
+    { enabled: appReadiness.ready },
   );
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

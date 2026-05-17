@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
@@ -9,7 +9,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
 import { getDashboardOverview } from '../lib/api/dashboard';
-import { getCurrentUser, getCurrentVendorContext, onVendorChange } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -134,19 +134,24 @@ function formatRecentActivity(item: string) {
 }
 
 export function DashboardPage() {
-  const [vendorId, setVendorId] = useState(() => getCurrentVendorContext().vendorId);
-  const currentUser = getCurrentUser();
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
+  const currentVendor = appReadiness.currentVendor;
+  const vendorId = currentVendor.vendorId;
   const { message, tone, showFeedback } = useActionFeedback();
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
   const { data: dashboard, isLoading, isError, error, refetch: refetchDashboard } = useQueryResource(
-    queryKeys.dashboard.overview(),
+    queryKeys.dashboard.overview(vendorId),
     () => getDashboardOverview(vendorId),
+    { enabled: appReadiness.ready },
   );
   const {
     data: notifications,
     refetch: refetchNotifications,
-  } = useQueryResource(queryKeys.notifications.list(), () => runtimeServices.notifications.list());
+  } = useQueryResource(queryKeys.notifications.list(vendorId), () => runtimeServices.notifications.list(), {
+    enabled: appReadiness.ready,
+  });
   const markNotificationReadMutation = useMutationAction(
     (notificationId: string) => runtimeServices.notifications.markRead(notificationId),
     {
@@ -267,13 +272,7 @@ export function DashboardPage() {
     }
   }
 
-  useEffect(() => {
-    return onVendorChange(() => {
-      setVendorId(getCurrentVendorContext().vendorId);
-    });
-  }, []);
-
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

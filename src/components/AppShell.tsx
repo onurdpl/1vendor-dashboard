@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { PageHeader } from './PageHeader';
-import { clearToken, getCurrentUser, getToken } from '../lib/auth';
+import { clearToken } from '../lib/auth';
 import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
 import { ActionFeedback } from './ActionFeedback';
@@ -29,8 +30,9 @@ const adminNavItems = [
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
-  const token = getToken();
-  const currentUser = getCurrentUser();
+  const appReadiness = useAppReadiness();
+  const token = appReadiness.token;
+  const currentUser = appReadiness.currentUser;
   const isAdmin = currentUser?.role === 'admin';
   const isDashboardRoute = location.pathname === '/';
   const isOrdersRoute = location.pathname === '/orders';
@@ -47,6 +49,10 @@ export function AppShell() {
     : vendors;
   const currentVendor =
     visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0];
+
+  useEffect(() => {
+    setSelectedVendorId(appReadiness.currentVendor.vendorId);
+  }, [appReadiness.currentVendor.vendorId]);
 
   function handleLogout() {
     clearToken();

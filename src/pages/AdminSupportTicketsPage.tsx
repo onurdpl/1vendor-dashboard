@@ -12,7 +12,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
-import { getCurrentUser } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { listAdminSupportTickets, type SupportTicket, type SupportTicketCategory, type SupportTicketStatus } from '../features/support/api';
 import { toTitleCaseLabel } from '../services/real/formatting';
 
@@ -126,10 +126,12 @@ export function isAdminSupportEscalated(ticket: SupportTicket) {
 }
 
 export function AdminSupportTicketsPage() {
-  const currentUser = getCurrentUser();
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
   const { data: tickets, isLoading, isError, error } = useQueryResource(
     queryKeys.admin.support.tickets(),
     listAdminSupportTickets,
+    { enabled: appReadiness.ready },
   );
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<(typeof ALL_STATUSES)[number]>('all');
@@ -182,7 +184,7 @@ export function AdminSupportTicketsPage() {
     });
   }, [assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

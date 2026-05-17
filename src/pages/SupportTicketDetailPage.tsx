@@ -6,7 +6,7 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
-import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import {
   addAdminSupportTicketNote,
   addAdminSupportTicketReply,
@@ -195,8 +195,10 @@ export function SupportTicketDetailPage() {
   const { ticketId } = useParams();
   const location = useLocation();
   const isAdmin = location.pathname.startsWith('/admin/');
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
+  const currentVendor = appReadiness.currentVendor;
+  const authContextReady = appReadiness.ready;
   const [note, setNote] = useState('');
   const [replyMessage, setReplyMessage] = useState('');
   const [replyStatus, setReplyStatus] = useState<'keep' | 'WAITING_FOR_VENDOR'>('keep');
@@ -212,6 +214,9 @@ export function SupportTicketDetailPage() {
         throw new Error('Support ticket not found.');
       }
       return isAdmin ? getAdminSupportTicket(ticketId) : getVendorSupportTicket(ticketId);
+    },
+    {
+      enabled: authContextReady && Boolean(ticketId),
     },
   );
 
@@ -336,7 +341,7 @@ export function SupportTicketDetailPage() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) });
   }, [currentVendor.vendorId, isAdmin, ticket?.id]);
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

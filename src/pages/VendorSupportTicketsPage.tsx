@@ -4,7 +4,7 @@ import { DataStatePanel } from '../components/DataStatePanel';
 import { EmptyStatePanel, FilterBar, OperationalTable, OperationalTableRow, OperationalToolbar, StatusBadge } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
-import { getCurrentVendorContext } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { listVendorSupportTickets, type SupportTicket } from '../features/support/api';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
 
@@ -30,18 +30,20 @@ export function isVendorSupportUnread(ticket: SupportTicket) {
 }
 
 export function VendorSupportTicketsPage() {
-  const currentVendor = getCurrentVendorContext();
+  const appReadiness = useAppReadiness();
+  const currentVendor = appReadiness.currentVendor;
   const [unreadOnly, setUnreadOnly] = useState(false);
   const { data: tickets, isLoading, isError, error } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     listVendorSupportTickets,
+    { enabled: appReadiness.ready },
   );
 
   const filteredTickets = useMemo(() => {
     return (tickets ?? []).filter((ticket) => !unreadOnly || isVendorSupportUnread(ticket));
   }, [tickets, unreadOnly]);
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

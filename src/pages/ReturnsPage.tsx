@@ -15,7 +15,8 @@ import {
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getReturn, listReturns, type ReturnDetail, type ReturnLineItem, type ReturnSummary } from '../features/returns/api';
-import { getAvailableVendors, getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
+import { getAvailableVendors } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { SupportTicketModal } from '../components/SupportTicketModal';
@@ -418,9 +419,10 @@ function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) 
 
 export function ReturnsPage() {
   const location = useLocation();
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
-  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
+  const currentVendor = appReadiness.currentVendor;
+  const authContextReady = appReadiness.ready;
   const { data: returns, isLoading, isError, error } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     () => listReturns({ vendorId: currentVendor.vendorId }),

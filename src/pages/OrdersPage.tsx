@@ -17,7 +17,7 @@ import {
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../features/orders/api';
-import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 
 function formatDate(value?: string | null) {
@@ -102,9 +102,9 @@ function getItemInitials(name: string) {
 }
 
 export function OrdersPage() {
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
-  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const appReadiness = useAppReadiness();
+  const currentVendor = appReadiness.currentVendor;
+  const authContextReady = appReadiness.ready;
   const { data: orders, isLoading, isError, error } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     () => listOrders({ vendorId: currentVendor.vendorId }),

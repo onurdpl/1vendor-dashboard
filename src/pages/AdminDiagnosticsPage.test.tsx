@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setCurrentUser, setToken } from '../lib/auth';
 import { AdminDiagnosticsPage } from './AdminDiagnosticsPage';
 
 const diagnosticsMocks = vi.hoisted(() => ({
@@ -146,6 +147,17 @@ function renderDiagnosticsPage() {
 
 describe('AdminDiagnosticsPage control center', () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    setToken('test-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
     diagnosticsMocks.webhooks.mockReset();
     diagnosticsMocks.webhookDetail.mockReset();
     diagnosticsMocks.syncEvents.mockReset();

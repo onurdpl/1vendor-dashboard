@@ -11,7 +11,6 @@ import {
   retryShipmentExecution,
   submitFulfillmentTracking,
 } from '../features/orders/api';
-import { getCurrentUser } from '../lib/auth';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
@@ -19,7 +18,7 @@ import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
 import { SupportTicketModal } from '../components/SupportTicketModal';
-import { getCurrentVendorContext } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
@@ -129,8 +128,10 @@ function getTrackingMutationErrorMessage(error: unknown) {
 export function OrderDetailPage() {
   const { orderId } = useParams();
   const location = useLocation();
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
+  const currentVendor = appReadiness.currentVendor;
+  const authContextReady = appReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
   const isRealMode = runtimeConfig.apiMode === 'real';
   const { message, tone, showFeedback } = useActionFeedback();
@@ -140,41 +141,44 @@ export function OrderDetailPage() {
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const { data: order, isLoading, isError, error, refetch } = useQueryResource(
-    orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list(),
+    orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
       if (!orderId) {
         throw new Error('Order not found.');
       }
 
-      return getOrder(orderId);
+      return getOrder(orderId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      enabled: authContextReady && Boolean(orderId),
     },
   );
   const { data: shippingProviderDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('kargo_entegrator'),
     () => getShippingProviderDiagnostics(),
     {
-      enabled: isAdmin,
+      enabled: authContextReady && isAdmin,
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
     () => listReturns({ vendorId: currentVendor.vendorId }),
     {
-      enabled: Boolean(order),
+      enabled: authContextReady && Boolean(order),
     },
   );
   const { data: relatedFinanceData } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
     {
-      enabled: Boolean(order),
+      enabled: authContextReady && Boolean(order),
     },
   );
   const { data: relatedSupportTicketsData } = useQueryResource(
     isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
     () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
     {
-      enabled: Boolean(order),
+      enabled: authContextReady && Boolean(order),
     },
   );
   const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
@@ -185,19 +189,19 @@ export function OrderDetailPage() {
       return payload;
     },
     {
-      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
     async (allocationId: string) => createShipmentExecution(allocationId),
     {
-      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
   const { mutateAsync: retryShipmentMutation, isPending: isRetryingShipment } = useMutationAction(
     async (shipmentExecutionId: string) => retryShipmentExecution(shipmentExecutionId),
     {
-      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
@@ -210,7 +214,7 @@ export function OrderDetailPage() {
       });
     },
     {
-      invalidateQueryKeys: [queryKeys.orders.list(), orderId ? queryKeys.orders.detail(orderId) : queryKeys.orders.list()],
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
 
@@ -322,7 +326,7 @@ export function OrderDetailPage() {
     setNotifyCustomer(false);
   }, [order]);
 
-  if (isLoading) {
+  if (!authContextReady || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

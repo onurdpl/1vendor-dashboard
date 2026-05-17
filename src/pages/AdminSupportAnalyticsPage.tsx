@@ -8,6 +8,7 @@ import {
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
+import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { getAdminSupportAnalytics, type SupportAnalyticsCategoryInsight } from '../features/support/api';
 import { formatSupportLabel } from './AdminSupportTicketsPage';
@@ -41,12 +42,14 @@ function getCategoryTone(entry: SupportAnalyticsCategoryInsight) {
 }
 
 export function AdminSupportAnalyticsPage() {
+  const appReadiness = useAppReadiness();
   const { data: analytics, isLoading, isError, error } = useQueryResource(
     queryKeys.admin.support.analytics(),
     getAdminSupportAnalytics,
+    { enabled: appReadiness.ready },
   );
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

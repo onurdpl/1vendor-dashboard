@@ -4,7 +4,8 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
-import { canPerformAction, getCurrentUserRole, getCurrentVendorContext } from '../lib/auth';
+import { canPerformAction } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -17,16 +18,18 @@ function formatDate(value: string) {
 }
 
 export function AutomationPage() {
+  const appReadiness = useAppReadiness();
+  const currentVendor = appReadiness.currentVendor;
   const { data: automation, isLoading, isError, error } = useQueryResource(
-    queryKeys.automation.alerts(),
+    queryKeys.automation.alerts(currentVendor.vendorId),
     getAutomationDashboard,
+    { enabled: appReadiness.ready },
   );
   const { message, tone, showFeedback } = useActionFeedback();
   const canRunAutomationAction = canPerformAction('automation:write');
-  const currentVendor = getCurrentVendorContext();
-  const currentRole = getCurrentUserRole();
+  const currentRole = appReadiness.currentUser?.role ?? 'vendor';
 
-  if (isLoading) {
+  if (!appReadiness.ready || isLoading) {
     return (
       <DataStatePanel
         tone="loading"

@@ -27,7 +27,7 @@ import {
   retryInvoiceExecution,
   updateVendorFinancialProfile,
 } from '../features/finance/api';
-import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
+import { useAppReadiness } from '../lib/appReadiness';
 import type { FinanceTransaction, OperationsRecommendation } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
@@ -331,9 +331,10 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
 }
 
 export function FinancePage() {
-  const currentUser = getCurrentUser();
-  const currentVendor = getCurrentVendorContext();
-  const authContextReady = Boolean(getToken() && currentUser && currentVendor.vendorId);
+  const appReadiness = useAppReadiness();
+  const currentUser = appReadiness.currentUser;
+  const currentVendor = appReadiness.currentVendor;
+  const authContextReady = appReadiness.ready;
   const { data: finance, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
