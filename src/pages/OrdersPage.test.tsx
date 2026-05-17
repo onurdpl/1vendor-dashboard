@@ -79,7 +79,7 @@ function toSummary(detail: OrderDetail): OrderSummary {
   return summary;
 }
 
-function renderOrdersPage() {
+function renderOrdersPage(initialEntries = ['/orders']) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -90,7 +90,7 @@ function renderOrdersPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <OrdersPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -156,5 +156,47 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
+  });
+
+  it('selects the order requested by query parameter instead of the first row', async () => {
+    const firstOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1001',
+      sourceShopifyOrderId: 'gid://shopify/Order/1001',
+      sourceShopifyOrderNumber: '#1001',
+      customer: 'First Customer',
+      date: '2026-05-09T09:20:00Z',
+    };
+    const targetOrder = {
+      ...orderDetail,
+      id: 'ORD-A-1030',
+      sourceShopifyOrderId: 'gid://shopify/Order/1030',
+      sourceShopifyOrderNumber: '#1030',
+      customer: 'Target Customer',
+      date: '2026-05-08T09:20:00Z',
+    };
+    listOrdersMock.mockResolvedValue([toSummary(firstOrder), toSummary(targetOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => {
+      if (orderId === 'ORD-A-1030') {
+        return targetOrder;
+      }
+      return firstOrder;
+    });
+
+    renderOrdersPage(['/orders?order=1030']);
+
+    expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
+    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' });
+    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+  });
+
+  it('does not select the first order when a linked query target is unavailable', async () => {
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage(['/orders?order=9999']);
+
+    expect(await screen.findByText('Linked order unavailable')).toBeInTheDocument();
+    expect(getOrderMock).not.toHaveBeenCalled();
   });
 });

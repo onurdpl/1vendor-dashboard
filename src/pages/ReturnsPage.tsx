@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
@@ -417,8 +417,32 @@ function getReturnShipment(summary: ReturnSummary, detail: ReturnDetail | null) 
   };
 }
 
+function normalizeReturnLookup(value: string | number | null | undefined) {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return '';
+  }
+  return text.replace(/^#+/, '').toLowerCase();
+}
+
+function returnMatchesTarget(item: ReturnSummary, target: string | null) {
+  if (!target) {
+    return false;
+  }
+
+  const normalizedTarget = normalizeReturnLookup(target);
+  return (
+    item.id === target ||
+    item.sourceShopifyOrderId === target ||
+    item.sourceShopifyRefundId === target ||
+    item.sourceShopifyReturnId === target ||
+    normalizeReturnLookup(item.sourceShopifyOrderNumber) === normalizedTarget
+  );
+}
+
 export function ReturnsPage() {
   const location = useLocation();
+  const [searchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
@@ -436,6 +460,11 @@ export function ReturnsPage() {
   const [supportOpen, setSupportOpen] = useState(false);
   const isRealMode = runtimeConfig.apiMode === 'real';
   const isAdmin = currentUser?.role === 'admin';
+  const requestedReturnTarget =
+    searchParams.get('returnId') ??
+    searchParams.get('shopifyReturnId') ??
+    searchParams.get('refundId') ??
+    searchParams.get('order');
 
   const vendorLookup = useMemo(() => {
     return new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
@@ -517,8 +546,15 @@ export function ReturnsPage() {
     if (!returns?.length) {
       return null;
     }
-    return returns.find((item) => item.id === selectedReturnId) ?? filteredReturns[0] ?? returns[0];
-  }, [filteredReturns, returns, selectedReturnId]);
+    const selectedByClick = selectedReturnId ? returns.find((item) => item.id === selectedReturnId) : null;
+    if (selectedByClick) {
+      return selectedByClick;
+    }
+    if (requestedReturnTarget) {
+      return returns.find((item) => returnMatchesTarget(item, requestedReturnTarget)) ?? null;
+    }
+    return filteredReturns[0] ?? returns[0];
+  }, [filteredReturns, requestedReturnTarget, returns, selectedReturnId]);
 
   const detailQuery = useQueryResource(
     selectedReturn ? queryKeys.returns.detail(selectedReturn.id, currentVendor.vendorId) : ['returns', 'detail', currentVendor.vendorId, 'empty'],
@@ -855,7 +891,14 @@ export function ReturnsPage() {
               </div>
             </>
           ) : (
-            <EmptyStatePanel title="Select a return" description="Choose a record from the table to inspect return details and items." />
+            <EmptyStatePanel
+              title={requestedReturnTarget ? 'Linked return unavailable' : 'Select a return'}
+              description={
+                requestedReturnTarget
+                  ? 'The linked return is not available in the current vendor scope.'
+                  : 'Choose a record from the table to inspect return details and items.'
+              }
+            />
           )}
         </SideDetailPanel>
       </div>

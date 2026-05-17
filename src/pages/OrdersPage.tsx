@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
@@ -101,7 +101,29 @@ function getItemInitials(name: string) {
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
 }
 
+function normalizeOrderLookup(value: string | number | null | undefined) {
+  const text = String(value ?? '').trim();
+  if (!text) {
+    return '';
+  }
+  return text.replace(/^#+/, '').toLowerCase();
+}
+
+function orderMatchesTarget(order: OrderSummary, target: string | null) {
+  if (!target) {
+    return false;
+  }
+
+  const normalizedTarget = normalizeOrderLookup(target);
+  return (
+    order.id === target ||
+    order.sourceShopifyOrderId === target ||
+    normalizeOrderLookup(order.sourceShopifyOrderNumber) === normalizedTarget
+  );
+}
+
 export function OrdersPage() {
+  const [searchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const authContextReady = appReadiness.ready;
@@ -115,6 +137,10 @@ export function OrdersPage() {
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const requestedOrderTarget =
+    searchParams.get('orderId') ??
+    searchParams.get('shopifyOrderId') ??
+    searchParams.get('order');
 
   const rankedOrders = useMemo(() => {
     const rank = (order: OrderSummary) => {
@@ -173,14 +199,23 @@ export function OrdersPage() {
   }, [currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
+    const selectedByClick = selectedOrderId ? filteredOrders.find((order) => order.id === selectedOrderId) : null;
+    if (selectedByClick) {
+      return selectedByClick;
+    }
+    if (requestedOrderTarget) {
+      return rankedOrders.find((order) => orderMatchesTarget(order, requestedOrderTarget)) ?? null;
+    }
     if (!filteredOrders.length) {
       return null;
     }
-    return filteredOrders.find((order) => order.id === selectedOrderId) ?? filteredOrders[0];
-  }, [filteredOrders, selectedOrderId]);
+    return filteredOrders[0];
+  }, [filteredOrders, rankedOrders, requestedOrderTarget, selectedOrderId]);
 
   const orderDetailQuery = useQueryResource(
-    selectedOrderSummary ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
+    selectedOrderSummary
+      ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
+      : ['orders', 'detail', currentVendor.vendorId, 'empty'],
     () => {
       if (!selectedOrderSummary) {
         throw new Error('Order not found.');
@@ -507,7 +542,14 @@ export function OrdersPage() {
               </section>
             </>
           ) : (
-            <EmptyStatePanel title="Select an order" description="Choose an order to inspect allocation, fulfillment, and tracking context." />
+            <EmptyStatePanel
+              title={requestedOrderTarget ? 'Linked order unavailable' : 'Select an order'}
+              description={
+                requestedOrderTarget
+                  ? 'The linked order is not available in the current vendor scope.'
+                  : 'Choose an order to inspect allocation, fulfillment, and tracking context.'
+              }
+            />
           )}
           </SideDetailPanel>
         </div>

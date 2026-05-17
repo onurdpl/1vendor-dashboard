@@ -260,6 +260,31 @@ describe('FinancePage control center', () => {
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
   });
 
+  it('links finance order records to the targeted orders workspace query', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
+    const linkedOrder = screen.getAllByText('Order #1021').find((node) => node.closest('a'));
+
+    expect(linkedOrder?.closest('a')).toHaveAttribute('href', '/orders?shopifyOrderId=7616544244049');
+  });
+
+  it('links finance refund records to the targeted returns workspace query', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+
+    const relatedReturn = await screen.findByText('Related return');
+    expect(relatedReturn.closest('a')).toHaveAttribute(
+      'href',
+      `/returns?refundId=${encodeURIComponent('gid://shopify/Refund/501')}`,
+    );
+  });
+
   it('shows vendor-friendly commission and tax deductions in compact ledger detail', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 

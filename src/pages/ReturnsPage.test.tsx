@@ -149,7 +149,7 @@ function toSummary(detail: ReturnDetail): ReturnSummary {
   return summary;
 }
 
-function renderReturnsPage() {
+function renderReturnsPage(initialEntries = ['/returns']) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -160,7 +160,7 @@ function renderReturnsPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <ReturnsPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -223,6 +223,28 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
     expect(screen.queryByText(/webhook/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/backend/i)).not.toBeInTheDocument();
+  });
+
+  it('selects the return requested by query parameter instead of the first row', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+
+    renderReturnsPage([`/returns?refundId=${encodeURIComponent(processedRefund.sourceShopifyRefundId ?? '')}`]);
+
+    await waitFor(() =>
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+    );
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+  });
+
+  it('does not select the first return when a linked query target is unavailable', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage(['/returns?refundId=missing-refund']);
+
+    expect(await screen.findByText('Linked return unavailable')).toBeInTheDocument();
+    expect(getReturnMock).not.toHaveBeenCalled();
   });
 
   it('preserves vendor-scoped visibility in mock mode data', async () => {

@@ -81,6 +81,49 @@ function formatDateParts(value: string) {
   };
 }
 
+function readFinanceString(record: FinanceTransaction, key: string) {
+  const value = (record as FinanceTransaction & Record<string, unknown>)[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function buildOrdersHref(record: FinanceTransaction) {
+  const internalOrderId =
+    readFinanceString(record, 'orderId') ??
+    readFinanceString(record, 'allocationId') ??
+    readFinanceString(record, 'relatedOrderId');
+  if (internalOrderId) {
+    return `/orders/${encodeURIComponent(internalOrderId)}`;
+  }
+  if (record.shopifyOrderId) {
+    return `/orders?shopifyOrderId=${encodeURIComponent(record.shopifyOrderId)}`;
+  }
+  if (record.shopifyOrderNumber) {
+    return `/orders?order=${encodeURIComponent(String(record.shopifyOrderNumber))}`;
+  }
+  return null;
+}
+
+function buildReturnsHref(record: FinanceTransaction) {
+  const internalReturnId =
+    readFinanceString(record, 'returnId') ??
+    readFinanceString(record, 'returnRecordId') ??
+    readFinanceString(record, 'relatedReturnId');
+  if (internalReturnId) {
+    return `/returns/${encodeURIComponent(internalReturnId)}`;
+  }
+  const sourceShopifyReturnId = readFinanceString(record, 'sourceShopifyReturnId');
+  if (sourceShopifyReturnId) {
+    return `/returns?shopifyReturnId=${encodeURIComponent(sourceShopifyReturnId)}`;
+  }
+  if (record.shopifyRefundId) {
+    return `/returns?refundId=${encodeURIComponent(record.shopifyRefundId)}`;
+  }
+  if (record.shopifyOrderNumber) {
+    return `/returns?order=${encodeURIComponent(String(record.shopifyOrderNumber))}`;
+  }
+  return null;
+}
+
 function normalizeFinanceStatus(status: string) {
   const normalized = status.trim().toLowerCase();
   if (normalized === 'hold' || normalized === 'recorded' || normalized === 'synced' || normalized === 'posted') {
@@ -581,25 +624,31 @@ export function FinancePage() {
   const financeTimelineEvents: OperationalEventInput[] = [];
   if (selectedRecord) {
     if (selectedRecord.shopifyOrderNumber) {
+      const orderHref = buildOrdersHref(selectedRecord);
       financeCrossLinks.push({
         id: `order-${selectedRecord.shopifyOrderNumber}`,
         eyebrow: 'Order',
         title: `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`,
-        description: 'Open the order workspace to review fulfillment context.',
-        href: '/orders',
-        status: 'Linked',
-        tone: 'info',
+        description: orderHref
+          ? 'Open the linked order record to review fulfillment context.'
+          : 'Order link unavailable for this finance row.',
+        href: orderHref ?? undefined,
+        status: orderHref ? 'Linked' : 'Unavailable',
+        tone: orderHref ? 'info' : 'neutral',
       });
     }
     if (selectedRecord.category === 'Refund') {
+      const returnHref = buildReturnsHref(selectedRecord);
       financeCrossLinks.push({
         id: `return-${selectedRecord.id}`,
         eyebrow: 'Return',
         title: 'Related return',
-        description: selectedRecord.shopifyRefundId ? `Refund ${selectedRecord.shopifyRefundId}` : 'Customer return activity',
-        href: '/returns',
-        status: 'Refund',
-        tone: 'warning',
+        description: returnHref
+          ? (selectedRecord.shopifyRefundId ? `Refund ${selectedRecord.shopifyRefundId}` : 'Customer return activity')
+          : 'Return link unavailable for this finance row.',
+        href: returnHref ?? undefined,
+        status: returnHref ? 'Refund' : 'Unavailable',
+        tone: returnHref ? 'warning' : 'neutral',
       });
     }
     financeCrossLinks.push(
