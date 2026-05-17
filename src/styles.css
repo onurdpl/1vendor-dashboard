@@ -849,6 +849,66 @@ a:focus-visible {
   grid-template-columns: 0.75fr 1.2fr 1fr 1fr 1fr 0.85fr 0.95fr 0.8fr;
 }
 
+.support-admin-table,
+.support-vendor-table {
+  overflow-x: auto;
+}
+
+.support-admin-table .op-table-head,
+.support-admin-table .op-table-row {
+  min-width: 1220px;
+  grid-template-columns:
+    minmax(190px, 1.45fr)
+    minmax(112px, 0.74fr)
+    minmax(120px, 0.86fr)
+    minmax(86px, 0.56fr)
+    minmax(86px, 0.56fr)
+    minmax(112px, 0.7fr)
+    minmax(108px, 0.76fr)
+    minmax(108px, 0.72fr)
+    minmax(142px, 0.9fr)
+    minmax(124px, 0.82fr)
+    minmax(72px, 0.42fr);
+}
+
+.support-vendor-table .op-table-head,
+.support-vendor-table .op-table-row {
+  min-width: 760px;
+  grid-template-columns:
+    minmax(118px, 0.7fr)
+    minmax(240px, 1.45fr)
+    minmax(104px, 0.58fr)
+    minmax(112px, 0.64fr)
+    minmax(150px, 0.9fr)
+    minmax(128px, 0.72fr);
+}
+
+.support-admin-table .op-table-row,
+.support-vendor-table .op-table-row {
+  cursor: default;
+}
+
+.support-ticket-cell,
+.support-sla-cell {
+  align-content: center;
+}
+
+.support-admin-table .op-table-row > span,
+.support-vendor-table .op-table-row > span {
+  min-width: 0;
+}
+
+.support-admin-table .op-table-row > span:not(.support-ticket-cell):not(.support-sla-cell),
+.support-vendor-table .op-table-row > span:not(.support-ticket-cell) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-action-cell {
+  justify-items: end;
+}
+
 .op-side-panel {
   position: sticky;
   top: var(--space-5);

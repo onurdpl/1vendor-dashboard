@@ -263,37 +263,40 @@ export function AdminSupportTicketsPage() {
       </OperationalToolbar>
 
       {filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'SLA', 'Assignee', 'Last reply', 'Updated', 'Action']}>
+        <OperationalTable
+          columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'SLA', 'Assignee', 'Last reply', 'Updated', 'Action']}
+          className="support-admin-table"
+        >
           {filteredTickets.map((ticket) => (
             <OperationalTableRow key={ticket.id}>
-              <td>
+              <span role="cell" className="support-ticket-cell">
                 <strong>{ticket.subject}</strong>
                 <span>{ticket.id}</span>
                 {ticket.adminUnreadCount > 0 ? (
                   <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
                 ) : null}
-              </td>
-              <td>{ticket.vendorName ?? ticket.vendorId}</td>
-              <td>{getContextLabel(ticket)}</td>
-              <td>{formatSupportLabel(ticket.category)}</td>
-              <td>
+              </span>
+              <span role="cell">{ticket.vendorName ?? ticket.vendorId}</span>
+              <span role="cell">{getContextLabel(ticket)}</span>
+              <span role="cell">{formatSupportLabel(ticket.category)}</span>
+              <span role="cell">
                 <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
-              </td>
-              <td>
+              </span>
+              <span role="cell">
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
-              </td>
-              <td>
+              </span>
+              <span role="cell" className="support-sla-cell">
                 <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
                 <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
-              </td>
-              <td>{ticket.assigneeName ?? 'Unassigned'}</td>
-              <td>{formatLastReply(ticket)}</td>
-              <td>{formatDate(ticket.updatedAt)}</td>
-              <td>
+              </span>
+              <span role="cell">{ticket.assigneeName ?? 'Unassigned'}</span>
+              <span role="cell">{formatLastReply(ticket)}</span>
+              <span role="cell">{formatDate(ticket.updatedAt)}</span>
+              <span role="cell" className="support-action-cell">
                 <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
                   Open
                 </Link>
-              </td>
+              </span>
             </OperationalTableRow>
           ))}
         </OperationalTable>

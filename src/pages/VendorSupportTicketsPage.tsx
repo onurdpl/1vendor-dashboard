@@ -86,25 +86,25 @@ export function VendorSupportTicketsPage() {
       </OperationalToolbar>
 
       {filteredTickets.length ? (
-        <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']}>
+        <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']} className="support-vendor-table">
           {filteredTickets.map((ticket: SupportTicket) => (
             <OperationalTableRow key={ticket.id}>
-              <td>
+              <span role="cell" className="support-ticket-cell">
                 <Link to={`/support/${ticket.id}`}>{ticket.id}</Link>
                 {ticket.vendorUnreadCount > 0 ? (
                   <StatusBadge tone="attention">{ticket.vendorUnreadCount} unread</StatusBadge>
                 ) : null}
-              </td>
-              <td>
+              </span>
+              <span role="cell" className="support-ticket-cell">
                 <strong>{ticket.subject}</strong>
                 <span>{ticket.message}</span>
-              </td>
-              <td>{formatSupportLabel(ticket.category)}</td>
-              <td>
+              </span>
+              <span role="cell">{formatSupportLabel(ticket.category)}</span>
+              <span role="cell">
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
-              </td>
-              <td>{formatLastReply(ticket)}</td>
-              <td>{formatDate(ticket.updatedAt)}</td>
+              </span>
+              <span role="cell">{formatLastReply(ticket)}</span>
+              <span role="cell">{formatDate(ticket.updatedAt)}</span>
             </OperationalTableRow>
           ))}
         </OperationalTable>
