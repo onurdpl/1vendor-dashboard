@@ -29,6 +29,13 @@ import {
 } from '../features/finance/api';
 import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
 import type { FinanceTransaction } from '../lib/api/contracts';
+import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import {
+  supportTicketMatchesFinance,
+  type OperationalEventInput,
+  type OperationalLinkInput,
+} from '../lib/operationalCrossLinks';
 
 type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
 
@@ -331,6 +338,11 @@ export function FinancePage() {
     () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
     { enabled: authContextReady },
   );
+  const { data: supportTickets } = useQueryResource(
+    currentUser?.role === 'admin' ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
+    () => (currentUser?.role === 'admin' ? listAdminSupportTickets() : listVendorSupportTickets()),
+    { enabled: authContextReady },
+  );
   const { message, tone, showFeedback } = useActionFeedback();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -544,6 +556,88 @@ export function FinancePage() {
   );
   const selectedInvoiceCapabilities = getProviderCapabilities(selectedRecord?.invoiceExecution ?? null);
   const invoiceResponseSummary = invoiceResponseSummaryQuery.data?.response ?? null;
+  const supportBasePath = isAdmin ? '/admin/support' : '/support';
+  const relatedSupportTickets = useMemo(
+    () =>
+      selectedRecord
+        ? (supportTickets ?? []).filter((ticket) =>
+            supportTicketMatchesFinance(
+              ticket,
+              selectedRecord.id,
+              selectedRecord.shopifyOrderNumber,
+              selectedRecord.shopifyRefundId ?? null,
+            ),
+          )
+        : [],
+    [selectedRecord, supportTickets],
+  );
+  const financeCrossLinks: OperationalLinkInput[] = [];
+  const financeTimelineEvents: OperationalEventInput[] = [];
+  if (selectedRecord) {
+    if (selectedRecord.shopifyOrderNumber) {
+      financeCrossLinks.push({
+        id: `order-${selectedRecord.shopifyOrderNumber}`,
+        eyebrow: 'Order',
+        title: `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}`,
+        description: 'Open the order workspace to review fulfillment context.',
+        href: '/orders',
+        status: 'Linked',
+        tone: 'info',
+      });
+    }
+    if (selectedRecord.category === 'Refund') {
+      financeCrossLinks.push({
+        id: `return-${selectedRecord.id}`,
+        eyebrow: 'Return',
+        title: 'Related return',
+        description: selectedRecord.shopifyRefundId ? `Refund ${selectedRecord.shopifyRefundId}` : 'Customer return activity',
+        href: '/returns',
+        status: 'Refund',
+        tone: 'warning',
+      });
+    }
+    financeCrossLinks.push(
+      ...relatedSupportTickets.map((ticket) => ({
+        id: `support-${ticket.id}`,
+        eyebrow: 'Support',
+        title: ticket.subject,
+        description: ticket.vendorName ?? ticket.vendorId,
+        href: `${supportBasePath}/${ticket.id}`,
+        status: ticket.status.replace(/_/g, ' '),
+        tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      })),
+    );
+    financeTimelineEvents.push(
+      ...getFinanceTimelineItems(selectedRecord).map((item) => ({
+        id: `finance-${selectedRecord.id}-${item.label}`,
+        title: item.label,
+        description: selectedRecord.category,
+        at: item.at,
+        status: item.status,
+        tone: selectedRecord.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      })),
+      ...relatedSupportTickets.map((ticket) => ({
+        id: `support-${ticket.id}`,
+        title: 'Support ticket opened',
+        description: ticket.subject,
+        at: ticket.createdAt,
+        status: ticket.status.replace(/_/g, ' '),
+        tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+        href: `${supportBasePath}/${ticket.id}`,
+      })),
+      ...relatedSupportTickets
+        .filter((ticket) => Boolean(ticket.lastReplyAt))
+        .map((ticket) => ({
+          id: `support-reply-${ticket.id}`,
+          title: 'Support reply added',
+          description: ticket.subject,
+          at: ticket.lastReplyAt,
+          status: ticket.lastReplyByRole ?? 'Reply',
+          tone: 'neutral' as const,
+          href: `${supportBasePath}/${ticket.id}`,
+        })),
+    );
+  }
 
   if (!authContextReady || isLoading) {
     return (
@@ -997,23 +1091,19 @@ export function FinancePage() {
                 </div>
               </div>
 
-              <div className="finance-detail-card finance-timeline-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Timeline</h4>
-                </div>
-                <ol className="finance-payout-timeline">
-                  {getFinanceTimelineItems(selectedRecord).map((item) => (
-                    <li key={`${item.label}-${item.at ?? 'pending'}`}>
-                      <span className="op-timeline-dot" />
-                      <div>
-                        <strong>{item.label}</strong>
-                        <small>{item.at ? formatDate(item.at) : '—'}</small>
-                      </div>
-                      <StatusBadge tone="neutral">{item.status}</StatusBadge>
-                    </li>
-                  ))}
-                </ol>
-              </div>
+              <OperationalLinkCards
+                title="Related records"
+                subtitle="Order, return, and support context for this finance row."
+                links={financeCrossLinks}
+                audience={isAdmin ? 'admin' : 'vendor'}
+              />
+
+              <OperationalTimeline
+                title="Operational timeline"
+                subtitle="Finance and support activity for this row."
+                events={financeTimelineEvents}
+                audience={isAdmin ? 'admin' : 'vendor'}
+              />
 
               <div className="finance-detail-card finance-actions-card">
                 <div className="finance-detail-card-heading">

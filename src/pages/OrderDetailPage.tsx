@@ -1,5 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -19,6 +19,17 @@ import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
 import { SupportTicketModal } from '../components/SupportTicketModal';
+import { getCurrentVendorContext } from '../lib/auth';
+import { listReturns } from '../features/returns/api';
+import { getFinanceDashboard } from '../features/finance/api';
+import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import {
+  sameOperationalOrderNumber,
+  supportTicketMatchesOrder,
+  type OperationalEventInput,
+  type OperationalLinkInput,
+} from '../lib/operationalCrossLinks';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -117,6 +128,7 @@ export function OrderDetailPage() {
   const { orderId } = useParams();
   const location = useLocation();
   const currentUser = getCurrentUser();
+  const currentVendor = getCurrentVendorContext();
   const isAdmin = currentUser?.role === 'admin';
   const isRealMode = runtimeConfig.apiMode === 'real';
   const { message, tone, showFeedback } = useActionFeedback();
@@ -140,6 +152,27 @@ export function OrderDetailPage() {
     () => getShippingProviderDiagnostics(),
     {
       enabled: isAdmin,
+    },
+  );
+  const { data: relatedReturnsData } = useQueryResource(
+    queryKeys.returns.list(currentVendor.vendorId),
+    () => listReturns({ vendorId: currentVendor.vendorId }),
+    {
+      enabled: Boolean(order),
+    },
+  );
+  const { data: relatedFinanceData } = useQueryResource(
+    queryKeys.finance.summary(currentVendor.vendorId),
+    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    {
+      enabled: Boolean(order),
+    },
+  );
+  const { data: relatedSupportTicketsData } = useQueryResource(
+    isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
+    () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
+    {
+      enabled: Boolean(order),
     },
   );
   const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
@@ -229,6 +262,32 @@ export function OrderDetailPage() {
         shipmentStatus: shipmentExecution?.shipmentStatus ?? null,
       }
     : null;
+  const relatedReturns = useMemo(
+    () =>
+      (relatedReturnsData ?? []).filter(
+        (returnRecord) =>
+          returnRecord.relatedOrderId === order?.id ||
+          sameOperationalOrderNumber(returnRecord.sourceShopifyOrderNumber, order?.sourceShopifyOrderNumber) ||
+          returnRecord.sourceShopifyOrderId === order?.sourceShopifyOrderId,
+      ),
+    [order?.id, order?.sourceShopifyOrderId, order?.sourceShopifyOrderNumber, relatedReturnsData],
+  );
+  const relatedFinanceRecords = useMemo(
+    () =>
+      (relatedFinanceData?.transactions ?? []).filter(
+        (record) =>
+          sameOperationalOrderNumber(record.shopifyOrderNumber, order?.sourceShopifyOrderNumber) ||
+          record.shopifyOrderId === order?.sourceShopifyOrderId,
+      ),
+    [order?.sourceShopifyOrderId, order?.sourceShopifyOrderNumber, relatedFinanceData?.transactions],
+  );
+  const relatedSupportTickets = useMemo(
+    () =>
+      (relatedSupportTicketsData ?? []).filter((ticket) =>
+        supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber),
+      ),
+    [order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
+  );
 
   const handleRetryShipment = () => {
     if (!shipmentExecution || !canRetryDryRunShipment) {
@@ -320,6 +379,106 @@ export function OrderDetailPage() {
       tone: hasTrackingSync ? 'success' : 'muted',
       icon: 'T',
     },
+  ];
+  const audience = isAdmin ? 'admin' : 'vendor';
+  const supportBasePath = isAdmin ? '/admin/support' : '/support';
+  const orderTimelineEvents: OperationalEventInput[] = [];
+  orderTimelineEvents.push({
+    id: 'order-created',
+    title: 'Order created',
+    description: `Order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)} entered the vendor workspace.`,
+    at: order.date,
+    status: order.status,
+    tone: 'info',
+  });
+  if (order.shipmentCreatedAt) {
+    orderTimelineEvents.push({
+      id: 'shipment-created',
+      title: 'Shipment created',
+      description: order.carrier ? `Carrier: ${order.carrier}` : 'Shipment record is available.',
+      at: order.shipmentCreatedAt,
+      status: order.shippingStatus,
+      tone: 'success',
+    });
+  }
+  if (order.trackingNumber || order.trackingUrl) {
+    orderTimelineEvents.push({
+      id: 'tracking-added',
+      title: 'Tracking added',
+      description: [order.carrier, order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
+      at: order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date,
+      status: 'Tracking added',
+      tone: 'success',
+    });
+  }
+  orderTimelineEvents.push(
+    ...relatedReturns.map((returnRecord) => ({
+      id: `return-${returnRecord.id}`,
+      title: 'Return requested',
+      description: `${returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item'} · ${getStatusClass(returnRecord.status).replace(/-/g, ' ')}`,
+      at: returnRecord.date,
+      status: returnRecord.status,
+      tone: 'attention' as const,
+      href: `/returns/${returnRecord.id}`,
+    })),
+    ...relatedFinanceRecords.map((record) => ({
+      id: `finance-${record.id}`,
+      title: record.category === 'Refund' ? 'Refund processed' : 'Finance entry created',
+      description: `${record.category} · ${record.amount}`,
+      at: record.date,
+      status: record.status,
+      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      href: '/finance',
+    })),
+    ...relatedSupportTickets.map((ticket) => ({
+      id: `support-${ticket.id}`,
+      title: 'Support ticket opened',
+      description: ticket.subject,
+      at: ticket.createdAt,
+      status: ticket.status.replace(/_/g, ' '),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      href: `${supportBasePath}/${ticket.id}`,
+    })),
+    ...relatedSupportTickets
+      .filter((ticket) => Boolean(ticket.lastReplyAt))
+      .map((ticket) => ({
+        id: `support-reply-${ticket.id}`,
+        title: 'Support reply added',
+        description: ticket.subject,
+        at: ticket.lastReplyAt,
+        status: ticket.lastReplyByRole ?? 'Reply',
+        tone: 'neutral' as const,
+        href: `${supportBasePath}/${ticket.id}`,
+      })),
+  );
+  const orderCrossLinks: OperationalLinkInput[] = [
+    ...relatedReturns.map((returnRecord) => ({
+      id: `return-${returnRecord.id}`,
+      eyebrow: 'Return',
+      title: `Return for ${formatShopifyOrderNumber(returnRecord.sourceShopifyOrderNumber)}`,
+      description: returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item',
+      href: `/returns/${returnRecord.id}`,
+      status: returnRecord.status,
+      tone: returnRecord.status === 'Refunded' || returnRecord.status === 'Closed' ? ('success' as const) : ('attention' as const),
+    })),
+    ...relatedFinanceRecords.map((record) => ({
+      id: `finance-${record.id}`,
+      eyebrow: 'Finance',
+      title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
+      description: `${record.amount} · ${record.status}`,
+      href: '/finance',
+      status: record.category,
+      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+    })),
+    ...relatedSupportTickets.map((ticket) => ({
+      id: `support-${ticket.id}`,
+      eyebrow: 'Support',
+      title: ticket.subject,
+      description: ticket.vendorName ?? ticket.vendorId,
+      href: `${supportBasePath}/${ticket.id}`,
+      status: ticket.status.replace(/_/g, ' '),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+    })),
   ];
 
   return (
@@ -459,29 +618,31 @@ export function OrderDetailPage() {
               </div>
             </div>
           </article>
+
+          <OperationalLinkCards
+            title="Related operational records"
+            subtitle="Returns, payout activity, and support linked to this order."
+            links={orderCrossLinks}
+            audience={audience}
+          />
         </div>
 
         <aside className="order-detail-right-column">
-          <article className="order-detail-card-v2">
-            <div className="order-card-heading">
-              <h2>Operational timeline</h2>
-            </div>
-            {order.timeline.length > 0 ? (
-              <ol className="order-timeline-compact">
-                {order.timeline.map((entry) => (
-                  <li key={`${entry.label}-${entry.at}`}>
-                    <span className="order-timeline-dot" aria-hidden="true" />
-                    <div>
-                      <strong>{getVendorTimelineLabel(entry.label)}</strong>
-                      <span>{formatDate(entry.at)}</span>
-                    </div>
-                  </li>
-                ))}
-              </ol>
-            ) : (
-              <p className="order-empty-copy">No records available.</p>
-            )}
-          </article>
+          <OperationalTimeline
+            title="Unified activity"
+            subtitle="Order, return, finance, and support events."
+            events={[
+              ...order.timeline.map((entry) => ({
+                id: `order-native-${entry.label}-${entry.at}`,
+                title: getVendorTimelineLabel(entry.label),
+                at: entry.at,
+                tone: 'neutral' as const,
+              })),
+              ...orderTimelineEvents,
+            ]}
+            audience={audience}
+            emptyMessage="No records available."
+          />
 
           <article className="order-detail-card-v2 order-primary-action-card">
             <div className="order-card-heading">

@@ -22,6 +22,8 @@ import {
 import { ActionFeedback } from '../components/ActionFeedback';
 import { useActionFeedback } from '../lib/ui';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
+import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
 
 const ADMIN_STATUSES: SupportTicketStatus[] = ['IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 
@@ -67,6 +69,48 @@ function getContextLink(ticket: SupportTicket) {
   return null;
 }
 
+function buildContextLinks(ticket: SupportTicket): OperationalLinkInput[] {
+  const links: OperationalLinkInput[] = [];
+  const contextLink = getContextLink(ticket);
+
+  if (contextLink) {
+    links.push({
+      id: `context-${ticket.contextType}-${ticket.contextId}`,
+      eyebrow: formatSupportLabel(ticket.contextType),
+      title:
+        getSnapshotString(ticket.contextSnapshot, 'orderNumber') ??
+        getSnapshotString(ticket.contextSnapshot, 'returnNumber') ??
+        ticket.contextId ??
+        'Linked context',
+      description: 'Open the operational record connected to this ticket.',
+      href: contextLink,
+      status: 'Linked',
+      tone: 'info',
+    });
+  }
+
+  const financeLedgerEntryId =
+    getSnapshotString(ticket.contextSnapshot, 'financeLedgerEntryId') ??
+    getSnapshotString(ticket.contextSnapshot, 'financeRecordId');
+  const refundId =
+    getSnapshotString(ticket.contextSnapshot, 'refundId') ??
+    getSnapshotString(ticket.contextSnapshot, 'shopifyRefundId');
+
+  if (financeLedgerEntryId || refundId || ticket.category === 'PAYOUT' || ticket.category === 'INVOICE' || ticket.category === 'REFUND') {
+    links.push({
+      id: `finance-${financeLedgerEntryId ?? refundId ?? ticket.id}`,
+      eyebrow: 'Finance',
+      title: financeLedgerEntryId ? 'Finance row' : 'Finance workspace',
+      description: refundId ? `Refund ${refundId}` : 'Review payout and invoice context.',
+      href: '/finance',
+      status: ticket.category,
+      tone: ticket.category === 'REFUND' ? 'warning' : 'success',
+    });
+  }
+
+  return links;
+}
+
 function buildTimeline(ticket: SupportTicket) {
   return [
     { label: 'Ticket created', at: ticket.createdAt, enabled: true },
@@ -74,6 +118,55 @@ function buildTimeline(ticket: SupportTicket) {
     { label: 'Resolved', at: ticket.resolvedAt, enabled: Boolean(ticket.resolvedAt) },
     { label: 'Closed', at: ticket.closedAt, enabled: Boolean(ticket.closedAt) },
   ].filter((entry) => entry.enabled);
+}
+
+function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInput[] {
+  const events: OperationalEventInput[] = [
+    {
+      id: 'ticket-created',
+      title: 'Support ticket opened',
+      description: ticket.subject,
+      at: ticket.createdAt,
+      status: formatSupportLabel(ticket.priority),
+      tone: 'info',
+    },
+    ...(ticket.replies ?? []).map((reply) => ({
+      id: `reply-${reply.id}`,
+      title: reply.authorRole === 'ADMIN' ? 'Support reply added' : 'Vendor reply added',
+      description: reply.message,
+      at: reply.createdAt,
+      status: formatSupportLabel(reply.authorRole),
+      tone: reply.authorRole === 'ADMIN' ? ('info' as const) : ('neutral' as const),
+    })),
+    {
+      id: 'ticket-updated',
+      title: `Status ${formatSupportLabel(ticket.status)}`,
+      at: ticket.updatedAt,
+      status: formatSupportLabel(ticket.status),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? 'success' : 'attention',
+    },
+  ];
+
+  if (ticket.resolvedAt) {
+    events.push({
+      id: 'ticket-resolved',
+      title: 'Ticket resolved',
+      at: ticket.resolvedAt,
+      status: 'Resolved',
+      tone: 'success',
+    });
+  }
+  if (ticket.closedAt) {
+    events.push({
+      id: 'ticket-closed',
+      title: 'Ticket closed',
+      at: ticket.closedAt,
+      status: 'Closed',
+      tone: 'neutral',
+    });
+  }
+
+  return events;
 }
 
 function getVendorSupportStatusCopy(ticket: SupportTicket) {
@@ -266,6 +359,8 @@ export function SupportTicketDetailPage() {
   const contextLink = getContextLink(ticket);
   const canReply = ticket.status !== 'CLOSED';
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
+  const contextLinks = buildContextLinks(ticket);
+  const unifiedTimeline = buildUnifiedSupportTimeline(ticket);
 
   return (
     <section className="op-page support-detail-page">
@@ -396,28 +491,30 @@ export function SupportTicketDetailPage() {
             )}
           </article>
 
-          <article className="support-card">
-            <div className="support-card-header">
-              <div>
-                <p className="eyebrow">Status timeline</p>
-                <h3>Progress</h3>
-              </div>
-            </div>
-            <ol className="return-review-timeline">
-              {buildTimeline(ticket).map((entry) => (
-                <li key={`${entry.label}-${entry.at}`}>
-                  <span aria-hidden="true" />
-                  <div>
-                    <strong>{entry.label}</strong>
-                    <small>{formatDate(entry.at)}</small>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </article>
+          <OperationalTimeline
+            title="Unified activity"
+            subtitle="Ticket status and public support replies."
+            events={[
+              ...buildTimeline(ticket).map((entry) => ({
+                id: `status-${entry.label}-${entry.at}`,
+                title: entry.label,
+                at: entry.at,
+                tone: 'neutral' as const,
+              })),
+              ...unifiedTimeline,
+            ]}
+            audience={isAdmin ? 'admin' : 'vendor'}
+          />
         </main>
 
         <aside className="support-detail-side">
+          <OperationalLinkCards
+            title="Context links"
+            subtitle="Operational records connected to this support ticket."
+            links={contextLinks}
+            audience={isAdmin ? 'admin' : 'vendor'}
+          />
+
           {isAdmin ? (
             <article className="support-card">
               <div className="support-card-header">

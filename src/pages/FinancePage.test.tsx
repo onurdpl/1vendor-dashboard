@@ -11,6 +11,8 @@ const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) =
 const updateVendorFinancialProfileMock = vi.fn();
 const preparePayoutBatchMock = vi.fn();
 const getInvoiceExecutionResponseSummaryMock = vi.fn();
+const listAdminSupportTicketsMock = vi.fn();
+const listVendorSupportTicketsMock = vi.fn();
 
 vi.mock('../features/finance/api', async () => {
   const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
@@ -20,6 +22,15 @@ vi.mock('../features/finance/api', async () => {
     getInvoiceExecutionResponseSummary: (...args: unknown[]) => getInvoiceExecutionResponseSummaryMock(...args),
     preparePayoutBatch: (...args: unknown[]) => preparePayoutBatchMock(...args),
     updateVendorFinancialProfile: (...args: unknown[]) => updateVendorFinancialProfileMock(...args),
+  };
+});
+
+vi.mock('../features/support/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
+  return {
+    ...actual,
+    listAdminSupportTickets: () => listAdminSupportTicketsMock(),
+    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
   };
 });
 
@@ -215,6 +226,10 @@ describe('FinancePage control center', () => {
     updateVendorFinancialProfileMock.mockReset();
     preparePayoutBatchMock.mockReset();
     getInvoiceExecutionResponseSummaryMock.mockReset();
+    listAdminSupportTicketsMock.mockReset();
+    listAdminSupportTicketsMock.mockResolvedValue([]);
+    listVendorSupportTicketsMock.mockReset();
+    listVendorSupportTicketsMock.mockResolvedValue([]);
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {

@@ -10,6 +10,10 @@ import { OrderDetailPage } from './OrderDetailPage';
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
+const listReturnsMock = vi.fn();
+const getFinanceDashboardMock = vi.fn();
+const listAdminSupportTicketsMock = vi.fn();
+const listVendorSupportTicketsMock = vi.fn();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -20,6 +24,31 @@ vi.mock('../features/orders/api', async () => {
     createShipmentExecution: vi.fn(),
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     submitFulfillmentTracking: vi.fn(),
+  };
+});
+
+vi.mock('../features/returns/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
+  return {
+    ...actual,
+    listReturns: (options?: { vendorId?: string | null }) => listReturnsMock(options),
+  };
+});
+
+vi.mock('../features/finance/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
+  return {
+    ...actual,
+    getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+  };
+});
+
+vi.mock('../features/support/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
+  return {
+    ...actual,
+    listAdminSupportTickets: () => listAdminSupportTicketsMock(),
+    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
   };
 });
 
@@ -148,6 +177,27 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       providerShipmentId: 'ke-live-1028',
       updatedAt: '2026-05-15T19:40:00.000Z',
     });
+    listReturnsMock.mockReset();
+    listReturnsMock.mockResolvedValue([]);
+    getFinanceDashboardMock.mockReset();
+    getFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        grossSales: '$0.00',
+        refunds: '$0.00',
+        netRevenue: '$0.00',
+        platformFee: '$0.00',
+        payoutEstimate: '$0.00',
+        totalRevenue: '$0.00',
+        availableBalance: '$0.00',
+        pendingPayouts: '$0.00',
+        refundsThisMonth: '$0.00',
+      },
+      transactions: [],
+    });
+    listAdminSupportTicketsMock.mockReset();
+    listAdminSupportTicketsMock.mockResolvedValue([]);
+    listVendorSupportTicketsMock.mockReset();
+    listVendorSupportTicketsMock.mockResolvedValue([]);
   });
 
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {

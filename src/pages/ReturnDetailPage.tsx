@@ -16,6 +16,15 @@ import { getCurrentUser, getCurrentVendorContext } from '../lib/auth';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { useActionFeedback } from '../lib/ui';
 import { SupportTicketModal } from '../components/SupportTicketModal';
+import { getFinanceDashboard } from '../features/finance/api';
+import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import {
+  sameOperationalOrderNumber,
+  supportTicketMatchesReturn,
+  type OperationalEventInput,
+  type OperationalLinkInput,
+} from '../lib/operationalCrossLinks';
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -203,6 +212,7 @@ export function ReturnDetailPage() {
   const location = useLocation();
   const currentVendor = getCurrentVendorContext();
   const currentUser = getCurrentUser();
+  const isAdmin = currentUser?.role === 'admin';
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
@@ -214,6 +224,20 @@ export function ReturnDetailPage() {
       }
 
       return getReturn(returnId);
+    },
+  );
+  const { data: relatedFinanceData } = useQueryResource(
+    queryKeys.finance.summary(currentVendor.vendorId),
+    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    {
+      enabled: Boolean(returnRequest),
+    },
+  );
+  const { data: relatedSupportTicketsData } = useQueryResource(
+    isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
+    () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
+    {
+      enabled: Boolean(returnRequest),
     },
   );
   const markReceivedMutation = useMutationAction(
@@ -304,6 +328,72 @@ export function ReturnDetailPage() {
     returnCarrierPresent: Boolean(returnRequest.returnCarrierName),
     returnTrackingPresent: Boolean(returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl),
   };
+  const relatedFinanceRecords = (relatedFinanceData?.transactions ?? []).filter(
+    (record) =>
+      (returnRequest.sourceShopifyRefundId && record.shopifyRefundId === returnRequest.sourceShopifyRefundId) ||
+      sameOperationalOrderNumber(record.shopifyOrderNumber, returnRequest.sourceShopifyOrderNumber),
+  );
+  const relatedSupportTickets = (relatedSupportTicketsData ?? []).filter((ticket) =>
+    supportTicketMatchesReturn(ticket, returnRequest.id),
+  );
+  const supportBasePath = isAdmin ? '/admin/support' : '/support';
+  const audience = isAdmin ? 'admin' : 'vendor';
+  const returnCrossLinks: OperationalLinkInput[] = [
+    {
+      id: `order-${returnRequest.relatedOrderId}`,
+      eyebrow: 'Order',
+      title: `Order ${formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}`,
+      description: 'Original order for this return.',
+      href: `/orders/${returnRequest.relatedOrderId}`,
+      status: 'Linked',
+      tone: 'info',
+    },
+    ...relatedFinanceRecords.map((record) => ({
+      id: `finance-${record.id}`,
+      eyebrow: 'Finance',
+      title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
+      description: `${record.amount} · ${record.status}`,
+      href: '/finance',
+      status: record.category,
+      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+    })),
+    ...relatedSupportTickets.map((ticket) => ({
+      id: `support-${ticket.id}`,
+      eyebrow: 'Support',
+      title: ticket.subject,
+      description: ticket.vendorName ?? ticket.vendorId,
+      href: `${supportBasePath}/${ticket.id}`,
+      status: ticket.status.replace(/_/g, ' '),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+    })),
+  ];
+  const unifiedTimelineEvents: OperationalEventInput[] = [
+    ...timeline.map((entry, index) => ({
+      id: `return-${index}-${entry.label}-${entry.at}`,
+      title: entry.label,
+      at: returnRequest.timeline[index]?.at ?? returnRequest.date,
+      description: entry.at,
+      tone: 'neutral' as const,
+    })),
+    ...relatedFinanceRecords.map((record) => ({
+      id: `finance-${record.id}`,
+      title: record.category === 'Refund' ? 'Refund processed' : 'Finance entry created',
+      description: `${record.category} · ${record.amount}`,
+      at: record.date,
+      status: record.status,
+      tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
+      href: '/finance',
+    })),
+    ...relatedSupportTickets.map((ticket) => ({
+      id: `support-${ticket.id}`,
+      title: 'Support ticket opened',
+      description: ticket.subject,
+      at: ticket.createdAt,
+      status: ticket.status.replace(/_/g, ' '),
+      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
+      href: `${supportBasePath}/${ticket.id}`,
+    })),
+  ];
 
   return (
     <section className="return-review-page">
@@ -377,6 +467,13 @@ export function ReturnDetailPage() {
               ) : null}
             </div>
           </article>
+
+          <OperationalLinkCards
+            title="Related operational records"
+            subtitle="Order, payout impact, and support linked to this return."
+            links={returnCrossLinks}
+            audience={audience}
+          />
         </main>
 
         <aside className="return-review-side">
@@ -510,25 +607,12 @@ export function ReturnDetailPage() {
             </div>
           </article>
 
-          <article className="return-review-card">
-            <div className="return-review-card-header">
-              <div>
-                <p className="eyebrow">Timeline</p>
-                <h3>Progress</h3>
-              </div>
-            </div>
-            <ol className="return-review-timeline">
-              {timeline.map((entry, index) => (
-                <li key={`${entry.label}-${entry.at}-${index}`}>
-                  <span aria-hidden="true" />
-                  <div>
-                    <strong>{entry.label}</strong>
-                    <small>{entry.at}</small>
-                  </div>
-                </li>
-              ))}
-            </ol>
-          </article>
+          <OperationalTimeline
+            title="Unified activity"
+            subtitle="Return, refund, finance, and support events."
+            events={unifiedTimelineEvents}
+            audience={audience}
+          />
         </aside>
       </div>
       <SupportTicketModal

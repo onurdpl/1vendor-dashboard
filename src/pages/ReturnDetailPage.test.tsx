@@ -13,6 +13,9 @@ const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
 >();
 const createSupportTicketMock = vi.fn();
+const listAdminSupportTicketsMock = vi.fn();
+const listVendorSupportTicketsMock = vi.fn();
+const getFinanceDashboardMock = vi.fn();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
@@ -30,6 +33,16 @@ vi.mock('../features/support/api', async () => {
   return {
     ...actual,
     createSupportTicket: (input: unknown) => createSupportTicketMock(input),
+    listAdminSupportTickets: () => listAdminSupportTicketsMock(),
+    listVendorSupportTickets: () => listVendorSupportTicketsMock(),
+  };
+});
+
+vi.mock('../features/finance/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/finance/api')>('../features/finance/api');
+  return {
+    ...actual,
+    getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
   };
 });
 
@@ -120,6 +133,25 @@ describe('ReturnDetailPage vendor review screen', () => {
     markReturnReceivedMock.mockReset();
     reviewReturnMock.mockReset();
     createSupportTicketMock.mockReset();
+    listAdminSupportTicketsMock.mockReset();
+    listAdminSupportTicketsMock.mockResolvedValue([]);
+    listVendorSupportTicketsMock.mockReset();
+    listVendorSupportTicketsMock.mockResolvedValue([]);
+    getFinanceDashboardMock.mockReset();
+    getFinanceDashboardMock.mockResolvedValue({
+      summary: {
+        grossSales: '$0.00',
+        refunds: '$0.00',
+        netRevenue: '$0.00',
+        platformFee: '$0.00',
+        payoutEstimate: '$0.00',
+        totalRevenue: '$0.00',
+        availableBalance: '$0.00',
+        pendingPayouts: '$0.00',
+        refundsThisMonth: '$0.00',
+      },
+      transactions: [],
+    });
   });
 
   it('renders a vendor-facing return review without internal lifecycle wording', async () => {
@@ -128,7 +160,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
-    expect(screen.getByText('Order #1023')).toBeInTheDocument();
+    expect(screen.getAllByText('Order #1023').length).toBeGreaterThan(0);
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.getByText('White / 42')).toBeInTheDocument();
