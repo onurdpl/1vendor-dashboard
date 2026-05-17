@@ -856,19 +856,19 @@ a:focus-visible {
 
 .support-admin-table .op-table-head,
 .support-admin-table .op-table-row {
-  min-width: 1220px;
+  min-width: 1180px;
   grid-template-columns:
-    minmax(190px, 1.45fr)
-    minmax(112px, 0.74fr)
-    minmax(120px, 0.86fr)
-    minmax(86px, 0.56fr)
-    minmax(86px, 0.56fr)
-    minmax(112px, 0.7fr)
-    minmax(108px, 0.76fr)
-    minmax(108px, 0.72fr)
-    minmax(142px, 0.9fr)
-    minmax(124px, 0.82fr)
-    minmax(72px, 0.42fr);
+    minmax(178px, 1.34fr)
+    minmax(104px, 0.68fr)
+    minmax(132px, 0.92fr)
+    minmax(82px, 0.52fr)
+    minmax(82px, 0.52fr)
+    minmax(106px, 0.66fr)
+    minmax(102px, 0.68fr)
+    minmax(98px, 0.64fr)
+    minmax(134px, 0.84fr)
+    minmax(116px, 0.76fr)
+    minmax(64px, 0.36fr);
 }
 
 .support-vendor-table .op-table-head,
@@ -886,6 +886,9 @@ a:focus-visible {
 .support-admin-table .op-table-row,
 .support-vendor-table .op-table-row {
   cursor: default;
+  min-height: 42px;
+  padding: 6px 10px;
+  gap: 6px;
 }
 
 .support-ticket-cell,
@@ -896,6 +899,44 @@ a:focus-visible {
 .support-admin-table .op-table-row > span,
 .support-vendor-table .op-table-row > span {
   min-width: 0;
+  align-content: center;
+  gap: 1px;
+  color: #334155;
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.support-admin-table .op-table-head,
+.support-vendor-table .op-table-head {
+  min-height: 30px;
+  padding: 0 10px;
+  gap: 6px;
+}
+
+.support-admin-table .op-table-row strong,
+.support-vendor-table .op-table-row strong {
+  font-size: 0.82rem;
+  line-height: 1.2;
+}
+
+.support-ticket-cell > span:not(.op-badge),
+.support-sla-cell > span:not(.op-badge),
+.support-muted-cell,
+.support-last-reply-cell {
+  min-width: 0;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.support-context-cell {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .support-admin-table .op-table-row > span:not(.support-ticket-cell):not(.support-sla-cell),
@@ -906,7 +947,15 @@ a:focus-visible {
 }
 
 .support-action-cell {
+  align-content: center;
   justify-items: end;
+}
+
+.support-action-cell .button {
+  min-height: 28px;
+  padding: 5px 8px;
+  border-radius: 10px;
+  font-size: 0.76rem;
 }
 
 .op-side-panel {
@@ -6409,16 +6458,100 @@ h3 {
 .support-ops-page,
 .support-detail-page {
   display: grid;
-  gap: 18px;
+  gap: 12px;
+}
+
+.support-ops-header {
+  align-items: center;
+  margin-bottom: 0;
+}
+
+.support-ops-header .eyebrow {
+  margin: 0 0 5px;
+  color: #2563eb;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.support-ops-header h1 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1.35rem;
+  line-height: 1.16;
+  letter-spacing: 0;
+}
+
+.support-ops-header p:not(.eyebrow) {
+  max-width: 560px;
+  margin: 5px 0 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.support-ops-header .button {
+  align-self: center;
+  min-height: 34px;
+  padding: 7px 11px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+}
+
+.support-ops-page .op-toolbar {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 16px;
+}
+
+.support-ops-page .op-toolbar .op-search-input {
+  flex: 1 1 320px;
+  min-width: min(320px, 100%);
+  min-height: 36px;
+  border-radius: 12px;
+  background: #f8fafc;
+  font-size: 0.84rem;
+}
+
+.support-ops-page .op-filter-bar {
+  flex: 1 1 auto;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.support-ops-page .op-toolbar > .op-filter-bar:only-child {
+  justify-content: flex-start;
+}
+
+.support-ops-page .op-filter-bar select {
+  min-height: 36px;
+  border-radius: 12px;
+  font-size: 0.8rem;
 }
 
 .support-toggle {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  min-height: 36px;
+  gap: 7px;
+  padding: 0 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #f8fafc;
   color: #475569;
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.support-toggle input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #2563eb;
 }
 
 .support-detail-header,

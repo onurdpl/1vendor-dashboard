@@ -209,7 +209,7 @@ export function AdminSupportTicketsPage() {
 
   return (
     <section className="op-page support-ops-page">
-      <div className="op-page-heading">
+      <div className="op-page-heading support-ops-header">
         <div>
           <p className="eyebrow">Support operations</p>
           <h1>Support Operations Workspace</h1>
@@ -276,8 +276,8 @@ export function AdminSupportTicketsPage() {
                   <StatusBadge tone="attention">{ticket.adminUnreadCount} unread</StatusBadge>
                 ) : null}
               </span>
-              <span role="cell">{ticket.vendorName ?? ticket.vendorId}</span>
-              <span role="cell">{getContextLabel(ticket)}</span>
+              <span role="cell" className="support-muted-cell">{ticket.vendorName ?? ticket.vendorId}</span>
+              <span role="cell" className="support-context-cell">{getContextLabel(ticket)}</span>
               <span role="cell">{formatSupportLabel(ticket.category)}</span>
               <span role="cell">
                 <StatusBadge tone={getPriorityTone(ticket.priority)}>{formatSupportLabel(ticket.priority)}</StatusBadge>
@@ -289,9 +289,9 @@ export function AdminSupportTicketsPage() {
                 <StatusBadge tone={getSlaTone(ticket)}>{getSlaLabel(ticket)}</StatusBadge>
                 <span>{ticket.sla?.dueLabel ?? 'No active SLA'}</span>
               </span>
-              <span role="cell">{ticket.assigneeName ?? 'Unassigned'}</span>
-              <span role="cell">{formatLastReply(ticket)}</span>
-              <span role="cell">{formatDate(ticket.updatedAt)}</span>
+              <span role="cell" className="support-muted-cell">{ticket.assigneeName ?? 'Unassigned'}</span>
+              <span role="cell" className="support-last-reply-cell">{formatLastReply(ticket)}</span>
+              <span role="cell" className="support-muted-cell">{formatDate(ticket.updatedAt)}</span>
               <span role="cell" className="support-action-cell">
                 <Link to={`/admin/support/${ticket.id}`} className="button button-secondary button-link">
                   Open

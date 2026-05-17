@@ -68,7 +68,7 @@ export function VendorSupportTicketsPage() {
 
   return (
     <section className="op-page support-ops-page">
-      <div className="op-page-heading">
+      <div className="op-page-heading support-ops-header">
         <div>
           <p className="eyebrow">Support</p>
           <h1>Vendor Support Requests</h1>
@@ -103,8 +103,8 @@ export function VendorSupportTicketsPage() {
               <span role="cell">
                 <StatusBadge tone={getSupportStatusTone(ticket.status)}>{formatSupportLabel(ticket.status)}</StatusBadge>
               </span>
-              <span role="cell">{formatLastReply(ticket)}</span>
-              <span role="cell">{formatDate(ticket.updatedAt)}</span>
+              <span role="cell" className="support-last-reply-cell">{formatLastReply(ticket)}</span>
+              <span role="cell" className="support-muted-cell">{formatDate(ticket.updatedAt)}</span>
             </OperationalTableRow>
           ))}
         </OperationalTable>
