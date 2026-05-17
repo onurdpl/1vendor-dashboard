@@ -4,6 +4,13 @@ import type { VendorId } from './vendorContext';
 const TOKEN_KEY = 'vendor-dashboard.session-token';
 const CURRENT_USER_KEY = 'vendor-dashboard.current-user';
 const SESSION_RESET_EVENT = 'vendor-dashboard:session-reset';
+const EXPIRED_SESSION_NOTICE_KEY = 'vendor-dashboard.expired-session';
+export const EXPIRED_SESSION_MESSAGE = 'Your session expired. Please sign in again.';
+
+export type ExpiredSessionNotice = {
+  message: string;
+  intendedPath: string;
+};
 
 export type UserVendorAccess = {
   vendorId: VendorId;
@@ -124,9 +131,90 @@ export function setToken(token: string) {
   window.localStorage.setItem(TOKEN_KEY, token);
 }
 
-export function clearToken() {
+function getCurrentBrowserPath() {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+
+  const { pathname, search, hash } = window.location;
+  return `${pathname || '/'}${search || ''}${hash || ''}`;
+}
+
+export function sanitizeInternalPath(path: string | null | undefined) {
+  if (!path || !path.startsWith('/') || path.startsWith('//')) {
+    return '/';
+  }
+
+  return path;
+}
+
+export function rememberExpiredSession(intendedPath = getCurrentBrowserPath()) {
   if (typeof window === 'undefined') {
     return;
+  }
+
+  const notice: ExpiredSessionNotice = {
+    message: EXPIRED_SESSION_MESSAGE,
+    intendedPath: sanitizeInternalPath(intendedPath),
+  };
+
+  window.localStorage.setItem(EXPIRED_SESSION_NOTICE_KEY, JSON.stringify(notice));
+}
+
+export function peekExpiredSessionNotice() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const serialized = window.localStorage.getItem(EXPIRED_SESSION_NOTICE_KEY);
+
+  if (!serialized) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(serialized) as Partial<ExpiredSessionNotice>;
+
+    if (typeof parsed.message !== 'string' || typeof parsed.intendedPath !== 'string') {
+      return null;
+    }
+
+    return {
+      message: parsed.message,
+      intendedPath: sanitizeInternalPath(parsed.intendedPath),
+    } satisfies ExpiredSessionNotice;
+  } catch {
+    return null;
+  }
+}
+
+export function consumeExpiredSessionNotice() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  const notice = peekExpiredSessionNotice();
+  window.localStorage.removeItem(EXPIRED_SESSION_NOTICE_KEY);
+  return notice;
+}
+
+export function clearExpiredSessionNotice() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(EXPIRED_SESSION_NOTICE_KEY);
+}
+
+export function clearToken(options: { reason?: 'expired'; intendedPath?: string } = {}) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if (options.reason === 'expired') {
+    rememberExpiredSession(options.intendedPath);
+  } else {
+    clearExpiredSessionNotice();
   }
 
   window.localStorage.removeItem(TOKEN_KEY);

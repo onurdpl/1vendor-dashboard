@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from './api-client';
-import { getCurrentUser, getToken, setCurrentUser, setCurrentVendorId, setToken } from './auth';
+import { EXPIRED_SESSION_MESSAGE, getCurrentUser, getToken, peekExpiredSessionNotice, setCurrentUser, setCurrentVendorId, setToken } from './auth';
 import { ApiError } from './api/errors';
 
 describe('apiClient vendor-scoped headers', () => {
@@ -55,6 +55,7 @@ describe('apiClient vendor-scoped headers', () => {
   });
 
   it('clears stale session state when the backend rejects the token', async () => {
+    window.history.pushState({}, '', '/orders?status=open#row-1029');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), {
       status: 401,
       headers: { 'Content-Type': 'application/json' },
@@ -67,5 +68,9 @@ describe('apiClient vendor-scoped headers', () => {
 
     expect(getToken()).toBeNull();
     expect(getCurrentUser()).toBeNull();
+    expect(peekExpiredSessionNotice()).toEqual({
+      message: EXPIRED_SESSION_MESSAGE,
+      intendedPath: '/orders?status=open#row-1029',
+    });
   });
 });

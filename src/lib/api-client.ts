@@ -26,6 +26,15 @@ function buildUrl(path: string) {
   return `${normalizedBase}${normalizedPath}`;
 }
 
+function getCurrentRouteForAuthRedirect() {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+
+  const { pathname, search, hash } = window.location;
+  return `${pathname || '/'}${search || ''}${hash || ''}`;
+}
+
 function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   const headers = new Headers(options.headers);
   const token = options.token ?? getToken();
@@ -84,7 +93,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
 
     if (!response.ok) {
       if (response.status === 401) {
-        clearToken();
+        clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
       }
 
       const message =

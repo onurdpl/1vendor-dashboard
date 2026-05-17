@@ -9,8 +9,17 @@ export type RequestOptions = Omit<RequestInit, 'body' | 'headers'> & {
   body?: unknown;
 };
 
+function getCurrentRouteForAuthRedirect() {
+  if (typeof window === 'undefined') {
+    return '/';
+  }
+
+  const { pathname, search, hash } = window.location;
+  return `${pathname || '/'}${search || ''}${hash || ''}`;
+}
+
 function handleUnauthorized() {
-  clearToken();
+  clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
 
   if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
     window.location.assign('/login');

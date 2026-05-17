@@ -2,8 +2,11 @@ import { FormEvent, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
+  EXPIRED_SESSION_MESSAGE,
+  consumeExpiredSessionNotice,
   getDemoUsers,
   isAuthenticated,
+  sanitizeInternalPath,
   setCurrentUser,
   setCurrentVendorId,
   setToken,
@@ -12,14 +15,55 @@ import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 
+type LoginRedirectState = {
+  from?: {
+    pathname?: string;
+    search?: string;
+    hash?: string;
+  } | string;
+  sessionExpired?: boolean;
+  message?: string;
+};
+
+type LoginLocationState = LoginRedirectState | null;
+
+function buildRouteFromLocationState(from: LoginRedirectState['from']) {
+  if (typeof from === 'string') {
+    return from;
+  }
+
+  if (!from?.pathname) {
+    return '/';
+  }
+
+  return `${from.pathname}${from.search ?? ''}${from.hash ?? ''}`;
+}
+
+function normalizeLoginDestination(path: string | null | undefined) {
+  const sanitized = sanitizeInternalPath(path);
+
+  if (sanitized === '/login' || sanitized.startsWith('/login?') || sanitized.startsWith('/login#')) {
+    return '/';
+  }
+
+  return sanitized;
+}
+
 export function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
+  const locationState = location.state as LoginLocationState;
+  const [expiredSessionNotice] = useState(() => consumeExpiredSessionNotice());
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const from = (location.state as { from?: { pathname?: string } } | null)?.from?.pathname ?? '/';
+  const from = normalizeLoginDestination(
+    expiredSessionNotice?.intendedPath ?? buildRouteFromLocationState(locationState?.from),
+  );
+  const sessionMessage =
+    expiredSessionNotice?.message ??
+    (locationState?.sessionExpired ? locationState.message ?? EXPIRED_SESSION_MESSAGE : null);
   const demoUsers = getDemoUsers();
   const realModeDemoUsers = [
     'admin@demo.com / demo123',
@@ -29,7 +73,7 @@ export function LoginPage() {
   ];
 
   if (isAuthenticated()) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={from} replace />;
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -102,6 +146,7 @@ export function LoginPage() {
           </button>
         </form>
 
+        {sessionMessage ? <ActionFeedback tone="info" message={sessionMessage} /> : null}
         {errorMessage ? <ActionFeedback tone="error" message={errorMessage} /> : null}
 
         <div className="demo-credentials">
