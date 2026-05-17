@@ -44,6 +44,10 @@ function formatOptionalDate(value?: string, fallback = '—') {
   return value ? formatDate(value) : fallback;
 }
 
+function buildFinanceHref(record: { id: string }) {
+  return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
+}
+
 function getCompactCustomerLabel(value?: string) {
   const normalized = value?.trim();
 
@@ -439,7 +443,7 @@ export function OrderDetailPage() {
       at: record.date,
       status: record.status,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
-      href: '/finance',
+      href: buildFinanceHref(record),
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
@@ -477,7 +481,7 @@ export function OrderDetailPage() {
       eyebrow: 'Finance',
       title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
       description: `${record.amount} · ${record.status}`,
-      href: '/finance',
+      href: buildFinanceHref(record),
       status: record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
     })),

@@ -232,6 +232,10 @@ function buildLinkedOrderHref(returnRequest: ReturnDetail) {
   return undefined;
 }
 
+function buildFinanceHref(record: { id: string }) {
+  return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
+}
+
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const location = useLocation();
@@ -387,7 +391,7 @@ export function ReturnDetailPage() {
       eyebrow: 'Finance',
       title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
       description: `${record.amount} · ${record.status}`,
-      href: '/finance',
+      href: buildFinanceHref(record),
       status: record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
     })),
@@ -416,7 +420,7 @@ export function ReturnDetailPage() {
       at: record.date,
       status: record.status,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
-      href: '/finance',
+      href: buildFinanceHref(record),
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
 import type { FinanceDashboard } from '../lib/api/contracts';
@@ -187,7 +187,7 @@ function buildInvoiceExecution(
   };
 }
 
-function renderFinancePage() {
+function renderFinancePage(initialEntries = ['/finance']) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -198,8 +198,39 @@ function renderFinancePage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <FinancePage />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function FinanceNavigationHarness({ target }: { target: string }) {
+  const navigate = useNavigate();
+
+  return (
+    <>
+      <button type="button" onClick={() => navigate(target)}>
+        Navigate to linked finance row
+      </button>
+      <FinancePage />
+    </>
+  );
+}
+
+function renderFinanceNavigationHarness(target: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={['/finance']}>
+        <FinanceNavigationHarness target={target} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -258,6 +289,65 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
+  });
+
+  it('selects a finance row by ledgerId deep link', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage(['/finance?ledgerId=ledger-refund-failed']);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
+    expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+  });
+
+  it('selects a finance row by Shopify refund id numeric tail', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage(['/finance?refundId=501']);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1001' })).toBeInTheDocument();
+    expect((await screen.findAllByText('-$425.00')).length).toBeGreaterThan(0);
+  });
+
+  it('selects a finance row by order number and Shopify order id', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    const { unmount } = renderFinancePage(['/finance?order=1002']);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
+
+    unmount();
+    getFinanceDashboardMock.mockClear();
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage(['/finance?shopifyOrderId=1002']);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
+  });
+
+  it('does not fall back to the first finance row when a linked target is unavailable', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage(['/finance?ledgerId=missing-ledger']);
+
+    expect(await screen.findByText('Linked finance record unavailable')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Order #1021' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+  });
+
+  it('clears stale selected finance state when a linked target changes', async () => {
+    const user = userEvent.setup();
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinanceNavigationHarness('/finance?ledgerId=ledger-refund-failed');
+
+    await user.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+    expect(await screen.findByRole('heading', { name: 'Order #1001' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Navigate to linked finance row' }));
+
+    expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
   });
 
   it('links finance order records to the targeted orders workspace query', async () => {

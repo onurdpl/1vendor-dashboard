@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -37,6 +38,7 @@ import {
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
+import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 
 type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
 
@@ -54,6 +56,11 @@ type VendorProfileFormInput = {
   deductShippingEnabled: boolean;
   shippingMode: 'disabled' | 'fixed' | 'external_provider';
   fixedShippingFee: number | null;
+};
+
+type FinanceDeepLinkTarget = {
+  type: 'ledger' | 'refund' | 'order' | 'shopifyOrder';
+  value: string;
 };
 
 function formatDate(value: string) {
@@ -122,6 +129,88 @@ function buildReturnsHref(record: FinanceTransaction) {
     return `/returns?order=${encodeURIComponent(String(record.shopifyOrderNumber))}`;
   }
   return null;
+}
+
+function buildFinanceHref(record: Pick<FinanceTransaction, 'id'>) {
+  return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
+}
+
+function readFirstSearchParam(searchParams: URLSearchParams, names: string[]) {
+  for (const name of names) {
+    const value = searchParams.get(name)?.trim();
+    if (value) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getFinanceDeepLinkTarget(searchParams: URLSearchParams): FinanceDeepLinkTarget | null {
+  const ledgerTarget = readFirstSearchParam(searchParams, ['ledgerId', 'financeLedgerEntryId', 'financeRecordId', 'ledger', 'id']);
+  if (ledgerTarget) {
+    return { type: 'ledger', value: ledgerTarget };
+  }
+
+  const refundTarget = readFirstSearchParam(searchParams, ['refundId', 'shopifyRefundId', 'sourceShopifyRefundId']);
+  if (refundTarget) {
+    return { type: 'refund', value: refundTarget };
+  }
+
+  const shopifyOrderTarget = readFirstSearchParam(searchParams, ['shopifyOrderId', 'sourceShopifyOrderId', 'orderId']);
+  if (shopifyOrderTarget) {
+    return { type: 'shopifyOrder', value: shopifyOrderTarget };
+  }
+
+  const orderTarget = readFirstSearchParam(searchParams, ['order', 'orderNumber', 'shopifyOrderNumber', 'sourceShopifyOrderNumber']);
+  if (orderTarget) {
+    return { type: 'order', value: orderTarget };
+  }
+
+  return null;
+}
+
+function financeRecordMatchesTarget(record: FinanceTransaction, target: FinanceDeepLinkTarget | null) {
+  if (!target) {
+    return false;
+  }
+
+  if (target.type === 'ledger') {
+    return [
+      record.id,
+      readFinanceString(record, 'ledgerId'),
+      readFinanceString(record, 'financeLedgerEntryId'),
+      readFinanceString(record, 'financeRecordId'),
+    ].some((value) => sameNormalizedIdentifier(value, target.value));
+  }
+
+  if (target.type === 'refund') {
+    return [
+      record.shopifyRefundId,
+      readFinanceString(record, 'refundId'),
+      readFinanceString(record, 'shopifyRefundId'),
+      readFinanceString(record, 'sourceShopifyRefundId'),
+      readFinanceString(record, 'relatedRefundId'),
+    ].some((value) => sameShopifyIdentifier(value, target.value));
+  }
+
+  if (target.type === 'shopifyOrder') {
+    return [
+      record.shopifyOrderId,
+      readFinanceString(record, 'shopifyOrderId'),
+      readFinanceString(record, 'sourceShopifyOrderId'),
+      readFinanceString(record, 'relatedOrderId'),
+      readFinanceString(record, 'orderId'),
+      readFinanceString(record, 'allocationId'),
+    ].some((value) => sameNormalizedIdentifier(value, target.value));
+  }
+
+  return [
+    record.shopifyOrderNumber,
+    readFinanceString(record, 'orderNumber'),
+    readFinanceString(record, 'shopifyOrderNumber'),
+    readFinanceString(record, 'sourceShopifyOrderNumber'),
+  ].some((value) => sameOrderNumber(value, target.value));
 }
 
 function normalizeFinanceStatus(status: string) {
@@ -374,6 +463,7 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
 }
 
 export function FinancePage() {
+  const [searchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
@@ -393,6 +483,7 @@ export function FinancePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
   const [commissionPercent, setCommissionPercent] = useState('10.00');
   const [commissionVatPercent, setCommissionVatPercent] = useState('0.00');
   const [deductShippingEnabled, setDeductShippingEnabled] = useState(false);
@@ -403,6 +494,10 @@ export function FinancePage() {
   const [shippingVatAmount, setShippingVatAmount] = useState('');
   const isAdmin = currentUser?.role === 'admin';
   const isVendorUser = currentUser?.role === 'vendor';
+
+  useEffect(() => {
+    setSelectedRecordId(null);
+  }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value]);
   const saveProfileMutation = useMutationAction(
     (input: VendorProfileFormInput) =>
       updateVendorFinancialProfile(currentVendor.vendorId, input),
@@ -585,11 +680,18 @@ export function FinancePage() {
   }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, searchTerm, statusFilter]);
 
   const selectedRecord = useMemo(() => {
+    const selectedByClick = selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : null;
+    if (selectedByClick) {
+      return selectedByClick;
+    }
+    if (requestedFinanceTarget) {
+      return (finance?.transactions ?? []).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null;
+    }
     if (!filteredRecords.length) {
       return null;
     }
-    return filteredRecords.find((record) => record.id === selectedRecordId) ?? filteredRecords[0];
-  }, [filteredRecords, selectedRecordId]);
+    return filteredRecords[0];
+  }, [filteredRecords, finance?.transactions, requestedFinanceTarget, selectedRecordId]);
   const shouldLoadInvoiceResponseSummary =
     isAdmin &&
     Boolean(selectedRecord?.invoiceExecution) &&
@@ -710,7 +812,7 @@ export function FinancePage() {
           name: currentVendor.vendorName,
         },
         createdFromSignal: `finance:${selectedRecord.id}:invoice`,
-        deepLink: '/finance',
+        deepLink: buildFinanceHref(selectedRecord),
         vendorVisible: false,
         createdAt: selectedRecord.date,
       });
@@ -733,7 +835,7 @@ export function FinancePage() {
           name: currentVendor.vendorName,
         },
         createdFromSignal: `finance:${selectedRecord.id}:payout`,
-        deepLink: '/finance',
+        deepLink: buildFinanceHref(selectedRecord),
         vendorVisible: false,
         createdAt: selectedRecord.date,
       });
@@ -1302,7 +1404,14 @@ export function FinancePage() {
               ) : null}
             </>
           ) : (
-            <EmptyStatePanel title="Select a finance record" description="Choose a finance row to review payout and invoice details." />
+            <EmptyStatePanel
+              title={requestedFinanceTarget ? 'Linked finance record unavailable' : 'Select a finance record'}
+              description={
+                requestedFinanceTarget
+                  ? 'The linked finance record is not available in the current vendor scope.'
+                  : 'Choose a finance row to review payout and invoice details.'
+              }
+            />
           )}
         </SideDetailPanel>
       </div>

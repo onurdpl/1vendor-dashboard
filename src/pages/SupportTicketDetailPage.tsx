@@ -103,6 +103,16 @@ function getContextLink(ticket: SupportTicket) {
   return null;
 }
 
+function getFinanceContextLink(financeLedgerEntryId: string | null, refundId: string | null) {
+  if (financeLedgerEntryId) {
+    return `/finance?ledgerId=${encodeURIComponent(financeLedgerEntryId)}`;
+  }
+  if (refundId) {
+    return `/finance?refundId=${encodeURIComponent(refundId)}`;
+  }
+  return '/finance';
+}
+
 function buildContextLinks(ticket: SupportTicket, isAdmin: boolean): OperationalLinkInput[] {
   const links: OperationalLinkInput[] = [];
   const contextLink = getContextLink(ticket);
@@ -144,7 +154,7 @@ function buildContextLinks(ticket: SupportTicket, isAdmin: boolean): Operational
       eyebrow: 'Finance',
       title: financeLedgerEntryId ? 'Finance row' : 'Finance workspace',
       description: refundId ? `Refund ${refundId}` : 'Review payout and invoice context.',
-      href: '/finance',
+      href: getFinanceContextLink(financeLedgerEntryId, refundId),
       status: ticket.category,
       tone: ticket.category === 'REFUND' ? 'warning' : 'success',
     });
