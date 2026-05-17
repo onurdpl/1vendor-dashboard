@@ -28,9 +28,10 @@ import {
   updateVendorFinancialProfile,
 } from '../features/finance/api';
 import { getCurrentUser, getCurrentVendorContext, getToken } from '../lib/auth';
-import type { FinanceTransaction } from '../lib/api/contracts';
+import type { FinanceTransaction, OperationsRecommendation } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import {
   supportTicketMatchesFinance,
   type OperationalEventInput,
@@ -638,6 +639,52 @@ export function FinancePage() {
         })),
     );
   }
+  const financeRecommendations: OperationsRecommendation[] = [];
+  if (selectedRecord && isAdmin) {
+    if (selectedRecord.invoiceExecution && ['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)) {
+      financeRecommendations.push({
+        id: `finance-rec-invoice-${selectedRecord.invoiceExecution.id}`,
+        type: 'invoice_retry',
+        severity: selectedRecord.invoiceExecution.status === 'failed' ? 'critical' : 'warning',
+        title: 'Review invoice visibility',
+        description: `Customer invoice visibility is ${getInvoiceVisibilityLabel(selectedRecord)} for this finance row.`,
+        recommendedAction: 'Review invoice status and retry accounting sync only when safe',
+        relatedObjectType: 'Finance row',
+        relatedObjectId: selectedRecord.id,
+        vendor: {
+          id: currentVendor.vendorId,
+          name: currentVendor.vendorName,
+        },
+        createdFromSignal: `finance:${selectedRecord.id}:invoice`,
+        deepLink: '/finance',
+        vendorVisible: false,
+        createdAt: selectedRecord.date,
+      });
+    }
+
+    if (selectedRecord.status === 'Pending' || selectedRecord.settlement?.status === 'held' || selectedRecord.settlement?.status === 'disputed') {
+      financeRecommendations.push({
+        id: `finance-rec-payout-${selectedRecord.id}`,
+        type: 'finance_review',
+        severity: 'warning',
+        title: 'Review payout issue',
+        description: selectedRecord.shopifyOrderNumber
+          ? `Payout activity for ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)} needs operator review.`
+          : 'This finance row needs operator review.',
+        recommendedAction: 'Review payout status before settlement preparation',
+        relatedObjectType: 'Finance row',
+        relatedObjectId: selectedRecord.id,
+        vendor: {
+          id: currentVendor.vendorId,
+          name: currentVendor.vendorName,
+        },
+        createdFromSignal: `finance:${selectedRecord.id}:payout`,
+        deepLink: '/finance',
+        vendorVisible: false,
+        createdAt: selectedRecord.date,
+      });
+    }
+  }
 
   if (!authContextReady || isLoading) {
     return (
@@ -979,6 +1026,12 @@ export function FinancePage() {
                   {selectedRecord.amount}
                 </strong>
               </div>
+              <OperationalRecommendations
+                title="Suggested next steps"
+                subtitle="Admin-only guidance for this finance row."
+                recommendations={financeRecommendations}
+                audience={isAdmin ? 'admin' : 'vendor'}
+              />
               <div className="finance-detail-card finance-invoice-card">
                 <div className="finance-detail-card-heading">
                   <h4>Customer invoice/accounting</h4>

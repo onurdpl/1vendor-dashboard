@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildOperationalRecommendations,
   buildVendorRiskSummaries,
   deriveOperationalSeverity,
 } from '../backend/src/modules/operations/operations.service.js';
@@ -53,5 +54,61 @@ describe('operational attention derivation', () => {
       shipmentItems: 1,
     }));
     expect(risks.map((risk) => risk.vendorId)).not.toContain('platform');
+  });
+
+  it('derives non-destructive operational recommendations from attention signals', () => {
+    const queue = [
+      attentionItem({
+        id: 'support-overdue',
+        type: 'support',
+        severity: 'critical',
+        title: 'Overdue support ticket',
+        objectReference: 'Order #1029',
+        objectId: 'ticket-1',
+      }),
+      attentionItem({
+        id: 'shipment-missing',
+        type: 'shipment',
+        severity: 'warning',
+        title: 'Shipment pending carrier identifiers',
+        objectReference: 'Order #1028',
+        objectId: 'shipment-1',
+        ageHours: 30,
+      }),
+      attentionItem({
+        id: 'finance-issue',
+        type: 'finance',
+        severity: 'critical',
+        title: 'Invoice visibility issue',
+        objectReference: 'Order #1027',
+        objectId: 'finance-1',
+      }),
+    ];
+    const risks = buildVendorRiskSummaries(queue);
+    const recommendations = buildOperationalRecommendations(queue, risks, '2026-05-17T10:00:00.000Z');
+
+    expect(recommendations).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: 'support_escalation',
+          title: 'Escalate overdue support request',
+          recommendedAction: expect.stringContaining('Review owner'),
+          vendorVisible: false,
+        }),
+        expect.objectContaining({
+          type: 'shipment_stale',
+          title: 'Review stale shipment update',
+          vendorVisible: true,
+        }),
+        expect.objectContaining({
+          type: 'invoice_retry',
+          vendorVisible: false,
+        }),
+        expect.objectContaining({
+          type: 'vendor_risk',
+          vendorVisible: false,
+        }),
+      ]),
+    );
   });
 });

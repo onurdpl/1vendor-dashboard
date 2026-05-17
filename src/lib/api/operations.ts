@@ -4,6 +4,7 @@ import type {
   OperationsAttentionItem,
   OperationsAttentionSeverity,
   OperationsQueueItem,
+  OperationsRecommendation,
 } from './contracts';
 import { listMockOrders } from './mockOrders';
 import { listMockReturns } from './mockReturns';
@@ -129,6 +130,29 @@ function mapQueueItemToAttention(item: OperationsQueueItem): OperationsAttention
   };
 }
 
+function mapAttentionItemToRecommendation(item: OperationsAttentionItem): OperationsRecommendation {
+  const isReturn = item.type === 'return';
+  const isShipment = item.type === 'shipment';
+  return {
+    id: `recommendation-${item.id}`,
+    type: isReturn ? 'return_review' : isShipment ? 'shipment_tracking' : 'automation_review',
+    severity: item.severity,
+    title: isReturn ? 'Review unresolved return' : isShipment ? 'Review shipment tracking' : 'Review operational suggestion',
+    description: `${item.objectReference} has an active operational signal.`,
+    recommendedAction: isReturn ? 'Open the return and review next action' : isShipment ? 'Open the order and verify shipment tracking' : 'Review suggestion',
+    relatedObjectType: item.objectType,
+    relatedObjectId: item.objectId,
+    vendor: {
+      id: item.vendorId,
+      name: item.vendorName,
+    },
+    createdFromSignal: item.id,
+    deepLink: item.destinationPath,
+    vendorVisible: isReturn || isShipment,
+    createdAt: item.createdAt,
+  };
+}
+
 export function getMockAdminOperationsAttention(): OperationsAttentionDashboard {
   const queue = listAdminOperationsQueue().map(mapQueueItemToAttention).sort((left, right) => {
     const severityRank = { critical: 0, warning: 1, info: 2 };
@@ -160,6 +184,28 @@ export function getMockAdminOperationsAttention(): OperationsAttentionDashboard 
       drivers: [`${items.length} attention items`],
     };
   });
+  const recommendations = [
+    ...queue.slice(0, 8).map(mapAttentionItemToRecommendation),
+    ...vendorRisks
+      .map((risk) => ({
+        id: `recommendation-vendor-risk-${risk.vendorId}`,
+        type: 'vendor_risk' as const,
+        severity: risk.riskLevel,
+        title: 'Review vendor operational risk',
+        description: `${risk.vendorName} has ${risk.totalAttentionItems} active attention items.`,
+        recommendedAction: 'Review vendor attention drivers',
+        relatedObjectType: 'Vendor',
+        relatedObjectId: risk.vendorId,
+        vendor: {
+          id: risk.vendorId,
+          name: risk.vendorName,
+        },
+        createdFromSignal: `vendor-risk:${risk.vendorId}`,
+        deepLink: '/admin/operations',
+        vendorVisible: false,
+        createdAt: new Date().toISOString(),
+      })),
+  ];
 
   return {
     generatedAt: new Date().toISOString(),
@@ -209,6 +255,7 @@ export function getMockAdminOperationsAttention(): OperationsAttentionDashboard 
         items: queue.filter((item) => item.type === 'finance').slice(0, 5),
       },
     ],
+    recommendations,
     vendorRisks,
     recentActivity: queue.slice(0, 10).map((item) => ({
       id: `activity-${item.id}`,

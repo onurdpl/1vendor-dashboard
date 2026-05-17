@@ -801,6 +801,37 @@ export type OperationsAttentionSection = {
   items: OperationsAttentionItem[];
 };
 
+export type OperationsRecommendationType =
+  | 'support_escalation'
+  | 'support_assignment'
+  | 'shipment_tracking'
+  | 'shipment_stale'
+  | 'return_review'
+  | 'return_refund'
+  | 'finance_review'
+  | 'invoice_retry'
+  | 'vendor_risk'
+  | 'automation_review';
+
+export type OperationsRecommendation = {
+  id: string;
+  type: OperationsRecommendationType;
+  severity: OperationsAttentionSeverity;
+  title: string;
+  description: string;
+  recommendedAction: string;
+  relatedObjectType: string;
+  relatedObjectId: string | null;
+  vendor: {
+    id: VendorId | string;
+    name: string;
+  };
+  createdFromSignal: string;
+  deepLink: string | null;
+  vendorVisible: boolean;
+  createdAt: string;
+};
+
 export type OperationsVendorRisk = {
   vendorId: VendorId | string;
   vendorName: string;
@@ -842,6 +873,7 @@ export type OperationsAttentionDashboard = {
   };
   queue: OperationsAttentionItem[];
   sections: OperationsAttentionSection[];
+  recommendations: OperationsRecommendation[];
   vendorRisks: OperationsVendorRisk[];
   recentActivity: OperationsActivity[];
 };

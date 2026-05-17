@@ -23,7 +23,9 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { useActionFeedback } from '../lib/ui';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
+import type { OperationsRecommendation } from '../lib/api/contracts';
 
 const ADMIN_STATUSES: SupportTicketStatus[] = ['IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 
@@ -361,6 +363,67 @@ export function SupportTicketDetailPage() {
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
   const contextLinks = buildContextLinks(ticket);
   const unifiedTimeline = buildUnifiedSupportTimeline(ticket);
+  const supportRecommendations: OperationsRecommendation[] = [];
+  if (isAdmin && ticket.sla?.isOverdue) {
+    supportRecommendations.push({
+      id: `support-rec-escalate-${ticket.id}`,
+      type: 'support_escalation',
+      severity: 'critical',
+      title: 'Escalate overdue support request',
+      description: ticket.sla.dueLabel ?? 'This support request is overdue.',
+      recommendedAction: 'Review ownership and send the next response',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: ticket.id,
+      vendor: {
+        id: ticket.vendorId,
+        name: ticket.vendorName ?? ticket.vendorId,
+      },
+      createdFromSignal: `support:${ticket.id}:sla`,
+      deepLink: `/admin/support/${ticket.id}`,
+      vendorVisible: false,
+      createdAt: ticket.updatedAt,
+    });
+  }
+  if (isAdmin && !ticket.assigneeName && ticket.status !== 'CLOSED' && ticket.status !== 'RESOLVED') {
+    supportRecommendations.push({
+      id: `support-rec-assign-${ticket.id}`,
+      type: 'support_assignment',
+      severity: ticket.priority === 'high' ? 'critical' : 'warning',
+      title: 'Assign support ownership',
+      description: 'This open support request does not have an admin owner.',
+      recommendedAction: 'Assign an operator before continuing investigation',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: ticket.id,
+      vendor: {
+        id: ticket.vendorId,
+        name: ticket.vendorName ?? ticket.vendorId,
+      },
+      createdFromSignal: `support:${ticket.id}:assignment`,
+      deepLink: `/admin/support/${ticket.id}`,
+      vendorVisible: false,
+      createdAt: ticket.updatedAt,
+    });
+  }
+  if (!isAdmin && ticket.status === 'WAITING_FOR_VENDOR') {
+    supportRecommendations.push({
+      id: `support-rec-vendor-reply-${ticket.id}`,
+      type: 'support_assignment',
+      severity: 'warning',
+      title: 'Reply to support request',
+      description: 'Support is waiting for your update on this request.',
+      recommendedAction: 'Post a reply with the requested operational context',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: ticket.id,
+      vendor: {
+        id: currentVendor.vendorId,
+        name: currentVendor.vendorName,
+      },
+      createdFromSignal: `support:${ticket.id}:vendor-reply`,
+      deepLink: `/support/${ticket.id}`,
+      vendorVisible: true,
+      createdAt: ticket.updatedAt,
+    });
+  }
 
   return (
     <section className="op-page support-detail-page">
@@ -508,6 +571,13 @@ export function SupportTicketDetailPage() {
         </main>
 
         <aside className="support-detail-side">
+          <OperationalRecommendations
+            title="Suggested next steps"
+            subtitle="Contextual, read-only support guidance."
+            recommendations={supportRecommendations}
+            audience={isAdmin ? 'admin' : 'vendor'}
+          />
+
           <OperationalLinkCards
             title="Context links"
             subtitle="Operational records connected to this support ticket."

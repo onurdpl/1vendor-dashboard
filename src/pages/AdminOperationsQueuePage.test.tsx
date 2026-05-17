@@ -98,6 +98,26 @@ const dashboard: OperationsAttentionDashboard = {
       items: [],
     },
   ],
+  recommendations: [
+    {
+      id: 'recommendation-support-1',
+      type: 'support_escalation',
+      severity: 'critical',
+      title: 'Escalate overdue support request',
+      description: 'Order #1029 needs an admin response.',
+      recommendedAction: 'Review owner, respond, or move the ticket to the correct waiting state',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: 'ticket-1',
+      vendor: {
+        id: 'sporjinal',
+        name: 'Sporjinal',
+      },
+      createdFromSignal: 'support-1',
+      deepLink: '/admin/support/ticket-1',
+      vendorVisible: false,
+      createdAt: '2026-05-17T08:00:00.000Z',
+    },
+  ],
   vendorRisks: [
     {
       vendorId: 'sporjinal',
@@ -159,6 +179,8 @@ describe('AdminOperationsQueuePage attention center', () => {
     expect(await screen.findByRole('heading', { name: /operational attention center/i })).toBeInTheDocument();
     expect(screen.getAllByText('Overdue support ticket').length).toBeGreaterThan(0);
     expect(screen.getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
+    expect(screen.getByText('Recommended actions')).toBeInTheDocument();
+    expect(screen.getByText('Escalate overdue support request')).toBeInTheDocument();
     expect(screen.getAllByText('Sporjinal').length).toBeGreaterThan(0);
     expect(screen.getByText('1 support item · 1 shipment item')).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Open' })[0]).toHaveAttribute('href', '/admin/support/ticket-1');

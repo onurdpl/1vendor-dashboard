@@ -6641,6 +6641,64 @@ h3 {
   font-size: 0.82rem;
 }
 
+.operational-recommendation-list {
+  display: grid;
+  gap: 0.65rem;
+}
+
+.operational-recommendation-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: #f8fafc;
+  padding: 0.75rem;
+  color: inherit;
+  text-decoration: none;
+}
+
+.operational-recommendation-row:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.operational-recommendation-copy {
+  display: grid;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.operational-recommendation-copy > div {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.operational-recommendation-copy strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.9rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.operational-recommendation-copy p,
+.operational-recommendation-copy span,
+.operational-recommendation-row small {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.76rem;
+  line-height: 1.35;
+}
+
+.operational-recommendation-copy span {
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
 .unified-operational-timeline {
   display: grid;
   gap: 0.75rem;

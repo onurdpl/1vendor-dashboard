@@ -109,6 +109,37 @@ export type OperationsAttentionSectionDto = {
   items: OperationsAttentionItemDto[];
 };
 
+export type OperationsRecommendationType =
+  | 'support_escalation'
+  | 'support_assignment'
+  | 'shipment_tracking'
+  | 'shipment_stale'
+  | 'return_review'
+  | 'return_refund'
+  | 'finance_review'
+  | 'invoice_retry'
+  | 'vendor_risk'
+  | 'automation_review';
+
+export type OperationsRecommendationDto = {
+  id: string;
+  type: OperationsRecommendationType;
+  severity: OperationsAttentionSeverity;
+  title: string;
+  description: string;
+  recommendedAction: string;
+  relatedObjectType: string;
+  relatedObjectId: string | null;
+  vendor: {
+    id: string;
+    name: string;
+  };
+  createdFromSignal: string;
+  deepLink: string | null;
+  vendorVisible: boolean;
+  createdAt: string;
+};
+
 export type OperationsAttentionDashboardDto = {
   generatedAt: string;
   summary: {
@@ -124,6 +155,7 @@ export type OperationsAttentionDashboardDto = {
   };
   queue: OperationsAttentionItemDto[];
   sections: OperationsAttentionSectionDto[];
+  recommendations: OperationsRecommendationDto[];
   vendorRisks: OperationsVendorRiskDto[];
   recentActivity: OperationsActivityDto[];
 };

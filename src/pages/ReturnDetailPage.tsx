@@ -19,6 +19,8 @@ import { SupportTicketModal } from '../components/SupportTicketModal';
 import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import type { OperationsRecommendation } from '../lib/api/contracts';
 import {
   sameOperationalOrderNumber,
   supportTicketMatchesReturn,
@@ -394,6 +396,89 @@ export function ReturnDetailPage() {
       href: `${supportBasePath}/${ticket.id}`,
     })),
   ];
+  const returnRecommendations: OperationsRecommendation[] = [];
+  if (!hasReceivedReturn) {
+    returnRecommendations.push({
+      id: `return-rec-receipt-${returnRequest.id}`,
+      type: 'return_review',
+      severity: hasReturnShipment ? 'warning' : 'info',
+      title: 'Review returned item',
+      description: hasReturnShipment
+        ? 'Customer return tracking is available; confirm receipt when the item arrives.'
+        : 'Return receipt has not been marked yet.',
+      recommendedAction: 'Inspect the returned item before recording a vendor decision',
+      relatedObjectType: 'Return',
+      relatedObjectId: returnRequest.id,
+      vendor: {
+        id: returnRequest.assignedVendorId,
+        name: currentVendor.vendorName ?? returnRequest.assignedVendorId,
+      },
+      createdFromSignal: `return:${returnRequest.id}:receipt`,
+      deepLink: `/returns/${returnRequest.id}`,
+      vendorVisible: true,
+      createdAt: returnRequest.updatedAt ?? returnRequest.date,
+    });
+  } else if (!hasReviewedReturn) {
+    returnRecommendations.push({
+      id: `return-rec-review-${returnRequest.id}`,
+      type: 'return_review',
+      severity: 'warning',
+      title: 'Complete vendor return review',
+      description: 'The item is marked received and is waiting for a vendor decision.',
+      recommendedAction: 'Approve or reject the return based on the received item',
+      relatedObjectType: 'Return',
+      relatedObjectId: returnRequest.id,
+      vendor: {
+        id: returnRequest.assignedVendorId,
+        name: currentVendor.vendorName ?? returnRequest.assignedVendorId,
+      },
+      createdFromSignal: `return:${returnRequest.id}:vendor-review`,
+      deepLink: `/returns/${returnRequest.id}`,
+      vendorVisible: true,
+      createdAt: returnRequest.vendorReceivedAt ?? returnRequest.updatedAt ?? returnRequest.date,
+    });
+  }
+  if (getRefundStatus(returnRequest).toLowerCase().includes('pending')) {
+    returnRecommendations.push({
+      id: `return-rec-refund-${returnRequest.id}`,
+      type: 'return_refund',
+      severity: 'info',
+      title: 'Monitor refund progress',
+      description: 'Refund status is still pending for this return.',
+      recommendedAction: 'Keep return review current so admin can complete refund handling',
+      relatedObjectType: 'Return',
+      relatedObjectId: returnRequest.id,
+      vendor: {
+        id: returnRequest.assignedVendorId,
+        name: currentVendor.vendorName ?? returnRequest.assignedVendorId,
+      },
+      createdFromSignal: `return:${returnRequest.id}:refund`,
+      deepLink: `/returns/${returnRequest.id}`,
+      vendorVisible: true,
+      createdAt: returnRequest.updatedAt ?? returnRequest.date,
+    });
+  }
+  const waitingReturnSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
+  if (waitingReturnSupportTicket) {
+    returnRecommendations.push({
+      id: `return-rec-support-${waitingReturnSupportTicket.id}`,
+      type: 'support_assignment',
+      severity: 'warning',
+      title: 'Reply to support request',
+      description: waitingReturnSupportTicket.subject,
+      recommendedAction: 'Open support and provide the requested update',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: waitingReturnSupportTicket.id,
+      vendor: {
+        id: waitingReturnSupportTicket.vendorId,
+        name: waitingReturnSupportTicket.vendorName ?? waitingReturnSupportTicket.vendorId,
+      },
+      createdFromSignal: `support:${waitingReturnSupportTicket.id}`,
+      deepLink: `${supportBasePath}/${waitingReturnSupportTicket.id}`,
+      vendorVisible: true,
+      createdAt: waitingReturnSupportTicket.lastReplyAt ?? waitingReturnSupportTicket.updatedAt,
+    });
+  }
 
   return (
     <section className="return-review-page">
@@ -477,6 +562,13 @@ export function ReturnDetailPage() {
         </main>
 
         <aside className="return-review-side">
+          <OperationalRecommendations
+            title="Suggested next steps"
+            subtitle="Contextual, read-only guidance for this return."
+            recommendations={returnRecommendations}
+            audience={audience}
+          />
+
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
             <h3>Vendor review</h3>

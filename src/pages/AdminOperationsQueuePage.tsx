@@ -8,6 +8,7 @@ import {
   OperationalTableRow,
   StatusBadge,
 } from '../components/OperationalPrimitives';
+import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
@@ -136,6 +137,14 @@ export function AdminOperationsQueuePage() {
 
       <div className="attention-layout">
         <main className="attention-main-column">
+          <OperationalRecommendations
+            title="Recommended actions"
+            subtitle="Read-only operator suggestions derived from active attention signals."
+            recommendations={data.recommendations}
+            audience="admin"
+            emptyMessage="No operational recommendations right now."
+          />
+
           <article className="attention-card">
             <div className="attention-card-heading">
               <div>

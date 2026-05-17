@@ -5,6 +5,7 @@ import type {
   OperationsAttentionItemDto,
   OperationsAttentionSectionDto,
   OperationsAttentionSeverity,
+  OperationsRecommendationDto,
   OperationsQueueDashboardDto,
   OperationsQueueItemDto,
   OperationsQueueSeverity,
@@ -127,6 +128,169 @@ export function buildVendorRiskSummaries(items: OperationsAttentionItemDto[]): O
       return right.totalAttentionItems - left.totalAttentionItems;
     })
     .slice(0, 8);
+}
+
+function getRecommendationForAttentionItem(item: OperationsAttentionItemDto): Pick<
+  OperationsRecommendationDto,
+  'type' | 'title' | 'description' | 'recommendedAction' | 'vendorVisible'
+> | null {
+  const status = item.status.trim().toLowerCase();
+  const title = item.title.trim().toLowerCase();
+
+  if (item.type === 'support') {
+    if (item.severity === 'critical' || title.includes('overdue')) {
+      return {
+        type: 'support_escalation',
+        title: 'Escalate overdue support request',
+        description: `${item.objectReference} needs an admin response.`,
+        recommendedAction: 'Review owner, respond, or move the ticket to the correct waiting state',
+        vendorVisible: false,
+      };
+    }
+
+    return {
+      type: 'support_assignment',
+      title: 'Assign support ownership',
+      description: `${item.objectReference} is active and needs a clear owner.`,
+      recommendedAction: 'Assign an operator and respond to the vendor',
+      vendorVisible: false,
+    };
+  }
+
+  if (item.type === 'shipment') {
+    if (status === 'failed') {
+      return {
+        type: 'shipment_stale',
+        title: 'Review failed shipment update',
+        description: `${item.objectReference} needs shipment follow-up before tracking can be trusted.`,
+        recommendedAction: 'Open the order and review carrier status',
+        vendorVisible: true,
+      };
+    }
+
+    return {
+      type: item.ageHours >= 24 ? 'shipment_stale' : 'shipment_tracking',
+      title: item.ageHours >= 24 ? 'Review stale shipment update' : 'Review shipment tracking',
+      description: `${item.objectReference} is waiting for tracking or carrier progress.`,
+      recommendedAction: 'Open the order and verify shipment tracking',
+      vendorVisible: true,
+    };
+  }
+
+  if (item.type === 'return') {
+    const refundRelated = item.description.toLowerCase().includes('refund') || status.includes('refund');
+    return {
+      type: refundRelated ? 'return_refund' : 'return_review',
+      title: refundRelated ? 'Review refund approval' : 'Review unresolved return',
+      description: `${item.objectReference} is still waiting for return progress.`,
+      recommendedAction: 'Open the return and review the next vendor action',
+      vendorVisible: true,
+    };
+  }
+
+  if (item.type === 'finance') {
+    const invoiceRelated = title.includes('invoice');
+    return {
+      type: invoiceRelated ? 'invoice_retry' : 'finance_review',
+      title: invoiceRelated ? 'Review invoice visibility' : 'Review payout issue',
+      description: `${item.objectReference} needs finance operator review.`,
+      recommendedAction: invoiceRelated ? 'Open finance and review invoice status' : 'Open finance and review payout status',
+      vendorVisible: false,
+    };
+  }
+
+  if (item.type === 'automation' || item.type === 'operational_signal') {
+    return {
+      type: 'automation_review',
+      title: 'Review operational suggestion',
+      description: `${item.objectReference} has a suggested operator action.`,
+      recommendedAction: 'Open the signal and decide the next manual step',
+      vendorVisible: false,
+    };
+  }
+
+  return null;
+}
+
+function createAttentionRecommendation(item: OperationsAttentionItemDto): OperationsRecommendationDto | null {
+  const recommendation = getRecommendationForAttentionItem(item);
+  if (!recommendation) {
+    return null;
+  }
+
+  return {
+    id: `recommendation-${item.id}`,
+    type: recommendation.type,
+    severity: item.severity,
+    title: recommendation.title,
+    description: recommendation.description,
+    recommendedAction: recommendation.recommendedAction,
+    relatedObjectType: item.objectType,
+    relatedObjectId: item.objectId,
+    vendor: {
+      id: item.vendorId,
+      name: item.vendorName,
+    },
+    createdFromSignal: item.id,
+    deepLink: item.destinationPath,
+    vendorVisible: recommendation.vendorVisible,
+    createdAt: item.createdAt,
+  };
+}
+
+function createVendorRiskRecommendation(risk: OperationsVendorRiskDto, generatedAt: string): OperationsRecommendationDto | null {
+  if (risk.riskLevel === 'info') {
+    return null;
+  }
+
+  return {
+    id: `recommendation-vendor-risk-${risk.vendorId}`,
+    type: 'vendor_risk',
+    severity: risk.riskLevel,
+    title: 'Review vendor operational risk',
+    description: `${risk.vendorName} has ${risk.totalAttentionItems} active attention item${risk.totalAttentionItems === 1 ? '' : 's'}${
+      risk.drivers.length ? `: ${risk.drivers.join(', ')}` : ''
+    }.`,
+    recommendedAction: 'Review vendor drivers and prioritize the highest severity item',
+    relatedObjectType: 'Vendor',
+    relatedObjectId: risk.vendorId,
+    vendor: {
+      id: risk.vendorId,
+      name: risk.vendorName,
+    },
+    createdFromSignal: `vendor-risk:${risk.vendorId}`,
+    deepLink: '/admin/operations',
+    vendorVisible: false,
+    createdAt: generatedAt,
+  };
+}
+
+export function buildOperationalRecommendations(
+  items: OperationsAttentionItemDto[],
+  vendorRisks: OperationsVendorRiskDto[],
+  generatedAt = new Date().toISOString(),
+): OperationsRecommendationDto[] {
+  const recommendations = [
+    ...items.map(createAttentionRecommendation).filter((item): item is OperationsRecommendationDto => Boolean(item)),
+    ...vendorRisks
+      .map((risk) => createVendorRiskRecommendation(risk, generatedAt))
+      .filter((item): item is OperationsRecommendationDto => Boolean(item)),
+  ];
+
+  const unique = new Map<string, OperationsRecommendationDto>();
+  for (const recommendation of recommendations) {
+    unique.set(recommendation.id, recommendation);
+  }
+
+  return [...unique.values()]
+    .sort((left, right) => {
+      const severityDelta = getSeverityWeight(left.severity) - getSeverityWeight(right.severity);
+      if (severityDelta !== 0) {
+        return severityDelta;
+      }
+      return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime();
+    })
+    .slice(0, 12);
 }
 
 function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
@@ -628,6 +792,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
     return right.ageHours - left.ageHours;
   });
   const vendorRisks = buildVendorRiskSummaries(queue);
+  const recommendations = buildOperationalRecommendations(queue, vendorRisks, now.toISOString());
   const recentActivity: OperationsActivityDto[] = queue
     .slice()
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
@@ -664,6 +829,7 @@ export async function getAdminOperationsAttentionCenter(): Promise<OperationsAtt
       getAttentionSection('return', 'Return backlog', queue),
       getAttentionSection('finance', 'Finance review', queue),
     ],
+    recommendations,
     vendorRisks,
     recentActivity,
   };

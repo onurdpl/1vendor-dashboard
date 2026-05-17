@@ -24,6 +24,8 @@ import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
+import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import type { OperationsRecommendation } from '../lib/api/contracts';
 import {
   sameOperationalOrderNumber,
   supportTicketMatchesOrder,
@@ -480,6 +482,69 @@ export function OrderDetailPage() {
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
     })),
   ];
+  const orderRecommendations: OperationsRecommendation[] = [];
+  if (!hasTrackingSync && order.shippingStatus !== 'Delivered') {
+    orderRecommendations.push({
+      id: `order-rec-tracking-${order.id}`,
+      type: 'shipment_tracking',
+      severity: order.shipmentCreatedAt ? 'warning' : 'info',
+      title: 'Review shipment tracking',
+      description: `Order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)} does not have tracking visible yet.`,
+      recommendedAction: 'Confirm shipment progress and add tracking when available',
+      relatedObjectType: 'Order',
+      relatedObjectId: order.id,
+      vendor: {
+        id: order.assignedVendorId,
+        name: currentVendor.vendorName ?? order.assignedVendorId,
+      },
+      createdFromSignal: `order:${order.id}:tracking`,
+      deepLink: `/orders/${order.id}`,
+      vendorVisible: true,
+      createdAt: order.shipmentUpdatedAt ?? order.date,
+    });
+  }
+  const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
+  if (activeReturn) {
+    orderRecommendations.push({
+      id: `order-rec-return-${activeReturn.id}`,
+      type: 'return_review',
+      severity: activeReturn.status === 'Requested' || activeReturn.status === 'In Review' ? 'warning' : 'info',
+      title: 'Review unresolved return',
+      description: `A related return for ${formatShopifyOrderNumber(activeReturn.sourceShopifyOrderNumber)} is still active.`,
+      recommendedAction: 'Open the return and review the next vendor action',
+      relatedObjectType: 'Return',
+      relatedObjectId: activeReturn.id,
+      vendor: {
+        id: activeReturn.assignedVendorId,
+        name: currentVendor.vendorName ?? activeReturn.assignedVendorId,
+      },
+      createdFromSignal: `return:${activeReturn.id}`,
+      deepLink: `/returns/${activeReturn.id}`,
+      vendorVisible: true,
+      createdAt: activeReturn.updatedAt ?? activeReturn.date,
+    });
+  }
+  const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
+  if (waitingSupportTicket) {
+    orderRecommendations.push({
+      id: `order-rec-support-${waitingSupportTicket.id}`,
+      type: 'support_assignment',
+      severity: 'warning',
+      title: 'Reply to support request',
+      description: waitingSupportTicket.subject,
+      recommendedAction: 'Open support and provide the requested update',
+      relatedObjectType: 'Support ticket',
+      relatedObjectId: waitingSupportTicket.id,
+      vendor: {
+        id: waitingSupportTicket.vendorId,
+        name: waitingSupportTicket.vendorName ?? waitingSupportTicket.vendorId,
+      },
+      createdFromSignal: `support:${waitingSupportTicket.id}`,
+      deepLink: `${supportBasePath}/${waitingSupportTicket.id}`,
+      vendorVisible: true,
+      createdAt: waitingSupportTicket.lastReplyAt ?? waitingSupportTicket.updatedAt,
+    });
+  }
 
   return (
     <section className="order-detail-workspace">
@@ -628,6 +693,13 @@ export function OrderDetailPage() {
         </div>
 
         <aside className="order-detail-right-column">
+          <OperationalRecommendations
+            title="Suggested next steps"
+            subtitle="Contextual, read-only guidance for this order."
+            recommendations={orderRecommendations}
+            audience={audience}
+          />
+
           <OperationalTimeline
             title="Unified activity"
             subtitle="Order, return, finance, and support events."
