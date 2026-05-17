@@ -290,9 +290,12 @@ export function OrderDetailPage() {
   const relatedSupportTickets = useMemo(
     () =>
       (relatedSupportTicketsData ?? []).filter((ticket) =>
-        supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber),
+        supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber, {
+          audience: isAdmin ? 'admin' : 'vendor',
+          currentVendorId: currentVendor.vendorId,
+        }),
       ),
-    [order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
+    [currentVendor.vendorId, isAdmin, order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
   );
 
   const handleRetryShipment = () => {

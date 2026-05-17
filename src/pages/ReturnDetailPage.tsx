@@ -342,7 +342,10 @@ export function ReturnDetailPage() {
       sameOperationalOrderNumber(record.shopifyOrderNumber, returnRequest.sourceShopifyOrderNumber),
   );
   const relatedSupportTickets = (relatedSupportTicketsData ?? []).filter((ticket) =>
-    supportTicketMatchesReturn(ticket, returnRequest.id),
+    supportTicketMatchesReturn(ticket, returnRequest.id, {
+      audience: isAdmin ? 'admin' : 'vendor',
+      currentVendorId: currentVendor.vendorId,
+    }),
   );
   const supportBasePath = isAdmin ? '/admin/support' : '/support';
   const audience = isAdmin ? 'admin' : 'vendor';

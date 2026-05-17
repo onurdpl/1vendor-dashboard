@@ -8,7 +8,7 @@ import type { DashboardOverview, NotificationIntent, NotificationsResponse } fro
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
-const listNotificationsMock = vi.fn<(vendorId?: string) => Promise<NotificationsResponse>>();
+const listNotificationsMock = vi.fn<(vendorId?: string | null) => Promise<NotificationsResponse>>();
 const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 
@@ -114,7 +114,7 @@ function renderDashboardPage() {
 }
 
 function getNotificationCenter() {
-  const headings = screen.getAllByRole('heading', { name: 'Notification center' });
+  const headings = screen.getAllByRole('heading', { name: /notification center/i });
   const heading = headings[headings.length - 1];
   const section = heading.closest('section');
   if (!section) {
@@ -183,7 +183,7 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
   });
 
-  it('loads dashboard data and notifications with the selected vendor scope', async () => {
+  it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -208,7 +208,27 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
-    expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-b');
+    expect(listNotificationsMock).toHaveBeenCalledWith(null);
+    expect(screen.getByText('Admin notification center')).toBeInTheDocument();
+    expect(screen.getByText('Global admin operational alerts.')).toBeInTheDocument();
+  });
+
+  it('loads vendor notifications with the selected vendor scope for vendor users', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-a');
   });
 
   it('renders the notification center list with compact metadata', async () => {
@@ -216,7 +236,7 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByText('Notification center')).toBeInTheDocument();
+    expect(await screen.findByText(/notification center/i)).toBeInTheDocument();
     expect(screen.getByText('Shipping cost is pending')).toBeInTheDocument();
     expect(screen.getByText('External-provider shipping cost is missing.')).toBeInTheDocument();
     expect(screen.getByText('shipping cost')).toBeInTheDocument();

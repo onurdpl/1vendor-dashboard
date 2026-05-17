@@ -307,7 +307,11 @@ export function onSessionReset(handler: () => void) {
 }
 
 export function getCurrentUserRole(): UserRole {
-  return getCurrentUser()?.role ?? 'admin';
+  return getCurrentUserRoleOrNull() ?? 'vendor';
+}
+
+export function getCurrentUserRoleOrNull(): UserRole | null {
+  return getCurrentUser()?.role ?? null;
 }
 
 export async function validateSession(): Promise<boolean> {

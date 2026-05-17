@@ -1,4 +1,4 @@
-import { getCurrentUserRole, isAuthenticated } from './session';
+import { getCurrentUserRoleOrNull, isAuthenticated } from './session';
 
 export type UserRole = 'admin' | 'vendor' | 'support' | 'finance';
 
@@ -37,9 +37,10 @@ export function canPerformAction(permission: Permission): boolean {
     return false;
   }
 
-  return hasPermission(getCurrentUserRole(), permission);
+  const role = getCurrentUserRoleOrNull();
+  return role ? hasPermission(role, permission) : false;
 }
 
-export function getDefaultRole(): UserRole {
-  return getCurrentUserRole();
+export function getDefaultRole(): UserRole | null {
+  return getCurrentUserRoleOrNull();
 }

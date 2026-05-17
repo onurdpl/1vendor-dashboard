@@ -4,7 +4,9 @@ import {
   filterOperationalLinks,
   normalizeOperationalOrderNumber,
   sameOperationalOrderNumber,
+  supportTicketMatchesFinance,
   supportTicketMatchesOrder,
+  supportTicketMatchesReturn,
 } from './operationalCrossLinks';
 import type { SupportTicket } from './api/contracts';
 
@@ -55,6 +57,51 @@ describe('operational cross-link helpers', () => {
         ticket({ contextId: 'other', contextSnapshot: { orderNumber: '#1029', customerEmail: 'hidden@example.com' } }),
         'alloc-1',
         '1029',
+      ),
+    ).toBe(true);
+  });
+
+  it('rejects cross-vendor support links in vendor contexts', () => {
+    const otherVendorTicket = ticket({
+      vendorId: 'demo-vendor-b',
+      contextId: 'alloc-1',
+      contextSnapshot: {
+        orderNumber: '#1029',
+        financeLedgerEntryId: 'ledger-1',
+      },
+    });
+
+    expect(
+      supportTicketMatchesOrder(otherVendorTicket, 'alloc-1', '#1029', {
+        audience: 'vendor',
+        currentVendorId: 'demo-vendor-a',
+      }),
+    ).toBe(false);
+    expect(
+      supportTicketMatchesReturn(
+        ticket({ vendorId: 'demo-vendor-b', contextType: 'return', contextId: 'return-1' }),
+        'return-1',
+        {
+          audience: 'vendor',
+          currentVendorId: 'demo-vendor-a',
+        },
+      ),
+    ).toBe(false);
+    expect(
+      supportTicketMatchesFinance(otherVendorTicket, 'ledger-1', '#1029', null, {
+        audience: 'vendor',
+        currentVendorId: 'demo-vendor-a',
+      }),
+    ).toBe(false);
+  });
+
+  it('keeps admin cross-link matching intentionally unscoped', () => {
+    expect(
+      supportTicketMatchesOrder(
+        ticket({ vendorId: 'demo-vendor-b', contextSnapshot: { orderNumber: '#1029' } }),
+        'alloc-1',
+        '1029',
+        { audience: 'admin', currentVendorId: 'demo-vendor-a' },
       ),
     ).toBe(true);
   });

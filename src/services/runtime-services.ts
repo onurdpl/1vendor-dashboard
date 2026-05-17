@@ -581,7 +581,7 @@ export const runtimeServices = {
           }),
   },
   notifications: {
-    list: (vendorId = getCurrentVendorId()) =>
+    list: (vendorId: string | null = getCurrentVendorId()) =>
       runtimeConfig.apiMode === 'real'
         ? realNotifications.listNotifications(vendorId)
         : Promise.resolve({

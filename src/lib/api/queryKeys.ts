@@ -51,6 +51,7 @@ export const queryKeys = {
     actions: (vendorId = getCurrentVendorContext().vendorId) => ['automation', 'actions', vendorId] as const,
   },
   notifications: {
+    adminGlobal: () => ['notifications', 'admin-global'] as const,
     list: (vendorId = getCurrentVendorContext().vendorId) => ['notifications', 'list', vendorId] as const,
   },
   support: {

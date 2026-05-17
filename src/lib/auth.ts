@@ -12,6 +12,7 @@ export {
   getCurrentUser,
   getCurrentUserVendorDetails,
   getCurrentUserRole,
+  getCurrentUserRoleOrNull,
   getDemoUserByCredentials,
   getDemoUsers,
   getToken,

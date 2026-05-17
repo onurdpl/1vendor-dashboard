@@ -568,10 +568,14 @@ export function FinancePage() {
               selectedRecord.id,
               selectedRecord.shopifyOrderNumber,
               selectedRecord.shopifyRefundId ?? null,
+              {
+                audience: isAdmin ? 'admin' : 'vendor',
+                currentVendorId: currentVendor.vendorId,
+              },
             ),
           )
         : [],
-    [selectedRecord, supportTickets],
+    [currentVendor.vendorId, isAdmin, selectedRecord, supportTickets],
   );
   const financeCrossLinks: OperationalLinkInput[] = [];
   const financeTimelineEvents: OperationalEventInput[] = [];

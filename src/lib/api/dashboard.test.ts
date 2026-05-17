@@ -77,6 +77,7 @@ async function importDashboardWithServices(
     services: ReturnType<typeof createRuntimeServices>,
     ApiError: typeof import('./errors').ApiError,
   ) => void,
+  role: 'admin' | 'vendor' = 'vendor',
 ) {
   vi.resetModules();
 
@@ -88,9 +89,9 @@ async function importDashboardWithServices(
   }));
   vi.doMock('../auth', () => ({
     getCurrentUser: () => ({
-      email: 'vendor@example.com',
-      name: 'Vendor User',
-      role: 'vendor',
+      email: role === 'admin' ? 'admin@example.com' : 'vendor@example.com',
+      name: role === 'admin' ? 'Admin User' : 'Vendor User',
+      role,
     }),
     getCurrentVendorContext: () => ({
       vendorId: 'stored-vendor',
@@ -162,6 +163,15 @@ describe('getDashboardOverview real-mode aggregation', () => {
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key');
     expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key');
     expect(services.notifications.list).toHaveBeenCalledWith('vendor-query-key');
+  });
+
+  it('uses explicit global admin notification scope for admin dashboard aggregation', async () => {
+    const { getDashboardOverview, services } = await importDashboardWithServices(undefined, 'admin');
+
+    await getDashboardOverview('vendor-query-key');
+
+    expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key');
+    expect(services.notifications.list).toHaveBeenCalledWith(null);
   });
 
   it('keeps admin vendor switch dashboard query keys distinct', () => {

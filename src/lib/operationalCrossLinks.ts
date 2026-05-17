@@ -25,6 +25,19 @@ export type OperationalLinkInput = {
   visibility?: OperationalVisibility;
 };
 
+export type OperationalMatchOptions = {
+  audience?: OperationalAudience;
+  currentVendorId?: string | null;
+};
+
+function ticketMatchesAudience(ticket: SupportTicket, options: OperationalMatchOptions = {}) {
+  if (options.audience !== 'vendor') {
+    return true;
+  }
+
+  return Boolean(options.currentVendorId && ticket.vendorId === options.currentVendorId);
+}
+
 export function normalizeOperationalOrderNumber(value: string | number | null | undefined) {
   const text = String(value ?? '').trim();
   if (!text) {
@@ -55,23 +68,45 @@ export function getSnapshotString(snapshot: unknown, key: string) {
   return String(value);
 }
 
+function getTicketContextString(ticket: SupportTicket, key: 'orderNumber' | 'returnNumber' | 'status') {
+  const value = ticket.contextSummary?.[key];
+  if (value !== null && value !== undefined) {
+    return String(value);
+  }
+
+  return getSnapshotString(ticket.contextSnapshot, key);
+}
+
 export function supportTicketMatchesOrder(
   ticket: SupportTicket,
   orderId: string | null | undefined,
   orderNumber: string | number | null | undefined,
+  options: OperationalMatchOptions = {},
 ) {
+  if (!ticketMatchesAudience(ticket, options)) {
+    return false;
+  }
+
   if (ticket.contextType === 'order' && ticket.contextId && orderId && ticket.contextId === orderId) {
     return true;
   }
 
   const snapshotOrderNumber =
-    getSnapshotString(ticket.contextSnapshot, 'orderNumber') ??
+    getTicketContextString(ticket, 'orderNumber') ??
     getSnapshotString(ticket.contextSnapshot, 'sourceShopifyOrderNumber');
 
   return sameOperationalOrderNumber(snapshotOrderNumber, orderNumber);
 }
 
-export function supportTicketMatchesReturn(ticket: SupportTicket, returnId: string | null | undefined) {
+export function supportTicketMatchesReturn(
+  ticket: SupportTicket,
+  returnId: string | null | undefined,
+  options: OperationalMatchOptions = {},
+) {
+  if (!ticketMatchesAudience(ticket, options)) {
+    return false;
+  }
+
   return Boolean(ticket.contextType === 'return' && ticket.contextId && returnId && ticket.contextId === returnId);
 }
 
@@ -80,7 +115,12 @@ export function supportTicketMatchesFinance(
   financeLedgerEntryId: string | null | undefined,
   orderNumber?: string | number | null,
   refundId?: string | null,
+  options: OperationalMatchOptions = {},
 ) {
+  if (!ticketMatchesAudience(ticket, options)) {
+    return false;
+  }
+
   const snapshotFinanceId =
     getSnapshotString(ticket.contextSnapshot, 'financeLedgerEntryId') ??
     getSnapshotString(ticket.contextSnapshot, 'financeRecordId') ??
@@ -90,7 +130,7 @@ export function supportTicketMatchesFinance(
     getSnapshotString(ticket.contextSnapshot, 'shopifyRefundId') ??
     getSnapshotString(ticket.contextSnapshot, 'sourceShopifyRefundId');
   const snapshotOrderNumber =
-    getSnapshotString(ticket.contextSnapshot, 'orderNumber') ??
+    getTicketContextString(ticket, 'orderNumber') ??
     getSnapshotString(ticket.contextSnapshot, 'sourceShopifyOrderNumber');
 
   return Boolean(

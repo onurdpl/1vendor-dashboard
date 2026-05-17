@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { DataStatePanel } from './DataStatePanel';
-import { getCurrentUser, getCurrentUserRole, hasPermission, type Permission } from '../lib/auth';
+import { getCurrentUser, hasPermission, type Permission } from '../lib/auth';
 
 type RequirePermissionProps = {
   permission: Permission;
@@ -9,9 +9,8 @@ type RequirePermissionProps = {
 
 export function RequirePermission({ permission, children }: RequirePermissionProps) {
   const currentUser = getCurrentUser();
-  const currentRole = getCurrentUserRole();
 
-  if (!currentUser || !hasPermission(currentRole, permission)) {
+  if (!currentUser || !hasPermission(currentUser.role, permission)) {
     return (
       <DataStatePanel
         tone="info"

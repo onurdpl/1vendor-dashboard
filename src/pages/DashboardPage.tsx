@@ -138,6 +138,9 @@ export function DashboardPage() {
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
   const vendorId = currentVendor.vendorId;
+  const isAdmin = currentUser?.role === 'admin';
+  const notificationQueryKey = isAdmin ? queryKeys.notifications.adminGlobal() : queryKeys.notifications.list(vendorId);
+  const notificationScopeVendorId = isAdmin ? null : vendorId;
   const { message, tone, showFeedback } = useActionFeedback();
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
@@ -149,7 +152,7 @@ export function DashboardPage() {
   const {
     data: notifications,
     refetch: refetchNotifications,
-  } = useQueryResource(queryKeys.notifications.list(vendorId), () => runtimeServices.notifications.list(vendorId), {
+  } = useQueryResource(notificationQueryKey, () => runtimeServices.notifications.list(notificationScopeVendorId), {
     enabled: appReadiness.ready,
   });
   const markNotificationReadMutation = useMutationAction(
@@ -401,7 +404,10 @@ export function DashboardPage() {
             )}
           </OperationalSection>
 
-          <OperationalSection title="Notification center" description="System notifications and operational alerts.">
+          <OperationalSection
+            title={isAdmin ? 'Admin notification center' : 'Notification center'}
+            description={isAdmin ? 'Global admin operational alerts.' : 'System notifications and operational alerts.'}
+          >
             {notifications ? (
               <div className="notification-center">
                 <div className="notification-summary-row">

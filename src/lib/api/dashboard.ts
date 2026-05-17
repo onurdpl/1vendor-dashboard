@@ -152,6 +152,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
   const currentVendorId = resolveVendorId(vendorId);
   const currentVendor = getCurrentVendorContext();
   const currentUser = getCurrentUser();
+  const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
 
   const partialDataWarnings: string[] = [];
   const dashboardRequests = await Promise.allSettled([
@@ -161,7 +162,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
     runtimeServices.automation.dashboard(currentVendorId),
     currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
     runtimeServices.signals.list(currentVendorId),
-    runtimeServices.notifications.list(currentVendorId),
+    runtimeServices.notifications.list(notificationScopeVendorId),
     currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
     currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
   ]);

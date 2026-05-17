@@ -1,14 +1,16 @@
 import { describe, expect, it, beforeEach } from 'vitest';
 import { canPerformAction, getDefaultRole, hasPermission } from './permissions';
-import { clearToken, setCurrentUser, setToken } from './session';
+import { clearToken, getCurrentUserRole, getCurrentUserRoleOrNull, setCurrentUser, setToken } from './session';
 
 beforeEach(() => {
   clearToken();
 });
 
 describe('auth permissions', () => {
-  it('denies unauthenticated permission checks even though the legacy default role remains admin', () => {
-    expect(getDefaultRole()).toBe('admin');
+  it('denies unauthenticated permission checks without defaulting display helpers to admin', () => {
+    expect(getDefaultRole()).toBeNull();
+    expect(getCurrentUserRoleOrNull()).toBeNull();
+    expect(getCurrentUserRole()).toBe('vendor');
     expect(canPerformAction('orders:read')).toBe(false);
     expect(canPerformAction('orders:write')).toBe(false);
     expect(canPerformAction('returns:write')).toBe(false);

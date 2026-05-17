@@ -74,6 +74,7 @@ export function AppShell() {
     void queryClient.invalidateQueries({ queryKey: ['returns'] });
     void queryClient.invalidateQueries({ queryKey: ['finance'] });
     void queryClient.invalidateQueries({ queryKey: ['automation'] });
+    void queryClient.invalidateQueries({ queryKey: ['notifications'] });
     void queryClient.invalidateQueries({ queryKey: ['support'] });
     void queryClient.invalidateQueries({ queryKey: ['admin', 'support'] });
     void queryClient.invalidateQueries({ queryKey: ['admin', 'diagnostics'] });
@@ -147,7 +148,7 @@ export function AppShell() {
             <div className="session-label">Operational vendor</div>
             <div className="session-state">{currentVendor.vendorName}</div>
             <div className="session-meta">
-              {currentUser?.name ?? 'Unknown user'} · {currentUser?.role ?? 'admin'}
+              {currentUser?.name ?? 'Unknown user'} · {currentUser?.role ?? 'Unauthenticated'}
             </div>
             {!currentUser?.canSwitchVendors ? (
               <div className="session-meta">Vendor scope is fixed for your account.</div>
@@ -195,7 +196,7 @@ export function AppShell() {
             <PageHeader title="Operational control center" description="Shopify operations, finance, diagnostics, and recovery." />
             <div className="shell-context-bar">
               <span className="severity-chip severity-normal">User {currentUser?.name ?? 'Unknown user'}</span>
-              <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'admin'}</span>
+              <span className="severity-chip severity-attention">Role {currentUser?.role ?? 'Unauthenticated'}</span>
               <span className="severity-chip severity-low">Vendor {currentVendor.vendorName}</span>
             </div>
           </>
