@@ -21,7 +21,14 @@ import * as realObservability from './real/observability';
 import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
-import type { CreateSupportTicketInput, SupportAnalytics, SupportTicket, SupportTicketCategory, SupportTicketStatus } from '../lib/api/contracts';
+import type {
+  CreateSupportTicketInput,
+  SupportAnalytics,
+  SupportTicket,
+  SupportTicketCategory,
+  SupportTicketContextSummary,
+  SupportTicketStatus,
+} from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
 function getCurrentVendorId() {
@@ -33,6 +40,49 @@ const mockSupportTickets: SupportTicket[] = [];
 function calculateMockSupportDueAt(priority: SupportTicket['priority'], baseDate = new Date()) {
   const hours = priority === 'high' ? 4 : priority === 'low' ? 48 : 24;
   return new Date(baseDate.getTime() + hours * 60 * 60 * 1000).toISOString();
+}
+
+function buildMockSupportContextSummary(snapshot: unknown): SupportTicketContextSummary | null {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return null;
+  }
+  const source = snapshot as Record<string, unknown>;
+  const summary: SupportTicketContextSummary = {};
+  for (const key of ['route', 'path', 'orderNumber', 'returnNumber', 'status'] as const) {
+    const value = source[key];
+    if (typeof value === 'string' || typeof value === 'number') {
+      summary[key] = String(value);
+    }
+  }
+  const flags = ['trackingPresent', 'returnTrackingPresent', 'returnCarrierPresent', 'shipmentTrackingPresent', 'pdfAvailable', 'labelAvailable']
+    .reduce<Record<string, boolean>>((accumulator, key) => {
+      if (typeof source[key] === 'boolean') {
+        accumulator[key] = source[key];
+      }
+      return accumulator;
+    }, {});
+  if (Object.keys(flags).length) {
+    summary.flags = flags;
+  }
+  return Object.keys(summary).length ? summary : null;
+}
+
+function toMockVendorSupportTicket(ticket: SupportTicket): SupportTicket {
+  const safeTicket: SupportTicket = {
+    ...ticket,
+    contextSnapshot: undefined,
+    notes: undefined,
+  };
+  return {
+    ...safeTicket,
+    contextSummary: ticket.contextSummary ?? buildMockSupportContextSummary(ticket.contextSnapshot),
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
+    sla: null,
+    notes: undefined,
+  };
 }
 
 const supportCategories: SupportTicketCategory[] = ['ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
@@ -604,6 +654,7 @@ export const runtimeServices = {
         contextType: input.contextType,
         contextId: input.contextId ?? null,
         contextSnapshot: input.contextSnapshot ?? null,
+        contextSummary: buildMockSupportContextSummary(input.contextSnapshot),
         resolvedAt: null,
         closedAt: null,
         assigneeUserId: null,
@@ -621,7 +672,7 @@ export const runtimeServices = {
         replies: [],
       };
       mockSupportTickets.unshift(ticket);
-      return ticket;
+      return toMockVendorSupportTicket(ticket);
     },
     listAdmin: () =>
       runtimeConfig.apiMode === 'real'
@@ -634,7 +685,7 @@ export const runtimeServices = {
     listVendor: () =>
       runtimeConfig.apiMode === 'real'
         ? realSupport.listVendorSupportTickets()
-        : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId())),
+        : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId()).map(toMockVendorSupportTicket)),
     async detailAdmin(ticketId: string) {
       if (runtimeConfig.apiMode === 'real') {
         return realSupport.getAdminSupportTicket(ticketId);
@@ -655,7 +706,7 @@ export const runtimeServices = {
         throw new ApiError('Support ticket not found.', 'server', { status: 404 });
       }
       ticket.vendorUnreadCount = 0;
-      return { ...ticket, notes: undefined };
+      return toMockVendorSupportTicket(ticket);
     },
     async updateStatus(ticketId: string, status: SupportTicketStatus) {
       if (runtimeConfig.apiMode === 'real') {

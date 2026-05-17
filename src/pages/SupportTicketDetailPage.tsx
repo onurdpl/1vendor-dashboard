@@ -57,6 +57,38 @@ function getSnapshotEntries(snapshot: unknown) {
     }));
 }
 
+function getContextSummaryEntries(ticket: SupportTicket | null | undefined) {
+  const summary = ticket?.contextSummary;
+  if (!summary) {
+    return [];
+  }
+
+  const entries: Array<{ label: string; value: string }> = [];
+  for (const key of ['route', 'path', 'orderNumber', 'returnNumber', 'status'] as const) {
+    const value = summary[key];
+    if (value) {
+      entries.push({ label: formatSupportLabel(key), value: String(value) });
+    }
+  }
+
+  if (summary.flags) {
+    for (const [key, value] of Object.entries(summary.flags)) {
+      entries.push({ label: formatSupportLabel(key), value: value ? 'Yes' : 'No' });
+    }
+  }
+
+  return entries.slice(0, 8);
+}
+
+export function getSupportTicketContextEntries(ticket: SupportTicket | null | undefined, isAdmin: boolean) {
+  return isAdmin ? getSnapshotEntries(ticket?.contextSnapshot) : getContextSummaryEntries(ticket);
+}
+
+function getContextSummaryString(ticket: SupportTicket, key: 'orderNumber' | 'returnNumber' | 'status') {
+  const value = ticket.contextSummary?.[key];
+  return value ? String(value) : null;
+}
+
 function getContextLink(ticket: SupportTicket) {
   if (!ticket.contextId) {
     return null;
@@ -71,7 +103,7 @@ function getContextLink(ticket: SupportTicket) {
   return null;
 }
 
-function buildContextLinks(ticket: SupportTicket): OperationalLinkInput[] {
+function buildContextLinks(ticket: SupportTicket, isAdmin: boolean): OperationalLinkInput[] {
   const links: OperationalLinkInput[] = [];
   const contextLink = getContextLink(ticket);
 
@@ -80,8 +112,10 @@ function buildContextLinks(ticket: SupportTicket): OperationalLinkInput[] {
       id: `context-${ticket.contextType}-${ticket.contextId}`,
       eyebrow: formatSupportLabel(ticket.contextType),
       title:
-        getSnapshotString(ticket.contextSnapshot, 'orderNumber') ??
-        getSnapshotString(ticket.contextSnapshot, 'returnNumber') ??
+        getContextSummaryString(ticket, 'orderNumber') ??
+        getContextSummaryString(ticket, 'returnNumber') ??
+        (isAdmin ? getSnapshotString(ticket.contextSnapshot, 'orderNumber') : null) ??
+        (isAdmin ? getSnapshotString(ticket.contextSnapshot, 'returnNumber') : null) ??
         ticket.contextId ??
         'Linked context',
       description: 'Open the operational record connected to this ticket.',
@@ -91,14 +125,20 @@ function buildContextLinks(ticket: SupportTicket): OperationalLinkInput[] {
     });
   }
 
-  const financeLedgerEntryId =
+  const financeLedgerEntryId = isAdmin
+    ? (
     getSnapshotString(ticket.contextSnapshot, 'financeLedgerEntryId') ??
-    getSnapshotString(ticket.contextSnapshot, 'financeRecordId');
-  const refundId =
+      getSnapshotString(ticket.contextSnapshot, 'financeRecordId')
+    )
+    : null;
+  const refundId = isAdmin
+    ? (
     getSnapshotString(ticket.contextSnapshot, 'refundId') ??
-    getSnapshotString(ticket.contextSnapshot, 'shopifyRefundId');
+      getSnapshotString(ticket.contextSnapshot, 'shopifyRefundId')
+    )
+    : null;
 
-  if (financeLedgerEntryId || refundId || ticket.category === 'PAYOUT' || ticket.category === 'INVOICE' || ticket.category === 'REFUND') {
+  if (isAdmin && (financeLedgerEntryId || refundId || ticket.category === 'PAYOUT' || ticket.category === 'INVOICE' || ticket.category === 'REFUND')) {
     links.push({
       id: `finance-${financeLedgerEntryId ?? refundId ?? ticket.id}`,
       eyebrow: 'Finance',
@@ -328,7 +368,10 @@ export function SupportTicketDetailPage() {
     },
   );
 
-  const snapshotEntries = useMemo(() => getSnapshotEntries(ticket?.contextSnapshot), [ticket?.contextSnapshot]);
+  const contextEntries = useMemo(
+    () => getSupportTicketContextEntries(ticket, isAdmin),
+    [isAdmin, ticket?.contextSnapshot, ticket?.contextSummary],
+  );
 
   useEffect(() => {
     if (!ticket) {
@@ -367,7 +410,7 @@ export function SupportTicketDetailPage() {
   const contextLink = getContextLink(ticket);
   const canReply = ticket.status !== 'CLOSED';
   const assignedToCurrentUser = Boolean(currentUser?.name && ticket.assigneeName === currentUser.name);
-  const contextLinks = buildContextLinks(ticket);
+  const contextLinks = buildContextLinks(ticket, isAdmin);
   const unifiedTimeline = buildUnifiedSupportTimeline(ticket);
   const supportRecommendations: OperationsRecommendation[] = [];
   if (isAdmin && ticket.sla?.isOverdue) {
@@ -486,9 +529,9 @@ export function SupportTicketDetailPage() {
                 <strong>{ticket.assigneeName ?? 'Unassigned'}</strong>
               </div>
             </div>
-            {snapshotEntries.length ? (
+            {contextEntries.length ? (
               <div className="support-snapshot-grid">
-                {snapshotEntries.map((entry) => (
+                {contextEntries.map((entry) => (
                   <div key={entry.label}>
                     <span>{entry.label}</span>
                     <strong>{entry.value}</strong>

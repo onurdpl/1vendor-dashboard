@@ -64,6 +64,15 @@ export type SupportTicketSlaDto = {
   overdueByHours: number | null;
 };
 
+export type SupportTicketContextSummaryDto = {
+  route?: string;
+  path?: string;
+  orderNumber?: string;
+  returnNumber?: string;
+  status?: string;
+  flags?: Record<string, boolean>;
+};
+
 export type SupportTicketDto = {
   id: string;
   createdAt: string;
@@ -90,7 +99,8 @@ export type SupportTicketDto = {
   sla: SupportTicketSlaDto | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
-  contextSnapshot: unknown;
+  contextSummary: SupportTicketContextSummaryDto | null;
+  contextSnapshot?: unknown;
   resolvedAt: string | null;
   closedAt: string | null;
   notes?: SupportTicketNoteDto[];

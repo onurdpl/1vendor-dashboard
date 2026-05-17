@@ -8,6 +8,7 @@ import type {
   CreateSupportTicketInput,
   SupportTicketCategory,
   SupportTicketContextType,
+  SupportTicketContextSummaryDto,
   SupportTicketDto,
   SupportTicketFilters,
   SupportTicketNoteDto,
@@ -590,6 +591,64 @@ function mapReply(reply: {
   };
 }
 
+const SAFE_CONTEXT_STRING_KEYS = ['route', 'path', 'orderNumber', 'returnNumber'] as const;
+const SAFE_CONTEXT_STATUS_KEYS = ['status', 'returnStatus', 'refundStatus', 'orderStatus', 'shippingStatus', 'fulfillmentStatus'] as const;
+const SAFE_CONTEXT_BOOLEAN_KEYS = [
+  'trackingPresent',
+  'returnTrackingPresent',
+  'returnCarrierPresent',
+  'shipmentTrackingPresent',
+  'pdfAvailable',
+  'labelAvailable',
+] as const;
+
+function readSummaryString(snapshot: Record<string, unknown>, keys: readonly string[], maxLength = 140) {
+  for (const key of keys) {
+    const value = snapshot[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim().slice(0, maxLength);
+    }
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      return String(value).slice(0, maxLength);
+    }
+  }
+  return undefined;
+}
+
+function buildContextSummary(snapshot: Prisma.JsonValue | null): SupportTicketContextSummaryDto | null {
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)) {
+    return null;
+  }
+
+  const source = snapshot as Record<string, unknown>;
+  const summary: SupportTicketContextSummaryDto = {};
+
+  for (const key of SAFE_CONTEXT_STRING_KEYS) {
+    const value = readSummaryString(source, [key]);
+    if (value) {
+      summary[key] = value;
+    }
+  }
+
+  const status = readSummaryString(source, SAFE_CONTEXT_STATUS_KEYS, 80);
+  if (status) {
+    summary.status = status;
+  }
+
+  const flags = SAFE_CONTEXT_BOOLEAN_KEYS.reduce<Record<string, boolean>>((accumulator, key) => {
+    if (typeof source[key] === 'boolean') {
+      accumulator[key] = source[key];
+    }
+    return accumulator;
+  }, {});
+
+  if (Object.keys(flags).length) {
+    summary.flags = flags;
+  }
+
+  return Object.keys(summary).length ? summary : null;
+}
+
 function mapTicket(ticket: {
   id: string;
   createdAt: Date;
@@ -636,9 +695,9 @@ function mapTicket(ticket: {
     message: string;
     createdAt: Date;
   }>;
-}, options: { includeNotes?: boolean; includeReplies?: boolean; includeSla?: boolean } = {}): SupportTicketDto {
+}, options: { includeNotes?: boolean; includeReplies?: boolean; includeSla?: boolean; includeContextSnapshot?: boolean } = {}): SupportTicketDto {
   const includeSla = options.includeSla ?? false;
-  return {
+  const dto: SupportTicketDto = {
     id: ticket.id,
     createdAt: ticket.createdAt.toISOString(),
     updatedAt: ticket.updatedAt.toISOString(),
@@ -670,12 +729,32 @@ function mapTicket(ticket: {
     }) : null,
     contextType: ticket.contextType as SupportTicketContextType,
     contextId: ticket.contextId,
-    contextSnapshot: ticket.contextSnapshot,
+    contextSummary: buildContextSummary(ticket.contextSnapshot),
     resolvedAt: ticket.resolvedAt?.toISOString() ?? null,
     closedAt: ticket.closedAt?.toISOString() ?? null,
     notes: options.includeNotes ? (ticket.notes ?? []).map(mapNote) : undefined,
     replies: options.includeReplies ? (ticket.replies ?? []).map(mapReply) : undefined,
   };
+
+  if (options.includeContextSnapshot) {
+    dto.contextSnapshot = ticket.contextSnapshot;
+  }
+
+  return dto;
+}
+
+function mapAdminTicket(
+  ticket: Parameters<typeof mapTicket>[0],
+  options: Omit<Parameters<typeof mapTicket>[1], 'includeContextSnapshot'> = {},
+) {
+  return mapTicket(ticket, { ...options, includeContextSnapshot: true });
+}
+
+function mapVendorTicket(
+  ticket: Parameters<typeof mapTicket>[0],
+  options: Omit<Parameters<typeof mapTicket>[1], 'includeContextSnapshot' | 'includeSla' | 'includeNotes'> = {},
+) {
+  return mapTicket(ticket, { ...options, includeContextSnapshot: false, includeSla: false, includeNotes: false });
 }
 
 function readBool(value: unknown) {
@@ -702,6 +781,7 @@ function ticketMatchesSearch(ticket: ReturnType<typeof mapTicket>, search: strin
     ticket.nextResponseDueAt,
     ticket.escalationReason,
     JSON.stringify(ticket.contextSnapshot ?? {}),
+    JSON.stringify(ticket.contextSummary ?? {}),
   ]
     .filter(Boolean)
     .join(' ')
@@ -775,7 +855,7 @@ export async function createSupportTicket(
     },
   });
 
-  return mapTicket(ticket);
+  return mapVendorTicket(ticket);
 }
 
 export async function listAdminSupportTickets(filters: SupportTicketFilters = {}): Promise<SupportTicketDto[]> {
@@ -791,7 +871,7 @@ export async function listAdminSupportTickets(filters: SupportTicketFilters = {}
     take: 250,
   });
 
-  return applyFilters(tickets.map((ticket) => mapTicket(ticket, { includeSla: true })), filters)
+  return applyFilters(tickets.map((ticket) => mapAdminTicket(ticket, { includeSla: true })), filters)
     .sort((left, right) => {
       const leftRank = left.sla?.isOverdue ? 0 : left.sla?.escalationLevel === 'due_soon' ? 1 : 2;
       const rightRank = right.sla?.isOverdue ? 0 : right.sla?.escalationLevel === 'due_soon' ? 1 : 2;
@@ -839,7 +919,7 @@ export async function listVendorSupportTickets(vendorId: string, filters: Suppor
     take: 100,
   });
 
-  return applyFilters(tickets.map((ticket) => mapTicket(ticket, { includeSla: false })), filters);
+  return applyFilters(tickets.map((ticket) => mapVendorTicket(ticket)), filters);
 }
 
 export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicketDto | null> {
@@ -868,7 +948,7 @@ export async function getAdminSupportTicket(ticketId: string): Promise<SupportTi
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true }) : null;
+  return ticket ? mapAdminTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true }) : null;
 }
 
 export async function getVendorSupportTicket(ticketId: string, vendorId: string): Promise<SupportTicketDto | null> {
@@ -898,7 +978,7 @@ export async function getVendorSupportTicket(ticketId: string, vendorId: string)
     },
   });
 
-  return ticket ? mapTicket(ticket, { includeNotes: false, includeReplies: true, includeSla: false }) : null;
+  return ticket ? mapVendorTicket(ticket, { includeReplies: true }) : null;
 }
 
 export async function updateAdminSupportTicketStatus(ticketId: string, input: UpdateSupportTicketStatusInput): Promise<SupportTicketDto> {
@@ -928,7 +1008,7 @@ export async function updateAdminSupportTicketStatus(ticketId: string, input: Up
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
+  return mapAdminTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }
 
 export async function addAdminSupportTicketNote(
@@ -1111,7 +1191,7 @@ export async function assignSupportTicketToSelf(ticketId: string, authUser: Auth
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
+  return mapAdminTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }
 
 export async function unassignSupportTicket(ticketId: string): Promise<SupportTicketDto> {
@@ -1134,5 +1214,5 @@ export async function unassignSupportTicket(ticketId: string): Promise<SupportTi
     },
   });
 
-  return mapTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
+  return mapAdminTicket(ticket, { includeNotes: true, includeReplies: true, includeSla: true });
 }

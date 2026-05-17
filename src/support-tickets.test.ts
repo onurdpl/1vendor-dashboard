@@ -43,6 +43,7 @@ const {
   getAdminSupportTicket,
   getVendorSupportTicket,
   listAdminSupportTickets,
+  listVendorSupportTickets,
   sanitizeSupportContextSnapshot,
   unassignSupportTicket,
   updateAdminSupportTicketStatus,
@@ -284,6 +285,12 @@ describe('support tickets', () => {
 
   it('shows internal notes to admin detail but hides them from vendor detail', async () => {
     prismaMock.supportTicket.findUnique.mockResolvedValueOnce(ticketRecord({
+      contextSnapshot: {
+        route: '/returns/return-1',
+        orderNumber: '#1023',
+        reconciliationState: 'internal-review',
+        lifecycleStatus: 'webhook-synced',
+      },
       notes: [
         {
           id: 'note-1',
@@ -308,6 +315,12 @@ describe('support tickets', () => {
       ],
     }));
     prismaMock.supportTicket.findFirst.mockResolvedValueOnce(ticketRecord({
+      contextSnapshot: {
+        route: '/returns/return-1',
+        orderNumber: '#1023',
+        reconciliationState: 'internal-review',
+        lifecycleStatus: 'webhook-synced',
+      },
       replies: [
         {
           id: 'reply-1',
@@ -326,8 +339,51 @@ describe('support tickets', () => {
 
     expect(adminTicket?.notes?.[0]?.content).toBe('Internal investigation note.');
     expect(adminTicket?.replies?.[0]?.message).toBe('Public reply.');
+    expect(adminTicket?.contextSnapshot).toEqual(expect.objectContaining({
+      reconciliationState: 'internal-review',
+      lifecycleStatus: 'webhook-synced',
+    }));
+    expect(adminTicket?.contextSummary).toEqual(expect.objectContaining({
+      route: '/returns/return-1',
+      orderNumber: '#1023',
+    }));
     expect(vendorTicket?.notes).toBeUndefined();
     expect(vendorTicket?.replies?.[0]?.message).toBe('Public reply.');
+    expect(vendorTicket).not.toHaveProperty('contextSnapshot');
+    expect(vendorTicket?.contextSummary).toEqual(expect.objectContaining({
+      route: '/returns/return-1',
+      orderNumber: '#1023',
+    }));
+  });
+
+  it('omits broad context snapshots from vendor support list responses', async () => {
+    prismaMock.supportTicket.findMany.mockResolvedValueOnce([
+      ticketRecord({
+        contextSnapshot: {
+          route: '/orders/order-1',
+          orderNumber: '#1029',
+          status: 'Awaiting shipment',
+          trackingPresent: false,
+          reconciliationState: 'internal-only',
+          lifecycleStatus: 'admin-only',
+        },
+      }),
+    ]);
+
+    const result = await listVendorSupportTickets('vendor-a');
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).not.toHaveProperty('contextSnapshot');
+    expect(result[0]?.contextSummary).toEqual({
+      route: '/orders/order-1',
+      orderNumber: '#1029',
+      status: 'Awaiting shipment',
+      flags: {
+        trackingPresent: false,
+      },
+    });
+    expect(JSON.stringify(result[0])).not.toContain('internal-only');
+    expect(JSON.stringify(result[0])).not.toContain('admin-only');
   });
 
   it('lets a vendor reply to own waiting ticket and moves it to review', async () => {

@@ -298,6 +298,15 @@ export type SupportTicketSla = {
   overdueByHours: number | null;
 };
 
+export type SupportTicketContextSummary = {
+  route?: string;
+  path?: string;
+  orderNumber?: string;
+  returnNumber?: string;
+  status?: string;
+  flags?: Record<string, boolean>;
+};
+
 export type SupportTicket = {
   id: string;
   createdAt: string;
@@ -324,7 +333,8 @@ export type SupportTicket = {
   sla: SupportTicketSla | null;
   contextType: SupportTicketContextType;
   contextId: string | null;
-  contextSnapshot: unknown;
+  contextSummary?: SupportTicketContextSummary | null;
+  contextSnapshot?: unknown;
   resolvedAt: string | null;
   closedAt: string | null;
   notes?: SupportTicketNote[];
