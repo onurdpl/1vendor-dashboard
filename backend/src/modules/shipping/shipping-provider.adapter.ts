@@ -158,6 +158,16 @@ function isTryOtoOrderAlreadyExists(snapshot: Record<string, unknown>) {
   return Boolean(message && /order id is already exist/i.test(message));
 }
 
+function isTryOtoShipmentAlreadyInProgress(snapshot: Record<string, unknown>) {
+  const code = readSafeProviderErrorCode(snapshot);
+  if (code?.trim().toUpperCase() === 'OTO1011') {
+    return true;
+  }
+
+  const message = readSafeProviderError(snapshot);
+  return Boolean(message && /(shipment.*(already exist|in progress)|there is a shipment in progress)/i.test(message));
+}
+
 function parseResponseBody(contentType: string, responseText: string): unknown {
   if (!contentType.includes('application/json') || !responseText) {
     return responseText;
@@ -1167,7 +1177,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       orderIdPresent: hasValue(createShipmentRequest.orderId),
       deliveryOptionIdPresent: hasValue(createShipmentRequest.deliveryOptionId),
     };
-    let createShipment: { snapshot: Record<string, unknown>; body: Record<string, unknown> };
+    let createShipment!: { snapshot: Record<string, unknown>; body: Record<string, unknown> };
+    let createShipmentRecovered = false;
+    let createShipmentRecoveryReason: string | null = null;
     try {
       createShipment = await this.postJson('/rest/v2/createShipment', createShipmentRequest, accessToken, 'createShipment');
     } catch (error) {
@@ -1183,18 +1195,38 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
             providerErrorCode: readSafeProviderErrorCode(error.responseSnapshot),
           },
         });
-        throw new ShippingProviderExecutionError(`Try OTO createShipment failed with HTTP ${error.responseSnapshot.status ?? 'unknown'}.`, {
-          ...error.responseSnapshot,
-          provider: 'try_oto',
-          operation: 'createShipment',
-          deliveryOptionLookup: deliveryOptionLookupDiagnostics,
-          createOrder: createOrder.snapshot,
-          createShipment: error.responseSnapshot,
-          createShipmentRequestDiagnostics,
-          payloadDiagnostics,
-        });
+        if (isTryOtoShipmentAlreadyInProgress(error.responseSnapshot)) {
+          createShipmentRecovered = true;
+          createShipmentRecoveryReason = 'existing shipment in progress';
+          createShipment = {
+            snapshot: {
+              ...error.responseSnapshot,
+              ok: true,
+              recovered: true,
+              recoveryReason: createShipmentRecoveryReason,
+              orderId,
+              providerMessage: 'Try OTO shipment is already in progress; tracking/label pending.',
+            },
+            body: {
+              message: 'Try OTO shipment is already in progress; tracking/label pending.',
+            },
+          };
+        } else {
+          throw new ShippingProviderExecutionError(`Try OTO createShipment failed with HTTP ${error.responseSnapshot.status ?? 'unknown'}.`, {
+            ...error.responseSnapshot,
+            provider: 'try_oto',
+            operation: 'createShipment',
+            deliveryOptionLookup: deliveryOptionLookupDiagnostics,
+            createOrder: createOrder.snapshot,
+            createShipment: error.responseSnapshot,
+            createShipmentRequestDiagnostics,
+            payloadDiagnostics,
+          });
+        }
       }
-      throw error;
+      if (!createShipmentRecovered) {
+        throw error;
+      }
     }
     let orderStatus: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
     try {
@@ -1257,8 +1289,14 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         createOrderSkipReason,
         retrySource,
         createShipment: createShipment.snapshot,
+        createShipmentRecovered,
+        createShipmentRecoveryReason,
+        orderStatusCalledAfterRecovery: createShipmentRecovered ? Boolean(orderStatus) : false,
         createShipmentRequestDiagnostics,
         orderStatus: orderStatus?.snapshot,
+        providerMessage: createShipmentRecovered && !trackingNumber && !labelUrl && !barcode
+          ? 'Try OTO shipment is already in progress; tracking/label pending.'
+          : readString(createShipment.body, ['message']),
         payloadDiagnostics,
         lastProviderResponseAt: new Date().toISOString(),
         timeline: [

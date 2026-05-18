@@ -3395,6 +3395,185 @@ describe('shipping execution foundation', () => {
     expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/orderStatus');
   });
 
+  it('recovers Try OTO shipment-in-progress responses and captures orderStatus tracking fields', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            deliveryCompany: [
+              {
+                deliveryOptionId: 7109,
+                deliveryCompanyName: 'surat-kargo-marketplace',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, otoId: 540789 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: false,
+            otoErrorCode: 'OTO1011',
+            errorMsg: 'there is a shipment in progress',
+            otoErrorMessage: 'Shipment is already exist',
+          }),
+          { status: 404 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            status: 'shipmentCreated',
+            shipmentId: 'OTO-SHIP-1001',
+            trackingNumber: 'OTO-TRACK-1001',
+            barcode: 'OTO-BARCODE-1001',
+            printLabelURL: 'https://app.tryoto.example/label.pdf',
+          }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: 'POC-TR-SHIPMENT-IN-PROGRESS',
+        pickupLocationCode: 'tr-test-store-001',
+        originCity: 'Istanbul',
+        payment_method: 'paid',
+        amount: 1299.9,
+        amount_due: 0,
+        currency: 'TRY',
+        packageWeight: 1,
+        customer: {
+          name: 'Sandbox Customer',
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+          city: 'Istanbul',
+          country: 'TR',
+          district: 'Kadikoy',
+        },
+        items: [],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toContain('https://staging-api.tryoto.com/rest/v2/orderStatus');
+    expect(result).toMatchObject({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: 'OTO-TRACK-1001',
+      labelUrl: 'https://app.tryoto.example/label.pdf',
+      shipmentStatus: 'created',
+      responseSnapshot: expect.objectContaining({
+        createShipmentRecovered: true,
+        createShipmentRecoveryReason: 'existing shipment in progress',
+        orderStatusCalledAfterRecovery: true,
+        barcode: 'OTO-BARCODE-1001',
+        createShipment: expect.objectContaining({
+          ok: true,
+          recovered: true,
+          recoveryReason: 'existing shipment in progress',
+        }),
+      }),
+    });
+  });
+
+  it('keeps recovered Try OTO shipment-in-progress executions pending when tracking is not ready yet', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            deliveryCompany: [
+              {
+                deliveryOptionId: 7109,
+                deliveryCompanyName: 'surat-kargo-marketplace',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, otoId: 540789 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: false,
+            otoErrorCode: 'OTO1011',
+            otoErrorMessage: 'Shipment is already exist',
+          }),
+          { status: 404 },
+        ),
+      )
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, status: 'processing' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: 'POC-TR-SHIPMENT-PENDING',
+        pickupLocationCode: 'tr-test-store-001',
+        originCity: 'Istanbul',
+        payment_method: 'paid',
+        amount: 1299.9,
+        amount_due: 0,
+        currency: 'TRY',
+        packageWeight: 1,
+        customer: {
+          name: 'Sandbox Customer',
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+          city: 'Istanbul',
+          country: 'TR',
+          district: 'Kadikoy',
+        },
+        items: [],
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerShipmentId: '540789',
+      trackingNumber: null,
+      labelUrl: null,
+      shipmentStatus: 'pending',
+      responseSnapshot: expect.objectContaining({
+        createShipmentRecovered: true,
+        createShipmentRecoveryReason: 'existing shipment in progress',
+        orderStatusCalledAfterRecovery: true,
+        providerMessage: 'Try OTO shipment is already in progress; tracking/label pending.',
+      }),
+    });
+  });
+
   it('builds Try OTO createOrder payload with required Turkey fields from allocation data', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
