@@ -1422,8 +1422,63 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       vendorId: 'sporjinal',
     });
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
-    expect((await screen.findAllByText('Try OTO shipment status refreshed.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).toBeInTheDocument();
+  });
+
+  it('renders polished Try OTO shipment links and treats missing barcode as tracking-backed', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'try_oto',
+      trackingNumber: 'OTO-TRACK-1028',
+      trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        barcode: null,
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect((await screen.findAllByText('Try OTO')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
+    expect(screen.getByText('Same as tracking')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
+    expect(screen.getByRole('link', { name: 'Open label PDF' })).toHaveAttribute('href', 'https://app.tryoto.example/label-1028.pdf');
+    expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
+  });
+
+  it('keeps Kargo provider display unchanged in shipment summaries', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect((await screen.findAllByText('Kargo Entegratör')).length).toBeGreaterThan(0);
   });
 
   it('shows a safe backend error when retry fails', async () => {

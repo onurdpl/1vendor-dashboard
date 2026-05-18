@@ -45,6 +45,7 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
+import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -80,8 +81,9 @@ function getTrackingTitle(order: { trackingNumber?: string; carrier?: string; tr
 }
 
 function getTrackingHelper(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
-  if (order.trackingNumber || order.carrier) {
-    return [order.carrier, order.trackingNumber].filter(Boolean).join(' / ');
+  const carrier = formatTrackingCarrierLabel(order.carrier);
+  if (order.trackingNumber || carrier) {
+    return [carrier, order.trackingNumber].filter(Boolean).join(' / ');
   }
 
   if (order.trackingUrl) {
@@ -89,6 +91,33 @@ function getTrackingHelper(order: { trackingNumber?: string; carrier?: string; t
   }
 
   return 'No tracking information available.';
+}
+
+function getShipmentTrackingNumber(order: { trackingNumber?: string | null }, shipment?: ShipmentExecution | null) {
+  return order.trackingNumber ?? shipment?.trackingNumber ?? null;
+}
+
+function getShipmentTrackingUrl(order: { trackingUrl?: string | null }, shipment?: ShipmentExecution | null) {
+  return order.trackingUrl ?? shipment?.trackingUrl ?? null;
+}
+
+function getShipmentBarcodeDisplay(shipment?: ShipmentExecution | null, trackingNumber?: string | null) {
+  if (shipment?.barcode) {
+    return shipment.barcode;
+  }
+  if (trackingNumber) {
+    return 'Same as tracking';
+  }
+  return 'Pending';
+}
+
+function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
+  return [
+    `Provider id: ${shipment.providerShipmentId ? 'yes' : 'pending'}`,
+    `Barcode: ${shipment.barcode ? 'yes' : shipment.trackingNumber ? 'same as tracking' : 'pending'}`,
+    `Tracking: ${shipment.trackingNumber ? 'yes' : 'pending'}`,
+    `Label: ${shipment.labelUrl ? 'yes' : 'pending'}`,
+  ].join(' · ');
 }
 
 type ShippingConfigDraft = {
@@ -585,7 +614,7 @@ export function OrderDetailPage() {
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
-    (!visibleShipmentExecution.trackingNumber || !visibleShipmentExecution.barcode || !visibleShipmentExecution.labelUrl);
+    (!getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution) || !visibleShipmentExecution.labelUrl);
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -698,25 +727,25 @@ export function OrderDetailPage() {
 
     setShipmentActionState({
       tone: 'info',
-      message: 'Refreshing Try OTO shipment status...',
+      message: 'Refreshing shipment status...',
       endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
     });
 
     void refreshShipmentStatusMutation(visibleShipmentExecution.id)
       .then((shipment) => {
-        const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.barcode || shipment.labelUrl);
+        const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.labelUrl);
         setShipmentActionState({
           tone: hasNewShipmentEvidence ? 'success' : 'info',
           message: hasNewShipmentEvidence
-            ? 'Try OTO shipment status refreshed.'
-            : 'Try OTO status checked. Tracking, barcode, or label are still pending.',
+            ? 'Shipment status refreshed.'
+            : 'Shipment was created. Tracking or label may still be processing.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
         });
         showFeedback(
           hasNewShipmentEvidence
-            ? 'Try OTO shipment status refreshed.'
-            : 'Try OTO status checked. Tracking, barcode, or label are still pending.',
+            ? 'Shipment status refreshed.'
+            : 'Shipment was created. Tracking or label may still be processing.',
           hasNewShipmentEvidence ? 'success' : 'info',
         );
         void refetch();
@@ -1183,7 +1212,7 @@ export function OrderDetailPage() {
     orderTimelineEvents.push({
       id: 'shipment-created',
       title: 'Shipment created',
-      description: order.carrier ? `Carrier: ${order.carrier}` : 'Shipment record is available.',
+      description: order.carrier ? `Carrier: ${formatShippingProviderName(order.carrier)}` : 'Shipment record is available.',
       at: order.shipmentCreatedAt,
       status: order.shippingStatus,
       tone: 'success',
@@ -1193,7 +1222,7 @@ export function OrderDetailPage() {
     orderTimelineEvents.push({
       id: 'tracking-added',
       title: 'Tracking added',
-      description: [order.carrier, order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
+      description: [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
       at: order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date,
       status: 'Tracking added',
       tone: 'success',
@@ -1681,7 +1710,7 @@ export function OrderDetailPage() {
                           <>
                             <div className="summary-row">
                               <span>Shipment provider</span>
-                              <strong>{toTitleCaseLabel(visibleShipmentExecution.provider)}</strong>
+                              <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Carrier status</span>
@@ -1701,8 +1730,12 @@ export function OrderDetailPage() {
                             </div>
                             <div className="summary-row">
                               <span>Barcode</span>
-                              <strong className={visibleShipmentExecution.barcode ? '' : 'muted'}>
-                                {visibleShipmentExecution.barcode ?? 'Pending'}
+                              <strong
+                                className={
+                                  visibleShipmentExecution.barcode || getShipmentTrackingNumber(order, visibleShipmentExecution) ? '' : 'muted'
+                                }
+                              >
+                                {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
                               </strong>
                             </div>
                           </>
@@ -1710,19 +1743,19 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Tracking</span>
                           <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
-                            {order.trackingNumber ?? visibleShipmentExecution?.trackingNumber ?? 'Not available'}
+                            {getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}
                           </strong>
                         </div>
                         <div className="summary-row">
                           <span>Carrier</span>
-                          <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
+                          <strong className={order.carrier ? '' : 'muted'}>{formatShippingProviderName(order.carrier) || 'Not available'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Tracking link</span>
-                          {order.trackingUrl || visibleShipmentExecution?.trackingUrl ? (
+                          {getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
                             <a
                               className="inline-link"
-                              href={(order.trackingUrl ?? visibleShipmentExecution?.trackingUrl) || undefined}
+                              href={getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
                               target="_blank"
                               rel="noreferrer"
                             >
@@ -1736,7 +1769,7 @@ export function OrderDetailPage() {
                           <div className="summary-row">
                             <span>Label</span>
                             <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
-                              Open label
+                              Open label PDF
                             </a>
                           </div>
                         ) : null}
@@ -1759,7 +1792,7 @@ export function OrderDetailPage() {
                         {canRefreshTryOtoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                             <strong>Try OTO status refresh</strong>
-                            <span>Shipment was created, but tracking, barcode, or label details may still be processing.</span>
+                            <span>Shipment was created. Tracking or label may still be processing.</span>
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -1960,12 +1993,7 @@ export function OrderDetailPage() {
                           </span>
                         ) : null}
                         {shipmentActionState.shipment ? (
-                          <span>
-                            Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
-                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'} · Tracking:{' '}
-                            {shipmentActionState.shipment.trackingNumber ? 'yes' : 'pending'} · Label:{' '}
-                            {shipmentActionState.shipment.labelUrl ? 'yes' : 'pending'}
-                          </span>
+                          <span>{getShipmentEvidenceSummary(shipmentActionState.shipment)}</span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>
@@ -2139,7 +2167,7 @@ export function OrderDetailPage() {
                   <div className="tracking-summary-card order-tracking-summary-card">
                     <div className="summary-row">
                       <span>Shipment provider</span>
-                      <strong>{toTitleCaseLabel(shipmentExecution.provider)}</strong>
+                      <strong>{formatShippingProviderName(shipmentExecution.provider)}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Carrier status</span>
@@ -2154,17 +2182,35 @@ export function OrderDetailPage() {
                     <div className="summary-row">
                       <span>Tracking</span>
                       <strong className={order.trackingNumber || shipmentExecution.trackingNumber ? '' : 'muted'}>
-                        {order.trackingNumber ?? shipmentExecution.trackingNumber ?? 'Not available'}
+                        {getShipmentTrackingNumber(order, shipmentExecution) ?? 'Not available'}
                       </strong>
                     </div>
                     <div className="summary-row">
                       <span>Carrier</span>
-                      <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
+                      <strong className={order.carrier ? '' : 'muted'}>{formatShippingProviderName(order.carrier) || 'Not available'}</strong>
                     </div>
+                    <div className="summary-row">
+                      <span>Tracking link</span>
+                      {getShipmentTrackingUrl(order, shipmentExecution) ? (
+                        <a className="inline-link" href={getShipmentTrackingUrl(order, shipmentExecution) || undefined} target="_blank" rel="noreferrer">
+                          Open tracking
+                        </a>
+                      ) : (
+                        <strong className="muted">Not available</strong>
+                      )}
+                    </div>
+                    {shipmentExecution.labelUrl ? (
+                      <div className="summary-row">
+                        <span>Label</span>
+                        <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                          Open label PDF
+                        </a>
+                      </div>
+                    ) : null}
                     {canRefreshTryOtoShipmentStatus ? (
                       <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                         <strong>Try OTO status refresh</strong>
-                        <span>Shipment was created, but tracking, barcode, or label details may still be processing.</span>
+                        <span>Shipment was created. Tracking or label may still be processing.</span>
                         <div className="order-inline-actions">
                           <button
                             type="button"
@@ -2327,12 +2373,7 @@ export function OrderDetailPage() {
                           </span>
                         ) : null}
                         {shipmentActionState.shipment ? (
-                          <span>
-                            Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
-                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'} · Tracking:{' '}
-                            {shipmentActionState.shipment.trackingNumber ? 'yes' : 'pending'} · Label:{' '}
-                            {shipmentActionState.shipment.labelUrl ? 'yes' : 'pending'}
-                          </span>
+                          <span>{getShipmentEvidenceSummary(shipmentActionState.shipment)}</span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>

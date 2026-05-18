@@ -20,6 +20,7 @@ import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../fe
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
+import { formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -59,8 +60,9 @@ function getLineItemCount(order: OrderSummary | OrderDetail) {
 }
 
 function getTrackingLabel(order: OrderSummary | OrderDetail) {
-  if (order.trackingNumber || order.carrier) {
-    return [order.carrier, order.trackingNumber].filter(Boolean).join(' / ');
+  const carrier = formatTrackingCarrierLabel(order.carrier);
+  if (order.trackingNumber || carrier) {
+    return [carrier, order.trackingNumber].filter(Boolean).join(' / ');
   }
 
   return 'Tracking pending';
@@ -68,7 +70,7 @@ function getTrackingLabel(order: OrderSummary | OrderDetail) {
 
 function getTrackingHelper(order: OrderSummary | OrderDetail) {
   if (order.trackingUrl) {
-    return 'Tracking link synced';
+    return 'Tracking link available';
   }
   if (order.trackingNumber || order.carrier) {
     return 'Waiting Shopify sync';
@@ -488,7 +490,7 @@ export function OrdersPage() {
                   <div className="orders-status-block">
                     <span>Tracking</span>
                     <strong>{getTrackingLabel(selectedOrder)}</strong>
-                    <small>{selectedOrder.carrier ?? 'Carrier pending'}</small>
+                    <small>{formatTrackingCarrierLabel(selectedOrder.carrier) ?? 'Carrier pending'}</small>
                   </div>
                 </div>
                 <div className="orders-detail-info-grid orders-detail-timestamps">
