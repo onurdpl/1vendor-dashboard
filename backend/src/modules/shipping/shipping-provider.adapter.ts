@@ -6,6 +6,12 @@ export type ShippingProviderCreateInput = {
   vendorId: string;
   provider: ShippingProviderDto;
   requestSnapshot: Record<string, unknown>;
+  retryContext?: {
+    isRetry?: boolean;
+    existingOrderId?: string | null;
+    existingProviderOrderId?: string | null;
+    existingOrderAlreadyExists?: boolean;
+  };
 };
 
 export type ShippingProviderCreateResult = {
@@ -140,6 +146,16 @@ function readSafeProviderError(value: Record<string, unknown>) {
 
 function readSafeProviderErrorCode(value: Record<string, unknown>) {
   return readString(value, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code']);
+}
+
+function isTryOtoOrderAlreadyExists(snapshot: Record<string, unknown>) {
+  const code = readSafeProviderErrorCode(snapshot);
+  if (code?.trim().toUpperCase() === 'OTO1063') {
+    return true;
+  }
+
+  const message = readSafeProviderError(snapshot);
+  return Boolean(message && /order id is already exist/i.test(message));
 }
 
 function parseResponseBody(contentType: string, responseText: string): unknown {
@@ -1039,7 +1055,6 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
     };
     const payloadDiagnostics = buildTryOtoPayloadDiagnostics(orderPayload);
-    const createOrder = await this.postJson('/rest/v2/createOrder', orderPayload, accessToken, 'createOrder');
     const orderId = readString(input.requestSnapshot, ['orderId']);
     if (!orderId) {
       throw new ShippingProviderExecutionError('Try OTO createOrder payload is missing orderId.', {
@@ -1047,6 +1062,70 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         operation: 'createOrder',
         payloadDiagnostics,
       });
+    }
+    const retrySource = input.retryContext?.isRetry
+      ? input.retryContext.existingOrderId
+        ? 'existing execution'
+        : 'unknown'
+      : 'fresh create';
+    const canReuseExistingOrder = Boolean(
+      input.retryContext?.isRetry &&
+      input.retryContext.existingOrderId &&
+      input.retryContext.existingOrderId === orderId,
+    );
+    let createOrderSkipped = false;
+    let createOrderSkipReason: 'existing order' | 'OTO1063 recovered' | 'none' = 'none';
+    let createOrder: { snapshot: Record<string, unknown>; body: Record<string, unknown> };
+
+    if (canReuseExistingOrder) {
+      createOrderSkipped = true;
+      createOrderSkipReason = input.retryContext?.existingOrderAlreadyExists ? 'OTO1063 recovered' : 'existing order';
+      createOrder = {
+        snapshot: {
+          ok: true,
+          provider: 'try_oto',
+          operation: 'createOrder',
+          skipped: true,
+          skipReason: createOrderSkipReason,
+          retrySource,
+          orderId,
+          providerOrderId: input.retryContext?.existingProviderOrderId ?? null,
+          requestPath: '/rest/v2/createOrder',
+          selectedEnvironment: 'sandbox',
+        },
+        body: input.retryContext?.existingProviderOrderId
+          ? { otoId: input.retryContext.existingProviderOrderId }
+          : {},
+      };
+    } else {
+      try {
+        createOrder = await this.postJson('/rest/v2/createOrder', orderPayload, accessToken, 'createOrder');
+      } catch (error) {
+        if (
+          error instanceof ShippingProviderExecutionError &&
+          isTryOtoOrderAlreadyExists(error.responseSnapshot) &&
+          canReuseExistingOrder
+        ) {
+          createOrderSkipped = true;
+          createOrderSkipReason = 'OTO1063 recovered';
+          createOrder = {
+            snapshot: {
+              ...error.responseSnapshot,
+              ok: true,
+              recovered: true,
+              skipReason: createOrderSkipReason,
+              retrySource,
+              orderId,
+              providerOrderId: input.retryContext?.existingProviderOrderId ?? null,
+            },
+            body: input.retryContext?.existingProviderOrderId
+              ? { otoId: input.retryContext.existingProviderOrderId }
+              : {},
+          };
+        } else {
+          throw error;
+        }
+      }
     }
 
     const deliveryOptionLookupDiagnostics = {
@@ -1174,6 +1253,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         selectedDeliveryCompanyName,
         selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
         createOrder: createOrder.snapshot,
+        createOrderSkipped,
+        createOrderSkipReason,
+        retrySource,
         createShipment: createShipment.snapshot,
         createShipmentRequestDiagnostics,
         orderStatus: orderStatus?.snapshot,

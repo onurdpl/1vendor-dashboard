@@ -898,6 +898,7 @@ describe('shipping execution foundation', () => {
       providerShipmentId: 'ke-recovered-1027',
     });
     expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(adapter.createShipment.mock.calls[0][0]).not.toHaveProperty('retryContext');
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
     expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1030,6 +1031,93 @@ describe('shipping execution foundation', () => {
     );
     const requestSnapshot = adapter.createShipment.mock.calls[0][0].requestSnapshot;
     expect(requestSnapshot).not.toHaveProperty('cargo_company');
+    expect(adapter.createShipment.mock.calls[0][0]).not.toHaveProperty('retryContext');
+  });
+
+  it('retries Try OTO shipments with the existing OTO order context', async () => {
+    const existingOrderId = 'shopify-7616544244049-allocation-alloc-1';
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'FAILED',
+      requestSnapshot: {
+        orderId: existingOrderId,
+      },
+      responseSnapshot: {
+        orderId: existingOrderId,
+        providerOrderId: '540790',
+        timeline: [{ label: 'Try OTO shipment create requested', status: 'failed' }],
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, provider: 'try_oto', orderId: existingOrderId },
+    });
+
+    await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_SANDBOX_MODE: true,
+        TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+        TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          orderId: existingOrderId,
+        }),
+        retryContext: {
+          isRetry: true,
+          existingOrderId,
+          existingProviderOrderId: '540790',
+          existingOrderAlreadyExists: false,
+        },
+      }),
+    );
   });
 
   it('preserves vendor isolation when creating shipments', async () => {
@@ -2910,14 +2998,242 @@ describe('shipping execution foundation', () => {
         }),
       },
     });
-    const serialized = JSON.stringify(result.responseSnapshot);
-    expect(serialized).not.toContain('refresh-secret');
-    expect(serialized).not.toContain('oto-access-token');
-    expect(serialized).not.toContain('905551112233');
-    expect(serialized).not.toContain('Test Mahallesi');
-  });
+	  const serialized = JSON.stringify(result.responseSnapshot);
+	  expect(serialized).not.toContain('refresh-secret');
+	  expect(serialized).not.toContain('oto-access-token');
+	  expect(serialized).not.toContain('905551112233');
+	  expect(serialized).not.toContain('Test Mahallesi');
+	});
 
-  it('surfaces Try OTO lookup 400 messages without calling createShipment', async () => {
+	it('reuses an existing Try OTO order on retry and skips createOrder', async () => {
+	  const fetchMock = vi
+	    .fn()
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+	    .mockResolvedValueOnce(
+	      mockProviderResponse(
+	        JSON.stringify({
+	          success: true,
+	          deliveryCompany: [
+	            {
+	              deliveryOptionId: 7109,
+	              deliveryCompanyName: 'surat-kargo-marketplace',
+	              price: 42,
+	              currency: 'TRY',
+	            },
+	          ],
+	        }),
+	      ),
+	    )
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, message: 'create shipment request is received.' })))
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, status: 'processing' })));
+	  vi.stubGlobal('fetch', fetchMock);
+
+	  const adapter = new TryOtoAdapter({
+	    ...env,
+	    SHIPPING_PROVIDER: 'try_oto',
+	    SHIPPING_EXECUTION_ENABLED: true,
+	    TRY_OTO_ENABLED: true,
+	    TRY_OTO_SANDBOX_MODE: true,
+	    TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+	    TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+	  });
+
+	  const result = await adapter.createShipment({
+	    allocationId: 'alloc-1',
+	    vendorId: 'sporjinal',
+	    provider: 'try_oto',
+	    retryContext: {
+	      isRetry: true,
+	      existingOrderId: 'POC-TR-RETRY-1001',
+	      existingProviderOrderId: '540789',
+	    },
+	    requestSnapshot: {
+	      orderId: 'POC-TR-RETRY-1001',
+	      pickupLocationCode: 'tr-test-store-001',
+	      originCity: 'Istanbul',
+	      payment_method: 'paid',
+	      amount: 1299.9,
+	      amount_due: 0,
+	      currency: 'TRY',
+	      packageWeight: 1,
+	      customer: {
+	        name: 'Sandbox Customer',
+	        mobile: '905551112233',
+	        address: 'Test Mahallesi 1. Sokak No: 1',
+	        city: 'Istanbul',
+	        country: 'TR',
+	        district: 'Kadikoy',
+	      },
+	      items: [],
+	    },
+	  });
+
+	  expect(fetchMock).toHaveBeenCalledTimes(4);
+	  expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/createOrder');
+	  expect(fetchMock.mock.calls.map((call) => call[0])).toContain('https://staging-api.tryoto.com/rest/v2/createShipment');
+	  expect(result.responseSnapshot).toMatchObject({
+	    providerOrderId: '540789',
+	    orderId: 'POC-TR-RETRY-1001',
+	    createOrderSkipped: true,
+	    createOrderSkipReason: 'existing order',
+	    retrySource: 'existing execution',
+	    createOrder: expect.objectContaining({
+	      skipped: true,
+	      skipReason: 'existing order',
+	      retrySource: 'existing execution',
+	    }),
+	  });
+	});
+
+	it('continues Try OTO retry finalization when the existing order already hit OTO1063', async () => {
+	  const fetchMock = vi
+	    .fn()
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+	    .mockResolvedValueOnce(
+	      mockProviderResponse(
+	        JSON.stringify({
+	          success: true,
+	          deliveryCompany: [
+	            {
+	              deliveryOptionId: 7109,
+	              deliveryCompanyName: 'surat-kargo-marketplace',
+	            },
+	          ],
+	        }),
+	      ),
+	    )
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, message: 'create shipment request is received.' })))
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, status: 'processing' })));
+	  vi.stubGlobal('fetch', fetchMock);
+
+	  const adapter = new TryOtoAdapter({
+	    ...env,
+	    SHIPPING_PROVIDER: 'try_oto',
+	    SHIPPING_EXECUTION_ENABLED: true,
+	    TRY_OTO_ENABLED: true,
+	    TRY_OTO_SANDBOX_MODE: true,
+	    TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+	    TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+	  });
+
+	  const result = await adapter.createShipment({
+	    allocationId: 'alloc-1',
+	    vendorId: 'sporjinal',
+	    provider: 'try_oto',
+	    retryContext: {
+	      isRetry: true,
+	      existingOrderId: 'POC-TR-RETRY-1002',
+	      existingOrderAlreadyExists: true,
+	    },
+	    requestSnapshot: {
+	      orderId: 'POC-TR-RETRY-1002',
+	      pickupLocationCode: 'tr-test-store-001',
+	      originCity: 'Istanbul',
+	      payment_method: 'paid',
+	      amount: 1299.9,
+	      amount_due: 0,
+	      currency: 'TRY',
+	      packageWeight: 1,
+	      customer: {
+	        name: 'Sandbox Customer',
+	        mobile: '905551112233',
+	        address: 'Test Mahallesi 1. Sokak No: 1',
+	        city: 'Istanbul',
+	        country: 'TR',
+	        district: 'Kadikoy',
+	      },
+	      items: [],
+	    },
+	  });
+
+	  expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/createOrder');
+	  expect(fetchMock.mock.calls.map((call) => call[0])).toContain('https://staging-api.tryoto.com/rest/v2/createShipment');
+	  expect(result.responseSnapshot).toMatchObject({
+	    createOrderSkipped: true,
+	    createOrderSkipReason: 'OTO1063 recovered',
+	    retrySource: 'existing execution',
+	  });
+	});
+
+	it('keeps unrelated Try OTO OTO1063 createOrder failures as provider failures', async () => {
+	  const fetchMock = vi
+	    .fn()
+	    .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+	    .mockResolvedValueOnce(
+	      mockProviderResponse(
+	        JSON.stringify({
+	          success: true,
+	          deliveryCompany: [
+	            {
+	              deliveryOptionId: 7109,
+	              deliveryCompanyName: 'surat-kargo-marketplace',
+	            },
+	          ],
+	        }),
+	      ),
+	    )
+	    .mockResolvedValueOnce(
+	      mockProviderResponse(
+	        JSON.stringify({
+	          success: false,
+	          otoErrorCode: 'OTO1063',
+	          otoErrorMessage: 'Order Id is already exist',
+	        }),
+	        { status: 400 },
+	      ),
+	    );
+	  vi.stubGlobal('fetch', fetchMock);
+
+	  const adapter = new TryOtoAdapter({
+	    ...env,
+	    SHIPPING_PROVIDER: 'try_oto',
+	    SHIPPING_EXECUTION_ENABLED: true,
+	    TRY_OTO_ENABLED: true,
+	    TRY_OTO_SANDBOX_MODE: true,
+	    TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+	    TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+	  });
+
+	  await expect(
+	    adapter.createShipment({
+	      allocationId: 'alloc-1',
+	      vendorId: 'sporjinal',
+	      provider: 'try_oto',
+	      retryContext: {
+	        isRetry: true,
+	        existingOrderId: 'DIFFERENT-ORDER',
+	      },
+	      requestSnapshot: {
+	        orderId: 'POC-TR-UNRELATED-1063',
+	        pickupLocationCode: 'tr-test-store-001',
+	        originCity: 'Istanbul',
+	        payment_method: 'paid',
+	        amount: 1299.9,
+	        amount_due: 0,
+	        currency: 'TRY',
+	        packageWeight: 1,
+	        customer: {
+	          name: 'Sandbox Customer',
+	          mobile: '905551112233',
+	          address: 'Test Mahallesi 1. Sokak No: 1',
+	          city: 'Istanbul',
+	          country: 'TR',
+	          district: 'Kadikoy',
+	        },
+	        items: [],
+	      },
+	    }),
+	  ).rejects.toMatchObject({
+	    message: 'Try OTO createOrder failed with HTTP 400.',
+	    responseSnapshot: expect.objectContaining({
+	      providerErrorCode: 'OTO1063',
+	      providerError: 'Order Id is already exist',
+	    }),
+	  });
+	  expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/createShipment');
+	});
+
+	it('surfaces Try OTO lookup 400 messages without calling createShipment', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))

@@ -187,6 +187,29 @@ function readString(value: unknown, keys: string[]) {
   return null;
 }
 
+function buildTryOtoRetryContext(existing: ShipmentExecution) {
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    return undefined;
+  }
+
+  const responseSnapshot = readSnapshot(existing);
+  const existingOrderAlreadyExists = (
+    readString(responseSnapshot, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code'])?.toUpperCase() === 'OTO1063' ||
+    /order id is already exist/i.test(readString(responseSnapshot, ['providerError', 'errorMsg', 'otoErrorMessage', 'message', 'error', 'detail']) ?? '')
+  );
+
+  return {
+    isRetry: true,
+    existingOrderId:
+      readString(existing.requestSnapshot, ['orderId']) ??
+      readString(responseSnapshot, ['orderId']),
+    existingProviderOrderId:
+      readString(responseSnapshot, ['providerOrderId', 'otoId', 'shipmentId']) ??
+      readString(existing.requestSnapshot, ['providerOrderId', 'otoId']),
+    existingOrderAlreadyExists,
+  };
+}
+
 function readBoolean(value: unknown, keys: string[]) {
   if (!isRecord(value)) {
     return false;
@@ -2020,11 +2043,13 @@ export async function retryDryRunShipmentExecution(
       preview,
       options.env,
     );
+    const retryContext = buildTryOtoRetryContext(existing);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
       provider: providerDto,
       requestSnapshot,
+      ...(retryContext ? { retryContext } : {}),
     });
 
     return persistProviderShipmentResult({
@@ -2145,11 +2170,13 @@ export async function retryFailedShipmentExecution(
       preview,
       options.env,
     );
+    const retryContext = buildTryOtoRetryContext(existing);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
       provider: providerDto,
       requestSnapshot,
+      ...(retryContext ? { retryContext } : {}),
     });
 
     return persistProviderShipmentResult({
