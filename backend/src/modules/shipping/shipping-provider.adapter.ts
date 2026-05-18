@@ -76,6 +76,65 @@ function readBoolean(value: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function toSafeDiagnosticString(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim().slice(0, 240);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return String(value);
+  }
+  return null;
+}
+
+function collectSafeDiagnosticStrings(value: unknown, output: string[] = []): string[] {
+  if (output.length >= 8) {
+    return output;
+  }
+
+  const scalar = toSafeDiagnosticString(value);
+  if (scalar) {
+    output.push(scalar);
+    return output;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectSafeDiagnosticStrings(item, output);
+      if (output.length >= 8) {
+        break;
+      }
+    }
+    return output;
+  }
+
+  if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      if (/token|secret|authorization|bearer|password|api[_-]?key/i.test(key)) {
+        continue;
+      }
+      collectSafeDiagnosticStrings(item, output);
+      if (output.length >= 8) {
+        break;
+      }
+    }
+  }
+
+  return output;
+}
+
+function readSafeValidationErrors(value: Record<string, unknown>) {
+  const candidates = [value.errors, value.validation, value.validation_errors, value.error_details];
+  return Array.from(new Set(candidates.flatMap((candidate) => collectSafeDiagnosticStrings(candidate)))).slice(0, 8);
+}
+
+function readSafeProviderError(value: Record<string, unknown>) {
+  return (
+    readString(value, ['message', 'error', 'detail', 'status']) ??
+    readSafeValidationErrors(value)[0] ??
+    null
+  );
+}
+
 function parseResponseBody(contentType: string, responseText: string): unknown {
   if (!contentType.includes('application/json') || !responseText) {
     return responseText;
@@ -91,6 +150,8 @@ function parseResponseBody(contentType: string, responseText: string): unknown {
 function sanitizeResponseSnippet(value: string) {
   return value
     .replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [redacted]')
+    .replace(/"((?:token|secret|authorization|bearer|password|api[_-]?key))"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
+    .replace(/"((?:phone|email|address|name|surname|customer[_-]?name))"\s*:\s*"[^"]*"/gi, '"$1":"[redacted]"')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 240);
@@ -259,6 +320,10 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       body: JSON.stringify(input.requestSnapshot),
     });
     const contentType = response.headers.get('content-type') ?? '';
+    const providerRequestId =
+      response.headers.get('x-request-id') ??
+      response.headers.get('x-correlation-id') ??
+      response.headers.get('request-id');
     const responseText = await response.text();
     const parsedBody = parseResponseBody(contentType, responseText);
     const body = getProviderResponseRecord(parsedBody);
@@ -274,12 +339,15 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       bodyKeys: Object.keys(body).sort(),
       topLevelKeys: isRecord(parsedBody) ? Object.keys(parsedBody).sort() : [],
       provider: 'kargo_entegrator',
-      providerError: readString(body, ['error', 'message', 'errors', 'detail']),
+      providerError: readSafeProviderError(body),
+      providerValidationErrors: readSafeValidationErrors(body),
+      requestId: providerRequestId ?? readString(body, ['request_id', 'requestId', 'correlation_id', 'correlationId']),
       statusField: readString(body, ['shipmentStatus', 'status', 'cargoStatus']),
       detectedResponseFormat,
       responseSnippet,
       authHeaderMode: 'bearer',
       acceptHeader: 'application/json',
+      notificationUrlIncluded: typeof input.requestSnapshot.notification_url === 'string' && input.requestSnapshot.notification_url.trim().length > 0,
     };
 
     if (!response.ok) {

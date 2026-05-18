@@ -953,6 +953,10 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.httpStatus ?? '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Provider request</span>
+                              <strong>{shipmentProviderSummary.requestId || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Content type</span>
                               <strong>{shipmentProviderSummary.contentType || '—'}</strong>
                             </div>
@@ -980,6 +984,12 @@ export function OrderDetailPage() {
                               <span>Provider message</span>
                               <strong>{shipmentProviderSummary.providerError || '—'}</strong>
                             </div>
+                            {shipmentProviderSummary.providerValidationErrors.length ? (
+                              <div className="summary-row">
+                                <span>Validation errors</span>
+                                <strong>{shipmentProviderSummary.providerValidationErrors.join(' · ')}</strong>
+                              </div>
+                            ) : null}
                             <div className="summary-row">
                               <span>Stored dry-run response</span>
                               <strong>{shipmentProviderSummary.dryRun === null ? '—' : shipmentProviderSummary.dryRun ? 'yes' : 'no'}</strong>
@@ -999,6 +1009,20 @@ export function OrderDetailPage() {
                             <div className="summary-row">
                               <span>Label present</span>
                               <strong>{shipmentProviderSummary.labelPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode present</span>
+                              <strong>{shipmentProviderSummary.barcodePresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Webhook URL included</span>
+                              <strong>
+                                {shipmentProviderSummary.notificationUrlIncluded === null
+                                  ? '—'
+                                  : shipmentProviderSummary.notificationUrlIncluded
+                                    ? 'yes'
+                                    : 'no'}
+                              </strong>
                             </div>
                             {shipmentProviderSummary.responseSnippet ? (
                               <div className="summary-row">

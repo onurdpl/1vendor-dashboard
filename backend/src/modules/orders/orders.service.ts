@@ -95,13 +95,19 @@ function buildShipmentProviderResponseSummary(
     providerError: readString(snapshot, ['providerError', 'error', 'message', 'reason']),
     dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
     disabledGates,
+    providerValidationErrors: Array.isArray(snapshot?.providerValidationErrors)
+      ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+      : [],
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
     labelPresent: Boolean(execution.labelUrl),
+    barcodePresent: Boolean(readString(snapshot, ['barcode', 'barcodeNumber'])),
+    notificationUrlIncluded: typeof snapshot?.notificationUrlIncluded === 'boolean' ? snapshot.notificationUrlIncluded : null,
     statusField: readString(snapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
     detectedResponseFormat: readString(snapshot, ['detectedResponseFormat']),
     responseSnippet: readString(snapshot, ['responseSnippet']),
     authHeaderMode: readString(snapshot, ['authHeaderMode']),
+    requestId: readString(snapshot, ['requestId']),
   };
 }
 

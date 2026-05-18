@@ -698,7 +698,7 @@ function assertDryRunRetryEligible(execution: ShipmentExecution) {
 }
 
 function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider) {
-  return error instanceof ShippingProviderExecutionError
+  const snapshot: Record<string, unknown> = error instanceof ShippingProviderExecutionError
     ? {
         ...error.responseSnapshot,
         error: error.message,
@@ -707,6 +707,28 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
         error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
         provider,
       };
+  const status = typeof snapshot.status === 'number' ? snapshot.status : null;
+  const providerError = readString(snapshot, ['providerError', 'error', 'message', 'reason']) ?? '';
+  const detectedFormat = readString(snapshot, ['detectedResponseFormat']) ?? '';
+  const validationErrors = Array.isArray(snapshot.providerValidationErrors)
+    ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const lowerError = providerError.toLowerCase();
+  const label =
+    validationErrors.length > 0 || status === 400 || status === 422
+      ? 'Provider validation failed'
+      : lowerError.includes('integration')
+        ? 'Invalid integration'
+        : detectedFormat === 'html' || detectedFormat === 'invalid_json'
+          ? 'Malformed provider response'
+          : status && status >= 400
+            ? 'Provider rejected request'
+            : 'Provider execution failed';
+
+  return appendTimelineEvent(snapshot, {
+    label,
+    status: status ? String(status) : 'failed',
+  });
 }
 
 function getWebhookData(payload: unknown) {

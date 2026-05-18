@@ -54,13 +54,17 @@ export type ShipmentExecution = {
     providerError: string | null;
     dryRun: boolean | null;
     disabledGates: string[];
+    providerValidationErrors: string[];
     providerShipmentIdPresent: boolean;
     trackingNumberPresent: boolean;
     labelPresent: boolean;
+    barcodePresent: boolean;
+    notificationUrlIncluded: boolean | null;
     statusField: string | null;
     detectedResponseFormat?: string | null;
     responseSnippet?: string | null;
     authHeaderMode?: string | null;
+    requestId?: string | null;
   };
 };
 

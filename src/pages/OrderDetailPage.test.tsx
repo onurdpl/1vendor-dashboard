@@ -134,10 +134,14 @@ const orderWithShipmentSummary: OrderDetail = {
       providerError: 'Provider returned no shipment identifiers.',
       dryRun: true,
       disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+      providerValidationErrors: [],
       providerShipmentIdPresent: false,
       trackingNumberPresent: false,
       labelPresent: false,
+      barcodePresent: false,
+      notificationUrlIncluded: null,
       statusField: 'pending',
+      requestId: null,
     },
   },
 };
@@ -264,6 +268,43 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Dummy Kargo creation is not enabled.')).toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
+  });
+
+  it('renders safe admin provider validation diagnostics for failed shipments', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          httpStatus: 422,
+          ok: false,
+          providerError: 'Validation failed.',
+          providerValidationErrors: ['The district field is required.'],
+          requestId: 'ke-req-422',
+          barcodePresent: false,
+          notificationUrlIncluded: true,
+          responseSnippet: '{"message":"Validation failed."}',
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
+    expect(screen.getByText('Validation failed.')).toBeInTheDocument();
+    expect(screen.queryByText(/test-kargo-key/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\+905551112233/)).not.toBeInTheDocument();
   });
 
   it('shows retry action to admins for eligible stale dry-run pending shipments', async () => {

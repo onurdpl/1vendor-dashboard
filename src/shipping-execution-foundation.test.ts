@@ -41,7 +41,7 @@ const {
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
-const { KargoEntegratorAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
+const { KargoEntegratorAdapter, ShippingProviderExecutionError } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
 const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
 
 const env = {
@@ -842,6 +842,61 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('records safe provider validation diagnostics and timeline events for shipment failures', async () => {
+    const adapter = buildAdapter();
+    adapter.createShipment.mockRejectedValue(
+      new ShippingProviderExecutionError('Kargo Entegratör shipment execution failed with HTTP 422.', {
+        status: 422,
+        ok: false,
+        contentType: 'application/json',
+        parsedBodyType: 'object',
+        bodyKeys: ['errors', 'message'],
+        provider: 'kargo_entegrator',
+        providerError: 'Validation failed.',
+        providerValidationErrors: ['customer.district is required', 'warehouse_id is invalid'],
+        requestId: 'ke-req-1',
+        providerShipmentIdPresent: false,
+        barcode: null,
+        notificationUrlIncluded: true,
+      }),
+    );
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+      },
+      {
+        env,
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shipmentStatus: 'FAILED',
+          responseSnapshot: expect.objectContaining({
+            status: 422,
+            providerError: 'Validation failed.',
+            providerValidationErrors: ['customer.district is required', 'warehouse_id is invalid'],
+            requestId: 'ke-req-1',
+            notificationUrlIncluded: true,
+            error: 'Kargo Entegratör shipment execution failed with HTTP 422.',
+            timeline: expect.arrayContaining([
+              expect.objectContaining({
+                label: 'Provider validation failed',
+                status: '422',
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(JSON.stringify(prismaMock.shipmentExecution.update.mock.calls)).not.toContain('test-kargo-key');
+    expect(JSON.stringify(prismaMock.shipmentExecution.update.mock.calls)).not.toContain('Authorization');
+  });
+
   it('diagnoses the global shipping execution gate separately from the Kargo provider gate', () => {
     const diagnostics = getShippingProviderGateDiagnostics({
       ...env,
@@ -1614,5 +1669,72 @@ describe('shipping execution foundation', () => {
         providerError: 'Provider returned HTML instead of JSON. Check endpoint and Bearer authentication.',
       }),
     });
+  });
+
+  it('parses safe Kargo provider validation failures without exposing secrets', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse(
+        JSON.stringify({
+          message: 'Validation failed.',
+          errors: {
+            'customer.district': ['The district field is required.'],
+            token: 'should-not-render',
+          },
+          request_id: 'ke-req-422',
+        }),
+        {
+          status: 422,
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        requestSnapshot: {
+          platform_id: 2547,
+          notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+          customer: {
+            phone: '+905551112233',
+          },
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Kargo Entegratör shipment execution failed with HTTP 422.',
+      responseSnapshot: expect.objectContaining({
+        status: 422,
+        ok: false,
+        providerError: 'Validation failed.',
+        providerValidationErrors: ['The district field is required.'],
+        requestId: 'ke-req-422',
+        notificationUrlIncluded: true,
+        bodyKeys: expect.arrayContaining(['errors', 'message', 'request_id']),
+      }),
+    });
+
+    const error = await adapter
+      .createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        requestSnapshot: {
+          platform_id: 2547,
+        },
+      })
+      .catch((caught) => caught as ShippingProviderExecutionError);
+    expect(JSON.stringify(error.responseSnapshot)).not.toContain('test-kargo-key');
+    expect(JSON.stringify(error.responseSnapshot)).not.toContain('should-not-render');
+    expect(JSON.stringify(error.responseSnapshot)).not.toContain('+905551112233');
   });
 });
