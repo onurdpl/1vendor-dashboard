@@ -787,6 +787,130 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/Test Mahallesi/)).not.toBeInTheDocument();
   });
 
+  it('renders admin-only Try OTO shipment finalization diagnostics', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-ORDER-1028',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          dryRun: false,
+          disabledGates: [],
+          providerShipmentIdPresent: true,
+          payloadDiagnostics: {
+            topLevelKeys: ['amount', 'customer', 'orderId', 'pickupLocationCode'],
+            customerKeys: ['address', 'city', 'country', 'district', 'mobile', 'name'],
+            receiverKeys: [],
+            cargoIntegrationIdPresent: false,
+            warehouseIdPresent: false,
+            paymentType: null,
+            packageType: null,
+            payorType: null,
+            kgPresent: false,
+            kgType: null,
+            desiPresent: false,
+            desiType: null,
+            platformIdPresent: false,
+            platformDIdPresent: false,
+            customerPhonePresent: false,
+            customerDistrictPresent: true,
+            customerCityPresent: true,
+            deliveryOptionIdPresent: false,
+            addressFieldPresence: {
+              customerAddress: false,
+              customerPostcode: false,
+              customerCountry: false,
+              customerCity: true,
+              customerDistrict: true,
+            },
+          },
+          tryOtoFinalization: {
+            createOrderSuccess: true,
+            createShipmentCalled: true,
+            createShipmentSuccess: true,
+            createShipmentResponseKeys: ['message', 'success'],
+            createShipmentProviderMessage: 'create shipment request is received.',
+            createShipmentRequestKeys: ['orderId'],
+            createShipmentDeliveryOptionIdPresent: false,
+            deliveryOptionIdPresent: false,
+            orderStatusValue: 'Depoya Atandı',
+          },
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
+    expect(screen.getByText('Delivery option')).toBeInTheDocument();
+    expect(screen.getByText('missing')).toBeInTheDocument();
+    expect(screen.getByText('Try OTO createOrder')).toBeInTheDocument();
+    expect(screen.getByText('Try OTO createShipment')).toBeInTheDocument();
+    expect(screen.getByText(/called yes · success yes/)).toBeInTheDocument();
+    expect(screen.getByText('createShipment request keys')).toBeInTheDocument();
+    expect(screen.getByText('createShipment response keys')).toBeInTheDocument();
+    expect(screen.getByText('create shipment request is received.')).toBeInTheDocument();
+    expect(screen.getByText(/createOrder missing · createShipment missing/)).toBeInTheDocument();
+    expect(screen.getByText('Depoya Atandı')).toBeInTheDocument();
+    expect(screen.queryByText(/905551112233/)).not.toBeInTheDocument();
+  });
+
+  it('does not expose Try OTO provider finalization diagnostics to vendors', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-ORDER-1028',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          dryRun: false,
+          disabledGates: [],
+          tryOtoFinalization: {
+            createOrderSuccess: true,
+            createShipmentCalled: true,
+            createShipmentSuccess: true,
+            createShipmentResponseKeys: ['message', 'success'],
+            createShipmentProviderMessage: 'create shipment request is received.',
+            createShipmentRequestKeys: ['orderId'],
+            createShipmentDeliveryOptionIdPresent: false,
+            deliveryOptionIdPresent: false,
+            orderStatusValue: 'Depoya Atandı',
+          },
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Try OTO status refresh')).toBeInTheDocument();
+    expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
+    expect(screen.queryByText('Try OTO createShipment')).not.toBeInTheDocument();
+    expect(screen.queryByText('create shipment request is received.')).not.toBeInTheDocument();
+  });
+
   it('renders the existing district completion input for admin failed Kargo shipments', async () => {
     getOrderMock.mockResolvedValueOnce({
       ...orderWithShipmentSummary,

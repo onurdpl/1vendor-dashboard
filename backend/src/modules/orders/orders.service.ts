@@ -89,6 +89,37 @@ function buildShipmentProviderResponseSummary(
   const addressFieldPresence: Record<string, unknown> = isRecord(payloadDiagnostics?.addressFieldPresence)
     ? payloadDiagnostics.addressFieldPresence
     : {};
+  const createOrderDiagnostics = isRecord(snapshot?.createOrder) ? snapshot.createOrder : null;
+  const createShipmentDiagnostics = isRecord(snapshot?.createShipment) ? snapshot.createShipment : null;
+  const createShipmentRequestDiagnostics = isRecord(snapshot?.createShipmentRequestDiagnostics)
+    ? snapshot.createShipmentRequestDiagnostics
+    : null;
+  const orderStatusDiagnostics = isRecord(snapshot?.orderStatus) ? snapshot.orderStatus : null;
+  const tryOtoFinalization = snapshot?.provider === 'try_oto'
+    ? {
+        createOrderSuccess: typeof createOrderDiagnostics?.ok === 'boolean' ? createOrderDiagnostics.ok : null,
+        createShipmentCalled: Boolean(createShipmentDiagnostics),
+        createShipmentSuccess: typeof createShipmentDiagnostics?.ok === 'boolean' ? createShipmentDiagnostics.ok : null,
+        createShipmentResponseKeys: Array.isArray(createShipmentDiagnostics?.bodyKeys)
+          ? createShipmentDiagnostics.bodyKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+        createShipmentProviderMessage: readString(createShipmentDiagnostics, ['providerError', 'message', 'reason']),
+        createShipmentRequestKeys: Array.isArray(createShipmentRequestDiagnostics?.topLevelKeys)
+          ? createShipmentRequestDiagnostics.topLevelKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+        createShipmentDeliveryOptionIdPresent:
+          typeof createShipmentRequestDiagnostics?.deliveryOptionIdPresent === 'boolean'
+            ? createShipmentRequestDiagnostics.deliveryOptionIdPresent
+            : null,
+        deliveryOptionIdPresent:
+          typeof payloadDiagnostics?.deliveryOptionIdPresent === 'boolean'
+            ? payloadDiagnostics.deliveryOptionIdPresent
+            : null,
+        orderStatusValue:
+          readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']) ??
+          readString(orderStatusDiagnostics, ['providerError', 'statusField', 'shipmentStatus', 'cargoStatus']),
+      }
+    : undefined;
 
   return {
     httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
@@ -141,6 +172,7 @@ function buildShipmentProviderResponseSummary(
           customerPhonePresent: payloadDiagnostics.customerPhonePresent === true,
           customerDistrictPresent: payloadDiagnostics.customerDistrictPresent === true,
           customerCityPresent: payloadDiagnostics.customerCityPresent === true,
+          deliveryOptionIdPresent: payloadDiagnostics.deliveryOptionIdPresent === true,
           addressFieldPresence: {
             customerAddress: addressFieldPresence.customerAddress === true,
             customerPostcode: addressFieldPresence.customerPostcode === true,
@@ -150,6 +182,7 @@ function buildShipmentProviderResponseSummary(
           },
         }
       : undefined,
+    tryOtoFinalization,
   };
 }
 

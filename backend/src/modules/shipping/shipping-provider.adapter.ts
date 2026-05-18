@@ -347,6 +347,7 @@ function buildTryOtoPayloadDiagnostics(payload: Record<string, unknown>) {
     customerCityPresent: hasValue(customer.city),
     customerCountryPresent: hasValue(customer.country),
     customerDistrictPresent: hasValue(customer.district),
+    deliveryOptionIdPresent: hasValue(payload.deliveryOptionId),
   };
 }
 
@@ -801,7 +802,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       });
     }
 
-    const createShipment = await this.postJson('/rest/v2/createShipment', { orderId }, accessToken, 'createShipment');
+    const createShipmentRequest = { orderId };
+    const createShipment = await this.postJson('/rest/v2/createShipment', createShipmentRequest, accessToken, 'createShipment');
     let orderStatus: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
     try {
       orderStatus = await this.postJson('/rest/v2/orderStatus', { orderId }, accessToken, 'orderStatus');
@@ -854,6 +856,11 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         providerStatus: readString(statusBody, ['status']),
         createOrder: createOrder.snapshot,
         createShipment: createShipment.snapshot,
+        createShipmentRequestDiagnostics: {
+          topLevelKeys: Object.keys(createShipmentRequest).sort(),
+          orderIdPresent: hasValue(createShipmentRequest.orderId),
+          deliveryOptionIdPresent: false,
+        },
         orderStatus: orderStatus?.snapshot,
         payloadDiagnostics,
         lastProviderResponseAt: new Date().toISOString(),

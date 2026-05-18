@@ -805,6 +805,12 @@ export function OrderDetailPage() {
           <span>Payload keys</span>
           <strong>{diagnostics.topLevelKeys.length ? diagnostics.topLevelKeys.join(', ') : '—'}</strong>
         </div>
+        {'deliveryOptionIdPresent' in diagnostics ? (
+          <div className="summary-row">
+            <span>Delivery option</span>
+            <strong>{diagnostics.deliveryOptionIdPresent ? 'present' : 'missing'}</strong>
+          </div>
+        ) : null}
         <div className="summary-row">
           <span>Customer keys</span>
           <strong>{diagnostics.customerKeys.length ? diagnostics.customerKeys.join(', ') : '—'}</strong>
@@ -854,6 +860,57 @@ export function OrderDetailPage() {
             {diagnostics.addressFieldPresence.customerPostcode ? 'yes' : 'no'} · country{' '}
             {diagnostics.addressFieldPresence.customerCountry ? 'yes' : 'no'}
           </strong>
+        </div>
+      </>
+    );
+  }
+
+  function renderTryOtoFinalizationDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
+    const diagnostics = summary.tryOtoFinalization;
+    if (!diagnostics) {
+      return null;
+    }
+
+    return (
+      <>
+        <div className="summary-row">
+          <span>Try OTO createOrder</span>
+          <strong>{diagnostics.createOrderSuccess === null ? '—' : diagnostics.createOrderSuccess ? 'success' : 'failed'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Try OTO createShipment</span>
+          <strong>
+            called {diagnostics.createShipmentCalled ? 'yes' : 'no'} · success{' '}
+            {diagnostics.createShipmentSuccess === null ? '—' : diagnostics.createShipmentSuccess ? 'yes' : 'no'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>createShipment request keys</span>
+          <strong>{diagnostics.createShipmentRequestKeys.length ? diagnostics.createShipmentRequestKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>createShipment response keys</span>
+          <strong>{diagnostics.createShipmentResponseKeys.length ? diagnostics.createShipmentResponseKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>createShipment message</span>
+          <strong>{diagnostics.createShipmentProviderMessage || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>deliveryOptionId</span>
+          <strong>
+            createOrder {diagnostics.deliveryOptionIdPresent === null ? '—' : diagnostics.deliveryOptionIdPresent ? 'present' : 'missing'} ·
+            createShipment{' '}
+            {diagnostics.createShipmentDeliveryOptionIdPresent === null
+              ? '—'
+              : diagnostics.createShipmentDeliveryOptionIdPresent
+                ? 'present'
+                : 'missing'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>orderStatus value</span>
+          <strong>{diagnostics.orderStatusValue || '—'}</strong>
         </div>
       </>
     );
@@ -1632,6 +1689,7 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                             </div>
                             {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
+                            {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                             <div className="summary-row">
                               <span>Status field</span>
                               <strong>{shipmentProviderSummary.statusField || '—'}</strong>
@@ -2026,6 +2084,7 @@ export function OrderDetailPage() {
                           <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                         </div>
                         {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
+                        {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                         <div className="summary-row">
                           <span>Status field</span>
                           <strong>{shipmentProviderSummary.statusField || '—'}</strong>

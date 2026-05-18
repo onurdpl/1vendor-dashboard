@@ -107,6 +107,7 @@ export type OrderShipmentExecutionDto = {
       customerPhonePresent: boolean;
       customerDistrictPresent: boolean;
       customerCityPresent: boolean;
+      deliveryOptionIdPresent?: boolean;
       addressFieldPresence: {
         customerAddress: boolean;
         customerPostcode: boolean;
@@ -114,6 +115,17 @@ export type OrderShipmentExecutionDto = {
         customerCity: boolean;
         customerDistrict: boolean;
       };
+    };
+    tryOtoFinalization?: {
+      createOrderSuccess: boolean | null;
+      createShipmentCalled: boolean;
+      createShipmentSuccess: boolean | null;
+      createShipmentResponseKeys: string[];
+      createShipmentProviderMessage: string | null;
+      createShipmentRequestKeys: string[];
+      createShipmentDeliveryOptionIdPresent: boolean | null;
+      deliveryOptionIdPresent: boolean | null;
+      orderStatusValue: string | null;
     };
   };
 };

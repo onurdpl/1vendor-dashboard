@@ -2776,6 +2776,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
       orderId: 'POC-TR-1001',
     });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).not.toHaveProperty('deliveryOptionId');
     expect(result).toMatchObject({
       providerShipmentId: 'OTO-SHIP-1001',
       trackingNumber: 'OTO-TRACK-1001',
@@ -2794,12 +2795,31 @@ describe('shipping execution foundation', () => {
         payloadDiagnostics: {
           orderIdPresent: true,
           pickupLocationCodePresent: true,
+          deliveryOptionIdPresent: false,
           customerMobilePresent: true,
           customerAddressPresent: true,
           customerCityPresent: true,
           customerCountryPresent: true,
           customerDistrictPresent: true,
         },
+        createOrder: expect.objectContaining({
+          ok: true,
+          bodyKeys: expect.arrayContaining(['otoId']),
+        }),
+        createShipment: expect.objectContaining({
+          ok: true,
+          bodyKeys: expect.arrayContaining(['message', 'success']),
+          providerError: 'create shipment request is received.',
+        }),
+        createShipmentRequestDiagnostics: {
+          topLevelKeys: ['orderId'],
+          orderIdPresent: true,
+          deliveryOptionIdPresent: false,
+        },
+        orderStatus: expect.objectContaining({
+          ok: true,
+          bodyKeys: expect.arrayContaining(['shipmentId', 'status', 'trackingNumber']),
+        }),
       },
     });
     const serialized = JSON.stringify(result.responseSnapshot);
