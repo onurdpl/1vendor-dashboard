@@ -400,6 +400,37 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async refreshShipmentExecutionStatus(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.refreshShipmentExecutionStatus(shipmentExecutionId, { vendorId });
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-kargo-/, ''),
+        vendorId,
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'try_oto' as const,
+        providerShipmentId: `mock-oto-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `OTO-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: 'https://example.test/try-oto-label.pdf',
+        shipmentStatus: 'created' as const,
+        desi: '1.00',
+        cargoIntegrationId: null,
+        warehouseId: 'pickup-location',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        barcode: `BAR-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator') {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics(provider, { vendorId });

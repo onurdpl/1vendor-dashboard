@@ -9,6 +9,7 @@ import {
   getOrder,
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
+  refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
@@ -454,6 +455,15 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: refreshShipmentStatusMutation, isPending: isRefreshingShipmentStatus } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      refreshShipmentExecutionStatus(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -559,6 +569,11 @@ export function OrderDetailPage() {
       Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
   const shouldShowRecoveryShipmentFieldCompletionForm =
     missingShipmentCustomerFields.length > 0 && canRecoverFailedShipment && shipmentActionState?.tone !== 'error';
+  const canRefreshTryOtoShipmentStatus =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
+    (!visibleShipmentExecution.trackingNumber || !visibleShipmentExecution.barcode || !visibleShipmentExecution.labelUrl);
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -659,6 +674,49 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/retry`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleRefreshShipmentStatus() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Refreshing Try OTO shipment status...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
+    });
+
+    void refreshShipmentStatusMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.barcode || shipment.labelUrl);
+        setShipmentActionState({
+          tone: hasNewShipmentEvidence ? 'success' : 'info',
+          message: hasNewShipmentEvidence
+            ? 'Try OTO shipment status refreshed.'
+            : 'Try OTO status checked. Tracking, barcode, or label are still pending.',
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
+        });
+        showFeedback(
+          hasNewShipmentEvidence
+            ? 'Try OTO shipment status refreshed.'
+            : 'Try OTO status checked. Tracking, barcode, or label are still pending.',
+          hasNewShipmentEvidence ? 'success' : 'info',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO shipment status could not be refreshed.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -1523,6 +1581,22 @@ export function OrderDetailPage() {
                             ))}
                           </div>
                         ) : null}
+                        {canRefreshTryOtoShipmentStatus ? (
+                          <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
+                            <strong>Try OTO status refresh</strong>
+                            <span>Shipment was created, but tracking, barcode, or label details may still be processing.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isRefreshingShipmentStatus}
+                                onClick={handleRefreshShipmentStatus}
+                              >
+                                {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
                           <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
                             <div className="provider-response-heading">
@@ -1712,7 +1786,9 @@ export function OrderDetailPage() {
                         {shipmentActionState.shipment ? (
                           <span>
                             Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
-                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
+                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'} · Tracking:{' '}
+                            {shipmentActionState.shipment.trackingNumber ? 'yes' : 'pending'} · Label:{' '}
+                            {shipmentActionState.shipment.labelUrl ? 'yes' : 'pending'}
                           </span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
@@ -1903,6 +1979,22 @@ export function OrderDetailPage() {
                       <span>Carrier</span>
                       <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
                     </div>
+                    {canRefreshTryOtoShipmentStatus ? (
+                      <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
+                        <strong>Try OTO status refresh</strong>
+                        <span>Shipment was created, but tracking, barcode, or label details may still be processing.</span>
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isRefreshingShipmentStatus}
+                            onClick={handleRefreshShipmentStatus}
+                          >
+                            {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
                       <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
                         <div className="provider-response-heading">
@@ -2054,7 +2146,9 @@ export function OrderDetailPage() {
                         {shipmentActionState.shipment ? (
                           <span>
                             Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
-                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
+                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'} · Tracking:{' '}
+                            {shipmentActionState.shipment.trackingNumber ? 'yes' : 'pending'} · Label:{' '}
+                            {shipmentActionState.shipment.labelUrl ? 'yes' : 'pending'}
                           </span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}

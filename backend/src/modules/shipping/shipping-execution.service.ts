@@ -1425,6 +1425,84 @@ async function persistProviderShipmentResult(input: {
   return mapShipmentExecution(updated);
 }
 
+function resolveTryOtoStatusOrderId(execution: ShipmentExecution) {
+  const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
+  const responseSnapshot = readSnapshot(execution);
+  return (
+    readString(requestSnapshot, ['orderId']) ??
+    readString(responseSnapshot, ['orderId', 'providerOrderId']) ??
+    execution.providerShipmentId ??
+    null
+  );
+}
+
+export async function refreshTryOtoShipmentStatus(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    throw new Error('Shipment status refresh is only available for Try OTO shipments.');
+  }
+
+  const orderId = resolveTryOtoStatusOrderId(existing);
+  if (!orderId) {
+    throw new Error('Try OTO status refresh requires a stored order id or provider id.');
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
+  const result = await adapter.getShipmentStatus(orderId);
+  const mergedSnapshot = appendTimelineEvent(
+    {
+      ...readSnapshot(existing),
+      ...result.responseSnapshot,
+      statusField: readString(result.responseSnapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
+      lastProviderResponseAt: new Date().toISOString(),
+    },
+    {
+      label:
+        result.trackingNumber || result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])
+          ? 'Try OTO status refreshed'
+          : 'Try OTO status checked',
+      status: result.shipmentStatus,
+    },
+  );
+  const nextStatus =
+    result.shipmentStatus === 'pending'
+      ? existing.shipmentStatus
+      : mapProviderStatus(result.shipmentStatus);
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      providerShipmentId: result.providerShipmentId ?? existing.providerShipmentId,
+      trackingNumber: result.trackingNumber ?? existing.trackingNumber,
+      trackingUrl: result.trackingUrl ?? existing.trackingUrl,
+      labelUrl: result.labelUrl ?? existing.labelUrl,
+      shipmentStatus: nextStatus,
+      currency: result.currency ?? existing.currency,
+      responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return mapShipmentExecution(updated);
+}
+
 export async function listShipmentExecutions(options: {
   vendorId?: string;
   status?: ShipmentExecutionDto['shipmentStatus'];

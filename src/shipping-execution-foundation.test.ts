@@ -37,6 +37,7 @@ const {
   ingestKargoEntegratorWebhook,
   inferShipmentDesi,
   previewShipmentExecution,
+  refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
 } = await import(
@@ -2997,5 +2998,168 @@ describe('shipping execution foundation', () => {
     });
     expect(Number.isNaN(createData?.desi)).toBe(false);
     expect(createData).not.toHaveProperty('allocationId');
+  });
+
+  it('refreshes Try OTO shipment status through orderStatus and captures tracking, barcode, and label fields', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            status: 'shipmentCreated',
+            shipmentId: 'OTO-SHIP-1001',
+            trackingNumber: 'OTO-TRACK-1001',
+            dcTrackingNumber: 'SURAT-1001',
+            trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+            barcode: 'OTO-BARCODE-1001',
+            printLabelURL: 'https://app.tryoto.example/label.pdf',
+          }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.getShipmentStatus('OTO-ORDER-1001');
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://staging-api.tryoto.com/rest/v2/orderStatus',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oto-access-token',
+        }),
+        body: JSON.stringify({ orderId: 'OTO-ORDER-1001' }),
+      }),
+    );
+    expect(result).toMatchObject({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: 'OTO-TRACK-1001',
+      trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+      labelUrl: 'https://app.tryoto.example/label.pdf',
+      shipmentStatus: 'created',
+      responseSnapshot: {
+        barcode: 'OTO-BARCODE-1001',
+        orderId: 'OTO-ORDER-1001',
+      },
+    });
+  });
+
+  it('keeps missing Try OTO status fields pending safely when orderStatus has no tracking details', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ status: 'processing' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.getShipmentStatus('OTO-ORDER-1002');
+
+    expect(result).toMatchObject({
+      providerShipmentId: 'OTO-ORDER-1002',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'pending',
+    });
+  });
+
+  it('refreshes and persists Try OTO shipment execution status without touching Kargo executions', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1001',
+      trackingNumber: null,
+      labelUrl: null,
+      responseSnapshot: {
+        orderId: 'OTO-ORDER-1001',
+      },
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1001',
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+    adapter.getShipmentStatus.mockResolvedValue({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: 'OTO-TRACK-1001',
+      trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+      labelUrl: 'https://app.tryoto.example/label.pdf',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1001',
+        barcode: 'OTO-BARCODE-1001',
+        providerStatus: 'shipmentCreated',
+      },
+    });
+
+    const result = await refreshTryOtoShipmentStatus('shipment-try_oto-alloc-1', {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.getShipmentStatus).toHaveBeenCalledWith('OTO-ORDER-1001');
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-try_oto-alloc-1' },
+        data: expect.objectContaining({
+          providerShipmentId: 'OTO-SHIP-1001',
+          trackingNumber: 'OTO-TRACK-1001',
+          trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+          labelUrl: 'https://app.tryoto.example/label.pdf',
+          shipmentStatus: 'CREATED',
+          responseSnapshot: expect.objectContaining({
+            barcode: 'OTO-BARCODE-1001',
+            providerStatus: 'shipmentCreated',
+          }),
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: 'OTO-TRACK-1001',
+      labelUrl: 'https://app.tryoto.example/label.pdf',
+      barcode: 'OTO-BARCODE-1001',
+    });
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(
+      buildShipmentExecution({
+        id: 'shipment-kargo_entegrator-alloc-1',
+        provider: 'KARGO_ENTEGRATOR',
+      }),
+    );
+    await expect(
+      refreshTryOtoShipmentStatus('shipment-kargo_entegrator-alloc-1', {
+        env,
+        vendorId: 'sporjinal',
+        adapter,
+      }),
+    ).rejects.toThrow('only available for Try OTO');
   });
 });

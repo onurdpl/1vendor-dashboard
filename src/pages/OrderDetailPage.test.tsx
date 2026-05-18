@@ -15,6 +15,7 @@ const updateVendorShippingConfigMock = vi.fn();
 const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
+const refreshShipmentExecutionStatusMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
@@ -42,6 +43,8 @@ vi.mock('../features/orders/api', async () => {
       shipmentExecutionId: string,
       options?: { vendorId?: string | null; customerOverrides?: Record<string, string> },
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
+    refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
     submitFulfillmentTracking: vi.fn(),
   };
 });
@@ -307,6 +310,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       providerShipmentId: 'ke-recovered-1028',
       barcode: 'barcode-recovered-1028',
       updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    refreshShipmentExecutionStatusMock.mockReset();
+    refreshShipmentExecutionStatusMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'created',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      barcode: 'OTO-BARCODE-1028',
+      labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+      updatedAt: '2026-05-15T19:46:00.000Z',
     });
     listReturnsMock.mockReset();
     listReturnsMock.mockResolvedValue([]);
@@ -1174,6 +1188,48 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(retryShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961');
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
     expect(await screen.findByText(/Shipment ke-live-1028 refreshed/i)).toBeInTheDocument();
+  });
+
+  it('renders Try OTO status refresh action and updates created shipment evidence', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        providerShipmentId: 'OTO-SHIP-1028',
+        shipmentStatus: 'created',
+        trackingNumber: null,
+        barcode: null,
+        labelUrl: null,
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          dryRun: false,
+          providerShipmentIdPresent: true,
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Refresh shipment status' }));
+
+    expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+    expect((await screen.findAllByText('Try OTO shipment status refreshed.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).toBeInTheDocument();
   });
 
   it('shows a safe backend error when retry fails', async () => {

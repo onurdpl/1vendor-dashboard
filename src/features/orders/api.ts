@@ -5,6 +5,7 @@ export {
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
   listOrders,
+  refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,

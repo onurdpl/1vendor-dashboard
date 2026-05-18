@@ -492,6 +492,19 @@ export async function retryFailedShipmentExecution(
   );
 }
 
+export async function refreshShipmentExecutionStatus(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/refresh`,
+    {},
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
 export async function getShippingProviderDiagnostics(
   provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},

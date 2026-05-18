@@ -11,6 +11,7 @@ import {
   ingestKargoEntegratorWebhook,
   listShipmentExecutions,
   previewShipmentExecution,
+  refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
   upsertVendorShippingConfig,
@@ -154,6 +155,29 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/shipments/:id/refresh',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        return await refreshTryOtoShipmentStatus(request.params.id, {
+          env,
+          vendorId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment status could not be refreshed.';
         return reply.code(400).send({ message });
       }
     },

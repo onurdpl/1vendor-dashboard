@@ -350,6 +350,28 @@ function buildTryOtoPayloadDiagnostics(payload: Record<string, unknown>) {
   };
 }
 
+function readTryOtoLabelUrl(value: Record<string, unknown>) {
+  return readString(value, [
+    'printLabelURL',
+    'printLabelUrl',
+    'printAWBURL',
+    'printAwbURL',
+    'printAwBUrl',
+    'labelUrl',
+    'labelURL',
+    'awbUrl',
+    'awbURL',
+  ]);
+}
+
+function readTryOtoTrackingNumber(value: Record<string, unknown>) {
+  return readString(value, ['trackingNumber', 'dcTrackingNumber']);
+}
+
+function readTryOtoBarcode(value: Record<string, unknown>) {
+  return readString(value, ['barcode', 'barcodeNumber', 'barCode', 'awbNumber']);
+}
+
 function getTryOtoRequestTarget(baseUrl: string | undefined, path: string) {
   if (!baseUrl) {
     return {
@@ -800,8 +822,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const statusBody = orderStatus?.body ?? {};
     const shipmentBody = createShipment.body;
     const orderBody = createOrder.body;
-    const trackingNumber = readString(statusBody, ['trackingNumber', 'dcTrackingNumber']);
-    const labelUrl = readString(statusBody, ['printAWBURL', 'printLabelURL', 'labelUrl']);
+    const trackingNumber = readTryOtoTrackingNumber(statusBody);
+    const labelUrl = readTryOtoLabelUrl(statusBody);
+    const barcode = readTryOtoBarcode(statusBody);
     const providerShipmentId =
       readString(statusBody, ['shipmentId']) ??
       readString(shipmentBody, ['shipmentId']) ??
@@ -825,6 +848,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         shipmentId: readString(statusBody, ['shipmentId']) ?? readString(shipmentBody, ['shipmentId']),
         trackingNumber,
         dcTrackingNumber: readString(statusBody, ['dcTrackingNumber']),
+        barcode,
         labelUrl,
         deliveryCompany: readString(statusBody, ['deliveryCompany']),
         providerStatus: readString(statusBody, ['status']),
@@ -849,8 +873,84 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     };
   }
 
-  async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
-    throw new Error('Try OTO shipment status polling is not implemented in this phase.');
+  async getShipmentStatus(orderId: string): Promise<ShippingProviderCreateResult> {
+    if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.TRY_OTO_ENABLED || !this.env.TRY_OTO_SANDBOX_MODE) {
+      const disabledGates = [
+        !this.env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
+        !this.env.TRY_OTO_ENABLED ? 'TRY_OTO_ENABLED' : null,
+        !this.env.TRY_OTO_SANDBOX_MODE ? 'TRY_OTO_SANDBOX_MODE' : null,
+      ].filter((gate): gate is string => Boolean(gate));
+      return {
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'pending',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          ok: true,
+          dryRun: true,
+          provider: 'try_oto',
+          reason: 'Try OTO sandbox shipment status refresh is disabled.',
+          disabledGates,
+          orderIdPresent: Boolean(orderId?.trim()),
+        },
+      };
+    }
+
+    if (!this.env.TRY_OTO_BASE_URL) {
+      throw new Error('Try OTO sandbox shipment status refresh is not configured. Missing TRY_OTO_BASE_URL.');
+    }
+
+    if (!this.env.TRY_OTO_REFRESH_TOKEN) {
+      throw new Error('Try OTO sandbox shipment status refresh is not configured. Missing TRY_OTO_REFRESH_TOKEN.');
+    }
+
+    const trimmedOrderId = orderId?.trim();
+    if (!trimmedOrderId) {
+      throw new ShippingProviderExecutionError('Try OTO shipment status refresh is missing orderId.', {
+        provider: 'try_oto',
+        operation: 'orderStatus',
+        orderIdPresent: false,
+      });
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    const orderStatus = await this.postJson('/rest/v2/orderStatus', { orderId: trimmedOrderId }, accessToken, 'orderStatus');
+    const statusBody = orderStatus.body;
+    const trackingNumber = readTryOtoTrackingNumber(statusBody);
+    const labelUrl = readTryOtoLabelUrl(statusBody);
+    const barcode = readTryOtoBarcode(statusBody);
+    const providerShipmentId = readString(statusBody, ['shipmentId', 'otoId']) ?? trimmedOrderId;
+    const providerStatus = readString(statusBody, ['status', 'shipmentStatus']);
+
+    return {
+      providerShipmentId,
+      trackingNumber,
+      trackingUrl: readString(statusBody, ['trackingUrl', 'trackingURL']),
+      labelUrl,
+      shipmentStatus: mapShipmentStatus(providerStatus ?? (providerShipmentId ? 'created' : null)),
+      shippingCost: null,
+      shippingVat: null,
+      currency: readString(statusBody, ['currency']) ?? 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'try_oto',
+        orderId: trimmedOrderId,
+        shipmentId: readString(statusBody, ['shipmentId']),
+        trackingNumber,
+        dcTrackingNumber: readString(statusBody, ['dcTrackingNumber']),
+        barcode,
+        labelUrl,
+        trackingUrl: readString(statusBody, ['trackingUrl', 'trackingURL']),
+        deliveryCompany: readString(statusBody, ['deliveryCompany']),
+        providerStatus,
+        orderStatus: orderStatus.snapshot,
+        lastProviderResponseAt: new Date().toISOString(),
+      },
+    };
   }
 
   async getTrackingInfo(): Promise<ShippingProviderCreateResult> {
