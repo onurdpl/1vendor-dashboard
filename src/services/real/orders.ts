@@ -458,9 +458,11 @@ export async function submitFulfillmentTracking(
   );
 }
 
-export async function createShipmentExecution(allocationId: string) {
+export async function createShipmentExecution(allocationId: string, options: { vendorId?: string | null } = {}) {
   return apiClient.post<CreateShipmentExecutionResult>('/shipments/create', {
     allocationId,
+  }, {
+    vendorId: options.vendorId,
   });
 }
 

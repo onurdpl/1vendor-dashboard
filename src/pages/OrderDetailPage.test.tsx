@@ -5,15 +5,24 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderDetail } from '../features/orders/api';
 import { setCurrentUser, setToken } from '../lib/auth';
+import { ApiError } from '../lib/api/errors';
 import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
+const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
+
+vi.mock('../config/runtime', () => ({
+  runtimeConfig: {
+    apiMode: 'real',
+    apiBaseUrl: 'http://localhost:4000',
+  },
+}));
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -21,7 +30,7 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
     getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
-    createShipmentExecution: vi.fn(),
+    createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) => createShipmentExecutionMock(allocationId, options),
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     submitFulfillmentTracking: vi.fn(),
   };
@@ -133,6 +142,11 @@ const orderWithShipmentSummary: OrderDetail = {
   },
 };
 
+const orderWithoutShipment: OrderDetail = {
+  ...orderWithShipmentSummary,
+  shipmentExecution: null,
+};
+
 function renderOrderDetail() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -182,6 +196,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       missing: ['SHIPPING_EXECUTION_ENABLED'],
       deprecatedEnvFallbacks: [],
       warnings: ['Dummy Kargo creation is not enabled.'],
+    });
+    createShipmentExecutionMock.mockReset();
+    createShipmentExecutionMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      id: 'shipment-created-1028',
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-created-1028',
+      barcode: 'barcode-1028',
+      timeline: [{ label: 'Shipment created', at: '2026-05-15T19:40:00.000Z', status: 'created' }],
     });
     retryShipmentExecutionMock.mockReset();
     retryShipmentExecutionMock.mockResolvedValue({
@@ -348,6 +371,92 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(await screen.findByRole('button', { name: 'Retry live shipment' }));
 
     expect(await screen.findByText('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.')).toBeInTheDocument();
+  });
+
+  it('calls create shipment endpoint, shows success evidence, and refreshes order detail', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect(createShipmentExecutionMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', { vendorId: 'sporjinal' });
+    expect((await screen.findAllByText('Shipment ke-created-1028 recorded.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
+    expect(screen.getByText(/Provider id: yes · Barcode: yes/)).toBeInTheDocument();
+    expect(screen.getByText('ke-created-1028')).toBeInTheDocument();
+    expect(screen.getByText('barcode-1028')).toBeInTheDocument();
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('shows visible create shipment API diagnostics when the request fails', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock.mockRejectedValueOnce(
+      new ApiError('Vendor shipping warehouse is not configured.', 'server', {
+        status: 400,
+        diagnostics: {
+          endpoint: '/shipments/create',
+          status: 400,
+          requestId: 'req-shipment-1',
+          hasAuthHeader: true,
+          hasVendorHeader: true,
+          selectedVendorPresent: true,
+          readinessState: 'ready',
+        },
+      }),
+    );
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect((await screen.findAllByText('Vendor shipping warehouse is not configured.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Endpoint:\s*\/shipments\/create/)).toBeInTheDocument();
+    expect(screen.getByText(/HTTP:\s*400.*Request:\s*req-shipment-1/)).toBeInTheDocument();
+  });
+
+  it('shows validation-blocked create shipment errors next to the button', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock.mockRejectedValueOnce(
+      new Error('Dummy Kargo shipment requires customer/address fields: customer.phone, customer.postcode.'),
+    );
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect((await screen.findAllByText('Dummy Kargo shipment requires customer/address fields: customer.phone, customer.postcode.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
   });
 
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {

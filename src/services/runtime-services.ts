@@ -308,16 +308,16 @@ export const runtimeServices = {
         shipmentUpdatedAt: submittedAt,
       };
     },
-    async createShipmentExecution(allocationId: string) {
+    async createShipmentExecution(allocationId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.createShipmentExecution(allocationId);
+        return realOrders.createShipmentExecution(allocationId, { vendorId });
       }
 
       const submittedAt = new Date().toISOString();
       return {
         id: `mock-shipment-kargo-${allocationId}`,
         allocationId,
-        vendorId: getCurrentVendorId(),
+        vendorId,
         sourceShopifyOrderId: null,
         sourceShopifyOrderNumber: null,
         sourceShopifyFulfillmentId: null,
