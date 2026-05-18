@@ -1573,6 +1573,119 @@ describe('shipping execution foundation', () => {
     expect(preview.customerFieldsValid).toBe(true);
   });
 
+  it('maps available county metadata to Kargo customer.district', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+905551112233',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingCounty: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        carrierId: 'dummy',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      customer: {
+        district: 'Kadikoy',
+      },
+    });
+    expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('uses stored Shopify billing address district when shipping district is unavailable', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+905551112233',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+        webhookEvents: [
+          {
+            rawPayload: JSON.stringify({
+              id: 1028,
+              shipping_address: {
+                country_code: 'TR',
+                zip: '34000',
+                city: 'Istanbul',
+                address1: 'Test Mahallesi 1. Sokak No: 1',
+              },
+              billing_address: {
+                county: 'Kadikoy',
+              },
+            }),
+          },
+        ],
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        carrierId: 'dummy',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      customer: {
+        district: 'Kadikoy',
+      },
+    });
+    expect(preview.customerFieldsValid).toBe(true);
+  });
+
   it('uses stored Shopify order webhook shipping address when order columns are still empty', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -1732,7 +1845,7 @@ describe('shipping execution foundation', () => {
       '[shipping:kargo:missing-required-payload-fields]',
       expect.objectContaining({
         provider: 'kargo_entegrator',
-        missingFields: expect.arrayContaining(['customer.phone']),
+        missingFields: expect.arrayContaining(['customer.phone', 'customer.district']),
         requestBlocked: false,
       }),
     );

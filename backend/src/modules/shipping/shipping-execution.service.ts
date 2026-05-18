@@ -529,6 +529,54 @@ function readStoredOrderWebhookPhone(orderRecord: Record<string, unknown>) {
   return null;
 }
 
+function readAddressDistrict(value: Record<string, unknown> | null) {
+  if (!value) {
+    return null;
+  }
+
+  return readString(value, [
+    'district',
+    'district_name',
+    'districtName',
+    'city_area',
+    'cityArea',
+    'county',
+    'county_name',
+    'countyName',
+    'province',
+    'province_name',
+    'provinceName',
+  ]);
+}
+
+function readStoredOrderWebhookDistrict(orderRecord: Record<string, unknown>) {
+  const events = Array.isArray(orderRecord.webhookEvents) ? orderRecord.webhookEvents : [];
+  for (const event of events) {
+    if (!isRecord(event)) {
+      continue;
+    }
+
+    const rawPayload = readString(event, ['rawPayload']);
+    if (!rawPayload) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+      const shippingAddress = readNestedRecord(payload, 'shipping_address');
+      const billingAddress = readNestedRecord(payload, 'billing_address');
+      const district = readAddressDistrict(shippingAddress) ?? readAddressDistrict(billingAddress);
+      if (district) {
+        return district;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function buildKargoCustomer(input: {
   order: unknown;
   customerName: string | null | undefined;
@@ -557,8 +605,22 @@ function buildKargoCustomer(input: {
     city: overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
     district:
       overrides.district ??
-      readString(orderRecord, ['shippingDistrict', 'district', 'cityArea', 'province']) ??
+      readString(orderRecord, [
+        'shippingDistrict',
+        'district',
+        'shippingCounty',
+        'county',
+        'shippingCityArea',
+        'cityArea',
+        'shippingProvince',
+        'province',
+        'billingDistrict',
+        'billingCounty',
+        'billingCityArea',
+        'billingProvince',
+      ]) ??
       webhookAddress?.shippingDistrict ??
+      readStoredOrderWebhookDistrict(orderRecord) ??
       null,
     address: overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
   };
