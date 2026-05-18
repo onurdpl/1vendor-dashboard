@@ -134,6 +134,10 @@ describe('fulfillment tracking sync', () => {
       fulfillmentId: 'gid://shopify/Fulfillment/fulfillment-1039',
       status: 'submitted',
       source: 'shopify_admin',
+      fulfillmentCreated: true,
+      skippedReason: null,
+      fulfillmentOrderIdPresent: true,
+      fulfillmentIdPresent: true,
     });
   });
 
@@ -163,6 +167,52 @@ describe('fulfillment tracking sync', () => {
         },
       ],
     });
+    expect(result).toMatchObject({
+      ok: true,
+      shopifyFulfillmentCreated: true,
+      shopifyFulfillmentSkippedReason: null,
+      shopifyFulfillmentOrderIdPresent: true,
+      shopifyFulfillmentIdPresent: true,
+    });
+  });
+
+  it('matches Shopify fulfillment order line items across GID and numeric identifier formats', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+    shopifyAdminMock.fetchFulfillmentOrders.mockResolvedValue({
+      fulfillmentOrders: [
+        {
+          id: '753159',
+          status: 'OPEN',
+          lineItems: [
+            {
+              id: '951357',
+              lineItemId: '20346971095377',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
+    const service = createFulfillmentService(env);
+
+    const result = await service.updateAllocationTracking(buildRequest());
+
+    expect(result.ok).toBe(true);
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        lineItemsByFulfillmentOrder: [
+          {
+            fulfillmentOrderId: '753159',
+            fulfillmentOrderLineItems: [
+              {
+                id: '951357',
+                quantity: 1,
+              },
+            ],
+          },
+        ],
+      }),
+    );
   });
 
   it('blocks safely when Shopify fulfillment order data is missing', async () => {
@@ -201,7 +251,13 @@ describe('fulfillment tracking sync', () => {
 
     const result = await service.updateAllocationTracking(buildRequest());
 
-    expect(result.ok).toBe(true);
+    expect(result).toMatchObject({
+      ok: true,
+      shopifyFulfillmentCreated: false,
+      shopifyFulfillmentSkippedReason: 'already_synced',
+      shopifyFulfillmentOrderIdPresent: false,
+      shopifyFulfillmentIdPresent: true,
+    });
     expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
   });
@@ -232,5 +288,35 @@ describe('fulfillment tracking sync', () => {
       message: 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.',
     });
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('does not report success when Shopify creation response has no fulfillment id', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+    shopifyAdminMock.createFulfillmentTracking.mockResolvedValue({
+      fulfillmentId: '',
+      status: 'submitted',
+      source: 'shopify_admin',
+      fulfillmentCreated: true,
+      skippedReason: null,
+      fulfillmentOrderIdPresent: true,
+      fulfillmentIdPresent: false,
+    });
+    const service = createFulfillmentService(env);
+
+    const result = await service.updateAllocationTracking(buildRequest());
+
+    expect(result).toEqual({
+      ok: false,
+      code: 502,
+      message: 'Shopify fulfillment creation response did not include a fulfillment id.',
+    });
+    expect(prismaMock.fulfillment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          fulfillmentStatus: 'fulfillment_sync_failed',
+          errorMessage: 'Shopify fulfillment creation response did not include a fulfillment id.',
+        }),
+      }),
+    );
   });
 });

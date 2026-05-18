@@ -38,6 +38,10 @@ export type SubmitFulfillmentTrackingResult = {
   shippingStatus: string;
   shopifySyncSource: string;
   shopifyFulfillmentId: string;
+  shopifyFulfillmentCreated?: boolean;
+  shopifyFulfillmentSkippedReason?: string | null;
+  shopifyFulfillmentOrderIdPresent?: boolean;
+  shopifyFulfillmentIdPresent?: boolean;
   fulfilledAt: string;
   shipmentCreatedAt: string;
   shipmentUpdatedAt: string;

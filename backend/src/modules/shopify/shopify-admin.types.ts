@@ -73,6 +73,10 @@ export type CreateFulfillmentTrackingResult = {
   fulfillmentId: string;
   status: 'submitted' | 'mock_submitted';
   source: 'mock' | 'shopify_admin';
+  fulfillmentCreated: boolean;
+  skippedReason: string | null;
+  fulfillmentOrderIdPresent: boolean;
+  fulfillmentIdPresent: boolean;
 };
 
 export type ShopifyOrderFulfillmentLineItem = {

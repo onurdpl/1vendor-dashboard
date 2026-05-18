@@ -16,6 +16,10 @@ export type UpdateAllocationTrackingSuccess = {
   shippingStatus: string;
   shopifySyncSource: 'mock' | 'shopify_admin';
   shopifyFulfillmentId: string;
+  shopifyFulfillmentCreated: boolean;
+  shopifyFulfillmentSkippedReason: string | null;
+  shopifyFulfillmentOrderIdPresent: boolean;
+  shopifyFulfillmentIdPresent: boolean;
   fulfilledAt: string;
   shipmentCreatedAt: string;
   shipmentUpdatedAt: string;

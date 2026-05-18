@@ -14,6 +14,27 @@ function normalizeOptionalString(value: string | null | undefined) {
   return normalized || null;
 }
 
+function normalizeShopifyIdentifier(value: string | number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return null;
+  }
+
+  const gidTail = raw.startsWith('gid://shopify/') ? raw.split('/').at(-1)?.trim() : null;
+  return gidTail || raw;
+}
+
+function sameShopifyIdentifier(left: string | number | null | undefined, right: string | number | null | undefined) {
+  const normalizedLeft = normalizeShopifyIdentifier(left);
+  const normalizedRight = normalizeShopifyIdentifier(right);
+
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+}
+
 export function createFulfillmentService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
 
@@ -112,6 +133,10 @@ export function createFulfillmentService(env: AppEnv) {
           shippingStatus: allocation.shippingStatus,
           shopifySyncSource: 'shopify_admin',
           shopifyFulfillmentId: allocation.fulfillment.shopifyFulfillmentId,
+          shopifyFulfillmentCreated: false,
+          shopifyFulfillmentSkippedReason: 'already_synced',
+          shopifyFulfillmentOrderIdPresent: Boolean(allocation.fulfillment.shopifyFulfillmentOrderId),
+          shopifyFulfillmentIdPresent: true,
           fulfilledAt: fulfilledAt.toISOString(),
           shipmentCreatedAt: shipmentCreatedAt.toISOString(),
           shipmentUpdatedAt: shipmentUpdatedAt.toISOString(),
@@ -129,15 +154,19 @@ export function createFulfillmentService(env: AppEnv) {
       allocation.order.sourceShopifyOrderId,
     );
 
-    const allocationLineItemIds = new Set(
-      allocation.lineItems.map((lineItem) => lineItem.shopifyOrderLineItem.sourceLineItemId),
-    );
+    const allocationLineItemIds = allocation.lineItems
+      .map((lineItem) => lineItem.shopifyOrderLineItem.sourceLineItemId)
+      .filter((lineItemId): lineItemId is string => Boolean(lineItemId));
 
     const matchedFulfillmentOrders = fulfillmentOrdersResponse.fulfillmentOrders
       .map((fulfillmentOrder) => ({
         fulfillmentOrderId: fulfillmentOrder.id,
         fulfillmentOrderLineItems: fulfillmentOrder.lineItems
-          .filter((lineItem) => allocationLineItemIds.has(lineItem.lineItemId))
+          .filter((lineItem) =>
+            allocationLineItemIds.some((allocationLineItemId) =>
+              sameShopifyIdentifier(allocationLineItemId, lineItem.lineItemId),
+            ),
+          )
           .map((lineItem) => ({
             id: lineItem.id,
             quantity: lineItem.quantity,
@@ -200,6 +229,10 @@ export function createFulfillmentService(env: AppEnv) {
         lineItemsByFulfillmentOrder: matchedFulfillmentOrders,
       });
 
+      if (!normalizeOptionalString(fulfillmentResult.fulfillmentId)) {
+        throw new Error('Shopify fulfillment creation response did not include a fulfillment id.');
+      }
+
       const primaryFulfillmentOrderId = matchedFulfillmentOrders[0]?.fulfillmentOrderId ?? null;
       const submittedAt = new Date();
 
@@ -260,6 +293,10 @@ export function createFulfillmentService(env: AppEnv) {
         shippingStatus: 'shipped',
         shopifySyncSource: fulfillmentResult.source,
         shopifyFulfillmentId: fulfillmentResult.fulfillmentId,
+        shopifyFulfillmentCreated: fulfillmentResult.fulfillmentCreated,
+        shopifyFulfillmentSkippedReason: fulfillmentResult.skippedReason,
+        shopifyFulfillmentOrderIdPresent: fulfillmentResult.fulfillmentOrderIdPresent,
+        shopifyFulfillmentIdPresent: fulfillmentResult.fulfillmentIdPresent,
         fulfilledAt: submittedAt.toISOString(),
         shipmentCreatedAt: submittedAt.toISOString(),
         shipmentUpdatedAt: submittedAt.toISOString(),

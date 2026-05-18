@@ -553,6 +553,10 @@ Webhook processing lifecycle states:
   "shippingStatus": "shipped",
   "shopifySyncSource": "mock",
   "shopifyFulfillmentId": "mock-fulfillment-alloc-yalispor-9001",
+  "shopifyFulfillmentCreated": true,
+  "shopifyFulfillmentSkippedReason": null,
+  "shopifyFulfillmentOrderIdPresent": true,
+  "shopifyFulfillmentIdPresent": true,
   "fulfilledAt": "2026-05-12T13:22:52.000Z",
   "shipmentCreatedAt": "2026-05-12T13:22:52.000Z",
   "shipmentUpdatedAt": "2026-05-12T13:22:59.000Z"
@@ -577,6 +581,8 @@ Webhook processing lifecycle states:
   - route maps allocation-owned Shopify line items into `line_items_by_fulfillment_order`
   - route submits tracking with `tracking_info.number`, `tracking_info.company`, and optional `tracking_info.url`
   - route may set `notify_customer: true`
+  - route only reports success after Shopify returns a fulfillment id
+  - route returns safe fulfillment diagnostics: whether a fulfillment was created, whether a fulfillment order id was available, whether a fulfillment id was returned, and any idempotent skip reason
 - Current frontend real-mode safety note:
   - the vendor order-detail UI defaults `notifyCustomer` to `false` unless the user explicitly opts in during tracking submission
 - Suggested status transitions:

@@ -802,6 +802,10 @@ export function createShopifyAdminService(env: AppEnv) {
         fulfillmentId: `mock-fulfillment-${input.allocationId}`,
         status: 'mock_submitted',
         source: 'mock',
+        fulfillmentCreated: true,
+        skippedReason: null,
+        fulfillmentOrderIdPresent: input.lineItemsByFulfillmentOrder.length > 0,
+        fulfillmentIdPresent: true,
       };
     }
 
@@ -846,11 +850,23 @@ export function createShopifyAdminService(env: AppEnv) {
         id?: string | number;
       };
     };
+    const fulfillmentId =
+      json.fulfillment?.id === null || json.fulfillment?.id === undefined
+        ? null
+        : String(json.fulfillment.id).trim();
+
+    if (!fulfillmentId) {
+      throw new Error('Shopify fulfillment creation response did not include a fulfillment id.');
+    }
 
     return {
-      fulfillmentId: String(json.fulfillment?.id ?? `shopify-fulfillment-${input.allocationId}`),
+      fulfillmentId,
       status: 'submitted',
       source: 'shopify_admin',
+      fulfillmentCreated: true,
+      skippedReason: null,
+      fulfillmentOrderIdPresent: input.lineItemsByFulfillmentOrder.length > 0,
+      fulfillmentIdPresent: true,
     };
   }
 
