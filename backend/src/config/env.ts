@@ -38,13 +38,17 @@ export type AppEnv = {
   BIZIMHESAP_ACCESS_TOKEN?: string;
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
-  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator';
+  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
   KARGO_ENTEGRATOR_BASE_URL?: string;
   KARGO_ENTEGRATOR_API_KEY?: string;
   KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?: string;
   KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE?: 'primary' | 'deprecated';
+  TRY_OTO_ENABLED: boolean;
+  TRY_OTO_BASE_URL?: string;
+  TRY_OTO_REFRESH_TOKEN?: string;
+  TRY_OTO_SANDBOX_MODE: boolean;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -133,11 +137,11 @@ function parseInvoiceProvider(value: string | undefined): AppEnv['INVOICE_PROVID
 
 function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROVIDER'] {
   const normalized = (value || 'hepsijet').trim().toLowerCase();
-  if (normalized === 'hepsijet' || normalized === 'kargo_entegrator') {
+  if (normalized === 'hepsijet' || normalized === 'kargo_entegrator' || normalized === 'try_oto') {
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet or kargo_entegrator.');
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, or try_oto.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -256,5 +260,9 @@ export function loadEnv(): AppEnv {
     KARGO_ENTEGRATOR_API_KEY: process.env.KARGO_ENTEGRATOR_API_KEY || undefined,
     KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: kargoCargoIntegration.value,
     KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE: kargoCargoIntegration.source,
+    TRY_OTO_ENABLED: parseBoolean(process.env.TRY_OTO_ENABLED, false),
+    TRY_OTO_BASE_URL: process.env.TRY_OTO_BASE_URL || undefined,
+    TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
+    TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
   };
 }

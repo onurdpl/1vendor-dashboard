@@ -18,7 +18,7 @@ export type ShipmentExecution = {
   sourceShopifyOrderId?: string | null;
   sourceShopifyOrderNumber?: string | null;
   sourceShopifyFulfillmentId?: string | null;
-  provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
+  provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
   providerShipmentId: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
@@ -112,7 +112,7 @@ export type ShipmentCustomerField =
 export type ShipmentCustomerOverrides = Partial<Record<ShipmentCustomerField, string>>;
 
 export type ShippingProviderDiagnostics = {
-  provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
+  provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
   executionReady: boolean;
   sandboxModeEnabled?: boolean;
   shippingExecutionEnabled: boolean;
@@ -135,7 +135,7 @@ export type ShippingProviderDiagnostics = {
   warnings?: string[];
 };
 
-export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
+export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
 
 export type VendorShippingWarehouse = {
   id: string;

@@ -31,7 +31,7 @@ export class ShippingProviderExecutionError extends Error {
 }
 
 export interface ShippingProviderAdapter {
-  provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR';
+  provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -47,6 +47,9 @@ function readString(value: Record<string, unknown>, keys: string[]) {
     const raw = value[key];
     if (typeof raw === 'string' && raw.trim()) {
       return raw.trim();
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(raw);
     }
   }
 
@@ -324,6 +327,55 @@ function buildKargoPayloadDiagnostics(payload: Record<string, unknown>) {
   };
 }
 
+function buildTryOtoPayloadDiagnostics(payload: Record<string, unknown>) {
+  const customer = isRecord(payload.customer) ? payload.customer : {};
+  return {
+    topLevelKeys: Object.keys(payload).sort(),
+    customerKeys: Object.keys(customer).sort(),
+    itemCount: Array.isArray(payload.items) ? payload.items.length : 0,
+    orderIdPresent: hasValue(payload.orderId),
+    pickupLocationCodePresent: hasValue(payload.pickupLocationCode),
+    paymentMethod: typeof payload.payment_method === 'string' ? payload.payment_method : null,
+    amountPresent: hasValue(payload.amount),
+    amountDuePresent: hasValue(payload.amount_due),
+    currency: typeof payload.currency === 'string' ? payload.currency : null,
+    packageWeightPresent: hasValue(payload.packageWeight),
+    packageWeightType: safeValueType(payload.packageWeight),
+    customerNamePresent: hasValue(customer.name),
+    customerMobilePresent: hasValue(customer.mobile),
+    customerAddressPresent: hasValue(customer.address),
+    customerCityPresent: hasValue(customer.city),
+    customerCountryPresent: hasValue(customer.country),
+    customerDistrictPresent: hasValue(customer.district),
+  };
+}
+
+function getTryOtoRequestTarget(baseUrl: string | undefined, path: string) {
+  if (!baseUrl) {
+    return {
+      selectedBaseUrl: null,
+      requestTargetHostname: null,
+      requestPath: path,
+    };
+  }
+
+  const selectedBaseUrl = baseUrl.replace(/\/$/, '');
+  try {
+    const requestUrl = new URL(`${selectedBaseUrl}${path}`);
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: requestUrl.hostname,
+      requestPath: requestUrl.pathname,
+    };
+  } catch {
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: null,
+      requestPath: path,
+    };
+  }
+}
+
 function mapShipmentStatus(value: string | null): ShipmentExecutionStatusDto {
   const normalized = value?.trim().toLowerCase() ?? '';
   if (normalized === 'in_transit' || normalized === 'in transit' || normalized === 'shipped') {
@@ -331,6 +383,8 @@ function mapShipmentStatus(value: string | null): ShipmentExecutionStatusDto {
   }
   if (
     normalized === 'created' ||
+    normalized === 'shipmentcreated' ||
+    normalized === 'shipment_created' ||
     normalized === 'label_created' ||
     normalized === 'label created' ||
     normalized === 'ready'
@@ -543,12 +597,280 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
   }
 }
 
+export class TryOtoAdapter implements ShippingProviderAdapter {
+  provider = 'TRY_OTO' as const;
+  private cachedAccessToken: { token: string; expiresAt: number } | null = null;
+
+  constructor(private readonly env: AppEnv) {}
+
+  private requireReady(input: ShippingProviderCreateInput) {
+    if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.TRY_OTO_ENABLED || !this.env.TRY_OTO_SANDBOX_MODE) {
+      const disabledGates = [
+        !this.env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
+        !this.env.TRY_OTO_ENABLED ? 'TRY_OTO_ENABLED' : null,
+        !this.env.TRY_OTO_SANDBOX_MODE ? 'TRY_OTO_SANDBOX_MODE' : null,
+      ].filter((gate): gate is string => Boolean(gate));
+
+      return {
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'pending' as const,
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          ok: true,
+          dryRun: true,
+          provider: 'try_oto',
+          reason: 'Try OTO sandbox shipment execution is disabled.',
+          disabledGates,
+          payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
+        },
+      };
+    }
+
+    if (!this.env.TRY_OTO_BASE_URL) {
+      throw new Error('Try OTO sandbox shipment execution is not configured. Missing TRY_OTO_BASE_URL.');
+    }
+
+    if (!this.env.TRY_OTO_REFRESH_TOKEN) {
+      throw new Error('Try OTO sandbox shipment execution is not configured. Missing TRY_OTO_REFRESH_TOKEN.');
+    }
+
+    return null;
+  }
+
+  private requestUrl(path: string) {
+    return `${this.env.TRY_OTO_BASE_URL?.replace(/\/$/, '')}${path}`;
+  }
+
+  private async refreshAccessToken() {
+    const now = Date.now();
+    if (this.cachedAccessToken && this.cachedAccessToken.expiresAt > now + 60_000) {
+      return this.cachedAccessToken.token;
+    }
+
+    const path = '/rest/v2/refreshToken';
+    const target = getTryOtoRequestTarget(this.env.TRY_OTO_BASE_URL, path);
+    const response = await fetch(this.requestUrl(path), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        refresh_token: this.env.TRY_OTO_REFRESH_TOKEN,
+      }),
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+    const parsedBody = parseResponseBody(contentType, responseText);
+    const body = getProviderResponseRecord(parsedBody);
+
+    if (!response.ok || !isRecord(parsedBody)) {
+      throw new ShippingProviderExecutionError(`Try OTO token refresh failed with HTTP ${response.status}.`, {
+        status: response.status,
+        ok: response.ok,
+        contentType,
+        provider: 'try_oto',
+        operation: 'refreshToken',
+        requestPath: target.requestPath,
+        requestTargetHostname: target.requestTargetHostname,
+        detectedResponseFormat: getDetectedResponseFormat(contentType, parsedBody),
+        responseSnippet: sanitizeResponseSnippet(responseText),
+        providerError: readSafeProviderError(body),
+      });
+    }
+
+    const accessToken = readString(body, ['access_token']);
+    if (!accessToken) {
+      throw new ShippingProviderExecutionError('Try OTO token refresh did not return an access token.', {
+        status: response.status,
+        ok: response.ok,
+        contentType,
+        provider: 'try_oto',
+        operation: 'refreshToken',
+        requestPath: target.requestPath,
+        requestTargetHostname: target.requestTargetHostname,
+        bodyKeys: Object.keys(body).sort(),
+      });
+    }
+
+    const expiresInSeconds = readNumber(body, ['expires_in']) ?? 3600;
+    this.cachedAccessToken = {
+      token: accessToken,
+      expiresAt: now + Math.max(60, expiresInSeconds - 120) * 1000,
+    };
+    return accessToken;
+  }
+
+  private async postJson(path: string, body: Record<string, unknown>, accessToken: string, operation: string) {
+    const target = getTryOtoRequestTarget(this.env.TRY_OTO_BASE_URL, path);
+    const response = await fetch(this.requestUrl(path), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const providerRequestId =
+      response.headers.get('x-request-id') ??
+      response.headers.get('x-correlation-id') ??
+      response.headers.get('request-id');
+    const responseText = await response.text();
+    const parsedBody = parseResponseBody(contentType, responseText);
+    const record = getProviderResponseRecord(parsedBody);
+    const snapshot = {
+      status: response.status,
+      ok: response.ok,
+      contentType,
+      parsedBodyType: Array.isArray(parsedBody) ? 'array' : typeof parsedBody,
+      bodyKeys: Object.keys(record).sort(),
+      topLevelKeys: isRecord(parsedBody) ? Object.keys(parsedBody).sort() : [],
+      provider: 'try_oto',
+      operation,
+      requestId: providerRequestId ?? readString(record, ['request_id', 'requestId', 'traceId', 'trace_id']),
+      requestPath: target.requestPath,
+      requestTargetHostname: target.requestTargetHostname,
+      selectedEnvironment: 'sandbox',
+      detectedResponseFormat: getDetectedResponseFormat(contentType, parsedBody),
+      responseSnippet: sanitizeResponseSnippet(responseText),
+      providerError: readSafeProviderError(record),
+      providerValidationErrors: readSafeValidationErrors(record),
+    };
+
+    if (!response.ok) {
+      throw new ShippingProviderExecutionError(`Try OTO ${operation} failed with HTTP ${response.status}.`, snapshot);
+    }
+
+    return {
+      snapshot,
+      body: record,
+    };
+  }
+
+  async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
+    const disabled = this.requireReady(input);
+    if (disabled) {
+      return disabled;
+    }
+
+    const payloadDiagnostics = buildTryOtoPayloadDiagnostics(input.requestSnapshot);
+    console.info('[shipping:try-oto:sandbox-create]', {
+      provider: 'try_oto',
+      selectedEnvironment: 'sandbox',
+      requestTargetHostname: getTryOtoRequestTarget(this.env.TRY_OTO_BASE_URL, '/rest/v2/createOrder').requestTargetHostname,
+      payloadDiagnostics,
+    });
+
+    const accessToken = await this.refreshAccessToken();
+    const createOrder = await this.postJson('/rest/v2/createOrder', input.requestSnapshot, accessToken, 'createOrder');
+    const orderId = readString(input.requestSnapshot, ['orderId']);
+    if (!orderId) {
+      throw new ShippingProviderExecutionError('Try OTO createOrder payload is missing orderId.', {
+        provider: 'try_oto',
+        operation: 'createOrder',
+        payloadDiagnostics,
+      });
+    }
+
+    const createShipment = await this.postJson('/rest/v2/createShipment', { orderId }, accessToken, 'createShipment');
+    let orderStatus: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
+    try {
+      orderStatus = await this.postJson('/rest/v2/orderStatus', { orderId }, accessToken, 'orderStatus');
+    } catch (error) {
+      if (error instanceof ShippingProviderExecutionError) {
+        orderStatus = {
+          snapshot: {
+            ...error.responseSnapshot,
+            nonBlocking: true,
+          },
+          body: {},
+        };
+      } else {
+        throw error;
+      }
+    }
+
+    const statusBody = orderStatus?.body ?? {};
+    const shipmentBody = createShipment.body;
+    const orderBody = createOrder.body;
+    const trackingNumber = readString(statusBody, ['trackingNumber', 'dcTrackingNumber']);
+    const labelUrl = readString(statusBody, ['printAWBURL', 'printLabelURL', 'labelUrl']);
+    const providerShipmentId =
+      readString(statusBody, ['shipmentId']) ??
+      readString(shipmentBody, ['shipmentId']) ??
+      readString(orderBody, ['otoId']) ??
+      orderId;
+
+    return {
+      providerShipmentId,
+      trackingNumber,
+      trackingUrl: readString(statusBody, ['trackingUrl', 'trackingURL']),
+      labelUrl,
+      shipmentStatus: mapShipmentStatus(readString(statusBody, ['status']) ?? (providerShipmentId ? 'created' : null)),
+      shippingCost: null,
+      shippingVat: null,
+      currency: readString(statusBody, ['currency']) ?? readString(input.requestSnapshot, ['currency']) ?? 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'try_oto',
+        providerOrderId: readString(orderBody, ['otoId']),
+        orderId,
+        shipmentId: readString(statusBody, ['shipmentId']) ?? readString(shipmentBody, ['shipmentId']),
+        trackingNumber,
+        dcTrackingNumber: readString(statusBody, ['dcTrackingNumber']),
+        labelUrl,
+        deliveryCompany: readString(statusBody, ['deliveryCompany']),
+        providerStatus: readString(statusBody, ['status']),
+        createOrder: createOrder.snapshot,
+        createShipment: createShipment.snapshot,
+        orderStatus: orderStatus?.snapshot,
+        payloadDiagnostics,
+        lastProviderResponseAt: new Date().toISOString(),
+        timeline: [
+          {
+            label: 'Try OTO order created',
+            at: new Date().toISOString(),
+            status: readString(orderBody, ['otoId']) ? 'created' : null,
+          },
+          {
+            label: 'Try OTO shipment create requested',
+            at: new Date().toISOString(),
+            status: readString(createShipment.body, ['message']) ?? null,
+          },
+        ],
+      },
+    };
+  }
+
+  async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Try OTO shipment status polling is not implemented in this phase.');
+  }
+
+  async getTrackingInfo(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Try OTO tracking polling is not implemented in this phase.');
+  }
+
+  async cancelShipment(): Promise<ShippingProviderCreateResult> {
+    throw new Error('Try OTO shipment cancellation is not implemented in this phase.');
+  }
+}
+
 export function createShippingProviderAdapter(
   env: AppEnv,
   provider: ShippingProviderDto = 'hepsijet',
 ): ShippingProviderAdapter {
   if (provider === 'kargo_entegrator') {
     return new KargoEntegratorAdapter(env);
+  }
+  if (provider === 'try_oto') {
+    return new TryOtoAdapter(env);
   }
 
   return new HepsijetAdapter(env);

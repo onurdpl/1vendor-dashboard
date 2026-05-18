@@ -100,4 +100,24 @@ describe('backend env shipping provider gates', () => {
     expect(env.SHIPPING_SANDBOX_MODE).toBe(true);
     expect(env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED).toBe(true);
   });
+
+  it('parses Try OTO sandbox provider gates without enabling production rollout', () => {
+    resetEnv({
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: 'true',
+      TRY_OTO_ENABLED: 'true',
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'configured-refresh-token',
+      TRY_OTO_SANDBOX_MODE: 'true',
+    });
+
+    const env = loadEnv();
+
+    expect(env.SHIPPING_PROVIDER).toBe('try_oto');
+    expect(env.SHIPPING_EXECUTION_ENABLED).toBe(true);
+    expect(env.TRY_OTO_ENABLED).toBe(true);
+    expect(env.TRY_OTO_BASE_URL).toBe('https://staging-api.tryoto.com');
+    expect(env.TRY_OTO_REFRESH_TOKEN).toBe('configured-refresh-token');
+    expect(env.TRY_OTO_SANDBOX_MODE).toBe(true);
+  });
 });

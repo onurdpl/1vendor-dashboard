@@ -42,7 +42,7 @@ const {
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
-const { KargoEntegratorAdapter, ShippingProviderExecutionError } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
+const { KargoEntegratorAdapter, ShippingProviderExecutionError, TryOtoAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
 const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
 
 const env = {
@@ -73,6 +73,10 @@ const env = {
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
   KARGO_ENTEGRATOR_BASE_URL: 'https://kargo.example',
   KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+  TRY_OTO_ENABLED: false,
+  TRY_OTO_BASE_URL: undefined,
+  TRY_OTO_REFRESH_TOKEN: undefined,
+  TRY_OTO_SANDBOX_MODE: false,
 };
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
@@ -2495,6 +2499,333 @@ describe('shipping execution foundation', () => {
         providerValidationErrors: ['Seçilen paket tipi geçersiz.'],
         bodyKeys: expect.arrayContaining(['errors', 'message']),
       }),
+    });
+  });
+
+  it('blocks Try OTO execution when the sandbox provider feature flag is disabled', async () => {
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: false,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: 'POC-TR-1001',
+        customer: {
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+        },
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerShipmentId: null,
+      shipmentStatus: 'pending',
+      responseSnapshot: {
+        dryRun: true,
+        provider: 'try_oto',
+        disabledGates: ['TRY_OTO_ENABLED'],
+        payloadDiagnostics: {
+          orderIdPresent: true,
+          customerMobilePresent: true,
+          customerAddressPresent: true,
+        },
+      },
+    });
+    expect(JSON.stringify(result.responseSnapshot)).not.toContain('905551112233');
+    expect(JSON.stringify(result.responseSnapshot)).not.toContain('Test Mahallesi');
+  });
+
+  it('blocks Try OTO execution when the refresh token is missing', async () => {
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: undefined,
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'try_oto',
+        requestSnapshot: {
+          orderId: 'POC-TR-1001',
+        },
+      }),
+    ).rejects.toThrow('Missing TRY_OTO_REFRESH_TOKEN');
+  });
+
+  it('refreshes Try OTO token and executes createOrder then createShipment with bearer auth', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            access_token: 'oto-access-token',
+            token_type: 'Bearer',
+            expires_in: '3600',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            otoId: 540789,
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            message: 'create shipment request is received.',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            status: 'shipmentCreated',
+            shipmentId: 'OTO-SHIP-1001',
+            trackingNumber: 'OTO-TRACK-1001',
+            dcTrackingNumber: 'SURAT-1001',
+            trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+            printAWBURL: 'https://app.tryoto.com/print/awb?enc=sandbox',
+            deliveryCompany: 'surat-kargo-marketplace',
+          }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: 'POC-TR-1001',
+        pickupLocationCode: 'tr-test-store-001',
+        payment_method: 'paid',
+        amount: 1299.9,
+        amount_due: 0,
+        currency: 'TRY',
+        packageWeight: 1,
+        customer: {
+          name: 'Sandbox Customer',
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+          city: 'Istanbul',
+          country: 'TR',
+          district: 'Kadikoy',
+        },
+        items: [
+          {
+            name: 'Sandbox T-Shirt',
+            sku: 'POC-TSHIRT-001',
+            quantity: 1,
+          },
+        ],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      'https://staging-api.tryoto.com/rest/v2/refreshToken',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://staging-api.tryoto.com/rest/v2/createOrder',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oto-access-token',
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://staging-api.tryoto.com/rest/v2/createShipment',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer oto-access-token',
+        }),
+      }),
+    );
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({
+      orderId: 'POC-TR-1001',
+      pickupLocationCode: 'tr-test-store-001',
+      payment_method: 'paid',
+      amount: 1299.9,
+      amount_due: 0,
+      currency: 'TRY',
+      packageWeight: 1,
+      customer: {
+        name: 'Sandbox Customer',
+        mobile: '905551112233',
+        address: 'Test Mahallesi 1. Sokak No: 1',
+        city: 'Istanbul',
+        country: 'TR',
+        district: 'Kadikoy',
+      },
+      items: [
+        expect.objectContaining({
+          name: 'Sandbox T-Shirt',
+          sku: 'POC-TSHIRT-001',
+          quantity: 1,
+        }),
+      ],
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+      orderId: 'POC-TR-1001',
+    });
+    expect(result).toMatchObject({
+      providerShipmentId: 'OTO-SHIP-1001',
+      trackingNumber: 'OTO-TRACK-1001',
+      trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1001',
+      labelUrl: 'https://app.tryoto.com/print/awb?enc=sandbox',
+      shipmentStatus: 'created',
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'try_oto',
+        providerOrderId: '540789',
+        orderId: 'POC-TR-1001',
+        shipmentId: 'OTO-SHIP-1001',
+        trackingNumber: 'OTO-TRACK-1001',
+        dcTrackingNumber: 'SURAT-1001',
+        deliveryCompany: 'surat-kargo-marketplace',
+        payloadDiagnostics: {
+          orderIdPresent: true,
+          pickupLocationCodePresent: true,
+          customerMobilePresent: true,
+          customerAddressPresent: true,
+          customerCityPresent: true,
+          customerCountryPresent: true,
+          customerDistrictPresent: true,
+        },
+      },
+    });
+    const serialized = JSON.stringify(result.responseSnapshot);
+    expect(serialized).not.toContain('refresh-secret');
+    expect(serialized).not.toContain('oto-access-token');
+    expect(serialized).not.toContain('905551112233');
+    expect(serialized).not.toContain('Test Mahallesi');
+  });
+
+  it('builds Try OTO createOrder payload with required Turkey fields from allocation data', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Sandbox Customer',
+          customerEmail: 'sandbox@example.com',
+          customerPhone: '0555 111 22 33',
+          shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'TR',
+          shippingPostcode: '34710',
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+        packageWeight: 2,
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'try_oto',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'try_oto',
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_SANDBOX_MODE: true,
+          TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+          TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+        },
+        vendorId: 'sporjinal',
+      },
+    );
+
+    expect(preview).toMatchObject({
+      provider: 'try_oto',
+      warehouseId: 'tr-test-store-001',
+      payload: {
+        orderId: expect.stringContaining('allocation-alloc-1'),
+        pickupLocationCode: 'tr-test-store-001',
+        payment_method: 'paid',
+        amount: 4999,
+        amount_due: 0,
+        currency: 'TRY',
+        packageCount: 1,
+        packageWeight: 2,
+        customer: {
+          name: 'Sandbox Customer',
+          email: 'sandbox@example.com',
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+          city: 'Istanbul',
+          country: 'TR',
+          district: 'Kadikoy',
+          postcode: '34710',
+        },
+        items: [
+          expect.objectContaining({
+            name: 'Nike Air Max Alpha Trainer 6',
+            sku: 'FQ1833-200-41',
+            quantity: 1,
+          }),
+        ],
+      },
+      warnings: expect.arrayContaining([
+        'Try OTO is sandbox-only in this phase.',
+      ]),
     });
   });
 });

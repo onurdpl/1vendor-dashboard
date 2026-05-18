@@ -105,6 +105,7 @@ enum ShippingCostStatus {
 enum ShippingProvider {
   HEPSIJET
   KARGO_ENTEGRATOR
+  TRY_OTO
   MNG
   YURTICI
   ARAS
