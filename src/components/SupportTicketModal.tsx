@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { createSupportTicket, type SupportTicketContextType, type SupportTicketPriority } from '../features/support/api';
 import { useMutationAction } from '../hooks/useMutationAction';
+import { getCurrentVendorContext } from '../lib/auth';
+import { queryClient } from '../lib/api/queryClient';
+import { queryKeys } from '../lib/api/queryKeys';
 
 type SupportTicketModalProps = {
   open: boolean;
@@ -46,6 +49,9 @@ export function SupportTicketModal({
   const mutation = useMutationAction(createSupportTicket, {
     onSuccess: () => {
       setSuccessMessage('Support ticket created.');
+      const vendorId = getCurrentVendorContext().vendorId;
+      void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(vendorId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() });
       onCreated?.();
     },
   });

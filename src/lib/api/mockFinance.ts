@@ -83,6 +83,8 @@ function buildVendorFinance(vendorId: VendorId): VendorFinanceDashboard {
     category: 'Invoice',
     amount: order.amount,
     status: mapOrderStatusToTransactionStatus(order.status),
+    shopifyOrderNumber: String(order.sourceShopifyOrderNumber),
+    shopifyOrderId: order.sourceShopifyOrderId,
   }));
 
   const refundTransactions: FinanceTransaction[] = returns.map((returnRequest) => ({
@@ -93,6 +95,9 @@ function buildVendorFinance(vendorId: VendorId): VendorFinanceDashboard {
     category: 'Refund',
     amount: returnRequest.amount,
     status: mapReturnStatusToTransactionStatus(returnRequest.status),
+    shopifyOrderNumber: String(returnRequest.sourceShopifyOrderNumber),
+    shopifyOrderId: returnRequest.sourceShopifyOrderId,
+    shopifyRefundId: returnRequest.sourceShopifyRefundId,
   }));
 
   const feeTransaction: FinanceTransaction = {
