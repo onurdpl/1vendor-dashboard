@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1424,6 +1424,177 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
     expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).toBeInTheDocument();
+  });
+
+  it('automatically refreshes Try OTO created shipments while tracking or label is missing', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      getOrderMock.mockResolvedValue({
+        ...orderWithShipmentSummary,
+        shipmentExecution: {
+          ...orderWithShipmentSummary.shipmentExecution!,
+          id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+          provider: 'try_oto',
+          providerShipmentId: 'OTO-SHIP-1028',
+          shipmentStatus: 'created',
+          trackingNumber: null,
+          barcode: null,
+          labelUrl: null,
+          providerResponseSummary: {
+            ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+            dryRun: false,
+            providerShipmentIdPresent: true,
+          },
+        },
+      });
+      setCurrentUser({
+        email: 'vendor@example.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'sporjinal',
+      });
+
+      renderOrderDetail();
+
+      expect(await screen.findByText('Status will refresh automatically while OTO finishes label generation.')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Refresh shipment status' })).toBeInTheDocument();
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+
+      expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops automatic Try OTO refresh once tracking and label exist', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      getOrderMock.mockResolvedValue({
+        ...orderWithShipmentSummary,
+        trackingNumber: 'OTO-TRACK-1028',
+        shipmentExecution: {
+          ...orderWithShipmentSummary.shipmentExecution!,
+          id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+          provider: 'try_oto',
+          providerShipmentId: 'OTO-SHIP-1028',
+          shipmentStatus: 'created',
+          trackingNumber: 'OTO-TRACK-1028',
+          barcode: null,
+          labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+          providerResponseSummary: null,
+        },
+      });
+      setCurrentUser({
+        email: 'vendor@example.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'sporjinal',
+      });
+
+      renderOrderDetail();
+
+      expect(await screen.findByText('Same as tracking')).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300_000);
+      });
+
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not automatically refresh Kargo shipments', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      setCurrentUser({
+        email: 'vendor@example.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'sporjinal',
+      });
+
+      renderOrderDetail();
+
+      expect((await screen.findAllByText('Kargo Entegratör')).length).toBeGreaterThan(0);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300_000);
+      });
+
+      expect(refreshShipmentExecutionStatusMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('limits automatic Try OTO refresh attempts', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const pendingTryOtoOrder = {
+        ...orderWithShipmentSummary,
+        shipmentExecution: {
+          ...orderWithShipmentSummary.shipmentExecution!,
+          id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+          provider: 'try_oto' as const,
+          providerShipmentId: 'OTO-SHIP-1028',
+          shipmentStatus: 'created',
+          trackingNumber: null,
+          barcode: null,
+          labelUrl: null,
+          providerResponseSummary: {
+            ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+            dryRun: false,
+            providerShipmentIdPresent: true,
+          },
+        },
+      };
+      getOrderMock.mockResolvedValue(pendingTryOtoOrder);
+      refreshShipmentExecutionStatusMock.mockResolvedValue(pendingTryOtoOrder.shipmentExecution);
+      setCurrentUser({
+        email: 'vendor@example.com',
+        name: 'Vendor User',
+        role: 'vendor',
+        vendorAccess: ['sporjinal'],
+        vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'sporjinal',
+      });
+
+      renderOrderDetail();
+
+      expect(await screen.findByText('Status will refresh automatically while OTO finishes label generation.')).toBeInTheDocument();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(90_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(180_000);
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300_000);
+      });
+
+      expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('renders polished Try OTO shipment links and treats missing barcode as tracking-backed', async () => {

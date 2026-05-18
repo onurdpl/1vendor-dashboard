@@ -1,5 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -129,6 +129,8 @@ type ShippingConfigDraft = {
   tryOtoPickupLocationCode: string;
   tryOtoOriginCity: string;
 };
+
+const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -403,6 +405,11 @@ export function OrderDetailPage() {
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
+  const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
+  const tryOtoAutoRefreshInFlightRef = useRef(false);
+  const refreshShipmentStatusMutationRef = useRef<((shipmentExecutionId: string) => Promise<ShipmentExecution>) | null>(null);
+  const refetchOrderRef = useRef<(() => unknown) | null>(null);
   const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
@@ -615,10 +622,20 @@ export function OrderDetailPage() {
     visibleShipmentExecution?.provider === 'try_oto' &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
     (!getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution) || !visibleShipmentExecution.labelUrl);
+  const canAutoRefreshTryOtoShipmentStatus =
+    canRefreshTryOtoShipmentStatus &&
+    Boolean(visibleShipmentExecution?.id) &&
+    Boolean(visibleShipmentExecution?.providerShipmentId) &&
+    ['created', 'pending'].includes(visibleShipmentStatus);
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
     setShipmentActionState(null);
+    tryOtoAutoRefreshAttemptsRef.current = {};
+    if (tryOtoAutoRefreshTimerRef.current !== null) {
+      window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
+      tryOtoAutoRefreshTimerRef.current = null;
+    }
   }, [orderId]);
 
   function buildShipmentCustomerOverrides(fields: ShipmentCustomerField[]) {
@@ -762,6 +779,74 @@ export function OrderDetailPage() {
         showFeedback(errorMessage, 'error');
       });
   }
+
+  useEffect(() => {
+    refreshShipmentStatusMutationRef.current = refreshShipmentStatusMutation;
+    refetchOrderRef.current = refetch;
+  }, [refreshShipmentStatusMutation, refetch]);
+
+  useEffect(() => {
+    if (tryOtoAutoRefreshTimerRef.current !== null) {
+      window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
+      tryOtoAutoRefreshTimerRef.current = null;
+    }
+
+    if (!canAutoRefreshTryOtoShipmentStatus || !visibleShipmentExecution?.id) {
+      return undefined;
+    }
+
+    const shipmentExecutionId = visibleShipmentExecution.id;
+    const attempt = tryOtoAutoRefreshAttemptsRef.current[shipmentExecutionId] ?? 0;
+    if (attempt >= TRY_OTO_AUTO_REFRESH_DELAYS_MS.length) {
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const scheduleAttempt = (nextAttempt: number) => {
+      tryOtoAutoRefreshTimerRef.current = window.setTimeout(() => {
+        if (cancelled || tryOtoAutoRefreshInFlightRef.current || !refreshShipmentStatusMutationRef.current) {
+          return;
+        }
+
+        tryOtoAutoRefreshAttemptsRef.current[shipmentExecutionId] = nextAttempt + 1;
+        tryOtoAutoRefreshInFlightRef.current = true;
+        void refreshShipmentStatusMutationRef.current(shipmentExecutionId)
+          .then((shipment) => {
+            void refetchOrderRef.current?.();
+            const hasTrackingAndLabel = Boolean(shipment.trackingNumber && shipment.labelUrl);
+            const followingAttempt = nextAttempt + 1;
+            if (!cancelled && !hasTrackingAndLabel && followingAttempt < TRY_OTO_AUTO_REFRESH_DELAYS_MS.length) {
+              scheduleAttempt(followingAttempt);
+            }
+          })
+          .catch(() => {
+            // Manual refresh remains available; avoid noisy background errors.
+          })
+          .finally(() => {
+            tryOtoAutoRefreshInFlightRef.current = false;
+          });
+      }, TRY_OTO_AUTO_REFRESH_DELAYS_MS[nextAttempt]);
+    };
+
+    scheduleAttempt(attempt);
+
+    return () => {
+      cancelled = true;
+      if (tryOtoAutoRefreshTimerRef.current !== null) {
+        window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
+        tryOtoAutoRefreshTimerRef.current = null;
+      }
+    };
+  }, [
+    canAutoRefreshTryOtoShipmentStatus,
+    visibleShipmentExecution?.id,
+    visibleShipmentExecution?.providerShipmentId,
+    visibleShipmentExecution?.trackingNumber,
+    visibleShipmentExecution?.labelUrl,
+    order?.trackingNumber,
+    visibleShipmentStatus,
+  ]);
 
   function renderShipmentFieldCompletionForm() {
     if (missingShipmentCustomerFields.length === 0) {
@@ -1793,6 +1878,7 @@ export function OrderDetailPage() {
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                             <strong>Try OTO status refresh</strong>
                             <span>Shipment was created. Tracking or label may still be processing.</span>
+                            <span>Status will refresh automatically while OTO finishes label generation.</span>
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -2211,6 +2297,7 @@ export function OrderDetailPage() {
                       <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                         <strong>Try OTO status refresh</strong>
                         <span>Shipment was created. Tracking or label may still be processing.</span>
+                        <span>Status will refresh automatically while OTO finishes label generation.</span>
                         <div className="order-inline-actions">
                           <button
                             type="button"
