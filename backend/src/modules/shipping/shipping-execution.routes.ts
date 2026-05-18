@@ -6,7 +6,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import {
   createShipmentExecution,
   getShipmentExecutionById,
-  getShippingProviderGateDiagnostics,
+  getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
   listShipmentExecutions,
   previewShipmentExecution,
@@ -27,6 +27,12 @@ function resolveNotificationUrl(request: { headers: Record<string, unknown>; pro
 export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+
+  app.post('/webhooks/shipping/kargo-entegrator', async (_request, reply) => {
+    return reply.code(501).send({
+      message: 'Kargo Entegratör webhook ingestion is not implemented yet.',
+    });
+  });
 
   app.get(
     '/shipping/config',
@@ -130,9 +136,9 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      const query = request.query as { provider?: string };
+      const query = request.query as { provider?: string; vendorId?: string };
       const provider = query.provider === 'kargo_entegrator' ? 'kargo_entegrator' : undefined;
-      return getShippingProviderGateDiagnostics(env, provider);
+      return getShippingProviderReadinessDiagnostics(env, provider, query.vendorId);
     },
   );
 

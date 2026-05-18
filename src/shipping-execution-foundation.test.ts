@@ -29,10 +29,18 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createShipmentExecution, getShippingProviderGateDiagnostics, inferShipmentDesi, retryDryRunShipmentExecution } = await import(
+const {
+  createShipmentExecution,
+  getShippingProviderGateDiagnostics,
+  getShippingProviderReadinessDiagnostics,
+  inferShipmentDesi,
+  previewShipmentExecution,
+  retryDryRunShipmentExecution,
+} = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
 const { KargoEntegratorAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
+const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -843,12 +851,166 @@ describe('shipping execution foundation', () => {
       provider: 'kargo_entegrator',
       executionReady: false,
       shippingExecutionEnabled: false,
+      providerSelected: true,
       providerEnabled: true,
       baseUrlConfigured: true,
       apiKeyConfigured: true,
+      webhookRouteImplemented: false,
+      receiverAddressAvailability: 'unknown_required',
+      dummyKargoSupport: 'not_implemented',
+      statusSyncSupport: 'not_implemented',
       missing: ['SHIPPING_EXECUTION_ENABLED'],
       deprecatedEnvFallbacks: [],
     });
+  });
+
+  it('reports vendor Kargo readiness booleans without exposing secrets or raw config values', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargo_entegrator',
+        SHIPPING_EXECUTION_ENABLED: true,
+        KARGO_ENTEGRATOR_ENABLED: true,
+        KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api',
+        KARGO_ENTEGRATOR_API_KEY: 'configured-secret',
+      },
+      'kargo_entegrator',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'kargo_entegrator',
+      executionReady: true,
+      shippingExecutionEnabled: true,
+      providerSelected: true,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      cargoIntegrationIdConfigured: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      notificationUrlConfigured: false,
+      webhookRouteImplemented: false,
+      receiverAddressAvailability: 'unknown_required',
+      dummyKargoSupport: 'not_implemented',
+      statusSyncSupport: 'not_implemented',
+      missing: [],
+    });
+    expect(diagnostics.warnings).toEqual(expect.arrayContaining(['Dummy Kargo creation is not implemented.']));
+    expect(JSON.stringify(diagnostics)).not.toContain('configured-secret');
+    expect(JSON.stringify(diagnostics)).not.toContain('2547');
+    expect(JSON.stringify(diagnostics)).not.toContain('1774');
+  });
+
+  it('adds Kargo contract warnings to shipment previews without changing the payload', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        notificationUrl: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      cargo_integration_id: 2547,
+      warehouse_id: 1774,
+      notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+    });
+    expect(preview.warnings).toEqual(
+      expect.arrayContaining([
+        'Kargo Entegratör create contract is not verified.',
+        'Receiver address and phone requirements are unknown.',
+        'Kargo Entegratör webhook/status sync is not implemented.',
+        'Dummy Kargo creation is not implemented.',
+      ]),
+    );
+  });
+
+  it('registers a Kargo webhook placeholder that returns 501 without mutating shipment data', async () => {
+    const posts = new Map<string, (request: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (request: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(app as never, env);
+    const result = await posts.get('/webhooks/shipping/kargo-entegrator')?.({}, reply);
+
+    expect(result).toEqual({
+      status: 501,
+      body: {
+        message: 'Kargo Entegratör webhook ingestion is not implemented yet.',
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
   it('diagnoses deprecated Kargo cargo integration env fallback without exposing values', () => {

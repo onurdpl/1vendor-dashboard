@@ -56,11 +56,21 @@ export type ShippingProviderDiagnostics = {
   provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
   executionReady: boolean;
   shippingExecutionEnabled: boolean;
+  providerSelected?: boolean;
   providerEnabled: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
+  cargoIntegrationIdConfigured?: boolean;
+  warehouseIdConfigured?: boolean;
+  defaultDesiConfigured?: boolean;
+  notificationUrlConfigured?: boolean;
+  webhookRouteImplemented?: boolean;
+  receiverAddressAvailability?: 'unknown_required';
+  dummyKargoSupport?: 'not_implemented';
+  statusSyncSupport?: 'not_implemented';
   missing: string[];
   deprecatedEnvFallbacks?: string[];
+  warnings?: string[];
 };
 
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';

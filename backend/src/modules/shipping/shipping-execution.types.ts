@@ -36,11 +36,21 @@ export type ShippingProviderGateDiagnosticsDto = {
   provider: ShippingProviderDto;
   executionReady: boolean;
   shippingExecutionEnabled: boolean;
+  providerSelected: boolean;
   providerEnabled: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
+  cargoIntegrationIdConfigured: boolean;
+  warehouseIdConfigured: boolean;
+  defaultDesiConfigured: boolean;
+  notificationUrlConfigured: boolean;
+  webhookRouteImplemented: boolean;
+  receiverAddressAvailability: 'unknown_required';
+  dummyKargoSupport: 'not_implemented';
+  statusSyncSupport: 'not_implemented';
   missing: string[];
   deprecatedEnvFallbacks: string[];
+  warnings: string[];
 };
 
 export type ShipmentExecutionDto = {
@@ -84,6 +94,7 @@ export type ShipmentExecutionPreviewDto = {
   payload: Record<string, unknown>;
   customerFieldsValid: boolean;
   missingCustomerFields: string[];
+  warnings: string[];
 };
 
 export type VendorShippingConfigUpdateDto = {

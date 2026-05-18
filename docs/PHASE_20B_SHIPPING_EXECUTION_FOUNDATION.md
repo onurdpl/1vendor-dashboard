@@ -142,6 +142,7 @@ Phase 20B does not:
 
 Future phases can add:
 
+- provider contract confirmation using `docs/KARGO_ENTEGRATOR_CONTRACT_CHECKLIST.md`
 - live Hepsijet payload hardening against the official production contract
 - MNG/Yurtiçi/Aras adapters
 - carrier status polling

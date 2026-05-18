@@ -409,9 +409,11 @@ export function getShippingProviderGateDiagnostics(
 ): ShippingProviderGateDiagnosticsDto {
   const provider = providerOverride ?? (env.SHIPPING_PROVIDER === 'kargo_entegrator' ? 'kargo_entegrator' : 'hepsijet');
   const isKargo = provider === 'kargo_entegrator';
+  const providerSelected = env.SHIPPING_PROVIDER === provider;
   const providerEnabled = isKargo ? env.KARGO_ENTEGRATOR_ENABLED : false;
   const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : false;
   const apiKeyConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_API_KEY) : false;
+  const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
   const missing = [
     !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
     isKargo && !env.KARGO_ENTEGRATOR_ENABLED ? 'KARGO_ENTEGRATOR_ENABLED' : null,
@@ -423,14 +425,67 @@ export function getShippingProviderGateDiagnostics(
     provider,
     executionReady: env.SHIPPING_EXECUTION_ENABLED && providerEnabled && baseUrlConfigured && apiKeyConfigured,
     shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
+    providerSelected,
     providerEnabled,
     baseUrlConfigured,
     apiKeyConfigured,
+    cargoIntegrationIdConfigured,
+    warehouseIdConfigured: false,
+    defaultDesiConfigured: false,
+    notificationUrlConfigured: false,
+    webhookRouteImplemented: false,
+    receiverAddressAvailability: 'unknown_required',
+    dummyKargoSupport: 'not_implemented',
+    statusSyncSupport: 'not_implemented',
     missing,
     deprecatedEnvFallbacks:
       isKargo && env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE === 'deprecated'
         ? ['ARGO_ENTEGRATOR_CARGO_INTEGRATION_ID']
         : [],
+    warnings: isKargo
+      ? [
+          'Kargo Entegratör create contract is not verified.',
+          'Receiver address and phone requirements are unknown.',
+          'Kargo Entegratör webhook/status sync is not implemented.',
+          'Dummy Kargo creation is not implemented.',
+        ]
+      : [],
+  };
+}
+
+export async function getShippingProviderReadinessDiagnostics(
+  env: AppEnv,
+  providerOverride?: ShippingProviderDto,
+  vendorId?: string | null,
+): Promise<ShippingProviderGateDiagnosticsDto> {
+  const diagnostics = getShippingProviderGateDiagnostics(env, providerOverride);
+  if (diagnostics.provider !== 'kargo_entegrator' || !vendorId) {
+    return diagnostics;
+  }
+
+  const config = mapShippingConfig(await getStoredShippingConfig(vendorId), vendorId);
+  const warehouse = selectDefaultWarehouse(config, diagnostics.provider);
+  const cargoIntegrationIdConfigured = Boolean(config.cargoIntegrationId ?? env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID);
+  const warehouseIdConfigured = Boolean(warehouse?.warehouseId ?? config.defaultWarehouseId);
+  const defaultDesiConfigured = Number(config.defaultDesi) > 0;
+  const missing = [
+    ...diagnostics.missing,
+    !cargoIntegrationIdConfigured ? 'VENDOR_CARGO_INTEGRATION_ID' : null,
+    !warehouseIdConfigured ? 'VENDOR_WAREHOUSE_ID' : null,
+    !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    ...diagnostics,
+    executionReady:
+      diagnostics.executionReady &&
+      cargoIntegrationIdConfigured &&
+      warehouseIdConfigured &&
+      defaultDesiConfigured,
+    cargoIntegrationIdConfigured,
+    warehouseIdConfigured,
+    defaultDesiConfigured,
+    missing,
   };
 }
 
@@ -750,6 +805,15 @@ async function buildShipmentRequestPreview(
     payload,
     customerFieldsValid: missingCustomerFields.length === 0,
     missingCustomerFields,
+    warnings:
+      provider === ShippingProvider.KARGO_ENTEGRATOR
+        ? [
+            'Kargo Entegratör create contract is not verified.',
+            'Receiver address and phone requirements are unknown.',
+            'Kargo Entegratör webhook/status sync is not implemented.',
+            'Dummy Kargo creation is not implemented.',
+          ]
+        : [],
   };
 }
 

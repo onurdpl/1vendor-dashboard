@@ -468,6 +468,13 @@ export async function retryShipmentExecution(shipmentExecutionId: string) {
   return apiClient.post<CreateShipmentExecutionResult>(`/admin/shipments/${shipmentExecutionId}/retry`, {});
 }
 
-export async function getShippingProviderDiagnostics(provider: 'kargo_entegrator' = 'kargo_entegrator') {
-  return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?provider=${provider}`);
+export async function getShippingProviderDiagnostics(
+  provider: 'kargo_entegrator' = 'kargo_entegrator',
+  options: { vendorId?: string | null } = {},
+) {
+  const params = new URLSearchParams({ provider });
+  if (options.vendorId) {
+    params.set('vendorId', options.vendorId);
+  }
+  return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?${params.toString()}`);
 }

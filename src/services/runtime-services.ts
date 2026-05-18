@@ -370,18 +370,33 @@ export const runtimeServices = {
     },
     async shippingProviderDiagnostics() {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getShippingProviderDiagnostics('kargo_entegrator');
+        return realOrders.getShippingProviderDiagnostics('kargo_entegrator', { vendorId: getCurrentVendorId() });
       }
 
       return {
         provider: 'kargo_entegrator' as const,
         executionReady: false,
         shippingExecutionEnabled: false,
+        providerSelected: false,
         providerEnabled: false,
         baseUrlConfigured: false,
         apiKeyConfigured: false,
+        cargoIntegrationIdConfigured: false,
+        warehouseIdConfigured: false,
+        defaultDesiConfigured: false,
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: false,
+        receiverAddressAvailability: 'unknown_required' as const,
+        dummyKargoSupport: 'not_implemented' as const,
+        statusSyncSupport: 'not_implemented' as const,
         missing: ['SHIPPING_EXECUTION_ENABLED', 'KARGO_ENTEGRATOR_ENABLED'],
         deprecatedEnvFallbacks: [],
+        warnings: [
+          'Kargo Entegratör create contract is not verified.',
+          'Receiver address and phone requirements are unknown.',
+          'Kargo Entegratör webhook/status sync is not implemented.',
+          'Dummy Kargo creation is not implemented.',
+        ],
       };
     },
   },

@@ -1146,6 +1146,10 @@ export function OrderDetailPage() {
                       <strong>{shippingProviderDiagnostics.shippingExecutionEnabled ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="summary-row">
+                      <span>Provider selected</span>
+                      <strong>{shippingProviderDiagnostics.providerSelected ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
                       <span>Provider enabled</span>
                       <strong>{shippingProviderDiagnostics.providerEnabled ? 'yes' : 'no'}</strong>
                     </div>
@@ -1156,6 +1160,38 @@ export function OrderDetailPage() {
                     <div className="summary-row">
                       <span>API key configured</span>
                       <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Cargo integration configured</span>
+                      <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Warehouse configured</span>
+                      <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Default desi configured</span>
+                      <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Notification URL configured</span>
+                      <strong>{shippingProviderDiagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Webhook route implemented</span>
+                      <strong>{shippingProviderDiagnostics.webhookRouteImplemented ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Receiver address availability</span>
+                      <strong>{shippingProviderDiagnostics.receiverAddressAvailability === 'unknown_required' ? 'unknown / required' : '—'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Dummy Kargo support</span>
+                      <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'not_implemented' ? 'not implemented' : '—'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Status sync support</span>
+                      <strong>{shippingProviderDiagnostics.statusSyncSupport === 'not_implemented' ? 'not implemented' : '—'}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Missing env names</span>
@@ -1169,6 +1205,12 @@ export function OrderDetailPage() {
                           : '—'}
                       </strong>
                     </div>
+                    {shippingProviderDiagnostics.warnings?.length ? (
+                      <div className="summary-row">
+                        <span>Readiness warnings</span>
+                        <strong>{shippingProviderDiagnostics.warnings.join(' · ')}</strong>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
                 <p className="page-description">
