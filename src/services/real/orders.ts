@@ -56,6 +56,12 @@ type OrderSummaryDto = {
   allocationStatus: string;
   fulfillmentStatus: string;
   shippingStatus: string;
+  carrier: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  fulfilledAt: string | null;
+  shipmentCreatedAt: string | null;
+  shipmentUpdatedAt: string | null;
   totalAmount: string;
   lineItemCount: number;
   createdAt: string;
@@ -63,12 +69,6 @@ type OrderSummaryDto = {
 };
 
 type OrderDetailDto = OrderSummaryDto & {
-  carrier: string | null;
-  trackingNumber: string | null;
-  trackingUrl: string | null;
-  fulfilledAt: string | null;
-  shipmentCreatedAt: string | null;
-  shipmentUpdatedAt: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   lineItems: Array<{
@@ -294,6 +294,13 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     fulfillmentActionAvailable: allocationStatus === 'active',
     fulfillmentStatus,
     shippingStatus,
+    trackingNumber: dto.trackingNumber ?? undefined,
+    carrier: dto.carrier ?? undefined,
+    trackingUrl: dto.trackingUrl ?? undefined,
+    fulfilledAt: dto.fulfilledAt ?? undefined,
+    fulfilledByVendorId: dto.fulfilledAt ? dto.assignedVendorId : undefined,
+    shipmentCreatedAt: dto.shipmentCreatedAt ?? undefined,
+    shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
     date: dto.createdAt,
     customer: 'Customer unavailable',
     amount: formatCurrency(dto.totalAmount),

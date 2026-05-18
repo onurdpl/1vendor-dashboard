@@ -8,6 +8,12 @@ export type OrderSummaryDto = {
   allocationStatus: string;
   fulfillmentStatus: string;
   shippingStatus: string;
+  carrier: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+  fulfilledAt: string | null;
+  shipmentCreatedAt: string | null;
+  shipmentUpdatedAt: string | null;
   totalAmount: string;
   lineItemCount: number;
   createdAt: string;
@@ -169,12 +175,6 @@ export type OrderShipmentExecutionDto = {
 };
 
 export type OrderDetailDto = OrderSummaryDto & {
-  carrier: string | null;
-  trackingNumber: string | null;
-  trackingUrl: string | null;
-  fulfilledAt: string | null;
-  shipmentCreatedAt: string | null;
-  shipmentUpdatedAt: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   lineItems: OrderDetailLineItemDto[];
