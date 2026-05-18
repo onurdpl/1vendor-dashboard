@@ -11,6 +11,7 @@ import {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  type OrderDetail,
   type ShipmentCustomerField,
   type ShipmentCustomerOverrides,
   type ShipmentExecution,
@@ -155,6 +156,51 @@ const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
   district: 'District',
   address: 'Address',
 };
+
+function hasShipmentSuccessEvidence(value: unknown) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  const normalized = String(value).trim().toLowerCase();
+  return Boolean(normalized && normalized !== 'pending' && normalized !== 'not available' && normalized !== '—');
+}
+
+function getShipmentRetryBlockedReason(
+  shipment: OrderDetail['shipmentExecution'] | null,
+  status: string,
+  summary: NonNullable<OrderDetail['shipmentExecution']>['providerResponseSummary'] | null | undefined,
+) {
+  if (!shipment) {
+    return 'No shipment execution is available.';
+  }
+
+  const failedLike =
+    ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(status) ||
+    summary?.ok === false ||
+    Boolean(summary?.providerError || summary?.providerValidationErrors.length);
+
+  if (!failedLike) {
+    return 'Shipment execution is not in a failed recovery state.';
+  }
+
+  if (hasShipmentSuccessEvidence(shipment.providerShipmentId)) {
+    return 'Provider shipment id already exists.';
+  }
+
+  if (hasShipmentSuccessEvidence(shipment.trackingNumber)) {
+    return 'Tracking number already exists.';
+  }
+
+  if (hasShipmentSuccessEvidence(shipment.labelUrl)) {
+    return 'Label already exists.';
+  }
+
+  if (hasShipmentSuccessEvidence(shipment.barcode)) {
+    return 'Barcode already exists.';
+  }
+
+  return null;
+}
 
 function getMissingShipmentCustomerFields(message: string): ShipmentCustomerField[] {
   const allowedFields = new Set(Object.keys(SHIPMENT_CUSTOMER_FIELD_LABELS));
@@ -327,14 +373,19 @@ export function OrderDetailPage() {
     !shipmentExecution.providerShipmentId &&
     !shipmentExecution.trackingNumber &&
     Boolean(shipmentProviderSummary?.dryRun === true || (shipmentProviderSummary?.disabledGates.length ?? 0) > 0);
-  const canRecoverFailedShipment =
+  const failedShipmentRetryBlockedReason = getShipmentRetryBlockedReason(
+    visibleShipmentExecution,
+    visibleShipmentStatus,
+    shipmentProviderSummary,
+  );
+  const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
+  const shouldShowFailedShipmentRetryDiagnostics =
+    (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
-    (['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
+    (canRecoverFailedShipment ||
+      ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
       shipmentProviderSummary?.ok === false ||
-      Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length)) &&
-    !visibleShipmentExecution?.providerShipmentId &&
-    !visibleShipmentExecution?.trackingNumber &&
-    !visibleShipmentExecution?.labelUrl;
+      Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -1142,6 +1193,30 @@ export function OrderDetailPage() {
                             ) : null}
                           </div>
                         ) : null}
+                        {shouldShowFailedShipmentRetryDiagnostics && !shipmentProviderSummary ? (
+                          <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
+                            <strong>Shipment recovery</strong>
+                            <span>
+                              Retry eligible: {canRecoverFailedShipment ? 'yes' : 'no'}
+                              {failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''}
+                            </span>
+                            {canRecoverFailedShipment ? (
+                              <div className="order-inline-actions">
+                                <button
+                                  type="button"
+                                  className="button button-primary"
+                                  disabled={isRetryingFailedShipment}
+                                  onClick={() => handleRetryFailedShipment()}
+                                >
+                                  {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
+                                </button>
+                                <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
+                                  View diagnostics
+                                </a>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {!hasTrackingSync && !hasShipmentExecution ? (
@@ -1478,6 +1553,30 @@ export function OrderDetailPage() {
                                 View diagnostics
                               </a>
                             </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {shouldShowFailedShipmentRetryDiagnostics && !shipmentProviderSummary ? (
+                      <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
+                        <strong>Shipment recovery</strong>
+                        <span>
+                          Retry eligible: {canRecoverFailedShipment ? 'yes' : 'no'}
+                          {failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''}
+                        </span>
+                        {canRecoverFailedShipment ? (
+                          <div className="order-inline-actions">
+                            <button
+                              type="button"
+                              className="button button-primary"
+                              disabled={isRetryingFailedShipment}
+                              onClick={() => handleRetryFailedShipment()}
+                            >
+                              {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
+                            </button>
+                            <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
+                              View diagnostics
+                            </a>
                           </div>
                         ) : null}
                       </div>

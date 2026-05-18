@@ -366,6 +366,85 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
   });
 
+  it('renders retry action for failed shipments even when provider response summary is missing', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'Failed',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Shipment retry eligibility')).toBeInTheDocument();
+    expect(screen.getByText(/Retry eligible:\s*yes/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'View diagnostics' })).toBeInTheDocument();
+  });
+
+  it('does not render unsafe failed retry when barcode success evidence exists', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'Failed',
+        barcode: 'BARCODE-1028',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Shipment retry eligibility')).toBeInTheDocument();
+    expect(screen.getByText(/Retry eligible:\s*no · Barcode already exists/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry shipment' })).not.toBeInTheDocument();
+  });
+
+  it('keeps manual tracking separate from failed provider retry actions', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'Failed',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('button', { name: 'Retry shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Add tracking information' })).toBeInTheDocument();
+  });
+
   it('uses completed shipment-only fields when retrying a failed execution', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
