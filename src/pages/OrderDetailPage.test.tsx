@@ -193,6 +193,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       if (options?.provider === 'try_oto') {
         return Promise.resolve({
           provider: 'try_oto',
+          supportedProviders: ['kargo_entegrator', 'hepsijet'],
           executionReady: false,
           sandboxModeEnabled: true,
           shippingExecutionEnabled: false,
@@ -218,6 +219,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
       return Promise.resolve({
         provider: 'kargo_entegrator',
+        supportedProviders: ['kargo_entegrator', 'hepsijet'],
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,
@@ -468,6 +470,54 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         }),
       ),
     );
+  });
+
+  it('shows Try OTO provider option when backend diagnostics expose it as supported', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+      Promise.resolve({
+        provider: options?.provider === 'try_oto' ? 'try_oto' : 'kargo_entegrator',
+        supportedProviders: ['kargo_entegrator', 'hepsijet', 'try_oto'],
+        executionReady: false,
+        sandboxModeEnabled: options?.provider === 'try_oto',
+        shippingExecutionEnabled: false,
+        providerSelected: options?.provider !== 'try_oto',
+        providerEnabled: options?.provider === 'try_oto',
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: options?.provider !== 'try_oto',
+        warehouseIdConfigured: options?.provider !== 'try_oto',
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: true,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: [],
+        deprecatedEnvFallbacks: [],
+        warnings: [],
+      }),
+    );
+
+    renderOrderDetail();
+
+    const providerSelect = await screen.findByLabelText('Provider');
+    expect(providerSelect).toHaveValue('kargo_entegrator');
+    expect(screen.getByRole('option', { name: 'Try OTO' })).toBeInTheDocument();
+    await user.selectOptions(providerSelect, 'try_oto');
+    expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
   });
 
   it('keeps Try OTO config editing hidden from vendors', async () => {

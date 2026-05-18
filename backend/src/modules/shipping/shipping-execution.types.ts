@@ -35,6 +35,7 @@ export type VendorShippingConfigDto = {
 
 export type ShippingProviderGateDiagnosticsDto = {
   provider: ShippingProviderDto;
+  supportedProviders: ShippingProviderDto[];
   executionReady: boolean;
   sandboxModeEnabled: boolean;
   shippingExecutionEnabled: boolean;

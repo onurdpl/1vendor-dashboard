@@ -113,6 +113,7 @@ export type ShipmentCustomerOverrides = Partial<Record<ShipmentCustomerField, st
 
 export type ShippingProviderDiagnostics = {
   provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
+  supportedProviders?: ShippingProvider[];
   executionReady: boolean;
   sandboxModeEnabled?: boolean;
   shippingExecutionEnabled: boolean;

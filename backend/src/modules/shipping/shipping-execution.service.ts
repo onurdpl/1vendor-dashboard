@@ -938,6 +938,11 @@ export function getShippingProviderGateDiagnostics(
   const provider = providerOverride ?? env.SHIPPING_PROVIDER;
   const isKargo = provider === 'kargo_entegrator';
   const isTryOto = provider === 'try_oto';
+  const supportedProviders: ShippingProviderDto[] = [
+    'kargo_entegrator',
+    'hepsijet',
+    ...(env.TRY_OTO_ENABLED ? (['try_oto'] as ShippingProviderDto[]) : []),
+  ];
   const providerSelected = env.SHIPPING_PROVIDER === provider;
   const providerEnabled = isKargo ? env.KARGO_ENTEGRATOR_ENABLED : isTryOto ? env.TRY_OTO_ENABLED : false;
   const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : isTryOto ? Boolean(env.TRY_OTO_BASE_URL) : false;
@@ -957,6 +962,7 @@ export function getShippingProviderGateDiagnostics(
 
   return {
     provider,
+    supportedProviders,
     executionReady:
       env.SHIPPING_EXECUTION_ENABLED &&
       providerEnabled &&

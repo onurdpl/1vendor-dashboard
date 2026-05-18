@@ -407,6 +407,7 @@ export const runtimeServices = {
 
       return {
         provider,
+        supportedProviders: ['kargo_entegrator' as const, 'hepsijet' as const],
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,

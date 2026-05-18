@@ -1119,6 +1119,8 @@ export function OrderDetailPage() {
   const shouldShowTryOtoProviderOption =
     vendorShippingConfig?.preferredProvider === 'try_oto' ||
     shippingProviderDiagnostics?.provider === 'try_oto' ||
+    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('try_oto')) ||
+    Boolean(tryOtoOptionDiagnostics?.supportedProviders?.includes('try_oto')) ||
     Boolean(tryOtoOptionDiagnostics?.providerEnabled);
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
 
