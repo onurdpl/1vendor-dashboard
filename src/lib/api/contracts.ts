@@ -118,6 +118,7 @@ export type ShipmentExecution = {
         pickupLocationCode: boolean;
         originCity: boolean;
         packageWeight: boolean;
+        weight?: boolean;
         customerCity: boolean;
         customerCountry: boolean;
         paymentMethod: boolean;
@@ -137,6 +138,9 @@ export type ShipmentExecution = {
       deliveryOptionLookupResponseHasDeliveryCompanyName?: boolean | null;
       deliveryOptionLookupResponseHasPricing?: boolean | null;
       deliveryOptionLookupResponsePricingKeys?: string[];
+      deliveryOptionLookupWeightFieldNames?: string[];
+      deliveryOptionLookupNumericWeightPresent?: boolean | null;
+      deliveryOptionLookupWeightType?: string | null;
     };
   };
 };

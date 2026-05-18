@@ -393,12 +393,21 @@ function buildTryOtoDeliveryLookupRequestDiagnostics(
 ) {
   const sourceCustomer = isRecord(sourcePayload.customer) ? sourcePayload.customer : {};
   const lookupCustomer = isRecord(lookupPayload?.customer) ? lookupPayload.customer : {};
+  const lookupWeightFieldNames = lookupPayload
+    ? ['weight', 'packageWeight'].filter((fieldName) => hasValue(lookupPayload[fieldName]))
+    : [];
   return {
     endpoint,
     topLevelKeys: lookupPayload ? Object.keys(lookupPayload).sort() : [],
     pickupLocationCodePresent: hasValue(lookupPayload?.pickupLocationCode),
     originCityPresent: hasValue(lookupPayload?.originCity),
     packageWeightPresent: hasValue(lookupPayload?.packageWeight),
+    weightPresent: hasValue(lookupPayload?.weight),
+    weightFieldNames: lookupWeightFieldNames,
+    numericWeightPresent:
+      typeof lookupPayload?.weight === 'number' ||
+      typeof lookupPayload?.packageWeight === 'number',
+    weightType: safeValueType(lookupPayload?.weight ?? lookupPayload?.packageWeight),
     customerCityPresent: hasValue(lookupCustomer.city),
     customerCountryPresent: hasValue(lookupCustomer.country),
     paymentMethodPresent: hasValue(lookupPayload?.payment_method),
@@ -478,6 +487,8 @@ function buildTryOtoDeliveryFeePayload(payload: Record<string, unknown>) {
     payload: {
       pickupLocationCode,
       ...(originCity ? { originCity } : {}),
+      destinationCity: customerCity,
+      weight: packageWeight,
       packageWeight,
       customer: {
         city: customerCity,

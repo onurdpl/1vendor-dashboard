@@ -151,6 +151,7 @@ function buildShipmentProviderResponseSummary(
               pickupLocationCode: deliveryOptionLookupRequest.pickupLocationCodePresent === true,
               originCity: deliveryOptionLookupRequest.originCityPresent === true,
               packageWeight: deliveryOptionLookupRequest.packageWeightPresent === true,
+              weight: deliveryOptionLookupRequest.weightPresent === true,
               customerCity: deliveryOptionLookupRequest.customerCityPresent === true,
               customerCountry: deliveryOptionLookupRequest.customerCountryPresent === true,
               paymentMethod: deliveryOptionLookupRequest.paymentMethodPresent === true,
@@ -187,6 +188,14 @@ function buildShipmentProviderResponseSummary(
         deliveryOptionLookupResponsePricingKeys: Array.isArray(deliveryOptionLookupResponse?.pricingKeys)
           ? deliveryOptionLookupResponse.pricingKeys.filter((key): key is string => typeof key === 'string')
           : [],
+        deliveryOptionLookupWeightFieldNames: Array.isArray(deliveryOptionLookupRequest?.weightFieldNames)
+          ? deliveryOptionLookupRequest.weightFieldNames.filter((key): key is string => typeof key === 'string')
+          : [],
+        deliveryOptionLookupNumericWeightPresent:
+          typeof deliveryOptionLookupRequest?.numericWeightPresent === 'boolean'
+            ? deliveryOptionLookupRequest.numericWeightPresent
+            : null,
+        deliveryOptionLookupWeightType: readString(deliveryOptionLookupRequest, ['weightType']),
       }
     : undefined;
 

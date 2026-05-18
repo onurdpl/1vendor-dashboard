@@ -877,6 +877,7 @@ export function OrderDetailPage() {
             `pickup ${formatPresence(presence.pickupLocationCode)}`,
             `origin ${formatPresence(presence.originCity)}`,
             `weight ${formatPresence(presence.packageWeight)}`,
+            `lookup.weight ${formatPresence(presence.weight)}`,
             `customer.city ${formatPresence(presence.customerCity)}`,
             `customer.country ${formatPresence(presence.customerCountry)}`,
             `payment ${formatPresence(presence.paymentMethod)}`,
@@ -938,6 +939,16 @@ export function OrderDetailPage() {
             {diagnostics.deliveryOptionLookupResponsePricingKeys?.length
               ? ` (${diagnostics.deliveryOptionLookupResponsePricingKeys.join(', ')})`
               : ''}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup weight fields</span>
+          <strong>
+            {diagnostics.deliveryOptionLookupWeightFieldNames?.length
+              ? diagnostics.deliveryOptionLookupWeightFieldNames.join(', ')
+              : '—'}{' '}
+            · numeric {formatPresence(diagnostics.deliveryOptionLookupNumericWeightPresent)}
+            {diagnostics.deliveryOptionLookupWeightType ? ` (${diagnostics.deliveryOptionLookupWeightType})` : ''}
           </strong>
         </div>
         <div className="summary-row">
