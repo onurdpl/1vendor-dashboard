@@ -1255,6 +1255,7 @@ describe('shipping execution foundation', () => {
       shippingVatPercent: 18,
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
       },
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
@@ -3108,6 +3109,66 @@ describe('shipping execution foundation', () => {
     });
     expect(Number.isNaN(createData?.desi)).toBe(false);
     expect(createData).not.toHaveProperty('allocationId');
+  });
+
+  it('blocks Try OTO shipment execution before provider lookup when origin city is missing', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Sandbox Customer',
+          customerEmail: 'sandbox@example.com',
+          customerPhone: '0555 111 22 33',
+          shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'TR',
+          shippingPostcode: '34710',
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          provider: 'try_oto',
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'try_oto',
+            TRY_OTO_ENABLED: true,
+            TRY_OTO_SANDBOX_MODE: true,
+            TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+            TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+          },
+          vendorId: 'sporjinal',
+          adapter,
+        },
+      ),
+    ).rejects.toThrow('Try OTO origin city is required for delivery option lookup.');
+
+    expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
   it('uses configured Try OTO deliveryOptionId without delivery option lookup', async () => {

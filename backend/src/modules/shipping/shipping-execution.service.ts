@@ -1070,17 +1070,19 @@ export async function getShippingProviderReadinessDiagnostics(
   const configProviderSelected = mapProvider(config.preferredProvider) === diagnostics.provider;
   if (diagnostics.provider === 'try_oto') {
     const pickupLocationCodeConfigured = Boolean(resolveTryOtoPickupLocationCode(config.providerMetadata));
+    const originCityConfigured = Boolean(resolveTryOtoOriginCity(config.providerMetadata));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
       !pickupLocationCodeConfigured ? 'VENDOR_TRY_OTO_PICKUP_LOCATION_CODE' : null,
+      !originCityConfigured ? 'VENDOR_TRY_OTO_ORIGIN_CITY' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
     ].filter((value): value is string => Boolean(value));
 
     return {
       ...diagnostics,
       providerSelected: configProviderSelected,
-      executionReady: diagnostics.executionReady && pickupLocationCodeConfigured && defaultDesiConfigured,
+      executionReady: diagnostics.executionReady && pickupLocationCodeConfigured && originCityConfigured && defaultDesiConfigured,
       warehouseIdConfigured: pickupLocationCodeConfigured,
       defaultDesiConfigured,
       missing,
@@ -1639,6 +1641,12 @@ async function buildShipmentRequestPreview(
   if (provider === ShippingProvider.TRY_OTO && !tryOtoPickupLocationCode) {
     throw new Error('Try OTO pickupLocationCode is not configured for this vendor.');
   }
+  const tryOtoOriginCity = provider === ShippingProvider.TRY_OTO
+    ? resolveTryOtoOriginCity(config.providerMetadata)
+    : null;
+  if (provider === ShippingProvider.TRY_OTO && !tryOtoOriginCity) {
+    throw new Error('Try OTO origin city is required for delivery option lookup.');
+  }
 
   const lineItems = allocation.lineItems.map((lineItem) => ({
     title: lineItem.shopifyOrderLineItem.title ?? lineItem.shopifyOrderLineItem.sku ?? 'Shopify item',
@@ -1703,9 +1711,6 @@ async function buildShipmentRequestPreview(
   const tryOtoPackageWeight = resolveTryOtoPackageWeight(config.providerMetadata, kg);
   const tryOtoDeliveryOptionId = provider === ShippingProvider.TRY_OTO
     ? resolveTryOtoDeliveryOptionId(config.providerMetadata)
-    : null;
-  const tryOtoOriginCity = provider === ShippingProvider.TRY_OTO
-    ? resolveTryOtoOriginCity(config.providerMetadata)
     : null;
   const tryOtoOrderId = [
     'shopify',

@@ -98,6 +98,7 @@ type ShippingConfigDraft = {
   defaultDesi: string;
   packageType: 'box' | 'document';
   tryOtoPickupLocationCode: string;
+  tryOtoOriginCity: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -116,6 +117,12 @@ function readTryOtoPickupLocationCode(config?: VendorShippingConfig | null) {
   return typeof raw === 'string' ? raw : '';
 }
 
+function readTryOtoOriginCity(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.tryOtoOriginCity ?? metadata.originCity ?? metadata.origin_city ?? metadata.pickupCity ?? metadata.pickup_city;
+  return typeof raw === 'string' ? raw : '';
+}
+
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
   return {
     preferredProvider: config?.preferredProvider ?? 'kargo_entegrator',
@@ -124,6 +131,7 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     defaultDesi: config?.defaultDesi ?? '3.00',
     packageType: readPackageType(config),
     tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
+    tryOtoOriginCity: readTryOtoOriginCity(config),
   };
 }
 
@@ -146,6 +154,9 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   }
   if (draft.preferredProvider === 'try_oto' && !draft.tryOtoPickupLocationCode.trim()) {
     errors.push('Try OTO pickup location code is required.');
+  }
+  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoOriginCity.trim()) {
+    errors.push('Try OTO origin city is required.');
   }
   const defaultDesi = Number(draft.defaultDesi);
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
@@ -177,6 +188,7 @@ function buildShippingConfigUpdate(
       providerMetadata: {
         ...metadata,
         tryOtoPickupLocationCode: draft.tryOtoPickupLocationCode.trim(),
+        tryOtoOriginCity: draft.tryOtoOriginCity.trim(),
       },
       warehouses: [],
     };
@@ -1318,6 +1330,7 @@ export function OrderDetailPage() {
     Boolean(tryOtoOptionDiagnostics?.supportedProviders?.includes('try_oto')) ||
     Boolean(tryOtoOptionDiagnostics?.providerEnabled);
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
+  const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
 
   const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
     <form
@@ -1385,18 +1398,32 @@ export function OrderDetailPage() {
           </>
         ) : null}
         {isTryOtoConfigDraft ? (
-          <label className="field">
-            <span>Try OTO pickup location code</span>
-            <input
-              value={shippingConfigDraft.tryOtoPickupLocationCode}
-              onChange={(event) =>
-                setShippingConfigDraft((current) => ({
-                  ...current,
-                  tryOtoPickupLocationCode: event.target.value,
-                }))
-              }
-            />
-          </label>
+          <>
+            <label className="field">
+              <span>Try OTO pickup location code</span>
+              <input
+                value={shippingConfigDraft.tryOtoPickupLocationCode}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    tryOtoPickupLocationCode: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Try OTO origin city</span>
+              <input
+                value={shippingConfigDraft.tryOtoOriginCity}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    tryOtoOriginCity: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </>
         ) : null}
         <label className="field">
           <span>Default desi</span>
@@ -1940,10 +1967,16 @@ export function OrderDetailPage() {
                         </div>
                         {shippingConfigEditorForm}
                         {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                          <div className="summary-row">
-                            <span>Try OTO pickup location</span>
-                            <strong>{tryOtoPickupLocationCode || '—'}</strong>
-                          </div>
+                          <>
+                            <div className="summary-row">
+                              <span>Try OTO pickup location</span>
+                              <strong>{tryOtoPickupLocationCode || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO origin city configured</span>
+                              <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
+                            </div>
+                          </>
                         ) : (
                           <>
                             <div className="summary-row">
@@ -2331,10 +2364,16 @@ export function OrderDetailPage() {
                       <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
                     </div>
                     {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                      <div className="summary-row">
-                        <span>Try OTO pickup location</span>
-                        <strong>{tryOtoPickupLocationCode || '—'}</strong>
-                      </div>
+                      <>
+                        <div className="summary-row">
+                          <span>Try OTO pickup location</span>
+                          <strong>{tryOtoPickupLocationCode || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Try OTO origin city configured</span>
+                          <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div className="summary-row">

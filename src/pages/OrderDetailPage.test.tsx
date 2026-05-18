@@ -440,6 +440,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
@@ -455,6 +456,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-002',
+        tryOtoOriginCity: 'Ankara',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:45:00.000Z',
@@ -463,10 +465,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const pickupInput = await screen.findByLabelText('Try OTO pickup location code');
+    const originCityInput = await screen.findByLabelText('Try OTO origin city');
     expect(pickupInput).toHaveValue('tr-test-store-001');
+    expect(originCityInput).toHaveValue('Istanbul');
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
     await user.clear(pickupInput);
     await user.type(pickupInput, 'tr-test-store-002');
+    await user.clear(originCityInput);
+    await user.type(originCityInput, 'Ankara');
     await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
 
     await waitFor(() =>
@@ -480,6 +486,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           warehouses: [],
           providerMetadata: expect.objectContaining({
             tryOtoPickupLocationCode: 'tr-test-store-002',
+            tryOtoOriginCity: 'Ankara',
           }),
         }),
       ),
@@ -507,6 +514,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
@@ -591,6 +599,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('option', { name: 'Try OTO' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'try_oto');
     expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
+    expect(screen.getByLabelText('Try OTO origin city')).toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
   });
 
@@ -607,6 +616,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
@@ -658,6 +668,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await screen.findByText('Order #1028');
     expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO origin city')).not.toBeInTheDocument();
   });
 
   it('renders shipping config editor fields for admins on active order detail actions', async () => {
