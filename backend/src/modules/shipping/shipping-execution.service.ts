@@ -1048,6 +1048,7 @@ export async function getShippingProviderReadinessDiagnostics(
   }
 
   const config = mapShippingConfig(await getStoredShippingConfig(vendorId), vendorId);
+  const configProviderSelected = mapProvider(config.preferredProvider) === diagnostics.provider;
   if (diagnostics.provider === 'try_oto') {
     const pickupLocationCodeConfigured = Boolean(resolveTryOtoPickupLocationCode(config.providerMetadata));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
@@ -1059,6 +1060,7 @@ export async function getShippingProviderReadinessDiagnostics(
 
     return {
       ...diagnostics,
+      providerSelected: configProviderSelected,
       executionReady: diagnostics.executionReady && pickupLocationCodeConfigured && defaultDesiConfigured,
       warehouseIdConfigured: pickupLocationCodeConfigured,
       defaultDesiConfigured,
@@ -1079,6 +1081,7 @@ export async function getShippingProviderReadinessDiagnostics(
 
   return {
     ...diagnostics,
+    providerSelected: configProviderSelected,
     executionReady:
       diagnostics.executionReady &&
       cargoIntegrationIdConfigured &&

@@ -472,6 +472,66 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
+  it('shows Try OTO as selected in admin diagnostics when vendor config uses Try OTO', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'try_oto',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+      Promise.resolve({
+        provider: options?.provider === 'try_oto' ? 'try_oto' : 'kargo_entegrator',
+        supportedProviders: ['kargo_entegrator', 'hepsijet', 'try_oto'],
+        executionReady: options?.provider === 'try_oto',
+        sandboxModeEnabled: options?.provider === 'try_oto',
+        shippingExecutionEnabled: true,
+        providerSelected: options?.provider === 'try_oto',
+        providerEnabled: true,
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: options?.provider !== 'try_oto',
+        warehouseIdConfigured: true,
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: true,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: [],
+        deprecatedEnvFallbacks: [],
+        warnings: ['Try OTO is sandbox-only in this phase.'],
+      }),
+    );
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Try OTO pickup location')).toBeInTheDocument();
+    expect(screen.getByText('tr-test-store-001')).toBeInTheDocument();
+    const selectedRow = screen.getByText('Provider selected').closest('.summary-row');
+    expect(selectedRow).toHaveTextContent('yes');
+  });
+
   it('shows Try OTO provider option when backend diagnostics expose it as supported', async () => {
     const user = userEvent.setup();
     setCurrentUser({
@@ -518,6 +578,39 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.selectOptions(providerSelect, 'try_oto');
     expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
+  });
+
+  it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'try_oto',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('button', { name: 'Create shipment' })).toBeInTheDocument();
+    expect(screen.queryByText('Shipping actions are currently unavailable.')).not.toBeInTheDocument();
   });
 
   it('keeps Try OTO config editing hidden from vendors', async () => {

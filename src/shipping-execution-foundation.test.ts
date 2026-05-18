@@ -1242,6 +1242,56 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('1774');
   });
 
+  it('marks Try OTO selected and ready from vendor shipping config even when the global provider differs', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargo_entegrator',
+        SHIPPING_EXECUTION_ENABLED: true,
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_SANDBOX_MODE: true,
+        TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+        TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+      },
+      'try_oto',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'try_oto',
+      supportedProviders: expect.arrayContaining(['try_oto']),
+      executionReady: true,
+      sandboxModeEnabled: true,
+      shippingExecutionEnabled: true,
+      providerSelected: true,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      missing: [],
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('refresh-secret');
+    expect(JSON.stringify(diagnostics)).not.toContain('tr-test-store-001');
+  });
+
   it('adds current Kargo readiness warnings to shipment previews without changing the payload', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
