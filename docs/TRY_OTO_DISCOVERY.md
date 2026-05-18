@@ -15,6 +15,27 @@ This document is discovery-only. It does not define a runtime implementation and
 - Existing Kargo Entegrator behavior must remain unchanged until a separate implementation phase.
 - Do not submit Shopify fulfillments automatically from Try OTO responses until a separate Shopify fulfillment phase is explicitly designed and tested.
 
+## Support Clarifications Received After Initial Discovery
+
+These notes are support clarifications layered on top of the Postman collection. The Postman collection remains the primary source of truth for endpoint names and example request/response shapes. Weak or ambiguous support answers are not treated as confirmed facts and remain marked as **Unknown** or **Needs confirmation** until sandbox proof.
+
+Confirmed support notes:
+- Initial label format requirement is PDF.
+- For Turkey, `customer.city` accepts free text.
+- For Turkey, `customer.district` accepts free text.
+- `deliveryOptionId` is not mandatory for Turkey according to support.
+- Carrier selection should be done by fetching delivery options through `checkOTODeliveryFee` or `checkDeliveryFee`, then using the selected `deliveryOptionId`.
+- 20 stores can use separate `pickupLocationCode` and return address mappings.
+- `createShipment=true` is supported, but separate `createOrder` plus `createShipment` gives more operational control.
+
+Weak or needs-confirmation support notes:
+- Support said the return label endpoint is `createShipment`, but the Postman collection contains `createReturnShipment`; return flow remains **Needs confirmation** and should prefer Postman evidence until Try OTO confirms the correct return-label path in writing or sandbox.
+- Support said the print endpoint usually returns a PDF URL field named `printLabelURL`; the Postman collection shows `printAWBURL`. The exact label URL response field remains **Unknown** until sandbox confirms.
+- Support said `trackingNumber` is usually authoritative; the authoritative tracking field remains **Unknown** until sandbox confirms responses for the selected Turkey carrier.
+- Webhook payload examples were not provided; `shipmentError` and `orderStatus` payload shapes remain **Unknown**.
+- Webhook signature verification exists according to support, but public key/secret retrieval and exact verification inputs remain **Unknown**.
+- Sandbox Turkey carrier availability and usable `deliveryOptionId` values remain **Unknown**.
+
 ## 1. Auth
 
 ### Base URLs
@@ -226,9 +247,13 @@ Optional fields listed:
 
 The collection states that if `deliveryOptionId` is not sent, OTO may assign a delivery company that satisfies a feasibility rule, or the first added delivery company if no rule exists.
 
+Support clarification:
+- `deliveryOptionId` is not mandatory for Turkey according to support.
+- Carrier selection should still be explicit in the PoC: call `checkOTODeliveryFee` or `checkDeliveryFee`, let the operator/admin choose a returned delivery option, and pass the selected `deliveryOptionId` to `createShipment`.
+
 Unknowns:
-- Whether auto-assignment without `deliveryOptionId` is safe for Turkey.
-- Whether a specific carrier can be selected without `deliveryOptionId`.
+- Whether auto-assignment without `deliveryOptionId` is operationally safe for production Turkey shipments.
+- Whether the selected `deliveryOptionId` remains stable across environments, stores, and carrier contract changes.
 - Whether `createShipment` returns final shipment identifiers synchronously beyond the generic acceptance message.
 
 ### `createOrder` With `createShipment=true`
@@ -239,12 +264,17 @@ Confirmed behavior:
 
 Recommended PoC approach:
 1. First test `createOrder` with `createShipment=false` or omitted to validate order/customer/item mapping.
-2. Then test `createShipment` separately with an explicit `deliveryOptionId` if available.
-3. Only after error/webhook visibility is proven, test `createOrder` with `createShipment=true`.
+2. Fetch carrier delivery options with `checkOTODeliveryFee` or `checkDeliveryFee`.
+3. Store/select the chosen `deliveryOptionId` for the test shipment.
+4. Then test `createShipment` separately with the selected `deliveryOptionId`.
+5. Only after separate order and shipment creation succeeds in sandbox, consider testing the `createShipment=true` shortcut.
+
+Support clarification:
+- `createShipment=true` is supported.
+- Separate `createOrder` plus `createShipment` gives more control and should be used first for the PoC to isolate mapping, carrier selection, and shipment errors.
 
 Unknowns:
-- Whether Try OTO recommends one-step `createOrder(createShipment=true)` for Turkish domestic shipping.
-- Whether two-step order then shipment is safer for operational retry/idempotency.
+- Whether Try OTO recommends one-step `createOrder(createShipment=true)` for production Turkey shipments after PoC success.
 - Whether duplicate `orderId` calls are idempotent, rejected, or mutate existing orders.
 
 ### Payment Mapping
@@ -350,6 +380,11 @@ Unknowns:
 - Whether `country = "TR"` is accepted by `createOrder`; the collection confirms country-specific marketplace registration rules for TR but createOrder examples do not show TR.
 - Whether Turkish carriers require national ID, tax number, or additional consignee fields for domestic shipments.
 
+Support clarification:
+- For Turkey, `customer.city` accepts free text.
+- For Turkey, `customer.district` accepts free text.
+- This confirms the field format is not limited to a known enum according to support, but sandbox should still verify carrier acceptance for the target delivery option.
+
 ### `pickupLocationCode` Behavior
 
 Confirmed:
@@ -405,6 +440,11 @@ Unknowns:
 - Whether labels should be stored as URL only or fetched and archived.
 - Whether `trackingNumber` or `dcTrackingNumber` is the canonical carrier tracking number for Turkish carriers.
 
+Support clarification:
+- Initial label format requirement is PDF.
+- Support said the print endpoint usually returns a PDF URL field named `printLabelURL`.
+- The Postman collection shows `printAWBURL`; therefore the exact label URL field remains **Unknown** until sandbox confirms whether the response uses `printAWBURL`, `printLabelURL`, both, or another field.
+
 ### ZPL Support
 
 Confirmed:
@@ -413,6 +453,10 @@ Confirmed:
 Unknown:
 - Whether the `print` endpoint itself accepts a ZPL parameter.
 - Whether Turkish carriers support ZPL through Try OTO for our account.
+
+Recommendation:
+- Start with PDF labels only.
+- Treat ZPL as a later capability after sandbox confirmation.
 
 ### Tracking Number Fields
 
@@ -425,6 +469,10 @@ Fields seen across label/status/history endpoints:
 Recommendation:
 - Store all safe identifiers in the provider snapshot.
 - Expose one canonical tracking number only after confirming which field Turkish carriers use.
+
+Support clarification:
+- Support said `trackingNumber` is usually authoritative.
+- Keep the authoritative tracking field as **Unknown** until sandbox responses confirm the chosen Turkey carrier behavior.
 
 ### `printReverseShipment` Behavior
 
@@ -574,6 +622,10 @@ Unknown:
 - Signature algorithm.
 - Whether status webhook includes `orderId`, `otoId`, `shipmentId`, `trackingNumber`, `dcTrackingNumber`, and `deliveryCompany`.
 
+Support clarification:
+- No `orderStatus` webhook payload example was provided.
+- Keep the payload shape **Unknown** until Try OTO provides an example or sandbox emits a real payload.
+
 ### Shipment Error Webhook
 
 Confirmed:
@@ -585,17 +637,22 @@ Unknown:
 - Whether errors are keyed by `orderId`, `otoId`, or `shipmentId`.
 - Whether error payloads contain customer data that must be redacted.
 
+Support clarification:
+- No `shipmentError` webhook payload example was provided.
+- Keep the payload shape **Unknown** until Try OTO provides an example or sandbox emits a real payload.
+
 ### Signature Verification Requirements
 
 Known:
 - `secretKey` is used for signing according to collection text.
 - `authorizationKey` can authenticate/validate incoming webhook requests.
+- Support confirmed webhook signature verification exists.
 
 Unknown:
 - Signature header name.
 - Signature algorithm.
 - Canonical string/body used for signing.
-- Public key behavior; no public key flow is shown in the collection.
+- Public key behavior; no public key flow is shown in the collection and support did not provide public key or secret retrieval details.
 - Replay protection requirements.
 
 Recommendation:
@@ -632,6 +689,11 @@ Confirmed behavior from collection:
 - All return-related actions, including tracking, print, and status checks, should use the returned return order ID.
 - Return shipment is item-based.
 
+Support clarification:
+- Support said the return label endpoint is `createShipment`.
+- This conflicts with or at least does not fully explain the Postman collection evidence, which contains `createReturnShipment` and documents generated `returnOrderId` behavior.
+- Treat the return flow as **Needs confirmation** and prefer the Postman `createReturnShipment` evidence until Try OTO confirms the exact return shipment and return label sequence.
+
 Documented fields:
 - `orderId`, required.
 - `pickupLocationCode`, optional.
@@ -644,6 +706,7 @@ Unknowns:
 - Whether return shipment can be created before Shopify return approval or only after delivery.
 - Whether a return can be created for undelivered forward shipments.
 - Whether Try OTO return shipment should be tied to our Shopify ReturnRecord, refund, or shipment execution object.
+- Whether the correct return-label flow is `createReturnShipment` then print by `returnOrderId`, original order print with `printReverseShipment=true`, `createShipment`, or another sequence.
 
 ### Return Item Behavior
 
@@ -716,11 +779,13 @@ Reasoning:
 - Marketplace registration introduces additional onboarding, country-specific seller identity fields, activation links, and account lifecycle complexity.
 
 Unknowns requiring Try OTO confirmation:
-- Whether 20 Turkish stores under one account with 20 pickup locations is supported by the desired carrier contracts.
 - Whether carrier contracts are per account, per pickup location, per brand, or per marketplace seller.
 - Whether each store needs its own Brand, Pickup Location, Branch, Warehouse, or sub-account.
-- Whether return addresses can differ from pickup addresses.
 - Whether sender name on label comes from account, brand, pickup location, or request field.
+
+Support clarification:
+- 20 stores can use separate `pickupLocationCode` and return address mappings according to support.
+- Carrier-contract behavior still needs confirmation because the collection separates pickup locations, brands, carrier integrations, and marketplace sub-accounts.
 
 ### `store_id` To `pickupLocationCode` Mapping
 
@@ -742,9 +807,9 @@ Confirmed from pickup location docs:
 - Pickup locations include address, city, country, contact name/email/mobile, and optional district/postcode/street/building fields.
 
 Unknowns:
-- Whether returns are always routed to pickup location, a return location, or a separate warehouse configured in OTO.
 - Whether `pickupLocationCode` on `createReturnShipment` controls return pickup origin or return destination.
-- Whether a separate return location code exists.
+- Whether returns are always routed to pickup location, support-confirmed return address mapping, a separate warehouse, or a carrier-specific return location.
+- Exact API/config field for the support-confirmed return address mapping.
 
 ## 8. Turkey-Specific Risks
 
@@ -756,7 +821,10 @@ Known:
 
 Unknown:
 - Whether `createOrder.customer.country = "TR"` is accepted for Turkish domestic shipments in our account.
-- Whether city names must be Turkish, English, OTO canonical names, or exact values returned by `/rest/v2/getCities`.
+- Whether carrier-specific validation prefers Turkish, English, or OTO canonical city names despite support saying free text is accepted.
+
+Support clarification:
+- For Turkey, `customer.city` accepts free text.
 
 ### City / District Expectations
 
@@ -768,9 +836,12 @@ Known:
 - `availableCities` returns account/carrier coverage cities.
 
 Unknown:
-- Whether Turkish carriers require district even if Try OTO docs mark it optional.
 - Whether Try OTO exposes a district list endpoint; none was found in the inspected collection.
 - Whether province, district, and neighborhood must be split into separate fields for Turkey.
+
+Support clarification:
+- For Turkey, `customer.district` accepts free text.
+- Whether specific carriers reject some district spellings remains **Unknown** until sandbox.
 
 ### Phone Format
 
@@ -816,7 +887,11 @@ Carrier names/codes found in the DC List response include:
 Unknown:
 - Which of these carriers are available for the actual Try OTO account.
 - Which carrier codes map to own contracts versus OTO marketplace contracts.
-- Whether delivery option ids must be configured before shipment creation.
+- Sandbox Turkey carrier availability and usable `deliveryOptionId` values.
+
+Support clarification:
+- `deliveryOptionId` is not mandatory for Turkey according to support.
+- Carrier selection should still be driven by calling `checkOTODeliveryFee` or `checkDeliveryFee`, then using the selected `deliveryOptionId`.
 
 ### National ID / Tax Fields
 
@@ -932,7 +1007,9 @@ Risks to plan for:
 3. Carrier readiness
    - Get active delivery options.
    - Confirm available Turkey carrier codes.
-   - Confirm whether `deliveryOptionId` is required.
+   - Call `checkOTODeliveryFee` or `checkDeliveryFee`.
+   - Store the selected `deliveryOptionId` for the shipment attempt.
+   - Confirm sandbox Turkey carrier availability and usable delivery options.
 
 4. Create paid forward order
    - Use `payment_method = "paid"`.
@@ -943,22 +1020,27 @@ Risks to plan for:
 
 5. Create shipment
    - Test separate `createShipment`.
-   - Test explicit `deliveryOptionId` if available.
+   - Use the selected `deliveryOptionId` from the delivery fee/options response.
    - Confirm response body and provider identifiers.
+   - Keep `createShipment=true` disabled for the first PoC so order creation and shipment creation errors can be isolated.
 
 6. Print AWB
    - Call print endpoint.
-   - Capture `printAWBURL`.
+   - Capture the PDF label URL.
+   - Confirm whether the field is `printAWBURL`, `printLabelURL`, or another field.
    - Confirm whether URL is public, authenticated, or expiring.
-   - Test ZPL through `orderStatus(labelType=ZPL)` if labels require thermal output.
+   - Keep initial label handling PDF-only.
+   - Test ZPL through `orderStatus(labelType=ZPL)` only after PDF works and thermal output is needed.
 
 7. Read order status
    - Call `orderStatus` by `orderId`.
    - Call `orderHistory` by `orderIds`.
    - Map `trackingNumber`, `dcTrackingNumber`, `trackingUrl`, `shipmentId`, `otoId`, and `status`.
+   - Confirm whether `trackingNumber` or `dcTrackingNumber` is authoritative for the selected Turkey carrier.
 
 8. Create return shipment
    - Confirm original order must be delivered first.
+   - Confirm whether the correct return flow is `createReturnShipment`, `createShipment`, or another sequence.
    - Create return shipment with `items[].sku` and `items[].quantity`.
    - Store returned `returnOrderId`.
 
@@ -980,14 +1062,14 @@ Risks to plan for:
 ## 11. Questions For Try OTO Support
 
 1. What is the exact minimal `createOrder` payload for a Turkish domestic shipment?
-2. Should Turkey integrations use `createOrder(createShipment=true)` or create order first and call `createShipment` separately?
-3. Is `deliveryOptionId` required for Turkish shipments, or is auto-assignment safe?
-4. How should we select a carrier such as Aras, Yurtiçi, MNG, Sürat, HepsiJet, or Kolay Gelsin?
+2. After sandbox success with separate calls, is `createOrder(createShipment=true)` recommended for production Turkey shipments, or should we keep separate `createOrder` plus `createShipment`?
+3. If `deliveryOptionId` is omitted for Turkey, what exact auto-assignment rules apply?
+4. When using `checkOTODeliveryFee` or `checkDeliveryFee`, which returned field is the stable `deliveryOptionId` to store for the immediate shipment attempt?
 5. Which Turkish carrier codes are enabled for our account in sandbox and production?
 6. Does `customer.country = "TR"` and `currency = "TRY"` work for Turkey shipments?
 7. What exact phone format is required for Turkish recipients?
-8. Is `customer.district` required for Turkish carriers even though the general docs mark district optional?
-9. Is there a district lookup endpoint for Turkey?
+8. Even though support says city/district are free text, are there carrier-specific spelling, casing, Turkish character, province, or district requirements?
+9. Is there a district lookup endpoint for Turkey, or should operators enter free text?
 10. Are recipient national ID, sender tax office, sender tax number, or company tax fields required for Turkey shipment creation?
 11. What should `amount` represent for a split multi-vendor Shopify order: full Shopify order total, allocation total, shipment item total, or declared item value?
 12. For prepaid Shopify orders, should we always send `payment_method = "paid"` and `amount_due = 0`?
@@ -999,14 +1081,13 @@ Risks to plan for:
 18. How are return addresses configured for each store?
 19. What is the exact print endpoint path format: `/print/{orderId}` or another form?
 20. Are PDF labels and ZPL labels both supported for Turkish carriers?
-21. Which field is canonical for carrier tracking: `trackingNumber` or `dcTrackingNumber`?
+21. Which field is canonical for carrier tracking in real Turkey sandbox responses: `trackingNumber` or `dcTrackingNumber`?
 22. Are `trackingUrl` and `trackingURL` stable/public URLs?
-23. For return labels, should we use `createReturnShipment` followed by print on `returnOrderId`, or print with `printReverseShipment=true` on the original order?
+23. For return labels, should we use `createReturnShipment` followed by print on `returnOrderId`, original-order print with `printReverseShipment=true`, `createShipment`, or another sequence?
 24. Can return shipments be created before the forward order is delivered?
 25. What webhook headers carry signature and authorization information?
 26. What is the signature algorithm for `secretKey` validation?
-27. Is there a public key flow? If yes, where is the public key obtained?
+27. Is there a public key flow or only shared-secret verification? If public key verification exists, where is the public key obtained?
 28. What are the exact payloads for `orderStatus` and `shipmentError` webhooks?
 29. Are webhook retries/idempotency keys provided?
 30. What are production onboarding steps, go-live checks, and sandbox-to-production differences?
-
