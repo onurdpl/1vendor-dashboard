@@ -294,6 +294,10 @@ function getMissingShipmentCustomerFields(message: string): ShipmentCustomerFiel
   const fields = Array.from(message.matchAll(/customer\.([a-zA-Z0-9_]+)/g))
     .map((match) => match[1])
     .filter((field): field is ShipmentCustomerField => Boolean(field && allowedFields.has(field)));
+  const normalizedMessage = message.toLocaleLowerCase('tr-TR');
+  if (/\bdistrict\b/.test(normalizedMessage) || normalizedMessage.includes('ilçe') || normalizedMessage.includes('ilce')) {
+    fields.push('district');
+  }
   return Array.from(new Set(fields));
 }
 
@@ -472,10 +476,20 @@ export function OrderDetailPage() {
   const shipmentExecution = order?.shipmentExecution ?? null;
   const visibleShipmentExecution = shipmentExecution ?? shipmentActionState?.shipment ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
-  const missingShipmentCustomerFields =
-    shipmentActionState?.tone === 'error' ? getMissingShipmentCustomerFields(shipmentActionState.message) : [];
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
   const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
+  const providerMissingShipmentCustomerFields =
+    shipmentProviderSummary?.ok === false || ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus)
+      ? [
+          ...(shipmentProviderSummary?.providerValidationErrors ?? []),
+          shipmentProviderSummary?.providerError ?? '',
+        ].flatMap((message) => getMissingShipmentCustomerFields(message))
+      : [];
+  const actionMissingShipmentCustomerFields =
+    shipmentActionState?.tone === 'error' ? getMissingShipmentCustomerFields(shipmentActionState.message) : [];
+  const missingShipmentCustomerFields = Array.from(
+    new Set([...actionMissingShipmentCustomerFields, ...providerMissingShipmentCustomerFields]),
+  );
   const shouldShowShipmentProviderSummary =
     isAdmin &&
     Boolean(shipmentProviderSummary) &&
@@ -506,6 +520,8 @@ export function OrderDetailPage() {
       ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
       shipmentProviderSummary?.ok === false ||
       Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
+  const shouldShowRecoveryShipmentFieldCompletionForm =
+    missingShipmentCustomerFields.length > 0 && canRecoverFailedShipment && shipmentActionState?.tone !== 'error';
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -610,6 +626,62 @@ export function OrderDetailPage() {
         showFeedback(errorMessage, 'error');
       });
   }
+
+  function renderShipmentFieldCompletionForm() {
+    if (missingShipmentCustomerFields.length === 0) {
+      return null;
+    }
+
+    return (
+      <form
+        className="shipment-field-completion-form"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canRecoverFailedShipment) {
+            handleRetryFailedShipment(missingShipmentCustomerFields);
+          } else {
+            handleCreateShipment(missingShipmentCustomerFields);
+          }
+        }}
+      >
+        <div>
+          <span>Complete shipment-only fields</span>
+          <p>These values are used only for this shipment request.</p>
+        </div>
+        <div className="shipment-field-completion-grid">
+          {missingShipmentCustomerFields.map((field) => (
+            <label className="field" key={field}>
+              <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
+              <input
+                required
+                value={shipmentCustomerOverrides[field] ?? ''}
+                onChange={(event) =>
+                  setShipmentCustomerOverrides((current) => ({
+                    ...current,
+                    [field]: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          ))}
+        </div>
+        <button
+          type="submit"
+          className="button button-primary"
+          disabled={isCreatingShipment || isRetryingFailedShipment}
+        >
+          {isRetryingFailedShipment
+            ? 'Retrying...'
+            : isCreatingShipment
+              ? 'Creating...'
+              : canRecoverFailedShipment
+                ? 'Retry shipment with completed fields'
+                : 'Create shipment with completed fields'}
+        </button>
+      </form>
+    );
+  }
+
   const supportSnapshot = order
     ? {
         route: location.pathname,
@@ -1432,11 +1504,12 @@ export function OrderDetailPage() {
                                     View diagnostics
                                   </a>
                                 </div>
+                                {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                               </div>
                             ) : null}
                           </div>
                         ) : null}
-                        {shouldShowFailedShipmentRetryDiagnostics && !shipmentProviderSummary ? (
+                        {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                           <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
                             <strong>Shipment recovery</strong>
                             <span>
@@ -1458,6 +1531,7 @@ export function OrderDetailPage() {
                                 </a>
                               </div>
                             ) : null}
+                            {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
                       </div>
@@ -1490,54 +1564,7 @@ export function OrderDetailPage() {
                             {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
                           </span>
                         ) : null}
-                        {missingShipmentCustomerFields.length > 0 ? (
-                          <form
-                            className="shipment-field-completion-form"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              if (canRecoverFailedShipment) {
-                                handleRetryFailedShipment(missingShipmentCustomerFields);
-                              } else {
-                                handleCreateShipment(missingShipmentCustomerFields);
-                              }
-                            }}
-                          >
-                            <div>
-                              <span>Complete shipment-only fields</span>
-                              <p>These values are used only for this shipment request.</p>
-                            </div>
-                            <div className="shipment-field-completion-grid">
-                              {missingShipmentCustomerFields.map((field) => (
-                                <label className="field" key={field}>
-                                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
-                                  <input
-                                    required
-                                    value={shipmentCustomerOverrides[field] ?? ''}
-                                    onChange={(event) =>
-                                      setShipmentCustomerOverrides((current) => ({
-                                        ...current,
-                                        [field]: event.target.value,
-                                      }))
-                                    }
-                                  />
-                                </label>
-                              ))}
-                            </div>
-                            <button
-                              type="submit"
-                              className="button button-primary"
-                              disabled={isCreatingShipment || isRetryingFailedShipment}
-                            >
-                              {isRetryingFailedShipment
-                                ? 'Retrying...'
-                                : isCreatingShipment
-                                  ? 'Creating...'
-                                  : canRecoverFailedShipment
-                                    ? 'Retry shipment with completed fields'
-                                    : 'Create shipment with completed fields'}
-                            </button>
-                          </form>
-                        ) : null}
+                        {renderShipmentFieldCompletionForm()}
                       </div>
                     ) : null}
                     {shippingProviderDiagnostics && shippingConfigEditorForm ? (
@@ -1821,11 +1848,12 @@ export function OrderDetailPage() {
                                 View diagnostics
                               </a>
                             </div>
+                            {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
                       </div>
                     ) : null}
-                    {shouldShowFailedShipmentRetryDiagnostics && !shipmentProviderSummary ? (
+                    {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                       <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
                         <strong>Shipment recovery</strong>
                         <span>
@@ -1847,6 +1875,7 @@ export function OrderDetailPage() {
                             </a>
                           </div>
                         ) : null}
+                        {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                       </div>
                     ) : null}
                     {shipmentActionState ? (
@@ -1865,54 +1894,7 @@ export function OrderDetailPage() {
                             {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
                           </span>
                         ) : null}
-                        {missingShipmentCustomerFields.length > 0 ? (
-                          <form
-                            className="shipment-field-completion-form"
-                            onSubmit={(event) => {
-                              event.preventDefault();
-                              if (canRecoverFailedShipment) {
-                                handleRetryFailedShipment(missingShipmentCustomerFields);
-                              } else {
-                                handleCreateShipment(missingShipmentCustomerFields);
-                              }
-                            }}
-                          >
-                            <div>
-                              <span>Complete shipment-only fields</span>
-                              <p>These values are used only for this shipment request.</p>
-                            </div>
-                            <div className="shipment-field-completion-grid">
-                              {missingShipmentCustomerFields.map((field) => (
-                                <label className="field" key={field}>
-                                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
-                                  <input
-                                    required
-                                    value={shipmentCustomerOverrides[field] ?? ''}
-                                    onChange={(event) =>
-                                      setShipmentCustomerOverrides((current) => ({
-                                        ...current,
-                                        [field]: event.target.value,
-                                      }))
-                                    }
-                                  />
-                                </label>
-                              ))}
-                            </div>
-                            <button
-                              type="submit"
-                              className="button button-primary"
-                              disabled={isCreatingShipment || isRetryingFailedShipment}
-                            >
-                              {isRetryingFailedShipment
-                                ? 'Retrying...'
-                                : isCreatingShipment
-                                  ? 'Creating...'
-                                  : canRecoverFailedShipment
-                                    ? 'Retry shipment with completed fields'
-                                    : 'Create shipment with completed fields'}
-                            </button>
-                          </form>
-                        ) : null}
+                        {renderShipmentFieldCompletionForm()}
                       </div>
                     ) : null}
                   </div>

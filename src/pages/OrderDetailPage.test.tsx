@@ -463,6 +463,90 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/\+905551112233/)).not.toBeInTheDocument();
   });
 
+  it('renders the existing district completion input for admin failed Kargo shipments', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 422,
+          providerError: 'Validation failed.',
+          providerValidationErrors: ['The district field is required.'],
+          dryRun: false,
+          disabledGates: [],
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+    expect(screen.getAllByLabelText('District *')).toHaveLength(1);
+    expect(screen.queryByLabelText('Phone *')).not.toBeInTheDocument();
+  });
+
+  it('renders the existing district completion input for vendor retry and submits customer.district', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 422,
+          providerError: 'Müşteri ilçe bilgisi zorunludur.',
+          providerValidationErrors: ['Müşteri ilçe bilgisi zorunludur.'],
+          dryRun: false,
+          disabledGates: [],
+        },
+      },
+    });
+    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-recovered-1028',
+      barcode: 'barcode-recovered-1028',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.type(await screen.findByLabelText('District *'), 'Kadikoy');
+    await user.click(screen.getByRole('button', { name: 'Retry shipment with completed fields' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      }),
+    );
+  });
+
   it('retries failed shipment executions and refreshes order detail', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
