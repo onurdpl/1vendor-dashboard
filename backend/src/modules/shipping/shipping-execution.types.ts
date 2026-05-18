@@ -98,6 +98,10 @@ export type CreateShipmentExecutionDto = {
   provider?: ShippingProviderDto;
   notificationUrl?: string;
   carrierId?: 'dummy';
+  customerOverrides?: Partial<Record<
+    'name' | 'surname' | 'phone' | 'email' | 'country' | 'postcode' | 'city' | 'district' | 'address',
+    string | null
+  >>;
 };
 
 export type ShipmentExecutionPreviewDto = {

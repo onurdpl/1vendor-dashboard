@@ -8,6 +8,7 @@ import type {
   OrderDetail,
   OrderLineItem,
   ShipmentExecution,
+  ShipmentCustomerOverrides,
   ShippingProviderDiagnostics,
   OrderStatus,
   OrderSummary,
@@ -458,9 +459,13 @@ export async function submitFulfillmentTracking(
   );
 }
 
-export async function createShipmentExecution(allocationId: string, options: { vendorId?: string | null } = {}) {
+export async function createShipmentExecution(
+  allocationId: string,
+  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+) {
   return apiClient.post<CreateShipmentExecutionResult>('/shipments/create', {
     allocationId,
+    customerOverrides: options.customerOverrides,
   }, {
     vendorId: options.vendorId,
   });

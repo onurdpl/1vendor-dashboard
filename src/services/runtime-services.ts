@@ -29,6 +29,7 @@ import type {
   SupportTicketCategory,
   SupportTicketContextSummary,
   SupportTicketStatus,
+  ShipmentCustomerOverrides,
 } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
@@ -308,9 +309,9 @@ export const runtimeServices = {
         shipmentUpdatedAt: submittedAt,
       };
     },
-    async createShipmentExecution(allocationId: string, vendorId = getCurrentVendorId()) {
+    async createShipmentExecution(allocationId: string, vendorId = getCurrentVendorId(), customerOverrides?: ShipmentCustomerOverrides) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.createShipmentExecution(allocationId, { vendorId });
+        return realOrders.createShipmentExecution(allocationId, { vendorId, customerOverrides });
       }
 
       const submittedAt = new Date().toISOString();

@@ -390,7 +390,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
 
-    expect(createShipmentExecutionMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', { vendorId: 'sporjinal' });
+    expect(createShipmentExecutionMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+      customerOverrides: undefined,
+    });
     expect((await screen.findAllByText('Shipment ke-created-1028 recorded.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
     expect(screen.getByText(/Provider id: yes · Barcode: yes/)).toBeInTheDocument();
@@ -459,6 +462,64 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText(/customer\.phone/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Provider request blocked before create call/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
+  });
+
+  it('renders missing shipment field inputs and retries with shipment-only overrides', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock
+      .mockRejectedValueOnce(
+        new Error('Missing required shipment fields:\n- customer.district\n\nProvider request blocked before create call.'),
+      )
+      .mockResolvedValueOnce({
+        id: 'shipment-created-1028',
+        allocationId: 'alloc-sporjinal-7621783322961',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        providerShipmentId: 'ke-created-1028',
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created',
+        desi: '3.00',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        barcode: 'barcode-1028',
+        createdAt: '2026-05-15T10:00:00.000Z',
+        updatedAt: '2026-05-15T10:00:00.000Z',
+      });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+    expect(screen.getByLabelText('District *')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Phone *')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('District *'), 'Kadikoy');
+    await user.click(screen.getByRole('button', { name: 'Create shipment with completed fields' }));
+
+    await waitFor(() =>
+      expect(createShipmentExecutionMock).toHaveBeenLastCalledWith('alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      }),
+    );
+    expect((await screen.findAllByText('Shipment ke-created-1028 recorded.')).length).toBeGreaterThan(0);
   });
 
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {

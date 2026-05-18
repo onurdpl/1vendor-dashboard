@@ -366,6 +366,26 @@ function composeShipmentAddress(orderRecord: Record<string, unknown>) {
   return parts.join(', ') || null;
 }
 
+function normalizeCustomerOverrides(input: CreateShipmentExecutionDto['customerOverrides']) {
+  if (!isRecord(input)) {
+    return {};
+  }
+
+  const allowedKeys = ['name', 'surname', 'phone', 'email', 'country', 'postcode', 'city', 'district', 'address'] as const;
+  return Object.fromEntries(
+    allowedKeys
+      .map((key) => {
+        const value = input[key];
+        if (typeof value !== 'string') {
+          return null;
+        }
+        const normalized = key === 'phone' ? normalizeShipmentPhone(value) : value.trim();
+        return normalized ? [key, normalized] : null;
+      })
+      .filter((entry): entry is [string, string] => Boolean(entry)),
+  );
+}
+
 function readStoredOrderWebhookAddress(orderRecord: Record<string, unknown>) {
   const events = Array.isArray(orderRecord.webhookEvents) ? orderRecord.webhookEvents : [];
   for (const event of events) {
@@ -392,25 +412,32 @@ function buildKargoCustomer(input: {
   order: unknown;
   customerName: string | null | undefined;
   customerEmail: string | null | undefined;
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
 }) {
   const orderRecord = isRecord(input.order) ? input.order : {};
   const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const overrides = normalizeCustomerOverrides(input.customerOverrides);
   const name = splitCustomerName(input.customerName);
   const customer = {
-    name: name.name,
-    surname: name.surname,
-    phone: normalizeShipmentPhone(
+    name: overrides.name ?? name.name,
+    surname: overrides.surname ?? name.surname,
+    phone: overrides.phone ?? normalizeShipmentPhone(
       readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone']) ?? webhookAddress?.customerPhone,
     ),
-    email: input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
-    country: readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? null,
-    postcode: readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']) ?? webhookAddress?.shippingPostcode ?? null,
-    city: readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
+    email: overrides.email ?? input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
+    country: overrides.country ?? readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? null,
+    postcode:
+      overrides.postcode ??
+      readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']) ??
+      webhookAddress?.shippingPostcode ??
+      null,
+    city: overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
     district:
+      overrides.district ??
       readString(orderRecord, ['shippingDistrict', 'district', 'cityArea', 'province']) ??
       webhookAddress?.shippingDistrict ??
       null,
-    address: composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
+    address: overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
   };
   const missingFields = Object.entries(customer)
     .filter(([, value]) => !value)
@@ -1059,6 +1086,7 @@ async function buildShipmentRequestPreview(
     order: allocation.order,
     customerName: allocation.order.customerName,
     customerEmail: allocation.order.customerEmail,
+    customerOverrides: input.customerOverrides,
   });
   const missingCustomerFields = [
     ...(dummyKargoRequested ? kargoCustomer.missingFields : [

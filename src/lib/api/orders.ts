@@ -1,4 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
+import type { ShipmentCustomerOverrides } from './contracts';
 
 export async function listOrders(options: { vendorId?: string | null } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined);
@@ -24,8 +25,15 @@ export async function submitFulfillmentTracking(
   return runtimeServices.orders.submitFulfillmentTracking(allocationId, payload);
 }
 
-export async function createShipmentExecution(allocationId: string, options: { vendorId?: string | null } = {}) {
-  return runtimeServices.orders.createShipmentExecution(allocationId, options.vendorId ?? undefined);
+export async function createShipmentExecution(
+  allocationId: string,
+  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+) {
+  return runtimeServices.orders.createShipmentExecution(
+    allocationId,
+    options.vendorId ?? undefined,
+    options.customerOverrides,
+  );
 }
 
 export async function retryShipmentExecution(shipmentExecutionId: string) {

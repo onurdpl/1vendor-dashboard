@@ -10,6 +10,8 @@ import {
   getShippingProviderDiagnostics,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  type ShipmentCustomerField,
+  type ShipmentCustomerOverrides,
   type ShipmentExecution,
 } from '../features/orders/api';
 import { useActionFeedback } from '../lib/ui';
@@ -141,6 +143,26 @@ type ShipmentActionState = {
   endpoint?: string;
 };
 
+const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
+  name: 'Name',
+  surname: 'Surname',
+  phone: 'Phone',
+  email: 'Email',
+  country: 'Country',
+  postcode: 'Postcode',
+  city: 'City',
+  district: 'District',
+  address: 'Address',
+};
+
+function getMissingShipmentCustomerFields(message: string): ShipmentCustomerField[] {
+  const allowedFields = new Set(Object.keys(SHIPMENT_CUSTOMER_FIELD_LABELS));
+  const fields = Array.from(message.matchAll(/customer\.([a-zA-Z0-9_]+)/g))
+    .map((match) => match[1])
+    .filter((field): field is ShipmentCustomerField => Boolean(field && allowedFields.has(field)));
+  return Array.from(new Set(fields));
+}
+
 function getCreateShipmentErrorMessage(error: unknown) {
   if (error instanceof ApiError) {
     return error.message;
@@ -169,6 +191,7 @@ export function OrderDetailPage() {
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
+  const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
@@ -222,7 +245,11 @@ export function OrderDetailPage() {
     },
   );
   const { mutateAsync: createShipmentMutation, isPending: isCreatingShipment } = useMutationAction(
-    async (allocationId: string) => createShipmentExecution(allocationId, { vendorId: currentVendor.vendorId }),
+    async (payload: { allocationId: string; customerOverrides?: ShipmentCustomerOverrides }) =>
+      createShipmentExecution(payload.allocationId, {
+        vendorId: currentVendor.vendorId,
+        customerOverrides: payload.customerOverrides,
+      }),
     {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
@@ -268,6 +295,8 @@ export function OrderDetailPage() {
   const shipmentExecution = order?.shipmentExecution ?? null;
   const visibleShipmentExecution = shipmentExecution ?? shipmentActionState?.shipment ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
+  const missingShipmentCustomerFields =
+    shipmentActionState?.tone === 'error' ? getMissingShipmentCustomerFields(shipmentActionState.message) : [];
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
   const shouldShowShipmentProviderSummary =
     isAdmin &&
@@ -286,6 +315,65 @@ export function OrderDetailPage() {
     !shipmentExecution.providerShipmentId &&
     !shipmentExecution.trackingNumber &&
     Boolean(shipmentProviderSummary?.dryRun === true || (shipmentProviderSummary?.disabledGates.length ?? 0) > 0);
+
+  useEffect(() => {
+    setShipmentCustomerOverrides({});
+    setShipmentActionState(null);
+  }, [orderId]);
+
+  function buildShipmentCustomerOverrides(fields: ShipmentCustomerField[]) {
+    const overrides = Object.fromEntries(
+      fields
+        .map((field) => [field, shipmentCustomerOverrides[field]?.trim() ?? ''] as const)
+        .filter(([, value]) => Boolean(value)),
+    ) as ShipmentCustomerOverrides;
+    return Object.keys(overrides).length > 0 ? overrides : undefined;
+  }
+
+  function handleCreateShipment(fields: ShipmentCustomerField[] = []) {
+    if (!order) {
+      return;
+    }
+
+    const customerOverrides = buildShipmentCustomerOverrides(fields);
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Creating shipment with the configured provider...',
+      endpoint: 'POST /shipments/create',
+    });
+
+    void createShipmentMutation({ allocationId: order.id, customerOverrides })
+      .then((shipment) => {
+        setShipmentActionState({
+          tone: 'success',
+          message:
+            shipment.shipmentStatus === 'pending'
+              ? 'Shipment request recorded. Carrier execution is pending.'
+              : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          shipment,
+          endpoint: 'POST /shipments/create',
+        });
+        setShipmentCustomerOverrides({});
+        showFeedback(
+          shipment.shipmentStatus === 'pending'
+            ? 'Shipment request recorded. Carrier execution is pending.'
+            : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          'success',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = getCreateShipmentErrorMessage(mutationError);
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? 'POST /shipments/create',
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
   const supportSnapshot = order
     ? {
         route: location.pathname,
@@ -938,44 +1026,7 @@ export function OrderDetailPage() {
                           type="button"
                           className="button button-primary"
                           disabled={isCreatingShipment}
-                          onClick={() => {
-                            setShipmentActionState({
-                              tone: 'info',
-                              message: 'Creating shipment with the configured provider...',
-                              endpoint: 'POST /shipments/create',
-                            });
-
-                            void createShipmentMutation(order.id)
-                              .then((shipment) => {
-                                setShipmentActionState({
-                                  tone: 'success',
-                                  message:
-                                    shipment.shipmentStatus === 'pending'
-                                      ? 'Shipment request recorded. Carrier execution is pending.'
-                                      : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
-                                  shipment,
-                                  endpoint: 'POST /shipments/create',
-                                });
-                                showFeedback(
-                                  shipment.shipmentStatus === 'pending'
-                                    ? 'Shipment request recorded. Carrier execution is pending.'
-                                    : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
-                                  'success',
-                                );
-                                void refetch();
-                              })
-                              .catch((mutationError) => {
-                                const diagnostics = getApiErrorDiagnostics(mutationError);
-                                const errorMessage = getCreateShipmentErrorMessage(mutationError);
-                                setShipmentActionState({
-                                  tone: 'error',
-                                  message: errorMessage,
-                                  diagnostics,
-                                  endpoint: diagnostics?.endpoint ?? 'POST /shipments/create',
-                                });
-                                showFeedback(errorMessage, 'error');
-                              });
-                          }}
+                          onClick={() => handleCreateShipment()}
                         >
                           {isCreatingShipment ? 'Creating...' : 'Create shipment'}
                         </button>
@@ -996,6 +1047,40 @@ export function OrderDetailPage() {
                             Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
                             {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
                           </span>
+                        ) : null}
+                        {missingShipmentCustomerFields.length > 0 ? (
+                          <form
+                            className="shipment-field-completion-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              handleCreateShipment(missingShipmentCustomerFields);
+                            }}
+                          >
+                            <div>
+                              <span>Complete shipment-only fields</span>
+                              <p>These values are used only for this shipment request.</p>
+                            </div>
+                            <div className="shipment-field-completion-grid">
+                              {missingShipmentCustomerFields.map((field) => (
+                                <label className="field" key={field}>
+                                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
+                                  <input
+                                    required
+                                    value={shipmentCustomerOverrides[field] ?? ''}
+                                    onChange={(event) =>
+                                      setShipmentCustomerOverrides((current) => ({
+                                        ...current,
+                                        [field]: event.target.value,
+                                      }))
+                                    }
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <button type="submit" className="button button-primary" disabled={isCreatingShipment}>
+                              {isCreatingShipment ? 'Creating...' : 'Create shipment with completed fields'}
+                            </button>
+                          </form>
                         ) : null}
                       </div>
                     ) : null}

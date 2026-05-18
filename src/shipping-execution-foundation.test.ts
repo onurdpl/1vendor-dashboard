@@ -1291,6 +1291,58 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
+  it('applies shipment-only customer overrides without mutating Shopify order data', async () => {
+    const order = {
+      id: 'order-1',
+      customerName: 'Test Customer',
+      customerEmail: 'customer@example.com',
+      customerPhone: '+905551112233',
+      shippingCountry: 'TR',
+      shippingPostcode: '34000',
+      shippingCity: 'Istanbul',
+      shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+    };
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({ order }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        carrierId: 'dummy',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      customer: {
+        district: 'Kadikoy',
+      },
+    });
+    expect(order).not.toHaveProperty('shippingDistrict');
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(preview.customerFieldsValid).toBe(true);
+  });
+
   it('registers a Kargo webhook placeholder that returns 501 without mutating shipment data', async () => {
     const posts = new Map<string, (request: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
     const app = {

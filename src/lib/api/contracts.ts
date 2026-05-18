@@ -64,6 +64,19 @@ export type ShipmentExecution = {
   };
 };
 
+export type ShipmentCustomerField =
+  | 'name'
+  | 'surname'
+  | 'phone'
+  | 'email'
+  | 'country'
+  | 'postcode'
+  | 'city'
+  | 'district'
+  | 'address';
+
+export type ShipmentCustomerOverrides = Partial<Record<ShipmentCustomerField, string>>;
+
 export type ShippingProviderDiagnostics = {
   provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
   executionReady: boolean;
