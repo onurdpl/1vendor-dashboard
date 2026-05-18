@@ -96,6 +96,15 @@ function buildShipmentProviderResponseSummary(
     : null;
   const orderStatusDiagnostics = isRecord(snapshot?.orderStatus) ? snapshot.orderStatus : null;
   const deliveryOptionLookupDiagnostics = isRecord(snapshot?.deliveryOptionLookup) ? snapshot.deliveryOptionLookup : null;
+  const deliveryOptionLookupRequest = isRecord(deliveryOptionLookupDiagnostics?.request)
+    ? deliveryOptionLookupDiagnostics.request
+    : null;
+  const deliveryOptionLookupResponse = isRecord(deliveryOptionLookupDiagnostics?.response)
+    ? deliveryOptionLookupDiagnostics.response
+    : null;
+  const deliveryOptionLookupSourceFieldPresence = isRecord(deliveryOptionLookupRequest?.sourceFieldPresence)
+    ? deliveryOptionLookupRequest.sourceFieldPresence
+    : null;
   const tryOtoFinalization = snapshot?.provider === 'try_oto'
     ? {
         createOrderSuccess: typeof createOrderDiagnostics?.ok === 'boolean' ? createOrderDiagnostics.ok : null,
@@ -130,7 +139,54 @@ function buildShipmentProviderResponseSummary(
             : null,
         selectedDeliveryCompanyName: readString(deliveryOptionLookupDiagnostics, ['selectedDeliveryCompanyName']),
         selectedDeliveryOptionIdPresent: deliveryOptionLookupDiagnostics?.selectedDeliveryOptionIdPresent === true,
-        deliveryOptionLookupErrorMessage: readString(deliveryOptionLookupDiagnostics, ['lookupErrorMessage', 'providerError']),
+        deliveryOptionLookupErrorMessage:
+          readString(deliveryOptionLookupDiagnostics, ['lookupErrorMessage', 'providerError']) ??
+          readString(deliveryOptionLookupResponse, ['providerError']),
+        deliveryOptionLookupEndpoint: readString(deliveryOptionLookupRequest, ['endpoint']),
+        deliveryOptionLookupRequestKeys: Array.isArray(deliveryOptionLookupRequest?.topLevelKeys)
+          ? deliveryOptionLookupRequest.topLevelKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+        deliveryOptionLookupRequestPresence: deliveryOptionLookupRequest
+          ? {
+              pickupLocationCode: deliveryOptionLookupRequest.pickupLocationCodePresent === true,
+              originCity: deliveryOptionLookupRequest.originCityPresent === true,
+              packageWeight: deliveryOptionLookupRequest.packageWeightPresent === true,
+              customerCity: deliveryOptionLookupRequest.customerCityPresent === true,
+              customerCountry: deliveryOptionLookupRequest.customerCountryPresent === true,
+              paymentMethod: deliveryOptionLookupRequest.paymentMethodPresent === true,
+            }
+          : null,
+        deliveryOptionLookupSourcePresence: deliveryOptionLookupSourceFieldPresence
+          ? {
+              pickupLocationCode: deliveryOptionLookupSourceFieldPresence.pickupLocationCode === true,
+              originCity: deliveryOptionLookupSourceFieldPresence.originCity === true,
+              packageWeight: deliveryOptionLookupSourceFieldPresence.packageWeight === true,
+              customerCity: deliveryOptionLookupSourceFieldPresence.customerCity === true,
+              customerCountry: deliveryOptionLookupSourceFieldPresence.customerCountry === true,
+              paymentMethod: deliveryOptionLookupSourceFieldPresence.paymentMethod === true,
+            }
+          : null,
+        deliveryOptionLookupResponseStatus:
+          typeof deliveryOptionLookupResponse?.status === 'number' ? deliveryOptionLookupResponse.status : null,
+        deliveryOptionLookupResponseKeys: Array.isArray(deliveryOptionLookupResponse?.topLevelKeys)
+          ? deliveryOptionLookupResponse.topLevelKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+        deliveryOptionLookupResponseBodyKeys: Array.isArray(deliveryOptionLookupResponse?.bodyKeys)
+          ? deliveryOptionLookupResponse.bodyKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+        deliveryOptionLookupResponseHasDeliveryOptionId:
+          typeof deliveryOptionLookupResponse?.deliveryOptionIdPresent === 'boolean'
+            ? deliveryOptionLookupResponse.deliveryOptionIdPresent
+            : null,
+        deliveryOptionLookupResponseHasDeliveryCompanyName:
+          typeof deliveryOptionLookupResponse?.deliveryCompanyNamePresent === 'boolean'
+            ? deliveryOptionLookupResponse.deliveryCompanyNamePresent
+            : null,
+        deliveryOptionLookupResponseHasPricing:
+          typeof deliveryOptionLookupResponse?.pricingPresent === 'boolean' ? deliveryOptionLookupResponse.pricingPresent : null,
+        deliveryOptionLookupResponsePricingKeys: Array.isArray(deliveryOptionLookupResponse?.pricingKeys)
+          ? deliveryOptionLookupResponse.pricingKeys.filter((key): key is string => typeof key === 'string')
+          : [],
       }
     : undefined;
 

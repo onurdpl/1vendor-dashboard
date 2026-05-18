@@ -842,6 +842,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             deliveryOptionLookupOptionCount: 1,
             selectedDeliveryCompanyName: 'surat-kargo-marketplace',
             selectedDeliveryOptionIdPresent: true,
+            deliveryOptionLookupEndpoint: '/rest/v2/checkOTODeliveryFee',
+            deliveryOptionLookupRequestKeys: ['currency', 'destinationCity', 'originCity', 'weight'],
+            deliveryOptionLookupRequestPresence: {
+              pickupLocationCode: false,
+              originCity: true,
+              packageWeight: false,
+              customerCity: false,
+              customerCountry: false,
+              paymentMethod: false,
+            },
+            deliveryOptionLookupSourcePresence: {
+              pickupLocationCode: true,
+              originCity: true,
+              packageWeight: true,
+              customerCity: true,
+              customerCountry: true,
+              paymentMethod: true,
+            },
+            deliveryOptionLookupResponseStatus: 200,
+            deliveryOptionLookupResponseKeys: ['deliveryCompany', 'success'],
+            deliveryOptionLookupResponseBodyKeys: ['deliveryCompany', 'success'],
+            deliveryOptionLookupResponseHasDeliveryOptionId: true,
+            deliveryOptionLookupResponseHasDeliveryCompanyName: true,
+            deliveryOptionLookupResponseHasPricing: true,
+            deliveryOptionLookupResponsePricingKeys: ['currency', 'price'],
           },
         },
       },
@@ -866,6 +891,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText(/called yes · success yes/).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Delivery option lookup')).toBeInTheDocument();
     expect(screen.getByText(/called yes · success yes · options 1/)).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup endpoint')).toBeInTheDocument();
+    expect(screen.getByText('/rest/v2/checkOTODeliveryFee')).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup request keys')).toBeInTheDocument();
+    expect(screen.getByText('currency, destinationCity, originCity, weight')).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup payload fields')).toBeInTheDocument();
+    expect(screen.getByText(/pickup no · origin yes · weight no · customer\.city no · customer\.country no · payment no/)).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup source fields')).toBeInTheDocument();
+    expect(screen.getByText(/pickup yes · origin yes · weight yes · customer\.city yes · customer\.country yes · payment yes/)).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup response')).toBeInTheDocument();
+    expect(screen.getByText(/HTTP 200 · keys deliveryCompany, success/)).toBeInTheDocument();
+    expect(screen.getByText('Delivery lookup response options')).toBeInTheDocument();
+    expect(screen.getByText(/deliveryOptionId yes · company yes · pricing yes \(currency, price\)/)).toBeInTheDocument();
     expect(screen.getByText('Selected delivery option')).toBeInTheDocument();
     expect(screen.getByText(/present · surat-kargo-marketplace/)).toBeInTheDocument();
     expect(screen.getByText('createShipment request keys')).toBeInTheDocument();

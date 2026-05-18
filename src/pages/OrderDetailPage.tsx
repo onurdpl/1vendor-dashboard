@@ -870,6 +870,18 @@ export function OrderDetailPage() {
     if (!diagnostics) {
       return null;
     }
+    const formatPresence = (value: boolean | null | undefined) => (value === null || value === undefined ? '—' : value ? 'yes' : 'no');
+    const formatLookupPresence = (presence: typeof diagnostics.deliveryOptionLookupRequestPresence) =>
+      presence
+        ? [
+            `pickup ${formatPresence(presence.pickupLocationCode)}`,
+            `origin ${formatPresence(presence.originCity)}`,
+            `weight ${formatPresence(presence.packageWeight)}`,
+            `customer.city ${formatPresence(presence.customerCity)}`,
+            `customer.country ${formatPresence(presence.customerCountry)}`,
+            `payment ${formatPresence(presence.paymentMethod)}`,
+          ].join(' · ')
+        : '—';
 
     return (
       <>
@@ -890,6 +902,42 @@ export function OrderDetailPage() {
             called {diagnostics.deliveryOptionLookupCalled ? 'yes' : 'no'} · success{' '}
             {diagnostics.deliveryOptionLookupSuccess === null ? '—' : diagnostics.deliveryOptionLookupSuccess ? 'yes' : 'no'} · options{' '}
             {diagnostics.deliveryOptionLookupOptionCount ?? '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup endpoint</span>
+          <strong>{diagnostics.deliveryOptionLookupEndpoint || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup request keys</span>
+          <strong>
+            {diagnostics.deliveryOptionLookupRequestKeys?.length ? diagnostics.deliveryOptionLookupRequestKeys.join(', ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup payload fields</span>
+          <strong>{formatLookupPresence(diagnostics.deliveryOptionLookupRequestPresence)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup source fields</span>
+          <strong>{formatLookupPresence(diagnostics.deliveryOptionLookupSourcePresence)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup response</span>
+          <strong>
+            HTTP {diagnostics.deliveryOptionLookupResponseStatus ?? '—'} · keys{' '}
+            {diagnostics.deliveryOptionLookupResponseKeys?.length ? diagnostics.deliveryOptionLookupResponseKeys.join(', ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Delivery lookup response options</span>
+          <strong>
+            deliveryOptionId {formatPresence(diagnostics.deliveryOptionLookupResponseHasDeliveryOptionId)} · company{' '}
+            {formatPresence(diagnostics.deliveryOptionLookupResponseHasDeliveryCompanyName)} · pricing{' '}
+            {formatPresence(diagnostics.deliveryOptionLookupResponseHasPricing)}
+            {diagnostics.deliveryOptionLookupResponsePricingKeys?.length
+              ? ` (${diagnostics.deliveryOptionLookupResponsePricingKeys.join(', ')})`
+              : ''}
           </strong>
         </div>
         <div className="summary-row">

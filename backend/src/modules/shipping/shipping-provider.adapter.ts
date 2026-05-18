@@ -386,6 +386,72 @@ function getTryOtoDeliveryOptions(value: Record<string, unknown>) {
   return candidates.find((candidate): candidate is unknown[] => Array.isArray(candidate))?.filter(isRecord) ?? [];
 }
 
+function buildTryOtoDeliveryLookupRequestDiagnostics(
+  sourcePayload: Record<string, unknown>,
+  lookupPayload: Record<string, unknown> | null,
+  endpoint: string,
+) {
+  const sourceCustomer = isRecord(sourcePayload.customer) ? sourcePayload.customer : {};
+  const lookupCustomer = isRecord(lookupPayload?.customer) ? lookupPayload.customer : {};
+  return {
+    endpoint,
+    topLevelKeys: lookupPayload ? Object.keys(lookupPayload).sort() : [],
+    pickupLocationCodePresent: hasValue(lookupPayload?.pickupLocationCode),
+    originCityPresent: hasValue(lookupPayload?.originCity),
+    packageWeightPresent: hasValue(lookupPayload?.packageWeight),
+    customerCityPresent: hasValue(lookupCustomer.city),
+    customerCountryPresent: hasValue(lookupCustomer.country),
+    paymentMethodPresent: hasValue(lookupPayload?.payment_method),
+    sourceFieldPresence: {
+      pickupLocationCode: hasValue(sourcePayload.pickupLocationCode),
+      originCity: hasValue(sourcePayload.originCity),
+      packageWeight: hasValue(sourcePayload.packageWeight),
+      customerCity: hasValue(sourceCustomer.city),
+      customerCountry: hasValue(sourceCustomer.country),
+      paymentMethod: hasValue(sourcePayload.payment_method),
+    },
+  };
+}
+
+function buildTryOtoDeliveryLookupResponseDiagnostics(
+  snapshot: Record<string, unknown> | null,
+  body: Record<string, unknown> | null,
+) {
+  const options = getTryOtoDeliveryOptions(body ?? {});
+  const pricingKeys = Array.from(
+    new Set(
+      options.flatMap((option) =>
+        Object.keys(option).filter((key) =>
+          ['price', 'amount', 'currency', 'deliveryFee', 'shippingFee', 'total', 'totalPrice', 'netPrice'].includes(key),
+        ),
+      ),
+    ),
+  ).sort();
+
+  return {
+    status: typeof snapshot?.status === 'number' ? snapshot.status : null,
+    topLevelKeys: Array.isArray(snapshot?.topLevelKeys)
+      ? snapshot.topLevelKeys.filter((key): key is string => typeof key === 'string')
+      : body
+        ? Object.keys(body).sort()
+        : [],
+    bodyKeys: Array.isArray(snapshot?.bodyKeys)
+      ? snapshot.bodyKeys.filter((key): key is string => typeof key === 'string')
+      : body
+        ? Object.keys(body).sort()
+        : [],
+    optionCount: options.length,
+    deliveryOptionIdPresent: options.some((option) => Boolean(readTryOtoDeliveryOptionId(option))),
+    deliveryCompanyNamePresent: options.some((option) => Boolean(readTryOtoDeliveryCompanyName(option))),
+    pricingPresent: pricingKeys.length > 0,
+    pricingKeys,
+    providerError: readSafeProviderError(snapshot ?? body ?? {}),
+    providerValidationErrors: Array.isArray(snapshot?.providerValidationErrors)
+      ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string')
+      : readSafeValidationErrors(body ?? {}),
+  };
+}
+
 function buildTryOtoDeliveryFeePayload(payload: Record<string, unknown>) {
   const customer = isRecord(payload.customer) ? payload.customer : {};
   const originCity = readString(payload, ['originCity']);
@@ -839,10 +905,23 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     let deliveryOptionLookup: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
     let selectedDeliveryOptionId = configuredDeliveryOptionId;
     let selectedDeliveryCompanyName: string | null = null;
+    let deliveryOptionLookupRequestDiagnostics: Record<string, unknown> | null = null;
+    let deliveryOptionLookupResponseDiagnostics: Record<string, unknown> | null = null;
 
     if (!selectedDeliveryOptionId) {
       const lookupPayload = buildTryOtoDeliveryFeePayload(input.requestSnapshot);
       if (!lookupPayload.ok) {
+        deliveryOptionLookupRequestDiagnostics = buildTryOtoDeliveryLookupRequestDiagnostics(
+          input.requestSnapshot,
+          null,
+          '/rest/v2/checkOTODeliveryFee',
+        );
+        console.info('[shipping:try-oto:delivery-option-lookup]', {
+          provider: 'try_oto',
+          operation: 'checkOTODeliveryFee',
+          request: deliveryOptionLookupRequestDiagnostics,
+          missingFields: lookupPayload.missing,
+        });
         throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
           ok: false,
           provider: 'try_oto',
@@ -852,15 +931,33 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
             success: false,
             missingFields: lookupPayload.missing,
             optionCount: 0,
+            request: deliveryOptionLookupRequestDiagnostics,
           },
           payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
         });
       }
 
+      deliveryOptionLookupRequestDiagnostics = buildTryOtoDeliveryLookupRequestDiagnostics(
+        input.requestSnapshot,
+        lookupPayload.payload,
+        '/rest/v2/checkOTODeliveryFee',
+      );
+      console.info('[shipping:try-oto:delivery-option-lookup]', {
+        provider: 'try_oto',
+        operation: 'checkOTODeliveryFee',
+        request: deliveryOptionLookupRequestDiagnostics,
+      });
       try {
         deliveryOptionLookup = await this.postJson('/rest/v2/checkOTODeliveryFee', lookupPayload.payload, accessToken, 'checkOTODeliveryFee');
       } catch (error) {
         if (error instanceof ShippingProviderExecutionError) {
+          deliveryOptionLookupResponseDiagnostics = buildTryOtoDeliveryLookupResponseDiagnostics(error.responseSnapshot, null);
+          console.info('[shipping:try-oto:delivery-option-lookup-result]', {
+            provider: 'try_oto',
+            operation: 'checkOTODeliveryFee',
+            request: deliveryOptionLookupRequestDiagnostics,
+            response: deliveryOptionLookupResponseDiagnostics,
+          });
           throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
             ...error.responseSnapshot,
             deliveryOptionLookup: {
@@ -868,6 +965,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
               success: false,
               optionCount: 0,
               providerError: readSafeProviderError(error.responseSnapshot),
+              request: deliveryOptionLookupRequestDiagnostics,
+              response: deliveryOptionLookupResponseDiagnostics,
             },
             payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
           });
@@ -876,6 +975,16 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       }
 
       const options = getTryOtoDeliveryOptions(deliveryOptionLookup.body);
+      deliveryOptionLookupResponseDiagnostics = buildTryOtoDeliveryLookupResponseDiagnostics(
+        deliveryOptionLookup.snapshot,
+        deliveryOptionLookup.body,
+      );
+      console.info('[shipping:try-oto:delivery-option-lookup-result]', {
+        provider: 'try_oto',
+        operation: 'checkOTODeliveryFee',
+        request: deliveryOptionLookupRequestDiagnostics,
+        response: deliveryOptionLookupResponseDiagnostics,
+      });
       const selectedOption = options.find((option) => readTryOtoDeliveryOptionId(option));
       selectedDeliveryOptionId = selectedOption ? readTryOtoDeliveryOptionId(selectedOption) : null;
       selectedDeliveryCompanyName = selectedOption ? readTryOtoDeliveryCompanyName(selectedOption) : null;
@@ -890,6 +999,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
             optionCount: options.length,
             selectedDeliveryCompanyName: null,
             selectedDeliveryOptionIdPresent: false,
+            request: deliveryOptionLookupRequestDiagnostics,
+            response: deliveryOptionLookupResponseDiagnostics,
           },
           lookup: deliveryOptionLookup.snapshot,
           payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
@@ -919,9 +1030,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       selectedDeliveryCompanyName,
       selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
       configuredDeliveryOptionIdPresent: Boolean(configuredDeliveryOptionId),
-      requestKeys: deliveryOptionLookup
-        ? ['currency', 'destinationCity', 'originCity', 'weight']
-        : [],
+      request: deliveryOptionLookupRequestDiagnostics,
+      response: deliveryOptionLookupResponseDiagnostics,
       lookupErrorMessage: null,
     };
     const createShipmentRequest = {

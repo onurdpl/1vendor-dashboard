@@ -132,6 +132,31 @@ export type OrderShipmentExecutionDto = {
       selectedDeliveryCompanyName?: string | null;
       selectedDeliveryOptionIdPresent?: boolean;
       deliveryOptionLookupErrorMessage?: string | null;
+      deliveryOptionLookupEndpoint?: string | null;
+      deliveryOptionLookupRequestKeys?: string[];
+      deliveryOptionLookupRequestPresence?: {
+        pickupLocationCode: boolean;
+        originCity: boolean;
+        packageWeight: boolean;
+        customerCity: boolean;
+        customerCountry: boolean;
+        paymentMethod: boolean;
+      } | null;
+      deliveryOptionLookupSourcePresence?: {
+        pickupLocationCode: boolean;
+        originCity: boolean;
+        packageWeight: boolean;
+        customerCity: boolean;
+        customerCountry: boolean;
+        paymentMethod: boolean;
+      } | null;
+      deliveryOptionLookupResponseStatus?: number | null;
+      deliveryOptionLookupResponseKeys?: string[];
+      deliveryOptionLookupResponseBodyKeys?: string[];
+      deliveryOptionLookupResponseHasDeliveryOptionId?: boolean | null;
+      deliveryOptionLookupResponseHasDeliveryCompanyName?: boolean | null;
+      deliveryOptionLookupResponseHasPricing?: boolean | null;
+      deliveryOptionLookupResponsePricingKeys?: string[];
     };
   };
 };
