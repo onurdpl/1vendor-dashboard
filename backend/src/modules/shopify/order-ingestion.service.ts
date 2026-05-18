@@ -17,6 +17,51 @@ function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
   return fullName || null;
 }
 
+function readAddressString(value: string | null | undefined) {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  return normalized || null;
+}
+
+export function normalizeShopifyShipmentPhone(value: string | null | undefined) {
+  const normalized = readAddressString(value);
+  return normalized ? normalized.replace(/\s+/g, '') : null;
+}
+
+function composeShopifyShippingAddress(address: ShopifyOrdersCreateWebhookPayload['shipping_address']) {
+  if (!address) {
+    return null;
+  }
+
+  const directAddress = readAddressString(address.address);
+  if (directAddress) {
+    return directAddress;
+  }
+
+  const parts = [readAddressString(address.address1), readAddressString(address.address2)].filter(
+    (part): part is string => Boolean(part),
+  );
+  return parts.join(', ') || null;
+}
+
+export function mapShopifyShippingAddress(payload: ShopifyOrdersCreateWebhookPayload) {
+  const address = payload.shipping_address;
+  return {
+    customerPhone:
+      normalizeShopifyShipmentPhone(address?.phone) ??
+      normalizeShopifyShipmentPhone(payload.phone) ??
+      normalizeShopifyShipmentPhone(payload.customer?.phone),
+    shippingCountry: readAddressString(address?.country_code) ?? readAddressString(address?.country),
+    shippingPostcode: readAddressString(address?.zip) ?? readAddressString(address?.postcode),
+    shippingCity: readAddressString(address?.city),
+    shippingDistrict:
+      readAddressString(address?.district) ??
+      readAddressString(address?.district_name) ??
+      readAddressString(address?.city_area) ??
+      readAddressString(address?.province),
+    shippingAddress: composeShopifyShippingAddress(address),
+  };
+}
+
 function toDate(value: string | null | undefined) {
   if (!value) {
     return new Date();
@@ -49,6 +94,7 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
       : payload.order_number !== undefined && payload.order_number !== null
         ? `#${String(payload.order_number)}`
         : `#${sourceShopifyOrderId}`;
+  const shippingAddress = mapShopifyShippingAddress(payload);
 
   return {
     sourceShopifyOrderId,
@@ -65,6 +111,7 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
         : typeof payload.email === 'string'
           ? payload.email
           : null,
+    ...shippingAddress,
     lineItems: lineItems.map<ParsedShopifyOrderLineItem>((lineItem) => ({
       sourceLineItemId: String(lineItem.id),
       sourceVariantId:
@@ -157,6 +204,12 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
           customerName: parsedOrder.customerName,
           customerEmail: parsedOrder.customerEmail,
+          customerPhone: parsedOrder.customerPhone,
+          shippingCountry: parsedOrder.shippingCountry,
+          shippingPostcode: parsedOrder.shippingPostcode,
+          shippingCity: parsedOrder.shippingCity,
+          shippingDistrict: parsedOrder.shippingDistrict,
+          shippingAddress: parsedOrder.shippingAddress,
           totalPrice: parsedOrder.totalPrice,
           createdAt: parsedOrder.createdAt,
         },
@@ -165,6 +218,12 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
           customerName: parsedOrder.customerName,
           customerEmail: parsedOrder.customerEmail,
+          customerPhone: parsedOrder.customerPhone,
+          shippingCountry: parsedOrder.shippingCountry,
+          shippingPostcode: parsedOrder.shippingPostcode,
+          shippingCity: parsedOrder.shippingCity,
+          shippingDistrict: parsedOrder.shippingDistrict,
+          shippingAddress: parsedOrder.shippingAddress,
           totalPrice: parsedOrder.totalPrice,
           createdAt: parsedOrder.createdAt,
         },

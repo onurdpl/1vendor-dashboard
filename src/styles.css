@@ -1523,6 +1523,10 @@ h3 {
   line-height: 1.35;
 }
 
+.shipment-action-feedback strong {
+  white-space: pre-line;
+}
+
 .action-success {
   border-color: rgba(34, 197, 94, 0.18);
   background: rgba(34, 197, 94, 0.12);

@@ -439,7 +439,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue(orderWithoutShipment);
     createShipmentExecutionMock.mockRejectedValueOnce(
-      new Error('Dummy Kargo shipment requires customer/address fields: customer.phone, customer.postcode.'),
+      new Error('Missing required shipment fields:\n- customer.phone\n- customer.postcode\n\nProvider request blocked before create call.'),
     );
     setCurrentUser({
       email: 'vendor@example.com',
@@ -455,7 +455,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
 
-    expect((await screen.findAllByText('Dummy Kargo shipment requires customer/address fields: customer.phone, customer.postcode.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/Missing required shipment fields:/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/customer\.phone/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Provider request blocked before create call/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
   });
 

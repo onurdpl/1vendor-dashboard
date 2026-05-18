@@ -13,6 +13,8 @@ import {
   ShippingProviderExecutionError,
   type ShippingProviderAdapter,
 } from './shipping-provider.adapter.js';
+import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
+import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type {
   CreateShipmentExecutionDto,
   ShipmentExecutionPreviewDto,
@@ -346,23 +348,69 @@ function buildNotificationUrl(input?: string | null) {
   return input?.trim() || null;
 }
 
+function normalizeShipmentPhone(value: string | null | undefined) {
+  return value?.trim().replace(/\s+/g, '') || null;
+}
+
+function composeShipmentAddress(orderRecord: Record<string, unknown>) {
+  const directAddress = readString(orderRecord, ['shippingAddress', 'address']);
+  if (directAddress) {
+    return directAddress;
+  }
+
+  const parts = [
+    readString(orderRecord, ['shippingAddress1', 'address1']),
+    readString(orderRecord, ['shippingAddress2', 'address2']),
+  ].filter((part): part is string => Boolean(part));
+
+  return parts.join(', ') || null;
+}
+
+function readStoredOrderWebhookAddress(orderRecord: Record<string, unknown>) {
+  const events = Array.isArray(orderRecord.webhookEvents) ? orderRecord.webhookEvents : [];
+  for (const event of events) {
+    if (!isRecord(event)) {
+      continue;
+    }
+
+    const rawPayload = readString(event, ['rawPayload']);
+    if (!rawPayload) {
+      continue;
+    }
+
+    try {
+      return mapShopifyShippingAddress(JSON.parse(rawPayload) as ShopifyOrdersCreateWebhookPayload);
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function buildKargoCustomer(input: {
   order: unknown;
   customerName: string | null | undefined;
   customerEmail: string | null | undefined;
 }) {
   const orderRecord = isRecord(input.order) ? input.order : {};
+  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
   const name = splitCustomerName(input.customerName);
   const customer = {
     name: name.name,
     surname: name.surname,
-    phone: readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone']),
+    phone: normalizeShipmentPhone(
+      readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone']) ?? webhookAddress?.customerPhone,
+    ),
     email: input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
-    country: readString(orderRecord, ['shippingCountry', 'country']),
-    postcode: readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']),
-    city: readString(orderRecord, ['shippingCity', 'city']),
-    district: readString(orderRecord, ['shippingDistrict', 'district']),
-    address: readString(orderRecord, ['shippingAddress', 'address']),
+    country: readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? null,
+    postcode: readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']) ?? webhookAddress?.shippingPostcode ?? null,
+    city: readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
+    district:
+      readString(orderRecord, ['shippingDistrict', 'district', 'cityArea', 'province']) ??
+      webhookAddress?.shippingDistrict ??
+      null,
+    address: composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
   };
   const missingFields = Object.entries(customer)
     .filter(([, value]) => !value)
@@ -944,7 +992,27 @@ async function buildShipmentRequestPreview(
       id: input.allocationId,
     },
     include: {
-      order: true,
+      order: {
+        include: {
+          webhookEvents: {
+            where: {
+              topic: 'orders/create',
+              rawPayload: {
+                not: null,
+              },
+            },
+            orderBy: [
+              {
+                processedAt: 'desc',
+              },
+              {
+                receivedAt: 'desc',
+              },
+            ],
+            take: 1,
+          },
+        },
+      },
       fulfillment: true,
       lineItems: {
         include: {
@@ -999,7 +1067,14 @@ async function buildShipmentRequestPreview(
     ]),
   ].filter((field): field is string => Boolean(field));
   if (dummyKargoRequested && missingCustomerFields.length > 0) {
-    throw new Error(`Dummy Kargo shipment requires customer/address fields: ${missingCustomerFields.join(', ')}.`);
+    throw new Error(
+      [
+        'Missing required shipment fields:',
+        ...missingCustomerFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before create call.',
+      ].join('\n'),
+    );
   }
   const notificationUrl = buildNotificationUrl(input.notificationUrl);
   const cargoIntegrationId = warehouseConfig?.cargoIntegrationId ?? null;

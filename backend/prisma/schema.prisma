@@ -352,6 +352,12 @@ model ShopifyOrder {
   sourceShopifyOrderNumber String
   customerName             String?
   customerEmail            String?
+  customerPhone            String?
+  shippingCountry          String?
+  shippingPostcode         String?
+  shippingCity             String?
+  shippingDistrict         String?
+  shippingAddress          String?
   totalPrice               Decimal?               @db.Decimal(10, 2)
   createdAt                DateTime               @default(now())
   updatedAt                DateTime               @updatedAt

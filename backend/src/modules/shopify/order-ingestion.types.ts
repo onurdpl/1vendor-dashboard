@@ -22,8 +22,25 @@ export type ShopifyOrdersCreateWebhookPayload = {
     email?: string | null;
     first_name?: string | null;
     last_name?: string | null;
+    phone?: string | null;
   } | null;
   email?: string | null;
+  phone?: string | null;
+  shipping_address?: {
+    phone?: string | null;
+    country?: string | null;
+    country_code?: string | null;
+    zip?: string | null;
+    postcode?: string | null;
+    city?: string | null;
+    district?: string | null;
+    district_name?: string | null;
+    city_area?: string | null;
+    province?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    address?: string | null;
+  } | null;
   line_items?: ShopifyOrdersCreateLineItemPayload[] | null;
 };
 
@@ -43,6 +60,12 @@ export type ParsedShopifyOrderPayload = {
   totalPrice: string | null;
   customerName: string | null;
   customerEmail: string | null;
+  customerPhone: string | null;
+  shippingCountry: string | null;
+  shippingPostcode: string | null;
+  shippingCity: string | null;
+  shippingDistrict: string | null;
+  shippingAddress: string | null;
   lineItems: ParsedShopifyOrderLineItem[];
 };
 
