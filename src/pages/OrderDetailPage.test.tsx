@@ -833,10 +833,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             createShipmentSuccess: true,
             createShipmentResponseKeys: ['message', 'success'],
             createShipmentProviderMessage: 'create shipment request is received.',
-            createShipmentRequestKeys: ['orderId'],
-            createShipmentDeliveryOptionIdPresent: false,
-            deliveryOptionIdPresent: false,
+            createShipmentRequestKeys: ['deliveryOptionId', 'orderId'],
+            createShipmentDeliveryOptionIdPresent: true,
+            deliveryOptionIdPresent: true,
             orderStatusValue: 'Depoya Atandı',
+            deliveryOptionLookupCalled: true,
+            deliveryOptionLookupSuccess: true,
+            deliveryOptionLookupOptionCount: 1,
+            selectedDeliveryCompanyName: 'surat-kargo-marketplace',
+            selectedDeliveryOptionIdPresent: true,
           },
         },
       },
@@ -858,11 +863,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('missing')).toBeInTheDocument();
     expect(screen.getByText('Try OTO createOrder')).toBeInTheDocument();
     expect(screen.getByText('Try OTO createShipment')).toBeInTheDocument();
-    expect(screen.getByText(/called yes · success yes/)).toBeInTheDocument();
+    expect(screen.getAllByText(/called yes · success yes/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Delivery option lookup')).toBeInTheDocument();
+    expect(screen.getByText(/called yes · success yes · options 1/)).toBeInTheDocument();
+    expect(screen.getByText('Selected delivery option')).toBeInTheDocument();
+    expect(screen.getByText(/present · surat-kargo-marketplace/)).toBeInTheDocument();
     expect(screen.getByText('createShipment request keys')).toBeInTheDocument();
     expect(screen.getByText('createShipment response keys')).toBeInTheDocument();
     expect(screen.getByText('create shipment request is received.')).toBeInTheDocument();
-    expect(screen.getByText(/createOrder missing · createShipment missing/)).toBeInTheDocument();
+    expect(screen.getByText(/createOrder present · createShipment present/)).toBeInTheDocument();
     expect(screen.getByText('Depoya Atandı')).toBeInTheDocument();
     expect(screen.queryByText(/905551112233/)).not.toBeInTheDocument();
   });

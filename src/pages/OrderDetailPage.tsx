@@ -885,6 +885,27 @@ export function OrderDetailPage() {
           </strong>
         </div>
         <div className="summary-row">
+          <span>Delivery option lookup</span>
+          <strong>
+            called {diagnostics.deliveryOptionLookupCalled ? 'yes' : 'no'} · success{' '}
+            {diagnostics.deliveryOptionLookupSuccess === null ? '—' : diagnostics.deliveryOptionLookupSuccess ? 'yes' : 'no'} · options{' '}
+            {diagnostics.deliveryOptionLookupOptionCount ?? '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Selected delivery option</span>
+          <strong>
+            {diagnostics.selectedDeliveryOptionIdPresent ? 'present' : 'missing'}
+            {diagnostics.selectedDeliveryCompanyName ? ` · ${diagnostics.selectedDeliveryCompanyName}` : ''}
+          </strong>
+        </div>
+        {diagnostics.deliveryOptionLookupErrorMessage ? (
+          <div className="summary-row">
+            <span>Delivery option error</span>
+            <strong>{diagnostics.deliveryOptionLookupErrorMessage}</strong>
+          </div>
+        ) : null}
+        <div className="summary-row">
           <span>createShipment request keys</span>
           <strong>{diagnostics.createShipmentRequestKeys.length ? diagnostics.createShipmentRequestKeys.join(', ') : '—'}</strong>
         </div>

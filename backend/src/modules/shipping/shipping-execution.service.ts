@@ -435,6 +435,25 @@ function resolveTryOtoPickupLocationCode(providerMetadata: unknown) {
   ]);
 }
 
+function resolveTryOtoDeliveryOptionId(providerMetadata: unknown) {
+  return readString(providerMetadata, [
+    'tryOtoDeliveryOptionId',
+    'deliveryOptionId',
+    'delivery_option_id',
+    'try_oto_delivery_option_id',
+  ]);
+}
+
+function resolveTryOtoOriginCity(providerMetadata: unknown) {
+  return readString(providerMetadata, [
+    'tryOtoOriginCity',
+    'originCity',
+    'origin_city',
+    'pickupCity',
+    'pickup_city',
+  ]);
+}
+
 function resolveTryOtoPackageWeight(providerMetadata: unknown, fallback: number) {
   const raw = readString(providerMetadata, ['packageWeight', 'package_weight', 'tryOtoPackageWeight']);
   const parsed = raw === null ? Number.NaN : Number(raw);
@@ -1682,6 +1701,12 @@ async function buildShipmentRequestPreview(
   const amount = lineItems.reduce((sum, lineItem) => sum + lineItem.lineAmount, 0);
   const tryOtoPayment = resolveTryOtoPayment(orderRecord, amount);
   const tryOtoPackageWeight = resolveTryOtoPackageWeight(config.providerMetadata, kg);
+  const tryOtoDeliveryOptionId = provider === ShippingProvider.TRY_OTO
+    ? resolveTryOtoDeliveryOptionId(config.providerMetadata)
+    : null;
+  const tryOtoOriginCity = provider === ShippingProvider.TRY_OTO
+    ? resolveTryOtoOriginCity(config.providerMetadata)
+    : null;
   const tryOtoOrderId = [
     'shopify',
     (allocation.sourceShopifyOrderId ?? allocation.sourceShopifyOrderNumber ?? allocation.id).replace(/[^a-zA-Z0-9]+/g, '-'),
@@ -1699,6 +1724,8 @@ async function buildShipmentRequestPreview(
         currency: 'TRY',
         packageCount: 1,
         packageWeight: tryOtoPackageWeight,
+        ...(tryOtoOriginCity ? { originCity: tryOtoOriginCity } : {}),
+        ...(tryOtoDeliveryOptionId ? { deliveryOptionId: tryOtoDeliveryOptionId } : {}),
         customer: tryOtoCustomer.customer,
         items: lineItems.map((lineItem) => ({
           name: lineItem.title,

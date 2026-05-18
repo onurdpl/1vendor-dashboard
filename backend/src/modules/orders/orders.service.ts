@@ -95,6 +95,7 @@ function buildShipmentProviderResponseSummary(
     ? snapshot.createShipmentRequestDiagnostics
     : null;
   const orderStatusDiagnostics = isRecord(snapshot?.orderStatus) ? snapshot.orderStatus : null;
+  const deliveryOptionLookupDiagnostics = isRecord(snapshot?.deliveryOptionLookup) ? snapshot.deliveryOptionLookup : null;
   const tryOtoFinalization = snapshot?.provider === 'try_oto'
     ? {
         createOrderSuccess: typeof createOrderDiagnostics?.ok === 'boolean' ? createOrderDiagnostics.ok : null,
@@ -118,6 +119,18 @@ function buildShipmentProviderResponseSummary(
         orderStatusValue:
           readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']) ??
           readString(orderStatusDiagnostics, ['providerError', 'statusField', 'shipmentStatus', 'cargoStatus']),
+        deliveryOptionLookupCalled: deliveryOptionLookupDiagnostics?.called === true,
+        deliveryOptionLookupSuccess:
+          typeof deliveryOptionLookupDiagnostics?.success === 'boolean'
+            ? deliveryOptionLookupDiagnostics.success
+            : null,
+        deliveryOptionLookupOptionCount:
+          typeof deliveryOptionLookupDiagnostics?.optionCount === 'number'
+            ? deliveryOptionLookupDiagnostics.optionCount
+            : null,
+        selectedDeliveryCompanyName: readString(deliveryOptionLookupDiagnostics, ['selectedDeliveryCompanyName']),
+        selectedDeliveryOptionIdPresent: deliveryOptionLookupDiagnostics?.selectedDeliveryOptionIdPresent === true,
+        deliveryOptionLookupErrorMessage: readString(deliveryOptionLookupDiagnostics, ['lookupErrorMessage', 'providerError']),
       }
     : undefined;
 

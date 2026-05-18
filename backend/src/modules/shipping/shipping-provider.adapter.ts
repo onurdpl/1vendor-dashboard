@@ -373,6 +373,50 @@ function readTryOtoBarcode(value: Record<string, unknown>) {
   return readString(value, ['barcode', 'barcodeNumber', 'barCode', 'awbNumber']);
 }
 
+function readTryOtoDeliveryOptionId(value: Record<string, unknown>) {
+  return readString(value, ['deliveryOptionId', 'delivery_option_id']);
+}
+
+function readTryOtoDeliveryCompanyName(value: Record<string, unknown>) {
+  return readString(value, ['deliveryCompanyName', 'deliveryOptionName', 'companyName', 'name']);
+}
+
+function getTryOtoDeliveryOptions(value: Record<string, unknown>) {
+  const candidates = [value.deliveryCompany, value.deliveryCompanies, value.deliveryOptions, value.options];
+  return candidates.find((candidate): candidate is unknown[] => Array.isArray(candidate))?.filter(isRecord) ?? [];
+}
+
+function buildTryOtoDeliveryFeePayload(payload: Record<string, unknown>) {
+  const customer = isRecord(payload.customer) ? payload.customer : {};
+  const originCity = readString(payload, ['originCity']);
+  const destinationCity = readString(customer, ['city']);
+  const weight = readNumber(payload, ['packageWeight']);
+  if (!originCity || !destinationCity || weight === null || weight <= 0) {
+    return {
+      ok: false as const,
+      missing: [
+        !originCity ? 'originCity' : null,
+        !destinationCity ? 'customer.city' : null,
+        weight === null || weight <= 0 ? 'packageWeight' : null,
+      ].filter((field): field is string => Boolean(field)),
+    };
+  }
+
+  return {
+    ok: true as const,
+    payload: {
+      originCity,
+      destinationCity,
+      weight,
+      currency: readString(payload, ['currency']) ?? 'TRY',
+      ...(readNumber(payload, ['packageCount']) ? { packageCount: readNumber(payload, ['packageCount']) } : {}),
+      ...(readNumber(payload, ['amount_due']) && Number(readNumber(payload, ['amount_due'])) > 0
+        ? { totalDue: readNumber(payload, ['amount_due']) }
+        : {}),
+    },
+  };
+}
+
 function getTryOtoRequestTarget(baseUrl: string | undefined, path: string) {
   if (!baseUrl) {
     return {
@@ -783,16 +827,82 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       return disabled;
     }
 
-    const payloadDiagnostics = buildTryOtoPayloadDiagnostics(input.requestSnapshot);
+    const configuredDeliveryOptionId = readTryOtoDeliveryOptionId(input.requestSnapshot);
     console.info('[shipping:try-oto:sandbox-create]', {
       provider: 'try_oto',
       selectedEnvironment: 'sandbox',
       requestTargetHostname: getTryOtoRequestTarget(this.env.TRY_OTO_BASE_URL, '/rest/v2/createOrder').requestTargetHostname,
-      payloadDiagnostics,
+      payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
     });
 
     const accessToken = await this.refreshAccessToken();
-    const createOrder = await this.postJson('/rest/v2/createOrder', input.requestSnapshot, accessToken, 'createOrder');
+    let deliveryOptionLookup: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
+    let selectedDeliveryOptionId = configuredDeliveryOptionId;
+    let selectedDeliveryCompanyName: string | null = null;
+
+    if (!selectedDeliveryOptionId) {
+      const lookupPayload = buildTryOtoDeliveryFeePayload(input.requestSnapshot);
+      if (!lookupPayload.ok) {
+        throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
+          ok: false,
+          provider: 'try_oto',
+          operation: 'checkOTODeliveryFee',
+          deliveryOptionLookup: {
+            called: false,
+            success: false,
+            missingFields: lookupPayload.missing,
+            optionCount: 0,
+          },
+          payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
+        });
+      }
+
+      try {
+        deliveryOptionLookup = await this.postJson('/rest/v2/checkOTODeliveryFee', lookupPayload.payload, accessToken, 'checkOTODeliveryFee');
+      } catch (error) {
+        if (error instanceof ShippingProviderExecutionError) {
+          throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
+            ...error.responseSnapshot,
+            deliveryOptionLookup: {
+              called: true,
+              success: false,
+              optionCount: 0,
+              providerError: readSafeProviderError(error.responseSnapshot),
+            },
+            payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
+          });
+        }
+        throw error;
+      }
+
+      const options = getTryOtoDeliveryOptions(deliveryOptionLookup.body);
+      const selectedOption = options.find((option) => readTryOtoDeliveryOptionId(option));
+      selectedDeliveryOptionId = selectedOption ? readTryOtoDeliveryOptionId(selectedOption) : null;
+      selectedDeliveryCompanyName = selectedOption ? readTryOtoDeliveryCompanyName(selectedOption) : null;
+      if (!selectedDeliveryOptionId) {
+        throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
+          ok: false,
+          provider: 'try_oto',
+          operation: 'checkOTODeliveryFee',
+          deliveryOptionLookup: {
+            called: true,
+            success: true,
+            optionCount: options.length,
+            selectedDeliveryCompanyName: null,
+            selectedDeliveryOptionIdPresent: false,
+          },
+          lookup: deliveryOptionLookup.snapshot,
+          payloadDiagnostics: buildTryOtoPayloadDiagnostics(input.requestSnapshot),
+        });
+      }
+    }
+
+    const orderPayload = {
+      ...input.requestSnapshot,
+      ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
+    };
+    const payloadDiagnostics = buildTryOtoPayloadDiagnostics(orderPayload);
+    const createOrder = await this.postJson('/rest/v2/createOrder', orderPayload, accessToken, 'createOrder');
     const orderId = readString(input.requestSnapshot, ['orderId']);
     if (!orderId) {
       throw new ShippingProviderExecutionError('Try OTO createOrder payload is missing orderId.', {
@@ -802,7 +912,22 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       });
     }
 
-    const createShipmentRequest = { orderId };
+    const deliveryOptionLookupDiagnostics = {
+      called: !configuredDeliveryOptionId,
+      success: configuredDeliveryOptionId ? null : Boolean(deliveryOptionLookup?.snapshot.ok),
+      optionCount: configuredDeliveryOptionId ? null : getTryOtoDeliveryOptions(deliveryOptionLookup?.body ?? {}).length,
+      selectedDeliveryCompanyName,
+      selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
+      configuredDeliveryOptionIdPresent: Boolean(configuredDeliveryOptionId),
+      requestKeys: deliveryOptionLookup
+        ? ['currency', 'destinationCity', 'originCity', 'weight']
+        : [],
+      lookupErrorMessage: null,
+    };
+    const createShipmentRequest = {
+      orderId,
+      ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
+    };
     const createShipment = await this.postJson('/rest/v2/createShipment', createShipmentRequest, accessToken, 'createShipment');
     let orderStatus: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
     try {
@@ -854,12 +979,18 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         labelUrl,
         deliveryCompany: readString(statusBody, ['deliveryCompany']),
         providerStatus: readString(statusBody, ['status']),
+        deliveryOptionLookup: {
+          ...deliveryOptionLookupDiagnostics,
+          lookup: deliveryOptionLookup?.snapshot,
+        },
+        selectedDeliveryCompanyName,
+        selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
         createOrder: createOrder.snapshot,
         createShipment: createShipment.snapshot,
         createShipmentRequestDiagnostics: {
           topLevelKeys: Object.keys(createShipmentRequest).sort(),
           orderIdPresent: hasValue(createShipmentRequest.orderId),
-          deliveryOptionIdPresent: false,
+          deliveryOptionIdPresent: hasValue(createShipmentRequest.deliveryOptionId),
         },
         orderStatus: orderStatus?.snapshot,
         payloadDiagnostics,

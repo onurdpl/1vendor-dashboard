@@ -126,6 +126,12 @@ export type OrderShipmentExecutionDto = {
       createShipmentDeliveryOptionIdPresent: boolean | null;
       deliveryOptionIdPresent: boolean | null;
       orderStatusValue: string | null;
+      deliveryOptionLookupCalled?: boolean;
+      deliveryOptionLookupSuccess?: boolean | null;
+      deliveryOptionLookupOptionCount?: number | null;
+      selectedDeliveryCompanyName?: string | null;
+      selectedDeliveryOptionIdPresent?: boolean;
+      deliveryOptionLookupErrorMessage?: string | null;
     };
   };
 };

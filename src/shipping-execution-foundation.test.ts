@@ -2635,7 +2635,7 @@ describe('shipping execution foundation', () => {
     ).rejects.toThrow('Missing TRY_OTO_REFRESH_TOKEN');
   });
 
-  it('refreshes Try OTO token and executes createOrder then createShipment with bearer auth', async () => {
+  it('refreshes Try OTO token, looks up a delivery option, and executes createShipment with bearer auth', async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce(
@@ -2645,6 +2645,22 @@ describe('shipping execution foundation', () => {
             access_token: 'oto-access-token',
             token_type: 'Bearer',
             expires_in: '3600',
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            deliveryCompany: [
+              {
+                deliveryOptionId: 7109,
+                deliveryCompanyName: 'surat-kargo-marketplace',
+                deliveryOptionName: 'Surat Marketplace',
+                price: 42,
+                currency: 'TRY',
+              },
+            ],
           }),
         ),
       )
@@ -2697,11 +2713,13 @@ describe('shipping execution foundation', () => {
       requestSnapshot: {
         orderId: 'POC-TR-1001',
         pickupLocationCode: 'tr-test-store-001',
+        originCity: 'Istanbul',
         payment_method: 'paid',
         amount: 1299.9,
         amount_due: 0,
         currency: 'TRY',
         packageWeight: 1,
+        packageCount: 1,
         customer: {
           name: 'Sandbox Customer',
           mobile: '905551112233',
@@ -2723,12 +2741,18 @@ describe('shipping execution foundation', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       'https://staging-api.tryoto.com/rest/v2/refreshToken',
-      expect.objectContaining({
-        method: 'POST',
-      }),
+      expect.objectContaining({ method: 'POST' }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
+      'https://staging-api.tryoto.com/rest/v2/checkOTODeliveryFee',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({ Authorization: 'Bearer oto-access-token' }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
       'https://staging-api.tryoto.com/rest/v2/createOrder',
       expect.objectContaining({
         method: 'POST',
@@ -2740,23 +2764,30 @@ describe('shipping execution foundation', () => {
       }),
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
-      3,
+      4,
       'https://staging-api.tryoto.com/rest/v2/createShipment',
       expect.objectContaining({
         method: 'POST',
-        headers: expect.objectContaining({
-          Authorization: 'Bearer oto-access-token',
-        }),
+        headers: expect.objectContaining({ Authorization: 'Bearer oto-access-token' }),
       }),
     );
-    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      originCity: 'Istanbul',
+      destinationCity: 'Istanbul',
+      weight: 1,
+      currency: 'TRY',
+      packageCount: 1,
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toMatchObject({
       orderId: 'POC-TR-1001',
       pickupLocationCode: 'tr-test-store-001',
+      deliveryOptionId: '7109',
       payment_method: 'paid',
       amount: 1299.9,
       amount_due: 0,
       currency: 'TRY',
       packageWeight: 1,
+      originCity: 'Istanbul',
       customer: {
         name: 'Sandbox Customer',
         mobile: '905551112233',
@@ -2773,10 +2804,10 @@ describe('shipping execution foundation', () => {
         }),
       ],
     });
-    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+    expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toEqual({
       orderId: 'POC-TR-1001',
+      deliveryOptionId: '7109',
     });
-    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).not.toHaveProperty('deliveryOptionId');
     expect(result).toMatchObject({
       providerShipmentId: 'OTO-SHIP-1001',
       trackingNumber: 'OTO-TRACK-1001',
@@ -2795,26 +2826,32 @@ describe('shipping execution foundation', () => {
         payloadDiagnostics: {
           orderIdPresent: true,
           pickupLocationCodePresent: true,
-          deliveryOptionIdPresent: false,
+          deliveryOptionIdPresent: true,
           customerMobilePresent: true,
           customerAddressPresent: true,
           customerCityPresent: true,
           customerCountryPresent: true,
           customerDistrictPresent: true,
         },
-        createOrder: expect.objectContaining({
-          ok: true,
-          bodyKeys: expect.arrayContaining(['otoId']),
+        deliveryOptionLookup: expect.objectContaining({
+          called: true,
+          success: true,
+          optionCount: 1,
+          selectedDeliveryCompanyName: 'surat-kargo-marketplace',
+          selectedDeliveryOptionIdPresent: true,
         }),
+        selectedDeliveryCompanyName: 'surat-kargo-marketplace',
+        selectedDeliveryOptionIdPresent: true,
+        createOrder: expect.objectContaining({ ok: true, bodyKeys: expect.arrayContaining(['otoId']) }),
         createShipment: expect.objectContaining({
           ok: true,
           bodyKeys: expect.arrayContaining(['message', 'success']),
           providerError: 'create shipment request is received.',
         }),
         createShipmentRequestDiagnostics: {
-          topLevelKeys: ['orderId'],
+          topLevelKeys: ['deliveryOptionId', 'orderId'],
           orderIdPresent: true,
-          deliveryOptionIdPresent: false,
+          deliveryOptionIdPresent: true,
         },
         orderStatus: expect.objectContaining({
           ok: true,
@@ -2857,6 +2894,7 @@ describe('shipping execution foundation', () => {
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
         packageWeight: 2,
+        tryOtoOriginCity: 'Istanbul',
       },
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
@@ -2887,6 +2925,7 @@ describe('shipping execution foundation', () => {
       payload: {
         orderId: expect.stringContaining('allocation-alloc-1'),
         pickupLocationCode: 'tr-test-store-001',
+        originCity: 'Istanbul',
         payment_method: 'paid',
         amount: 4999,
         amount_due: 0,
@@ -2954,6 +2993,7 @@ describe('shipping execution foundation', () => {
       shippingVatPercent: 18,
       providerMetadata: {
         tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
       },
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
@@ -3013,11 +3053,138 @@ describe('shipping execution foundation', () => {
       },
       requestSnapshot: expect.objectContaining({
         pickupLocationCode: 'tr-test-store-001',
+        originCity: 'Istanbul',
         packageWeight: 1,
       }),
     });
     expect(Number.isNaN(createData?.desi)).toBe(false);
     expect(createData).not.toHaveProperty('allocationId');
+  });
+
+  it('uses configured Try OTO deliveryOptionId without delivery option lookup', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, otoId: 540790 })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, message: 'create shipment request is received.' })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, status: 'processing' })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'sporjinal',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: 'POC-TR-1002',
+        pickupLocationCode: 'tr-test-store-001',
+        deliveryOptionId: 'configured-7109',
+        payment_method: 'paid',
+        amount: 1299.9,
+        amount_due: 0,
+        currency: 'TRY',
+        packageWeight: 1,
+        customer: {
+          name: 'Sandbox Customer',
+          mobile: '905551112233',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+          city: 'Istanbul',
+          country: 'TR',
+          district: 'Kadikoy',
+        },
+        items: [],
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/checkOTODeliveryFee');
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({
+      orderId: 'POC-TR-1002',
+      deliveryOptionId: 'configured-7109',
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toEqual({
+      orderId: 'POC-TR-1002',
+      deliveryOptionId: 'configured-7109',
+    });
+    expect(result.responseSnapshot).toMatchObject({
+      deliveryOptionLookup: expect.objectContaining({
+        called: false,
+        selectedDeliveryOptionIdPresent: true,
+        configuredDeliveryOptionIdPresent: true,
+      }),
+      createShipmentRequestDiagnostics: {
+        topLevelKeys: ['deliveryOptionId', 'orderId'],
+        orderIdPresent: true,
+        deliveryOptionIdPresent: true,
+      },
+    });
+  });
+
+  it('blocks Try OTO shipment creation when delivery options cannot be resolved', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, deliveryCompany: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'try_oto',
+        requestSnapshot: {
+          orderId: 'POC-TR-1003',
+          pickupLocationCode: 'tr-test-store-001',
+          originCity: 'Istanbul',
+          payment_method: 'paid',
+          amount: 1299.9,
+          amount_due: 0,
+          currency: 'TRY',
+          packageWeight: 1,
+          customer: {
+            name: 'Sandbox Customer',
+            mobile: '905551112233',
+            address: 'Test Mahallesi 1. Sokak No: 1',
+            city: 'Istanbul',
+            country: 'TR',
+            district: 'Kadikoy',
+          },
+          items: [],
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.',
+      responseSnapshot: expect.objectContaining({
+        deliveryOptionLookup: {
+          called: true,
+          success: true,
+          optionCount: 0,
+          selectedDeliveryCompanyName: null,
+          selectedDeliveryOptionIdPresent: false,
+        },
+      }),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('905551112233');
   });
 
   it('refreshes Try OTO shipment status through orderStatus and captures tracking, barcode, and label fields', async () => {
