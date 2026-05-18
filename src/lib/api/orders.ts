@@ -1,5 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { ShipmentCustomerOverrides } from './contracts';
+import type { ShipmentCustomerOverrides, VendorShippingConfigUpdate } from './contracts';
 
 export async function listOrders(options: { vendorId?: string | null } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined);
@@ -51,6 +51,14 @@ export async function retryFailedShipmentExecution(
   );
 }
 
-export async function getShippingProviderDiagnostics() {
-  return runtimeServices.orders.shippingProviderDiagnostics();
+export async function getShippingProviderDiagnostics(options: { vendorId?: string | null } = {}) {
+  return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined);
+}
+
+export async function getVendorShippingConfig(options: { vendorId?: string | null } = {}) {
+  return runtimeServices.orders.vendorShippingConfig(options.vendorId ?? undefined);
+}
+
+export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
+  return runtimeServices.orders.updateVendorShippingConfig(vendorId, input);
 }

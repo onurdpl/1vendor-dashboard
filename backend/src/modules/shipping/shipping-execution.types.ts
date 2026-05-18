@@ -30,6 +30,7 @@ export type VendorShippingConfigDto = {
   warehouses: VendorShippingWarehouseDto[];
   providerMetadata: unknown;
   source: 'configured' | 'default';
+  updatedAt: string | null;
 };
 
 export type ShippingProviderGateDiagnosticsDto = {

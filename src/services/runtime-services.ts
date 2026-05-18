@@ -30,6 +30,7 @@ import type {
   SupportTicketContextSummary,
   SupportTicketStatus,
   ShipmentCustomerOverrides,
+  VendorShippingConfigUpdate,
 } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
 
@@ -399,9 +400,9 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async shippingProviderDiagnostics() {
+    async shippingProviderDiagnostics(vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getShippingProviderDiagnostics('kargo_entegrator', { vendorId: getCurrentVendorId() });
+        return realOrders.getShippingProviderDiagnostics('kargo_entegrator', { vendorId });
       }
 
       return {
@@ -429,6 +430,66 @@ export const runtimeServices = {
           'Kargo Entegratör webhook/status sync is not implemented.',
           'Live carrier execution is not enabled or verified.',
         ],
+      };
+    },
+    async vendorShippingConfig(vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.getVendorShippingConfig({ vendorId });
+      }
+
+      return {
+        vendorId,
+        preferredProvider: 'kargo_entegrator' as const,
+        shippingEnabled: true,
+        defaultDesi: '3.00',
+        cargoIntegrationId: '2547',
+        defaultWarehouseId: '1774',
+        shippingVatPercent: '18.00',
+        warehouses: [
+          {
+            id: `mock-warehouse-${vendorId}-1774`,
+            vendorId,
+            provider: 'kargo_entegrator' as const,
+            warehouseId: '1774',
+            name: 'Default warehouse',
+            address: null,
+            isDefault: true,
+          },
+        ],
+        providerMetadata: {
+          packageType: 'box',
+        },
+        source: 'configured' as const,
+        updatedAt: new Date().toISOString(),
+      };
+    },
+    async updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.updateVendorShippingConfig(vendorId, input);
+      }
+
+      return {
+        vendorId,
+        preferredProvider: input.preferredProvider ?? 'kargo_entegrator',
+        shippingEnabled: input.shippingEnabled ?? true,
+        defaultDesi: (input.defaultDesi ?? 3).toFixed(2),
+        cargoIntegrationId: input.cargoIntegrationId ?? '2547',
+        defaultWarehouseId: input.defaultWarehouseId ?? '1774',
+        shippingVatPercent: (input.shippingVatPercent ?? 18).toFixed(2),
+        warehouses: (input.warehouses ?? []).map((warehouse, index) => ({
+          id: `mock-warehouse-${vendorId}-${warehouse.warehouseId}-${index}`,
+          vendorId,
+          provider: warehouse.provider ?? input.preferredProvider ?? 'kargo_entegrator',
+          warehouseId: warehouse.warehouseId,
+          name: warehouse.name ?? null,
+          address: warehouse.address ?? null,
+          isDefault: Boolean(warehouse.isDefault),
+        })),
+        providerMetadata: input.providerMetadata ?? {
+          packageType: 'box',
+        },
+        source: 'configured' as const,
+        updatedAt: new Date().toISOString(),
       };
     },
   },

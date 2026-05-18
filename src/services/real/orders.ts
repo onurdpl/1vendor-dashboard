@@ -15,6 +15,8 @@ import type {
   ShippingStatus,
   ShopifyOrderBreakdown,
   VendorAllocationSummary,
+  VendorShippingConfig,
+  VendorShippingConfigUpdate,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
 
@@ -499,4 +501,17 @@ export async function getShippingProviderDiagnostics(
     params.set('vendorId', options.vendorId);
   }
   return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?${params.toString()}`);
+}
+
+export async function getVendorShippingConfig(options: { vendorId?: string | null } = {}) {
+  return apiClient.get<VendorShippingConfig>('/shipping/config', {
+    vendorId: options.vendorId,
+  });
+}
+
+export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
+  return apiClient.put<VendorShippingConfig>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/shipping-config`,
+    input,
+  );
 }

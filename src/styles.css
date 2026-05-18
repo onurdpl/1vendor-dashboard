@@ -4703,6 +4703,110 @@ h3 {
   background: #ffffff;
 }
 
+.shipping-config-editor {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.shipping-config-editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shipping-config-editor-heading strong,
+.shipping-config-editor-heading span {
+  display: block;
+}
+
+.shipping-config-editor-heading strong {
+  color: #0f172a;
+  font-size: 0.86rem;
+}
+
+.shipping-config-editor-heading span {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.shipping-config-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.shipping-config-editor .field {
+  gap: 5px;
+  font-size: 0.76rem;
+}
+
+.shipping-config-editor .field input,
+.shipping-config-editor .field select {
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #ffffff;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.shipping-config-readonly {
+  display: grid;
+  gap: 5px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.shipping-config-readonly span {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.shipping-config-readonly strong {
+  color: #0f172a;
+  font-size: 0.82rem;
+}
+
+.shipping-config-feedback {
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.shipping-config-feedback.success {
+  border: 1px solid rgba(22, 163, 74, 0.18);
+  background: rgba(220, 252, 231, 0.9);
+  color: #166534;
+}
+
+.shipping-config-feedback.error {
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  background: rgba(254, 226, 226, 0.9);
+  color: #991b1b;
+}
+
+.shipping-config-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .order-tracking-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

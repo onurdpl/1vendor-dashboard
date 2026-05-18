@@ -10,6 +10,8 @@ import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
+const getVendorShippingConfigMock = vi.fn();
+const updateVendorShippingConfigMock = vi.fn();
 const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
@@ -31,6 +33,8 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
     getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
+    getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
+    updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) => createShipmentExecutionMock(allocationId, options),
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     retryFailedShipmentExecution: (
@@ -207,6 +211,48 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       deprecatedEnvFallbacks: [],
       warnings: ['Live carrier execution is not enabled or verified.'],
     });
+    getVendorShippingConfigMock.mockReset();
+    getVendorShippingConfigMock.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'kargo_entegrator',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: '18.00',
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          vendorId: 'sporjinal',
+          provider: 'kargo_entegrator',
+          warehouseId: '1774',
+          name: 'Sporjinal warehouse',
+          address: null,
+          isDefault: true,
+        },
+      ],
+      providerMetadata: {
+        packageType: 'box',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+    updateVendorShippingConfigMock.mockReset();
+    updateVendorShippingConfigMock.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'kargo_entegrator',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: '9999',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        packageType: 'box',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
     createShipmentExecutionMock.mockReset();
     createShipmentExecutionMock.mockResolvedValue({
       ...orderWithShipmentSummary.shipmentExecution,
@@ -277,8 +323,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Shipping execution enabled')).toBeInTheDocument();
     expect(screen.getByText('Cargo integration configured')).toBeInTheDocument();
     expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
-    expect(screen.getByText('Package type')).toBeInTheDocument();
-    expect(screen.getByText('box')).toBeInTheDocument();
+    expect(screen.getAllByText('Package type').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('box').length).toBeGreaterThan(0);
     expect(screen.getByText('Webhook route implemented')).toBeInTheDocument();
     expect(screen.getByText('Dummy Kargo support')).toBeInTheDocument();
     expect(screen.getByText('Live carrier execution is not enabled or verified.')).toBeInTheDocument();
@@ -286,6 +332,68 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Receiver address and phone requirements are unknown.')).not.toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
+  });
+
+  it('lets admins update vendor shipping provider configuration and refresh diagnostics', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Shipping provider configuration editor')).toBeInTheDocument();
+    const cargoInput = screen.getByLabelText('Cargo integration ID');
+    await user.clear(cargoInput);
+    await user.type(cargoInput, '9999');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'sporjinal',
+        expect.objectContaining({
+          preferredProvider: 'kargo_entegrator',
+          cargoIntegrationId: '9999',
+          defaultWarehouseId: '1774',
+          defaultDesi: 3,
+          providerMetadata: expect.objectContaining({
+            packageType: 'box',
+          }),
+        }),
+      ),
+    );
+    expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
+    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(2));
+    expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
+  });
+
+  it('blocks invalid admin shipping provider configuration before save', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const warehouseInput = await screen.findByLabelText('Warehouse ID');
+    await user.clear(warehouseInput);
+    await user.type(warehouseInput, 'warehouse-1774');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    expect(await screen.findByText('Warehouse ID must be numeric.')).toBeInTheDocument();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
   });
 
   it('renders safe admin provider validation diagnostics for failed shipments', async () => {
@@ -874,8 +982,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Order ##1028')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
     expect(screen.queryByText('message, shipment_id')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
   });
 });

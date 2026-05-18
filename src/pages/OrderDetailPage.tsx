@@ -1,5 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -8,13 +8,18 @@ import {
   createShipmentExecution,
   getOrder,
   getShippingProviderDiagnostics,
+  getVendorShippingConfig,
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  updateVendorShippingConfig,
   type OrderDetail,
   type ShipmentCustomerField,
   type ShipmentCustomerOverrides,
   type ShipmentExecution,
+  type ShippingProvider,
+  type VendorShippingConfig,
+  type VendorShippingConfigUpdate,
 } from '../features/orders/api';
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -83,6 +88,88 @@ function getTrackingHelper(order: { trackingNumber?: string; carrier?: string; t
   }
 
   return 'No tracking information available.';
+}
+
+type ShippingConfigDraft = {
+  preferredProvider: ShippingProvider;
+  cargoIntegrationId: string;
+  defaultWarehouseId: string;
+  defaultDesi: string;
+  packageType: 'box' | 'document';
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readPackageType(config?: VendorShippingConfig | null): 'box' | 'document' {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.packageType ?? metadata.package_type;
+  return raw === 'document' ? 'document' : 'box';
+}
+
+function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
+  return {
+    preferredProvider: config?.preferredProvider ?? 'kargo_entegrator',
+    cargoIntegrationId: config?.cargoIntegrationId ?? '',
+    defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
+    defaultDesi: config?.defaultDesi ?? '3.00',
+    packageType: readPackageType(config),
+  };
+}
+
+function validateShippingConfigDraft(draft: ShippingConfigDraft) {
+  const errors: string[] = [];
+
+  if (!draft.preferredProvider) {
+    errors.push('Provider is required.');
+  }
+  if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
+    errors.push('Cargo integration ID must be numeric.');
+  }
+  if (!/^\d+$/.test(draft.defaultWarehouseId.trim())) {
+    errors.push('Warehouse ID must be numeric.');
+  }
+  const defaultDesi = Number(draft.defaultDesi);
+  if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
+    errors.push('Default desi must be greater than zero.');
+  }
+  if (draft.packageType !== 'box' && draft.packageType !== 'document') {
+    errors.push('Package type must be box or document.');
+  }
+
+  return errors;
+}
+
+function buildShippingConfigUpdate(
+  draft: ShippingConfigDraft,
+  currentConfig?: VendorShippingConfig | null,
+): VendorShippingConfigUpdate {
+  const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
+  const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
+    ?? currentConfig?.warehouses[0];
+
+  return {
+    preferredProvider: draft.preferredProvider,
+    shippingEnabled: currentConfig?.shippingEnabled ?? true,
+    defaultDesi: Number(draft.defaultDesi),
+    cargoIntegrationId: draft.cargoIntegrationId.trim(),
+    defaultWarehouseId: draft.defaultWarehouseId.trim(),
+    shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
+    providerMetadata: {
+      ...metadata,
+      packageType: draft.packageType,
+    },
+    warehouses: [
+      {
+        warehouseId: draft.defaultWarehouseId.trim(),
+        name: existingDefaultWarehouse?.name ?? 'Default warehouse',
+        address: existingDefaultWarehouse?.address ?? null,
+        isDefault: true,
+        provider: draft.preferredProvider,
+      },
+    ],
+  };
 }
 
 function getInitialsLabel(value: string) {
@@ -239,6 +326,8 @@ export function OrderDetailPage() {
   const [supportOpen, setSupportOpen] = useState(false);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
+  const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
+  const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
     () => {
@@ -252,11 +341,18 @@ export function OrderDetailPage() {
       enabled: authContextReady && Boolean(orderId),
     },
   );
-  const { data: shippingProviderDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig('kargo_entegrator'),
-    () => getShippingProviderDiagnostics(),
+  const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig('kargo_entegrator', currentVendor.vendorId),
+    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId }),
     {
       enabled: authContextReady && isAdmin,
+    },
+  );
+  const { data: vendorShippingConfig, refetch: refetchVendorShippingConfig } = useQueryResource(
+    queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
+    () => getVendorShippingConfig({ vendorId: currentVendor.vendorId }),
+    {
+      enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId),
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
@@ -330,6 +426,30 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: updateShippingConfigMutation, isPending: isSavingShippingConfig } = useMutationAction(
+    async (payload: VendorShippingConfigUpdate) => updateVendorShippingConfig(currentVendor.vendorId, payload),
+    {
+      invalidateQueryKeys: [
+        queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
+        queryKeys.admin.shipments.providerConfig('kargo_entegrator', currentVendor.vendorId),
+      ],
+      onSuccess: async () => {
+        setShippingConfigFeedback({ tone: 'success', message: 'Shipping provider configuration saved.' });
+        await Promise.all([refetchVendorShippingConfig(), refetchShippingProviderDiagnostics()]);
+      },
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : 'Shipping provider configuration could not be saved.';
+        setShippingConfigFeedback({ tone: 'error', message });
+      },
+    },
+  );
+
+  useEffect(() => {
+    if (vendorShippingConfig) {
+      setShippingConfigDraft(buildShippingConfigDraft(vendorShippingConfig));
+      setShippingConfigFeedback(null);
+    }
+  }, [vendorShippingConfig]);
 
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
@@ -531,6 +651,17 @@ export function OrderDetailPage() {
       ),
     [currentVendor.vendorId, isAdmin, order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
   );
+
+  const handleSaveShippingConfig = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const validationErrors = validateShippingConfigDraft(shippingConfigDraft);
+    if (validationErrors.length) {
+      setShippingConfigFeedback({ tone: 'error', message: validationErrors.join(' ') });
+      return;
+    }
+
+    void updateShippingConfigMutation(buildShippingConfigUpdate(shippingConfigDraft, vendorShippingConfig));
+  };
 
   const handleRetryShipment = () => {
     if (!shipmentExecution || !canRetryDryRunShipment) {
@@ -1655,6 +1786,116 @@ export function OrderDetailPage() {
                       <strong>Shipping provider diagnostics</strong>
                       <span>Admin only</span>
                     </div>
+                    <form
+                      className="shipping-config-editor"
+                      aria-label="Shipping provider configuration editor"
+                      noValidate
+                      onSubmit={handleSaveShippingConfig}
+                    >
+                      <div className="shipping-config-editor-heading">
+                        <div>
+                          <strong>Provider configuration</strong>
+                          <span>Shipment settings for {currentVendor.vendorName ?? currentVendor.vendorId}</span>
+                        </div>
+                        <span>
+                          Last updated:{' '}
+                          {vendorShippingConfig?.updatedAt ? formatOptionalDate(vendorShippingConfig.updatedAt) : 'not configured'}
+                        </span>
+                      </div>
+                      <div className="shipping-config-editor-grid">
+                        <label className="field">
+                          <span>Provider</span>
+                          <select
+                            value={shippingConfigDraft.preferredProvider}
+                            onChange={(event) =>
+                              setShippingConfigDraft((current) => ({
+                                ...current,
+                                preferredProvider: event.target.value as ShippingProvider,
+                              }))
+                            }
+                          >
+                            <option value="kargo_entegrator">Kargo Entegratör</option>
+                            <option value="hepsijet">Hepsijet</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Cargo integration ID</span>
+                          <input
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={shippingConfigDraft.cargoIntegrationId}
+                            onChange={(event) =>
+                              setShippingConfigDraft((current) => ({
+                                ...current,
+                                cargoIntegrationId: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Warehouse ID</span>
+                          <input
+                            inputMode="numeric"
+                            pattern="[0-9]*"
+                            value={shippingConfigDraft.defaultWarehouseId}
+                            onChange={(event) =>
+                              setShippingConfigDraft((current) => ({
+                                ...current,
+                                defaultWarehouseId: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Default desi</span>
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={shippingConfigDraft.defaultDesi}
+                            onChange={(event) =>
+                              setShippingConfigDraft((current) => ({
+                                ...current,
+                                defaultDesi: event.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="field">
+                          <span>Package type</span>
+                          <select
+                            value={shippingConfigDraft.packageType}
+                            onChange={(event) =>
+                              setShippingConfigDraft((current) => ({
+                                ...current,
+                                packageType: event.target.value as ShippingConfigDraft['packageType'],
+                              }))
+                            }
+                          >
+                            <option value="box">box</option>
+                            <option value="document">document</option>
+                          </select>
+                        </label>
+                        <div className="shipping-config-readonly">
+                          <span>Sandbox</span>
+                          <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
+                        </div>
+                        <div className="shipping-config-readonly">
+                          <span>Webhook ingest</span>
+                          <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
+                        </div>
+                      </div>
+                      {shippingConfigFeedback ? (
+                        <div className={`shipping-config-feedback ${shippingConfigFeedback.tone}`}>
+                          {shippingConfigFeedback.message}
+                        </div>
+                      ) : null}
+                      <div className="shipping-config-actions">
+                        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
+                          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
+                        </button>
+                      </div>
+                    </form>
                     <div className="summary-row">
                       <span>Sandbox mode</span>
                       <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'yes' : 'no'}</strong>

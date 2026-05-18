@@ -96,6 +96,7 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
       warehouses: [],
       providerMetadata: null,
       source: 'default',
+      updatedAt: null,
     };
   }
 
@@ -110,6 +111,7 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
     warehouses: (config.warehouses ?? []).map(mapWarehouse),
     providerMetadata: config.providerMetadata,
     source: 'configured',
+    updatedAt: config.updatedAt ? config.updatedAt.toISOString() : null,
   };
 }
 
@@ -500,6 +502,15 @@ export async function upsertVendorShippingConfig(
   if (!Number.isFinite(shippingVatPercent) || shippingVatPercent < 0) {
     throw new Error('shippingVatPercent must be zero or greater.');
   }
+  if (input.cargoIntegrationId !== undefined && input.cargoIntegrationId !== null && !/^\d+$/.test(input.cargoIntegrationId)) {
+    throw new Error('cargoIntegrationId must be numeric.');
+  }
+  if (input.defaultWarehouseId !== undefined && input.defaultWarehouseId !== null && !/^\d+$/.test(input.defaultWarehouseId)) {
+    throw new Error('defaultWarehouseId must be numeric.');
+  }
+  if (input.providerMetadata !== undefined) {
+    assertValidKargoPackageType(resolveKargoPackageType(input.providerMetadata));
+  }
 
   const config = await prisma.$transaction(async (tx) => {
     const savedConfig = await tx.vendorShippingConfig.upsert({
@@ -544,6 +555,12 @@ export async function upsertVendorShippingConfig(
           ]
         : []
     );
+
+    for (const warehouseInput of warehouseInputs) {
+      if (!/^\d+$/.test(warehouseInput.warehouseId)) {
+        throw new Error('warehouseId must be numeric.');
+      }
+    }
 
     for (const warehouseInput of warehouseInputs) {
       const warehouseProvider = normalizeProvider(warehouseInput.provider ?? mapProvider(preferredProvider));

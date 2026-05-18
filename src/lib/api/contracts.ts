@@ -105,6 +105,49 @@ export type ShippingProviderDiagnostics = {
   warnings?: string[];
 };
 
+export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
+
+export type VendorShippingWarehouse = {
+  id: string;
+  vendorId: string;
+  provider: ShippingProvider;
+  warehouseId: string;
+  name: string | null;
+  address: string | null;
+  isDefault: boolean;
+};
+
+export type VendorShippingConfig = {
+  vendorId: string;
+  preferredProvider: ShippingProvider;
+  shippingEnabled: boolean;
+  defaultDesi: string;
+  cargoIntegrationId: string | null;
+  defaultWarehouseId: string | null;
+  shippingVatPercent: string;
+  warehouses: VendorShippingWarehouse[];
+  providerMetadata: unknown;
+  source: 'configured' | 'default';
+  updatedAt?: string | null;
+};
+
+export type VendorShippingConfigUpdate = {
+  preferredProvider?: ShippingProvider;
+  shippingEnabled?: boolean;
+  defaultDesi?: number;
+  cargoIntegrationId?: string | null;
+  defaultWarehouseId?: string | null;
+  shippingVatPercent?: number;
+  warehouses?: Array<{
+    warehouseId: string;
+    name?: string | null;
+    address?: string | null;
+    isDefault?: boolean;
+    provider?: ShippingProvider;
+  }>;
+  providerMetadata?: unknown;
+};
+
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';
 
 export type AssignmentHistoryEntry = {
