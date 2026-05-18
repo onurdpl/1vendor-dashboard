@@ -418,7 +418,20 @@ function buildNotificationUrl(input?: string | null) {
 }
 
 function normalizeShipmentPhone(value: string | null | undefined) {
-  return value?.trim().replace(/\s+/g, '') || null;
+  const digits = value?.replace(/\D+/g, '') ?? '';
+  if (!digits) {
+    return null;
+  }
+  if (digits.startsWith('90') && digits.length === 12) {
+    return digits;
+  }
+  if (digits.startsWith('0') && digits.length === 11) {
+    return `90${digits.slice(1)}`;
+  }
+  if (digits.startsWith('5') && digits.length === 10) {
+    return `90${digits}`;
+  }
+  return digits;
 }
 
 function composeShipmentAddress(orderRecord: Record<string, unknown>) {
@@ -477,6 +490,45 @@ function readStoredOrderWebhookAddress(orderRecord: Record<string, unknown>) {
   return null;
 }
 
+function readNestedRecord(value: Record<string, unknown>, key: string) {
+  const nested = value[key];
+  return isRecord(nested) ? nested : null;
+}
+
+function readStoredOrderWebhookPhone(orderRecord: Record<string, unknown>) {
+  const events = Array.isArray(orderRecord.webhookEvents) ? orderRecord.webhookEvents : [];
+  for (const event of events) {
+    if (!isRecord(event)) {
+      continue;
+    }
+
+    const rawPayload = readString(event, ['rawPayload']);
+    if (!rawPayload) {
+      continue;
+    }
+
+    try {
+      const payload = JSON.parse(rawPayload) as Record<string, unknown>;
+      const shippingAddress = readNestedRecord(payload, 'shipping_address');
+      const billingAddress = readNestedRecord(payload, 'billing_address');
+      const customer = readNestedRecord(payload, 'customer');
+      const phone =
+        readString(shippingAddress ?? {}, ['phone']) ??
+        readString(billingAddress ?? {}, ['phone']) ??
+        readString(payload, ['phone']) ??
+        readString(customer ?? {}, ['phone']);
+      const normalized = normalizeShipmentPhone(phone);
+      if (normalized) {
+        return normalized;
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 function buildKargoCustomer(input: {
   order: unknown;
   customerName: string | null | undefined;
@@ -491,7 +543,9 @@ function buildKargoCustomer(input: {
     name: overrides.name ?? name.name,
     surname: overrides.surname ?? name.surname,
     phone: overrides.phone ?? normalizeShipmentPhone(
-      readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone']) ?? webhookAddress?.customerPhone,
+      readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone', 'billingPhone']) ??
+        webhookAddress?.customerPhone ??
+        readStoredOrderWebhookPhone(orderRecord),
     ),
     email: overrides.email ?? input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
     country: overrides.country ?? readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? null,
@@ -516,6 +570,65 @@ function buildKargoCustomer(input: {
     customer,
     missingFields,
   };
+}
+
+function resolveKargoPaymentType(orderRecord: Record<string, unknown>) {
+  void orderRecord;
+  return 'cash_money';
+}
+
+function resolveKargoKg(orderRecord: Record<string, unknown>, desi: number) {
+  const rawKg = readString(orderRecord, ['shippingKg', 'kg']);
+  const parsedKg = rawKg === null ? Number.NaN : Number(rawKg);
+  return Number.isFinite(parsedKg) && parsedKg > 0 ? parsedKg : desi;
+}
+
+function readPath(value: unknown, path: string) {
+  return path.split('.').reduce<unknown>((current, key) => {
+    if (!isRecord(current)) {
+      return null;
+    }
+    return current[key] ?? null;
+  }, value);
+}
+
+function logMissingKargoPayloadFields(payload: Record<string, unknown>, provider: ShippingProvider) {
+  if (provider !== ShippingProvider.KARGO_ENTEGRATOR) {
+    return;
+  }
+
+  const requiredFields = [
+    'cargo_integration_id',
+    'warehouse_id',
+    'payment_type',
+    'package_type',
+    'payor_type',
+    'desi',
+    'kg',
+    'platform_id',
+    'platform_d_id',
+    'customer.name',
+    'customer.surname',
+    'customer.phone',
+    'customer.email',
+    'customer.country',
+    'customer.postcode',
+    'customer.city',
+    'customer.district',
+    'customer.address',
+  ];
+  const missingFields = requiredFields.filter((field) => {
+    const value = readPath(payload, field);
+    return value === null || value === undefined || value === '';
+  });
+
+  if (missingFields.length) {
+    console.warn('[shipping:kargo:missing-required-payload-fields]', {
+      provider: 'kargo_entegrator',
+      missingFields,
+      requestBlocked: false,
+    });
+  }
 }
 
 async function getStoredShippingConfig(vendorId: string) {
@@ -1240,7 +1353,7 @@ async function buildShipmentRequestPreview(
   const numericCargoIntegrationId = Number(cargoIntegrationId);
   const numericWarehouseId = Number(warehouseId);
   const orderRecord = isRecord(allocation.order) ? allocation.order : {};
-  const kg = readString(orderRecord, ['shippingKg', 'kg']);
+  const kg = resolveKargoKg(orderRecord, desi);
   const note = readString(orderRecord, ['shippingNote', 'shipmentNote']) ?? '';
   const packageType = provider === ShippingProvider.KARGO_ENTEGRATOR
     ? resolveKargoPackageType(config.providerMetadata)
@@ -1253,21 +1366,21 @@ async function buildShipmentRequestPreview(
     cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
     warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
     ...(dummyKargoRequested ? { cargo_company: { id: DUMMY_KARGO_CARRIER_ID } } : {}),
-    platform_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
-    platform_d_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
+    platform_id: allocation.sourceShopifyOrderId,
+    platform_d_id: allocation.sourceShopifyOrderNumber,
     notification_url: notificationUrl,
-    customer: dummyKargoRequested
+    customer: provider === ShippingProvider.KARGO_ENTEGRATOR
       ? kargoCustomer.customer
       : {
           name: customer.name,
           surname: customer.surname,
           email: allocation.order.customerEmail,
         },
-    payment_type: 'cash_money',
+    payment_type: resolveKargoPaymentType(orderRecord),
     ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { package_type: packageType } : {}),
-    ...(dummyKargoRequested ? { payor_type: 'sender' } : {}),
+    ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { payor_type: 'sender' } : {}),
     desi,
-    ...(dummyKargoRequested && kg ? { kg: Number.isFinite(Number(kg)) ? Number(kg) : kg } : {}),
+    ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { kg } : {}),
     ...(dummyKargoRequested ? { note } : {}),
     lines: lineItems.map((lineItem) => ({
       title: lineItem.title,
@@ -1281,6 +1394,7 @@ async function buildShipmentRequestPreview(
       vendor_id: allocation.assignedVendorId,
     },
   };
+  logMissingKargoPayloadFields(payload, provider);
 
   return {
     allocationId: allocation.id,

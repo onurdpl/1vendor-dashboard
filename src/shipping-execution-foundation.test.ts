@@ -394,8 +394,11 @@ describe('shipping execution foundation', () => {
         requestSnapshot: expect.objectContaining({
           cargo_integration_id: 2547,
           warehouse_id: 1774,
-          platform_id: 2547,
-          platform_d_id: 1774,
+          platform_id: '7616544244049',
+          platform_d_id: '1027',
+          payment_type: 'cash_money',
+          payor_type: 'sender',
+          kg: 3,
         }),
       }),
     );
@@ -466,7 +469,10 @@ describe('shipping execution foundation', () => {
       expect.objectContaining({
         requestSnapshot: expect.objectContaining({
           cargo_integration_id: 2547,
-          platform_id: 2547,
+          platform_id: '7616544244049',
+          platform_d_id: '1027',
+          payment_type: 'cash_money',
+          payor_type: 'sender',
           warehouse_id: 1774,
         }),
       }),
@@ -987,18 +993,21 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).toHaveBeenCalledWith(
       expect.objectContaining({
         requestSnapshot: expect.objectContaining({
-          customer: {
+          customer: expect.objectContaining({
             name: 'Test',
             surname: 'Customer',
             email: 'customer@example.com',
-          },
+            phone: '905551112233',
+          }),
           package_type: 'box',
+          payment_type: 'cash_money',
+          payor_type: 'sender',
+          kg: 3,
         }),
       }),
     );
     const requestSnapshot = adapter.createShipment.mock.calls[0][0].requestSnapshot;
     expect(requestSnapshot).not.toHaveProperty('cargo_company');
-    expect(requestSnapshot).not.toHaveProperty('payor_type');
   });
 
   it('preserves vendor isolation when creating shipments', async () => {
@@ -1334,7 +1343,7 @@ describe('shipping execution foundation', () => {
       customer: {
         name: 'Test',
         surname: 'Customer',
-        phone: '+905551112233',
+        phone: '905551112233',
         email: 'customer@example.com',
         country: 'TR',
         postcode: '34000',
@@ -1346,9 +1355,10 @@ describe('shipping execution foundation', () => {
       package_type: 'box',
       payor_type: 'sender',
       desi: 3,
+      kg: 3,
       note: '',
-      platform_id: 2547,
-      platform_d_id: 1774,
+      platform_id: '7616544244049',
+      platform_d_id: '1027',
       notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
     });
     expect(preview.customerFieldsValid).toBe(true);
@@ -1429,17 +1439,22 @@ describe('shipping execution foundation', () => {
         provider: 'kargo_entegrator',
         requestSnapshot: expect.objectContaining({
           package_type: 'box',
-          customer: {
+          customer: expect.objectContaining({
             name: 'Test',
             surname: 'Customer',
             email: 'customer@example.com',
-          },
+            phone: '905551112233',
+          }),
+          payment_type: 'cash_money',
+          payor_type: 'sender',
+          kg: 3,
+          platform_id: '7616544244049',
+          platform_d_id: '1027',
         }),
       }),
     );
     const requestSnapshot = adapter.createShipment.mock.calls[0]?.[0]?.requestSnapshot;
     expect(requestSnapshot).not.toHaveProperty('cargo_company');
-    expect(requestSnapshot).not.toHaveProperty('payor_type');
   });
 
   it('blocks invalid Kargo package_type before calling the provider', async () => {
@@ -1610,7 +1625,7 @@ describe('shipping execution foundation', () => {
 
     expect(preview.payload).toMatchObject({
       customer: {
-        phone: '+905551112233',
+        phone: '905551112233',
         country: 'TR',
         postcode: '34000',
         city: 'Istanbul',
@@ -1619,6 +1634,109 @@ describe('shipping execution foundation', () => {
       },
     });
     expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('falls back to stored Shopify billing phone when shipping phone is unavailable', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+        webhookEvents: [
+          {
+            rawPayload: JSON.stringify({
+              id: 1028,
+              shipping_address: {
+                country_code: 'TR',
+                zip: '34000',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                address1: 'Test Mahallesi 1. Sokak No: 1',
+              },
+              billing_address: {
+                phone: '0555 111 22 33',
+              },
+            }),
+          },
+        ],
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        carrierId: 'dummy',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      customer: {
+        phone: '905551112233',
+      },
+    });
+    expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('logs missing Kargo required payload fields before provider execution', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+
+    await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[shipping:kargo:missing-required-payload-fields]',
+      expect.objectContaining({
+        provider: 'kargo_entegrator',
+        missingFields: expect.arrayContaining(['customer.phone']),
+        requestBlocked: false,
+      }),
+    );
+    warnSpy.mockRestore();
   });
 
   it('blocks Dummy Kargo creation outside sandbox mode', async () => {
