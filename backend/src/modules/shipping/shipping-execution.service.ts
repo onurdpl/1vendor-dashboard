@@ -43,6 +43,11 @@ function toAmountString(value: number) {
   return value.toFixed(2);
 }
 
+function toPositiveNumber(value: unknown, fallback: number) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : fallback;
+}
+
 function mapProvider(provider: ShippingProvider | string): ShippingProviderDto {
   return provider.trim().toLowerCase() as ShippingProviderDto;
 }
@@ -308,6 +313,32 @@ export function inferShipmentDesi(
   }
 
   return fallbackDesi;
+}
+
+function resolveShipmentDesi(
+  lineItems: Array<{ title?: string | null; sku?: string | null }>,
+  configuredDefaultDesi: unknown,
+) {
+  const fallbackDesi = toPositiveNumber(configuredDefaultDesi, DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG);
+  return toPositiveNumber(inferShipmentDesi(lineItems, fallbackDesi), fallbackDesi);
+}
+
+function resolvePersistedShipmentDesi(preview: ShipmentExecutionPreviewDto) {
+  const payload = isRecord(preview.payload) ? preview.payload : {};
+  const candidates = [
+    preview.desi,
+    payload.desi,
+    payload.packageWeight,
+  ];
+
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+
+  return DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG;
 }
 
 function buildShipmentExecutionId(input: {
@@ -1515,7 +1546,7 @@ async function buildShipmentRequestPreview(
     quantity: lineItem.quantity,
     lineAmount: toNumber(lineItem.lineAmount),
   }));
-  const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
+  const desi = resolveShipmentDesi(lineItems, config.defaultDesi);
   const customer = splitCustomerName(allocation.order.customerName);
   const dummyKargoRequested = provider === ShippingProvider.KARGO_ENTEGRATOR && isDummyKargoRequested(input, options.env);
   if (input.carrierId === DUMMY_KARGO_CARRIER_ID && !options.env?.SHIPPING_SANDBOX_MODE) {
@@ -1721,15 +1752,13 @@ export async function createShipmentExecution(
     return getShipmentExecutionById(existing.id, options.vendorId) as Promise<ShipmentExecutionDto>;
   }
 
-  const desi = Number(preview.payload.desi);
+  const desi = resolvePersistedShipmentDesi(preview);
   const requestSnapshot = preview.payload;
   const executionId = buildShipmentExecutionId({ allocationId: allocation.id, provider });
 
   await prisma.shipmentExecution.create({
     data: {
       id: executionId,
-      allocationId: allocation.id,
-      vendorId: allocation.assignedVendorId,
       sourceShopifyOrderId: allocation.sourceShopifyOrderId,
       sourceShopifyOrderNumber: allocation.sourceShopifyOrderNumber,
       sourceShopifyFulfillmentId: allocation.fulfillment?.shopifyFulfillmentId ?? null,
@@ -1739,6 +1768,16 @@ export async function createShipmentExecution(
       cargoIntegrationId: preview.cargoIntegrationId,
       warehouseId: preview.warehouseId,
       requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+      allocation: {
+        connect: {
+          id: allocation.id,
+        },
+      },
+      vendor: {
+        connect: {
+          id: allocation.assignedVendorId,
+        },
+      },
     },
   });
 

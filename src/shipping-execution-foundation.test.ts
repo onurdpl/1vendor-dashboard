@@ -186,6 +186,8 @@ describe('shipping execution foundation', () => {
     prismaMock.shipmentExecution.create.mockImplementation(async ({ data }) => {
       storedExecution = buildShipmentExecution({
         ...data,
+        allocationId: data.allocationId ?? data.allocation?.connect?.id,
+        vendorId: data.vendorId ?? data.vendor?.connect?.id,
         createdAt: new Date('2026-05-15T10:00:00.000Z'),
         updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       });
@@ -392,6 +394,21 @@ describe('shipping execution foundation', () => {
       warehouseId: '1774',
       providerShipmentId: 'ke-1027',
     });
+    expect(prismaMock.shipmentExecution.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          provider: 'KARGO_ENTEGRATOR',
+          cargoIntegrationId: '2547',
+          warehouseId: '1774',
+          desi: 3,
+          allocation: {
+            connect: {
+              id: 'alloc-1',
+            },
+          },
+        }),
+      }),
+    );
     expect(adapter.createShipment).toHaveBeenCalledWith(
       expect.objectContaining({
         provider: 'kargo_entegrator',
@@ -2827,5 +2844,108 @@ describe('shipping execution foundation', () => {
         'Try OTO is sandbox-only in this phase.',
       ]),
     });
+  });
+
+  it('persists Try OTO shipment execution with allocation relation and finite desi', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Sandbox Customer',
+          customerEmail: 'sandbox@example.com',
+          customerPhone: '0555 111 22 33',
+          shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'TR',
+          shippingPostcode: '34710',
+        },
+        lineItems: [
+          {
+            quantity: 1,
+            lineAmount: 499,
+            shopifyOrderLineItem: {
+              title: 'Sandbox Mug',
+              sku: 'POC-MUG-001',
+            },
+          },
+        ],
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: null,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'pending',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'try_oto',
+        dryRun: true,
+      },
+    });
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'try_oto',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'try_oto',
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_SANDBOX_MODE: true,
+          TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+          TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    const createData = prismaMock.shipmentExecution.create.mock.calls[0]?.[0].data;
+    expect(createData).toMatchObject({
+      provider: 'TRY_OTO',
+      warehouseId: 'tr-test-store-001',
+      desi: 1,
+      allocation: {
+        connect: {
+          id: 'alloc-1',
+        },
+      },
+      vendor: {
+        connect: {
+          id: 'sporjinal',
+        },
+      },
+      requestSnapshot: expect.objectContaining({
+        pickupLocationCode: 'tr-test-store-001',
+        packageWeight: 1,
+      }),
+    });
+    expect(Number.isNaN(createData?.desi)).toBe(false);
+    expect(createData).not.toHaveProperty('allocationId');
   });
 });
