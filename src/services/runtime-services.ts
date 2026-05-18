@@ -400,13 +400,13 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async shippingProviderDiagnostics(vendorId = getCurrentVendorId()) {
+    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator') {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getShippingProviderDiagnostics('kargo_entegrator', { vendorId });
+        return realOrders.getShippingProviderDiagnostics(provider, { vendorId });
       }
 
       return {
-        provider: 'kargo_entegrator' as const,
+        provider,
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,

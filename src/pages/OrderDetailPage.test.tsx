@@ -32,7 +32,8 @@ vi.mock('../features/orders/api', async () => {
   return {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
-    getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
+    getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+      getShippingProviderDiagnosticsMock(options),
     getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
     updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) => createShipmentExecutionMock(allocationId, options),
@@ -188,28 +189,56 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
     getShippingProviderDiagnosticsMock.mockReset();
-    getShippingProviderDiagnosticsMock.mockResolvedValue({
-      provider: 'kargo_entegrator',
-      executionReady: false,
-      sandboxModeEnabled: false,
-      shippingExecutionEnabled: false,
-      providerSelected: true,
-      providerEnabled: true,
-      webhookIngestEnabled: false,
-      baseUrlConfigured: true,
-      apiKeyConfigured: true,
-      cargoIntegrationIdConfigured: true,
-      warehouseIdConfigured: true,
-      defaultDesiConfigured: true,
-      packageTypeUsed: 'box',
-      notificationUrlConfigured: false,
-      webhookRouteImplemented: false,
-      receiverAddressAvailability: 'confirmed_required',
-      dummyKargoSupport: 'not_implemented',
-      statusSyncSupport: 'not_implemented',
-      missing: ['SHIPPING_EXECUTION_ENABLED'],
-      deprecatedEnvFallbacks: [],
-      warnings: ['Live carrier execution is not enabled or verified.'],
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) => {
+      if (options?.provider === 'try_oto') {
+        return Promise.resolve({
+          provider: 'try_oto',
+          executionReady: false,
+          sandboxModeEnabled: true,
+          shippingExecutionEnabled: false,
+          providerSelected: false,
+          providerEnabled: false,
+          webhookIngestEnabled: false,
+          baseUrlConfigured: true,
+          apiKeyConfigured: true,
+          cargoIntegrationIdConfigured: false,
+          warehouseIdConfigured: false,
+          defaultDesiConfigured: true,
+          packageTypeUsed: 'box',
+          notificationUrlConfigured: false,
+          webhookRouteImplemented: true,
+          receiverAddressAvailability: 'confirmed_required',
+          dummyKargoSupport: 'not_implemented',
+          statusSyncSupport: 'not_implemented',
+          missing: ['TRY_OTO_ENABLED'],
+          deprecatedEnvFallbacks: [],
+          warnings: ['Try OTO is sandbox-only in this phase.'],
+        });
+      }
+
+      return Promise.resolve({
+        provider: 'kargo_entegrator',
+        executionReady: false,
+        sandboxModeEnabled: false,
+        shippingExecutionEnabled: false,
+        providerSelected: true,
+        providerEnabled: true,
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: true,
+        warehouseIdConfigured: true,
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: false,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: ['SHIPPING_EXECUTION_ENABLED'],
+        deprecatedEnvFallbacks: [],
+        warnings: ['Live carrier execution is not enabled or verified.'],
+      });
     });
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue({
@@ -369,8 +398,109 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
-    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(3));
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
+  });
+
+  it('lets admins update Try OTO pickup location configuration', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'try_oto',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+    updateVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'try_oto',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-002',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+
+    renderOrderDetail();
+
+    const pickupInput = await screen.findByLabelText('Try OTO pickup location code');
+    expect(pickupInput).toHaveValue('tr-test-store-001');
+    expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
+    await user.clear(pickupInput);
+    await user.type(pickupInput, 'tr-test-store-002');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'sporjinal',
+        expect.objectContaining({
+          preferredProvider: 'try_oto',
+          cargoIntegrationId: null,
+          defaultWarehouseId: null,
+          defaultDesi: 3,
+          warehouses: [],
+          providerMetadata: expect.objectContaining({
+            tryOtoPickupLocationCode: 'tr-test-store-002',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('keeps Try OTO config editing hidden from vendors', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'try_oto',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+    expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
   });
 
   it('renders shipping config editor fields for admins on active order detail actions', async () => {

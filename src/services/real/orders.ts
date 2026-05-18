@@ -493,7 +493,7 @@ export async function retryFailedShipmentExecution(
 }
 
 export async function getShippingProviderDiagnostics(
-  provider: 'kargo_entegrator' = 'kargo_entegrator',
+  provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},
 ) {
   const params = new URLSearchParams({ provider });

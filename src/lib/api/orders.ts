@@ -51,8 +51,10 @@ export async function retryFailedShipmentExecution(
   );
 }
 
-export async function getShippingProviderDiagnostics(options: { vendorId?: string | null } = {}) {
-  return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined);
+export async function getShippingProviderDiagnostics(
+  options: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null } = {},
+) {
+  return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined, options.provider ?? undefined);
 }
 
 export async function getVendorShippingConfig(options: { vendorId?: string | null } = {}) {

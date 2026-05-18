@@ -96,6 +96,7 @@ type ShippingConfigDraft = {
   defaultWarehouseId: string;
   defaultDesi: string;
   packageType: 'box' | 'document';
+  tryOtoPickupLocationCode: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -108,6 +109,12 @@ function readPackageType(config?: VendorShippingConfig | null): 'box' | 'documen
   return raw === 'document' ? 'document' : 'box';
 }
 
+function readTryOtoPickupLocationCode(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.tryOtoPickupLocationCode ?? metadata.pickupLocationCode ?? metadata.pickup_location_code;
+  return typeof raw === 'string' ? raw : '';
+}
+
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
   return {
     preferredProvider: config?.preferredProvider ?? 'kargo_entegrator',
@@ -115,6 +122,7 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     defaultWarehouseId: config?.defaultWarehouseId ?? config?.warehouses.find((warehouse) => warehouse.isDefault)?.warehouseId ?? '',
     defaultDesi: config?.defaultDesi ?? '3.00',
     packageType: readPackageType(config),
+    tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
   };
 }
 
@@ -124,18 +132,23 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   if (!draft.preferredProvider) {
     errors.push('Provider is required.');
   }
-  if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
-    errors.push('Cargo integration ID must be numeric.');
+  if (draft.preferredProvider === 'kargo_entegrator') {
+    if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
+      errors.push('Cargo integration ID must be numeric.');
+    }
+    if (!/^\d+$/.test(draft.defaultWarehouseId.trim())) {
+      errors.push('Warehouse ID must be numeric.');
+    }
+    if (draft.packageType !== 'box' && draft.packageType !== 'document') {
+      errors.push('Package type must be box or document.');
+    }
   }
-  if (!/^\d+$/.test(draft.defaultWarehouseId.trim())) {
-    errors.push('Warehouse ID must be numeric.');
+  if (draft.preferredProvider === 'try_oto' && !draft.tryOtoPickupLocationCode.trim()) {
+    errors.push('Try OTO pickup location code is required.');
   }
   const defaultDesi = Number(draft.defaultDesi);
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
     errors.push('Default desi must be greater than zero.');
-  }
-  if (draft.packageType !== 'box' && draft.packageType !== 'document') {
-    errors.push('Package type must be box or document.');
   }
 
   return errors;
@@ -148,14 +161,30 @@ function buildShippingConfigUpdate(
   const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
   const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
     ?? currentConfig?.warehouses[0];
-
-  return {
+  const baseUpdate = {
     preferredProvider: draft.preferredProvider,
     shippingEnabled: currentConfig?.shippingEnabled ?? true,
     defaultDesi: Number(draft.defaultDesi),
+    shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
+  };
+
+  if (draft.preferredProvider === 'try_oto') {
+    return {
+      ...baseUpdate,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      providerMetadata: {
+        ...metadata,
+        tryOtoPickupLocationCode: draft.tryOtoPickupLocationCode.trim(),
+      },
+      warehouses: [],
+    };
+  }
+
+  return {
+    ...baseUpdate,
     cargoIntegrationId: draft.cargoIntegrationId.trim(),
     defaultWarehouseId: draft.defaultWarehouseId.trim(),
-    shippingVatPercent: Number(currentConfig?.shippingVatPercent ?? 18),
     providerMetadata: {
       ...metadata,
       packageType: draft.packageType,
@@ -345,18 +374,26 @@ export function OrderDetailPage() {
       enabled: authContextReady && Boolean(orderId),
     },
   );
-  const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig('kargo_entegrator', currentVendor.vendorId),
-    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId }),
-    {
-      enabled: authContextReady && isAdmin,
-    },
-  );
   const { data: vendorShippingConfig, refetch: refetchVendorShippingConfig } = useQueryResource(
     queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
     () => getVendorShippingConfig({ vendorId: currentVendor.vendorId }),
     {
       enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId),
+    },
+  );
+  const diagnosticsProvider = vendorShippingConfig?.preferredProvider === 'try_oto' ? 'try_oto' : 'kargo_entegrator';
+  const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
+    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider }),
+    {
+      enabled: authContextReady && isAdmin,
+    },
+  );
+  const { data: tryOtoOptionDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig('try_oto', currentVendor.vendorId),
+    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto' }),
+    {
+      enabled: authContextReady && isAdmin,
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
@@ -435,7 +472,7 @@ export function OrderDetailPage() {
     {
       invalidateQueryKeys: [
         queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-        queryKeys.admin.shipments.providerConfig('kargo_entegrator', currentVendor.vendorId),
+        queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
       ],
       onSuccess: async () => {
         setShippingConfigFeedback({ tone: 'success', message: 'Shipping provider configuration saved.' });
@@ -1077,6 +1114,14 @@ export function OrderDetailPage() {
     });
   }
 
+  const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
+  const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
+  const shouldShowTryOtoProviderOption =
+    vendorShippingConfig?.preferredProvider === 'try_oto' ||
+    shippingProviderDiagnostics?.provider === 'try_oto' ||
+    Boolean(tryOtoOptionDiagnostics?.providerEnabled);
+  const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
+
   const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
     <form
       className="shipping-config-editor"
@@ -1106,37 +1151,56 @@ export function OrderDetailPage() {
             }
           >
             <option value="kargo_entegrator">Kargo Entegratör</option>
+            {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
             <option value="hepsijet">Hepsijet</option>
           </select>
         </label>
-        <label className="field">
-          <span>Cargo integration ID</span>
-          <input
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={shippingConfigDraft.cargoIntegrationId}
-            onChange={(event) =>
-              setShippingConfigDraft((current) => ({
-                ...current,
-                cargoIntegrationId: event.target.value,
-              }))
-            }
-          />
-        </label>
-        <label className="field">
-          <span>Warehouse ID</span>
-          <input
-            inputMode="numeric"
-            pattern="[0-9]*"
-            value={shippingConfigDraft.defaultWarehouseId}
-            onChange={(event) =>
-              setShippingConfigDraft((current) => ({
-                ...current,
-                defaultWarehouseId: event.target.value,
-              }))
-            }
-          />
-        </label>
+        {isKargoConfigDraft ? (
+          <>
+            <label className="field">
+              <span>Cargo integration ID</span>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={shippingConfigDraft.cargoIntegrationId}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    cargoIntegrationId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Warehouse ID</span>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={shippingConfigDraft.defaultWarehouseId}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    defaultWarehouseId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+          </>
+        ) : null}
+        {isTryOtoConfigDraft ? (
+          <label className="field">
+            <span>Try OTO pickup location code</span>
+            <input
+              value={shippingConfigDraft.tryOtoPickupLocationCode}
+              onChange={(event) =>
+                setShippingConfigDraft((current) => ({
+                  ...current,
+                  tryOtoPickupLocationCode: event.target.value,
+                }))
+              }
+            />
+          </label>
+        ) : null}
         <label className="field">
           <span>Default desi</span>
           <input
@@ -1152,21 +1216,23 @@ export function OrderDetailPage() {
             }
           />
         </label>
-        <label className="field">
-          <span>Package type</span>
-          <select
-            value={shippingConfigDraft.packageType}
-            onChange={(event) =>
-              setShippingConfigDraft((current) => ({
-                ...current,
-                packageType: event.target.value as ShippingConfigDraft['packageType'],
-              }))
-            }
-          >
-            <option value="box">box</option>
-            <option value="document">document</option>
-          </select>
-        </label>
+        {isKargoConfigDraft ? (
+          <label className="field">
+            <span>Package type</span>
+            <select
+              value={shippingConfigDraft.packageType}
+              onChange={(event) =>
+                setShippingConfigDraft((current) => ({
+                  ...current,
+                  packageType: event.target.value as ShippingConfigDraft['packageType'],
+                }))
+              }
+            >
+              <option value="box">box</option>
+              <option value="document">document</option>
+            </select>
+          </label>
+        ) : null}
         <div className="shipping-config-readonly">
           <span>Sandbox</span>
           <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
@@ -1657,22 +1723,33 @@ export function OrderDetailPage() {
                           <span>Admin only</span>
                         </div>
                         {shippingConfigEditorForm}
-                        <div className="summary-row">
-                          <span>Cargo integration configured</span>
-                          <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Warehouse configured</span>
-                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                        </div>
+                        {shippingProviderDiagnostics.provider === 'try_oto' ? (
+                          <div className="summary-row">
+                            <span>Try OTO pickup location</span>
+                            <strong>{tryOtoPickupLocationCode || '—'}</strong>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="summary-row">
+                              <span>Cargo integration configured</span>
+                              <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Warehouse configured</span>
+                              <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                            </div>
+                          </>
+                        )}
                         <div className="summary-row">
                           <span>Default desi configured</span>
                           <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
                         </div>
-                        <div className="summary-row">
-                          <span>Package type</span>
-                          <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
-                        </div>
+                        {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
+                          <div className="summary-row">
+                            <span>Package type</span>
+                            <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {shouldShowRealTrackingForm ? (
@@ -1989,116 +2066,7 @@ export function OrderDetailPage() {
                       <strong>Shipping provider diagnostics</strong>
                       <span>Admin only</span>
                     </div>
-                    <form
-                      className="shipping-config-editor"
-                      aria-label="Shipping provider configuration editor"
-                      noValidate
-                      onSubmit={handleSaveShippingConfig}
-                    >
-                      <div className="shipping-config-editor-heading">
-                        <div>
-                          <strong>Provider configuration</strong>
-                          <span>Shipment settings for {currentVendor.vendorName ?? currentVendor.vendorId}</span>
-                        </div>
-                        <span>
-                          Last updated:{' '}
-                          {vendorShippingConfig?.updatedAt ? formatOptionalDate(vendorShippingConfig.updatedAt) : 'not configured'}
-                        </span>
-                      </div>
-                      <div className="shipping-config-editor-grid">
-                        <label className="field">
-                          <span>Provider</span>
-                          <select
-                            value={shippingConfigDraft.preferredProvider}
-                            onChange={(event) =>
-                              setShippingConfigDraft((current) => ({
-                                ...current,
-                                preferredProvider: event.target.value as ShippingProvider,
-                              }))
-                            }
-                          >
-                            <option value="kargo_entegrator">Kargo Entegratör</option>
-                            <option value="hepsijet">Hepsijet</option>
-                          </select>
-                        </label>
-                        <label className="field">
-                          <span>Cargo integration ID</span>
-                          <input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            value={shippingConfigDraft.cargoIntegrationId}
-                            onChange={(event) =>
-                              setShippingConfigDraft((current) => ({
-                                ...current,
-                                cargoIntegrationId: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Warehouse ID</span>
-                          <input
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            value={shippingConfigDraft.defaultWarehouseId}
-                            onChange={(event) =>
-                              setShippingConfigDraft((current) => ({
-                                ...current,
-                                defaultWarehouseId: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Default desi</span>
-                          <input
-                            type="number"
-                            min="0.1"
-                            step="0.1"
-                            value={shippingConfigDraft.defaultDesi}
-                            onChange={(event) =>
-                              setShippingConfigDraft((current) => ({
-                                ...current,
-                                defaultDesi: event.target.value,
-                              }))
-                            }
-                          />
-                        </label>
-                        <label className="field">
-                          <span>Package type</span>
-                          <select
-                            value={shippingConfigDraft.packageType}
-                            onChange={(event) =>
-                              setShippingConfigDraft((current) => ({
-                                ...current,
-                                packageType: event.target.value as ShippingConfigDraft['packageType'],
-                              }))
-                            }
-                          >
-                            <option value="box">box</option>
-                            <option value="document">document</option>
-                          </select>
-                        </label>
-                        <div className="shipping-config-readonly">
-                          <span>Sandbox</span>
-                          <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
-                        </div>
-                        <div className="shipping-config-readonly">
-                          <span>Webhook ingest</span>
-                          <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
-                        </div>
-                      </div>
-                      {shippingConfigFeedback ? (
-                        <div className={`shipping-config-feedback ${shippingConfigFeedback.tone}`}>
-                          {shippingConfigFeedback.message}
-                        </div>
-                      ) : null}
-                      <div className="shipping-config-actions">
-                        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
-                          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
-                        </button>
-                      </div>
-                    </form>
+                    {shippingConfigEditorForm}
                     <div className="summary-row">
                       <span>Sandbox mode</span>
                       <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'yes' : 'no'}</strong>
@@ -2127,22 +2095,33 @@ export function OrderDetailPage() {
                       <span>API key configured</span>
                       <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
                     </div>
-                    <div className="summary-row">
-                      <span>Cargo integration configured</span>
-                      <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Warehouse configured</span>
-                      <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                    </div>
+                    {shippingProviderDiagnostics.provider === 'try_oto' ? (
+                      <div className="summary-row">
+                        <span>Try OTO pickup location</span>
+                        <strong>{tryOtoPickupLocationCode || '—'}</strong>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="summary-row">
+                          <span>Cargo integration configured</span>
+                          <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Warehouse configured</span>
+                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                      </>
+                    )}
                     <div className="summary-row">
                       <span>Default desi configured</span>
                       <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
                     </div>
-                    <div className="summary-row">
-                      <span>Package type</span>
-                      <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
-                    </div>
+                    {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
+                      <div className="summary-row">
+                        <span>Package type</span>
+                        <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
+                      </div>
+                    ) : null}
                     <div className="summary-row">
                       <span>Notification URL configured</span>
                       <strong>{shippingProviderDiagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
@@ -2159,10 +2138,12 @@ export function OrderDetailPage() {
                           : 'unknown / required'}
                       </strong>
                     </div>
-                    <div className="summary-row">
-                      <span>Dummy Kargo support</span>
-                      <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'available' ? 'available' : 'not enabled'}</strong>
-                    </div>
+                    {shippingProviderDiagnostics.provider === 'kargo_entegrator' ? (
+                      <div className="summary-row">
+                        <span>Dummy Kargo support</span>
+                        <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'available' ? 'available' : 'not enabled'}</strong>
+                      </div>
+                    ) : null}
                     <div className="summary-row">
                       <span>Status sync support</span>
                       <strong>{shippingProviderDiagnostics.statusSyncSupport === 'not_implemented' ? 'not implemented' : '—'}</strong>
