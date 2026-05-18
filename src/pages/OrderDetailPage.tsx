@@ -923,6 +923,118 @@ export function OrderDetailPage() {
     });
   }
 
+  const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
+    <form
+      className="shipping-config-editor"
+      aria-label="Shipping provider configuration editor"
+      noValidate
+      onSubmit={handleSaveShippingConfig}
+    >
+      <div className="shipping-config-editor-heading">
+        <div>
+          <strong>Provider configuration</strong>
+          <span>Shipment settings for {currentVendor.vendorName ?? currentVendor.vendorId}</span>
+        </div>
+        <span>
+          Last updated: {vendorShippingConfig?.updatedAt ? formatOptionalDate(vendorShippingConfig.updatedAt) : 'not configured'}
+        </span>
+      </div>
+      <div className="shipping-config-editor-grid">
+        <label className="field">
+          <span>Provider</span>
+          <select
+            value={shippingConfigDraft.preferredProvider}
+            onChange={(event) =>
+              setShippingConfigDraft((current) => ({
+                ...current,
+                preferredProvider: event.target.value as ShippingProvider,
+              }))
+            }
+          >
+            <option value="kargo_entegrator">Kargo Entegratör</option>
+            <option value="hepsijet">Hepsijet</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>Cargo integration ID</span>
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={shippingConfigDraft.cargoIntegrationId}
+            onChange={(event) =>
+              setShippingConfigDraft((current) => ({
+                ...current,
+                cargoIntegrationId: event.target.value,
+              }))
+            }
+          />
+        </label>
+        <label className="field">
+          <span>Warehouse ID</span>
+          <input
+            inputMode="numeric"
+            pattern="[0-9]*"
+            value={shippingConfigDraft.defaultWarehouseId}
+            onChange={(event) =>
+              setShippingConfigDraft((current) => ({
+                ...current,
+                defaultWarehouseId: event.target.value,
+              }))
+            }
+          />
+        </label>
+        <label className="field">
+          <span>Default desi</span>
+          <input
+            type="number"
+            min="0.1"
+            step="0.1"
+            value={shippingConfigDraft.defaultDesi}
+            onChange={(event) =>
+              setShippingConfigDraft((current) => ({
+                ...current,
+                defaultDesi: event.target.value,
+              }))
+            }
+          />
+        </label>
+        <label className="field">
+          <span>Package type</span>
+          <select
+            value={shippingConfigDraft.packageType}
+            onChange={(event) =>
+              setShippingConfigDraft((current) => ({
+                ...current,
+                packageType: event.target.value as ShippingConfigDraft['packageType'],
+              }))
+            }
+          >
+            <option value="box">box</option>
+            <option value="document">document</option>
+          </select>
+        </label>
+        <div className="shipping-config-readonly">
+          <span>Sandbox</span>
+          <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'enabled' : 'disabled'}</strong>
+        </div>
+        <div className="shipping-config-readonly">
+          <span>Webhook ingest</span>
+          <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'enabled' : 'disabled'}</strong>
+        </div>
+      </div>
+      {shippingConfigFeedback ? (
+        <div className={`shipping-config-feedback ${shippingConfigFeedback.tone}`}>
+          {shippingConfigFeedback.message}
+        </div>
+      ) : null}
+      <div className="shipping-config-actions">
+        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
+          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
+        </button>
+      </div>
+    </form>
+  ) : null;
+
   return (
     <section className="order-detail-workspace">
       <header className="order-detail-topbar">
@@ -1426,6 +1538,31 @@ export function OrderDetailPage() {
                             </button>
                           </form>
                         ) : null}
+                      </div>
+                    ) : null}
+                    {shippingProviderDiagnostics && shippingConfigEditorForm ? (
+                      <div className="shipping-provider-diagnostics" aria-label="Shipping provider diagnostics">
+                        <div className="provider-response-heading">
+                          <strong>Shipping provider diagnostics</strong>
+                          <span>Admin only</span>
+                        </div>
+                        {shippingConfigEditorForm}
+                        <div className="summary-row">
+                          <span>Cargo integration configured</span>
+                          <strong>{shippingProviderDiagnostics.cargoIntegrationIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Warehouse configured</span>
+                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Default desi configured</span>
+                          <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Package type</span>
+                          <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
+                        </div>
                       </div>
                     ) : null}
                     {shouldShowRealTrackingForm ? (

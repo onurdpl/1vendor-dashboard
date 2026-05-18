@@ -373,6 +373,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
   });
 
+  it('renders shipping config editor fields for admins on active order detail actions', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithoutShipment,
+      shipmentExecution: null,
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Shipping provider configuration editor')).toBeInTheDocument();
+    expect(screen.getByLabelText('Cargo integration ID')).toHaveValue('2547');
+    expect(screen.getByLabelText('Warehouse ID')).toHaveValue('1774');
+    expect(screen.getByLabelText('Default desi')).toHaveValue(3);
+    expect(screen.getByLabelText('Package type')).toHaveValue('box');
+    expect(screen.getByRole('button', { name: 'Save shipping config' })).toBeInTheDocument();
+  });
+
   it('blocks invalid admin shipping provider configuration before save', async () => {
     const user = userEvent.setup();
     setCurrentUser({
