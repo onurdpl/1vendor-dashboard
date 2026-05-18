@@ -65,6 +65,36 @@ export type ShipmentExecution = {
     responseSnippet?: string | null;
     authHeaderMode?: string | null;
     requestId?: string | null;
+    requestPath?: string | null;
+    selectedEnvironment?: string | null;
+    requestTargetHostname?: string | null;
+    providerMode?: string | null;
+    payloadDiagnostics?: {
+      topLevelKeys: string[];
+      customerKeys: string[];
+      receiverKeys: string[];
+      cargoIntegrationIdPresent: boolean;
+      warehouseIdPresent: boolean;
+      paymentType: string | null;
+      packageType: string | null;
+      payorType: string | null;
+      kgPresent: boolean;
+      kgType: string | null;
+      desiPresent: boolean;
+      desiType: string | null;
+      platformIdPresent: boolean;
+      platformDIdPresent: boolean;
+      customerPhonePresent: boolean;
+      customerDistrictPresent: boolean;
+      customerCityPresent: boolean;
+      addressFieldPresence: {
+        customerAddress: boolean;
+        customerPostcode: boolean;
+        customerCountry: boolean;
+        customerCity: boolean;
+        customerDistrict: boolean;
+      };
+    };
   };
 };
 

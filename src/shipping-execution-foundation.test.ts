@@ -2349,6 +2349,110 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(error.responseSnapshot)).not.toContain('+905551112233');
   });
 
+  it('records safe Kargo payload shape diagnostics on provider 500 responses', async () => {
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse(
+        JSON.stringify({
+          message: 'Server Error',
+        }),
+        {
+          status: 500,
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_BASE_URL: 'https://app.kargoentegrator.com/api',
+      KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+    });
+
+    const error = await adapter
+      .createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        requestSnapshot: {
+          cargo_integration_id: 2547,
+          warehouse_id: 1774,
+          payment_type: 'cash_money',
+          package_type: 'box',
+          payor_type: 'sender',
+          kg: 3,
+          desi: 3,
+          platform_id: '7616544244049',
+          platform_d_id: '#1028',
+          customer: {
+            name: 'Test',
+            surname: 'Customer',
+            phone: '905551112233',
+            email: 'customer@example.com',
+            country: 'TR',
+            postcode: '34000',
+            city: 'Istanbul',
+            district: 'Kadikoy',
+            address: 'Test Mahallesi 1. Sokak No: 1',
+          },
+        },
+      })
+      .catch((caught) => caught as ShippingProviderExecutionError);
+
+    expect(error.responseSnapshot).toMatchObject({
+      status: 500,
+      ok: false,
+      providerError: 'Server Error',
+      requestPath: '/api/shipments',
+      selectedEnvironment: 'production',
+      requestTargetHostname: 'app.kargoentegrator.com',
+      providerMode: 'live',
+      payloadDiagnostics: {
+        topLevelKeys: expect.arrayContaining(['customer', 'payment_type', 'payor_type', 'platform_id']),
+        customerKeys: expect.arrayContaining(['phone', 'district', 'address']),
+        cargoIntegrationIdPresent: true,
+        warehouseIdPresent: true,
+        paymentType: 'cash_money',
+        packageType: 'box',
+        payorType: 'sender',
+        kgPresent: true,
+        kgType: 'number',
+        desiPresent: true,
+        desiType: 'number',
+        platformIdPresent: true,
+        platformDIdPresent: true,
+        customerPhonePresent: true,
+        customerDistrictPresent: true,
+        customerCityPresent: true,
+        addressFieldPresence: {
+          customerAddress: true,
+          customerPostcode: true,
+          customerCountry: true,
+          customerCity: true,
+          customerDistrict: true,
+        },
+      },
+    });
+    expect(infoSpy).toHaveBeenCalledWith(
+      '[shipping:kargo:provider-create-diagnostics]',
+      expect.objectContaining({
+        httpStatus: 500,
+        providerMessage: 'Server Error',
+        requestPath: '/api/shipments',
+        providerMode: 'live',
+      }),
+    );
+    const serialized = JSON.stringify(error.responseSnapshot);
+    expect(serialized).not.toContain('905551112233');
+    expect(serialized).not.toContain('Test Mahallesi');
+    expect(serialized).not.toContain('customer@example.com');
+    expect(serialized).not.toContain('test-kargo-key');
+    infoSpy.mockRestore();
+  });
+
   it('parses Kargo package_type validation failures clearly', async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       mockProviderResponse(

@@ -437,6 +437,36 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           barcodePresent: false,
           notificationUrlIncluded: true,
           responseSnippet: '{"message":"Validation failed."}',
+          requestPath: '/api/shipments',
+          selectedEnvironment: 'production',
+          requestTargetHostname: 'app.kargoentegrator.com',
+          providerMode: 'live',
+          payloadDiagnostics: {
+            topLevelKeys: ['cargo_integration_id', 'customer', 'payment_type'],
+            customerKeys: ['address', 'city', 'district', 'phone'],
+            receiverKeys: [],
+            cargoIntegrationIdPresent: true,
+            warehouseIdPresent: true,
+            paymentType: 'cash_money',
+            packageType: 'box',
+            payorType: 'sender',
+            kgPresent: true,
+            kgType: 'number',
+            desiPresent: true,
+            desiType: 'number',
+            platformIdPresent: true,
+            platformDIdPresent: true,
+            customerPhonePresent: true,
+            customerDistrictPresent: false,
+            customerCityPresent: true,
+            addressFieldPresence: {
+              customerAddress: true,
+              customerPostcode: true,
+              customerCountry: true,
+              customerCity: true,
+              customerDistrict: false,
+            },
+          },
         },
       },
     });
@@ -454,6 +484,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
     expect(screen.getByText('Validation failed.')).toBeInTheDocument();
+    expect(screen.getByText('Payload keys')).toBeInTheDocument();
+    expect(screen.getByText(/cargo_integration_id, customer, payment_type/)).toBeInTheDocument();
+    expect(screen.getByText('Shipment enums')).toBeInTheDocument();
+    expect(screen.getByText(/payment cash_money · package box · payor sender/)).toBeInTheDocument();
+    expect(screen.getByText('Customer required fields')).toBeInTheDocument();
+    expect(screen.getByText(/phone yes · district no · city yes/)).toBeInTheDocument();
     expect(screen.getByText('Shipment recovery')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry shipment' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Retry provider request' })).toBeInTheDocument();
@@ -461,6 +497,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('link', { name: 'View diagnostics' })).toBeInTheDocument();
     expect(screen.queryByText(/test-kargo-key/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/\+905551112233/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Test Mahallesi/)).not.toBeInTheDocument();
   });
 
   it('renders the existing district completion input for admin failed Kargo shipments', async () => {
@@ -512,6 +549,32 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           providerValidationErrors: ['Müşteri ilçe bilgisi zorunludur.'],
           dryRun: false,
           disabledGates: [],
+          payloadDiagnostics: {
+            topLevelKeys: ['customer'],
+            customerKeys: ['address', 'district', 'phone'],
+            receiverKeys: [],
+            cargoIntegrationIdPresent: true,
+            warehouseIdPresent: true,
+            paymentType: 'cash_money',
+            packageType: 'box',
+            payorType: 'sender',
+            kgPresent: true,
+            kgType: 'number',
+            desiPresent: true,
+            desiType: 'number',
+            platformIdPresent: true,
+            platformDIdPresent: true,
+            customerPhonePresent: true,
+            customerDistrictPresent: false,
+            customerCityPresent: true,
+            addressFieldPresence: {
+              customerAddress: true,
+              customerPostcode: true,
+              customerCountry: true,
+              customerCity: true,
+              customerDistrict: false,
+            },
+          },
         },
       },
     });
@@ -534,6 +597,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
+    expect(screen.queryByText('Payload keys')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();
     await user.type(await screen.findByLabelText('District *'), 'Kadikoy');
     await user.click(screen.getByRole('button', { name: 'Retry shipment with completed fields' }));
 

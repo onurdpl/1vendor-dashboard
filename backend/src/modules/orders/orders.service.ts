@@ -85,6 +85,10 @@ function buildShipmentProviderResponseSummary(
   const disabledGates = Array.isArray(snapshot?.disabledGates)
     ? snapshot.disabledGates.filter((gate): gate is string => typeof gate === 'string')
     : [];
+  const payloadDiagnostics = isRecord(snapshot?.payloadDiagnostics) ? snapshot.payloadDiagnostics : null;
+  const addressFieldPresence: Record<string, unknown> = isRecord(payloadDiagnostics?.addressFieldPresence)
+    ? payloadDiagnostics.addressFieldPresence
+    : {};
 
   return {
     httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
@@ -108,6 +112,44 @@ function buildShipmentProviderResponseSummary(
     responseSnippet: readString(snapshot, ['responseSnippet']),
     authHeaderMode: readString(snapshot, ['authHeaderMode']),
     requestId: readString(snapshot, ['requestId']),
+    requestPath: readString(snapshot, ['requestPath']),
+    selectedEnvironment: readString(snapshot, ['selectedEnvironment']),
+    requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
+    providerMode: readString(snapshot, ['providerMode']),
+    payloadDiagnostics: payloadDiagnostics
+      ? {
+          topLevelKeys: Array.isArray(payloadDiagnostics.topLevelKeys)
+            ? payloadDiagnostics.topLevelKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+          customerKeys: Array.isArray(payloadDiagnostics.customerKeys)
+            ? payloadDiagnostics.customerKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+          receiverKeys: Array.isArray(payloadDiagnostics.receiverKeys)
+            ? payloadDiagnostics.receiverKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+          cargoIntegrationIdPresent: payloadDiagnostics.cargoIntegrationIdPresent === true,
+          warehouseIdPresent: payloadDiagnostics.warehouseIdPresent === true,
+          paymentType: readString(payloadDiagnostics, ['paymentType']),
+          packageType: readString(payloadDiagnostics, ['packageType']),
+          payorType: readString(payloadDiagnostics, ['payorType']),
+          kgPresent: payloadDiagnostics.kgPresent === true,
+          kgType: readString(payloadDiagnostics, ['kgType']),
+          desiPresent: payloadDiagnostics.desiPresent === true,
+          desiType: readString(payloadDiagnostics, ['desiType']),
+          platformIdPresent: payloadDiagnostics.platformIdPresent === true,
+          platformDIdPresent: payloadDiagnostics.platformDIdPresent === true,
+          customerPhonePresent: payloadDiagnostics.customerPhonePresent === true,
+          customerDistrictPresent: payloadDiagnostics.customerDistrictPresent === true,
+          customerCityPresent: payloadDiagnostics.customerCityPresent === true,
+          addressFieldPresence: {
+            customerAddress: addressFieldPresence.customerAddress === true,
+            customerPostcode: addressFieldPresence.customerPostcode === true,
+            customerCountry: addressFieldPresence.customerCountry === true,
+            customerCity: addressFieldPresence.customerCity === true,
+            customerDistrict: addressFieldPresence.customerDistrict === true,
+          },
+        }
+      : undefined,
   };
 }
 

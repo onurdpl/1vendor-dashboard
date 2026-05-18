@@ -682,6 +682,88 @@ export function OrderDetailPage() {
     );
   }
 
+  function renderShipmentPayloadDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
+    const diagnostics = summary.payloadDiagnostics;
+    if (!diagnostics) {
+      return null;
+    }
+
+    return (
+      <>
+        <div className="summary-row">
+          <span>Request endpoint</span>
+          <strong>{summary.requestPath || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider mode</span>
+          <strong>{summary.providerMode || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Environment</span>
+          <strong>{summary.selectedEnvironment || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Target host</span>
+          <strong>{summary.requestTargetHostname || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Payload keys</span>
+          <strong>{diagnostics.topLevelKeys.length ? diagnostics.topLevelKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Customer keys</span>
+          <strong>{diagnostics.customerKeys.length ? diagnostics.customerKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Receiver keys</span>
+          <strong>{diagnostics.receiverKeys.length ? diagnostics.receiverKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider config fields</span>
+          <strong>
+            cargo integration {diagnostics.cargoIntegrationIdPresent ? 'yes' : 'no'} · warehouse{' '}
+            {diagnostics.warehouseIdPresent ? 'yes' : 'no'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Shipment enums</span>
+          <strong>
+            payment {diagnostics.paymentType || '—'} · package {diagnostics.packageType || '—'} · payor {diagnostics.payorType || '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Weight fields</span>
+          <strong>
+            kg {diagnostics.kgPresent ? `yes (${diagnostics.kgType || 'unknown'})` : 'no'} · desi{' '}
+            {diagnostics.desiPresent ? `yes (${diagnostics.desiType || 'unknown'})` : 'no'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Platform identifiers</span>
+          <strong>
+            platform_id {diagnostics.platformIdPresent ? 'yes' : 'no'} · platform_d_id{' '}
+            {diagnostics.platformDIdPresent ? 'yes' : 'no'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Customer required fields</span>
+          <strong>
+            phone {diagnostics.customerPhonePresent ? 'yes' : 'no'} · district{' '}
+            {diagnostics.customerDistrictPresent ? 'yes' : 'no'} · city {diagnostics.customerCityPresent ? 'yes' : 'no'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Address fields</span>
+          <strong>
+            address {diagnostics.addressFieldPresence.customerAddress ? 'yes' : 'no'} · postcode{' '}
+            {diagnostics.addressFieldPresence.customerPostcode ? 'yes' : 'no'} · country{' '}
+            {diagnostics.addressFieldPresence.customerCountry ? 'yes' : 'no'}
+          </strong>
+        </div>
+      </>
+    );
+  }
+
   const supportSnapshot = order
     ? {
         route: location.pathname,
@@ -1407,6 +1489,7 @@ export function OrderDetailPage() {
                               <span>Response keys</span>
                               <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                             </div>
+                            {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
                             <div className="summary-row">
                               <span>Status field</span>
                               <strong>{shipmentProviderSummary.statusField || '—'}</strong>
@@ -1771,6 +1854,7 @@ export function OrderDetailPage() {
                           <span>Response keys</span>
                           <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                         </div>
+                        {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
                         <div className="summary-row">
                           <span>Status field</span>
                           <strong>{shipmentProviderSummary.statusField || '—'}</strong>

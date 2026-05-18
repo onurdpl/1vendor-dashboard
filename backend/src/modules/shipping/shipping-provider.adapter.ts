@@ -264,6 +264,66 @@ function logKargoProviderEnvironmentSelection(input: ShippingProviderCreateInput
   });
 }
 
+function getKargoProviderEnvironmentDiagnostics(input: ShippingProviderCreateInput, env: AppEnv) {
+  const target = getKargoRequestTarget(env.KARGO_ENTEGRATOR_BASE_URL);
+  const dummyModeEnabled = readCargoCompanyId(input.requestSnapshot) === 'dummy';
+  const executionEnabled = env.SHIPPING_EXECUTION_ENABLED && env.KARGO_ENTEGRATOR_ENABLED;
+
+  return {
+    selectedEnvironment: env.SHIPPING_SANDBOX_MODE ? 'sandbox' : 'production',
+    requestTargetHostname: target.requestTargetHostname,
+    requestPath: target.requestPath,
+    providerMode: !executionEnabled ? 'disabled' : dummyModeEnabled ? 'dummy' : 'live',
+  };
+}
+
+function hasValue(value: unknown) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function safeValueType(value: unknown) {
+  if (!hasValue(value)) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    return 'array';
+  }
+  return typeof value;
+}
+
+function buildKargoPayloadDiagnostics(payload: Record<string, unknown>) {
+  const customer = isRecord(payload.customer) ? payload.customer : {};
+  const receiver = isRecord(payload.receiver) ? payload.receiver : null;
+  const addressFieldPresence = {
+    customerAddress: hasValue(customer.address),
+    customerPostcode: hasValue(customer.postcode),
+    customerCountry: hasValue(customer.country),
+    customerCity: hasValue(customer.city),
+    customerDistrict: hasValue(customer.district),
+  };
+
+  return {
+    topLevelKeys: Object.keys(payload).sort(),
+    customerKeys: Object.keys(customer).sort(),
+    receiverKeys: receiver ? Object.keys(receiver).sort() : [],
+    cargoIntegrationIdPresent: hasValue(payload.cargo_integration_id),
+    warehouseIdPresent: hasValue(payload.warehouse_id),
+    paymentType: typeof payload.payment_type === 'string' ? payload.payment_type : null,
+    packageType: typeof payload.package_type === 'string' ? payload.package_type : null,
+    payorType: typeof payload.payor_type === 'string' ? payload.payor_type : null,
+    kgPresent: hasValue(payload.kg),
+    kgType: safeValueType(payload.kg),
+    desiPresent: hasValue(payload.desi),
+    desiType: safeValueType(payload.desi),
+    platformIdPresent: hasValue(payload.platform_id),
+    platformDIdPresent: hasValue(payload.platform_d_id),
+    customerPhonePresent: hasValue(customer.phone),
+    customerDistrictPresent: hasValue(customer.district),
+    customerCityPresent: hasValue(customer.city),
+    addressFieldPresence,
+  };
+}
+
 function mapShipmentStatus(value: string | null): ShipmentExecutionStatusDto {
   const normalized = value?.trim().toLowerCase() ?? '';
   if (normalized === 'in_transit' || normalized === 'in transit' || normalized === 'shipped') {
@@ -340,6 +400,8 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
 
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
     logKargoProviderEnvironmentSelection(input, this.env);
+    const providerEnvironment = getKargoProviderEnvironmentDiagnostics(input, this.env);
+    const payloadDiagnostics = buildKargoPayloadDiagnostics(input.requestSnapshot);
 
     if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.KARGO_ENTEGRATOR_ENABLED) {
       const disabledGates = [
@@ -409,7 +471,23 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       authHeaderMode: 'bearer',
       acceptHeader: 'application/json',
       notificationUrlIncluded: typeof input.requestSnapshot.notification_url === 'string' && input.requestSnapshot.notification_url.trim().length > 0,
+      requestPath: providerEnvironment.requestPath,
+      selectedEnvironment: providerEnvironment.selectedEnvironment,
+      requestTargetHostname: providerEnvironment.requestTargetHostname,
+      providerMode: providerEnvironment.providerMode,
+      payloadDiagnostics,
     };
+
+    console.info('[shipping:kargo:provider-create-diagnostics]', {
+      provider: 'kargo_entegrator',
+      httpStatus: response.status,
+      providerMessage: responseSnapshot.providerError,
+      requestPath: providerEnvironment.requestPath,
+      selectedEnvironment: providerEnvironment.selectedEnvironment,
+      requestTargetHostname: providerEnvironment.requestTargetHostname,
+      providerMode: providerEnvironment.providerMode,
+      payloadDiagnostics,
+    });
 
     if (!response.ok) {
       throw new ShippingProviderExecutionError(
