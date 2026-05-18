@@ -91,6 +91,40 @@ export function createFulfillmentService(env: AppEnv) {
       };
     }
 
+    if (allocation.fulfillment?.shopifyFulfillmentId) {
+      const existingTrackingMatches = allocation.fulfillment.trackingNumber === trackingNumber;
+      const existingCarrierMatches = allocation.fulfillment.carrier === carrier;
+      const existingTrackingUrlMatches = (allocation.fulfillment.trackingUrl ?? null) === (trackingUrl ?? null);
+
+      if (existingTrackingMatches && existingCarrierMatches && existingTrackingUrlMatches) {
+        const fulfilledAt = allocation.fulfillment.fulfilledAt ?? new Date();
+        const shipmentCreatedAt = allocation.fulfillment.shipmentCreatedAt ?? fulfilledAt;
+        const shipmentUpdatedAt = allocation.fulfillment.shipmentUpdatedAt ?? fulfilledAt;
+
+        return {
+          ok: true,
+          allocationId: allocation.id,
+          trackingNumber,
+          carrier,
+          trackingUrl,
+          notifyCustomer,
+          fulfillmentStatus: allocation.fulfillment.fulfillmentStatus,
+          shippingStatus: allocation.shippingStatus,
+          shopifySyncSource: 'shopify_admin',
+          shopifyFulfillmentId: allocation.fulfillment.shopifyFulfillmentId,
+          fulfilledAt: fulfilledAt.toISOString(),
+          shipmentCreatedAt: shipmentCreatedAt.toISOString(),
+          shipmentUpdatedAt: shipmentUpdatedAt.toISOString(),
+        };
+      }
+
+      return {
+        ok: false,
+        code: 409,
+        message: 'Shopify fulfillment already exists for this allocation; tracking sync was not duplicated.',
+      };
+    }
+
     const fulfillmentOrdersResponse = await shopifyAdminService.fetchFulfillmentOrders(
       allocation.order.sourceShopifyOrderId,
     );
@@ -112,6 +146,7 @@ export function createFulfillmentService(env: AppEnv) {
       .filter((entry) => entry.fulfillmentOrderLineItems.length > 0);
 
     if (matchedFulfillmentOrders.length === 0) {
+      const missingFulfillmentOrderMessage = 'Shopify fulfillment order data is missing; cannot sync tracking automatically.';
       await prisma.fulfillment.upsert({
         where: {
           vendorAllocationId: allocation.id,
@@ -123,7 +158,7 @@ export function createFulfillmentService(env: AppEnv) {
           trackingUrl,
           notifyCustomer,
           syncStatus: 'fulfillment_sync_failed',
-          errorMessage: 'No matching Shopify fulfillment order line items were found for this allocation.',
+          errorMessage: missingFulfillmentOrderMessage,
         },
         create: {
           vendorAllocationId: allocation.id,
@@ -133,7 +168,7 @@ export function createFulfillmentService(env: AppEnv) {
           trackingUrl,
           notifyCustomer,
           syncStatus: 'fulfillment_sync_failed',
-          errorMessage: 'No matching Shopify fulfillment order line items were found for this allocation.',
+          errorMessage: missingFulfillmentOrderMessage,
         },
       });
 
@@ -150,7 +185,7 @@ export function createFulfillmentService(env: AppEnv) {
       return {
         ok: false,
         code: 502,
-        message: 'No matching Shopify fulfillment order line items were found for this allocation.',
+        message: missingFulfillmentOrderMessage,
       };
     }
 

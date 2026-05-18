@@ -52,6 +52,22 @@ function readBoolean(value: Record<string, unknown> | null, keys: string[]) {
   return keys.some((key) => value[key] === true);
 }
 
+function readRecord(value: Record<string, unknown> | null, key: string) {
+  if (!value) {
+    return null;
+  }
+
+  const raw = value[key];
+  return isRecord(raw) ? raw : null;
+}
+
+function readShipmentProviderCarrierName(snapshot: Record<string, unknown> | null) {
+  return (
+    readString(snapshot, ['selectedDeliveryCompanyName', 'deliveryCompany', 'deliveryCompanyName']) ??
+    readString(readRecord(snapshot, 'deliveryOptionLookup'), ['selectedDeliveryCompanyName', 'deliveryCompanyName'])
+  );
+}
+
 function readShipmentTimeline(value: Record<string, unknown> | null) {
   const events = Array.isArray(value?.timeline) ? value.timeline : [];
   return events
@@ -303,6 +319,7 @@ function mapShipmentExecution(execution: {
     sourceShopifyOrderNumber: execution.sourceShopifyOrderNumber,
     sourceShopifyFulfillmentId: execution.sourceShopifyFulfillmentId,
     providerShipmentId: execution.providerShipmentId,
+    providerCarrierName: readShipmentProviderCarrierName(snapshot),
     trackingNumber: execution.trackingNumber,
     trackingUrl: execution.trackingUrl,
     labelUrl: execution.labelUrl,

@@ -120,6 +120,18 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fallbackCarrier?: string | null) {
+  const providerCarrierName = shipment?.providerCarrierName?.trim();
+  if (shipment?.provider === 'try_oto') {
+    if (providerCarrierName && /s[üu]rat/i.test(providerCarrierName)) {
+      return 'Sürat Kargo';
+    }
+    return providerCarrierName || 'Try OTO';
+  }
+
+  return fallbackCarrier?.trim() || (shipment ? formatShippingProviderName(shipment.provider) : '');
+}
+
 type ShippingConfigDraft = {
   preferredProvider: ShippingProvider;
   cargoIntegrationId: string;
@@ -627,6 +639,15 @@ export function OrderDetailPage() {
     Boolean(visibleShipmentExecution?.id) &&
     Boolean(visibleShipmentExecution?.providerShipmentId) &&
     ['created', 'pending'].includes(visibleShipmentStatus);
+  const shipmentShopifyTrackingNumber = getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution);
+  const shipmentShopifyTrackingUrl = getShipmentTrackingUrl(order ?? {}, visibleShipmentExecution);
+  const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
+  const canSyncShipmentTrackingToShopify =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(shipmentShopifyTrackingNumber) &&
+    Boolean(shipmentShopifyCarrier) &&
+    !order?.fulfilledAt;
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -777,6 +798,28 @@ export function OrderDetailPage() {
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
         });
         showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleSyncShipmentTrackingToShopify() {
+    if (!order || !shipmentShopifyTrackingNumber || !shipmentShopifyCarrier) {
+      showFeedback('Shipment tracking and carrier are required before syncing to Shopify.', 'error');
+      return;
+    }
+
+    void submitTrackingMutation({
+      allocationId: order.id,
+      trackingNumber: shipmentShopifyTrackingNumber,
+      carrier: shipmentShopifyCarrier,
+      trackingUrl: shipmentShopifyTrackingUrl ?? undefined,
+      notifyCustomer: false,
+    })
+      .then((result) => {
+        showFeedback(`Tracking ${result.trackingNumber} synced to Shopify.`, 'success');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        showFeedback(getTrackingMutationErrorMessage(mutationError), 'error');
       });
   }
 
@@ -1891,6 +1934,22 @@ export function OrderDetailPage() {
                             </div>
                           </div>
                         ) : null}
+                        {canSyncShipmentTrackingToShopify ? (
+                          <div className="shipment-recovery-actions" aria-label="Shopify tracking sync">
+                            <strong>Shopify fulfillment sync</strong>
+                            <span>Tracking is available locally. Sync it to Shopify fulfillment when ready.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-primary"
+                                disabled={isSubmittingTracking}
+                                onClick={handleSyncShipmentTrackingToShopify}
+                              >
+                                {isSubmittingTracking ? 'Syncing...' : 'Sync tracking to Shopify'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
                           <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
                             <div className="provider-response-heading">
@@ -2306,6 +2365,22 @@ export function OrderDetailPage() {
                             onClick={handleRefreshShipmentStatus}
                           >
                             {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {canSyncShipmentTrackingToShopify ? (
+                      <div className="shipment-recovery-actions" aria-label="Shopify tracking sync">
+                        <strong>Shopify fulfillment sync</strong>
+                        <span>Tracking is available locally. Sync it to Shopify fulfillment when ready.</span>
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-primary"
+                            disabled={isSubmittingTracking}
+                            onClick={handleSyncShipmentTrackingToShopify}
+                          >
+                            {isSubmittingTracking ? 'Syncing...' : 'Sync tracking to Shopify'}
                           </button>
                         </div>
                       </div>

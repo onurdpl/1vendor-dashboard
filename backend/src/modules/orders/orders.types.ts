@@ -47,6 +47,7 @@ export type OrderShipmentExecutionDto = {
   sourceShopifyOrderNumber: string | null;
   sourceShopifyFulfillmentId: string | null;
   providerShipmentId: string | null;
+  providerCarrierName: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
   labelUrl: string | null;

@@ -16,6 +16,7 @@ const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
+const submitFulfillmentTrackingMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
@@ -45,7 +46,10 @@ vi.mock('../features/orders/api', async () => {
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
-    submitFulfillmentTracking: vi.fn(),
+    submitFulfillmentTracking: (
+      allocationId: string,
+      payload: { trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer?: boolean },
+    ) => submitFulfillmentTrackingMock(allocationId, payload),
   };
 });
 
@@ -321,6 +325,22 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       barcode: 'OTO-BARCODE-1028',
       labelUrl: 'https://app.tryoto.example/label-1028.pdf',
       updatedAt: '2026-05-15T19:46:00.000Z',
+    });
+    submitFulfillmentTrackingMock.mockReset();
+    submitFulfillmentTrackingMock.mockResolvedValue({
+      ok: true,
+      allocationId: 'alloc-sporjinal-7621783322961',
+      trackingNumber: 'OTO-TRACK-1028',
+      carrier: 'Sürat Kargo',
+      trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+      notifyCustomer: false,
+      fulfillmentStatus: 'fulfillment_submitted',
+      shippingStatus: 'shipped',
+      shopifySyncSource: 'shopify_admin',
+      shopifyFulfillmentId: 'gid://shopify/Fulfillment/123',
+      fulfilledAt: '2026-05-15T19:47:00.000Z',
+      shipmentCreatedAt: '2026-05-15T19:46:00.000Z',
+      shipmentUpdatedAt: '2026-05-15T19:47:00.000Z',
     });
     listReturnsMock.mockReset();
     listReturnsMock.mockResolvedValue([]);
@@ -1636,6 +1656,128 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
   });
 
+  it('syncs Try OTO shipment tracking to Shopify with the selected carrier name', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'try_oto',
+      trackingNumber: null,
+      trackingUrl: null,
+      fulfilledAt: undefined,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        barcode: null,
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Sync tracking to Shopify' }));
+
+    expect(submitFulfillmentTrackingMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', {
+      trackingNumber: 'OTO-TRACK-1028',
+      carrier: 'Sürat Kargo',
+      trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+      notifyCustomer: false,
+    });
+    expect(await screen.findByText('Tracking OTO-TRACK-1028 synced to Shopify.')).toBeInTheDocument();
+  });
+
+  it('falls back to Try OTO as the Shopify carrier when delivery company is unavailable', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'try_oto',
+      trackingNumber: null,
+      fulfilledAt: undefined,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        providerCarrierName: null,
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: null,
+        barcode: null,
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Sync tracking to Shopify' }));
+
+    expect(submitFulfillmentTrackingMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', {
+      trackingNumber: 'OTO-TRACK-1028',
+      carrier: 'Try OTO',
+      trackingUrl: undefined,
+      notifyCustomer: false,
+    });
+  });
+
+  it('does not show Shopify sync action after fulfillment sync has a fulfilled timestamp', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'try_oto',
+      trackingNumber: 'OTO-TRACK-1028',
+      fulfilledAt: '2026-05-15T19:47:00.000Z',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Same as tracking')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync tracking to Shopify' })).not.toBeInTheDocument();
+  });
+
   it('keeps Kargo provider display unchanged in shipment summaries', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
@@ -1650,6 +1792,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Kargo Entegratör')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Sync tracking to Shopify' })).not.toBeInTheDocument();
   });
 
   it('shows a safe backend error when retry fails', async () => {

@@ -20,6 +20,7 @@ export type ShipmentExecution = {
   sourceShopifyFulfillmentId?: string | null;
   provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
   providerShipmentId: string | null;
+  providerCarrierName?: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
   labelUrl: string | null;
