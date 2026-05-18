@@ -804,6 +804,16 @@ export function OrderDetailPage() {
                             <strong>{formatCurrency(shipmentExecution.shippingCost, shipmentExecution.currency)}</strong>
                           </div>
                         ) : null}
+                        {shipmentExecution?.timeline?.length ? (
+                          <div className="shipment-mini-timeline" aria-label="Shipment timeline">
+                            {shipmentExecution.timeline.map((event) => (
+                              <div className="summary-row" key={`${event.label}-${event.at}`}>
+                                <span>{event.label}</span>
+                                <strong>{event.status ? `${toTitleCaseLabel(event.status)} · ` : ''}{formatOptionalDate(event.at)}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                         {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
                           <div className="provider-response-summary" aria-label="Provider response summary">
                             <div className="provider-response-heading">
@@ -1142,6 +1152,10 @@ export function OrderDetailPage() {
                       <span>Admin only</span>
                     </div>
                     <div className="summary-row">
+                      <span>Sandbox mode</span>
+                      <strong>{shippingProviderDiagnostics.sandboxModeEnabled ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
                       <span>Shipping execution enabled</span>
                       <strong>{shippingProviderDiagnostics.shippingExecutionEnabled ? 'yes' : 'no'}</strong>
                     </div>
@@ -1152,6 +1166,10 @@ export function OrderDetailPage() {
                     <div className="summary-row">
                       <span>Provider enabled</span>
                       <strong>{shippingProviderDiagnostics.providerEnabled ? 'yes' : 'no'}</strong>
+                    </div>
+                    <div className="summary-row">
+                      <span>Webhook ingest enabled</span>
+                      <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Base URL configured</span>
@@ -1187,7 +1205,7 @@ export function OrderDetailPage() {
                     </div>
                     <div className="summary-row">
                       <span>Dummy Kargo support</span>
-                      <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'not_implemented' ? 'not implemented' : '—'}</strong>
+                      <strong>{shippingProviderDiagnostics.dummyKargoSupport === 'available' ? 'available' : 'not enabled'}</strong>
                     </div>
                     <div className="summary-row">
                       <span>Status sync support</span>

@@ -34,6 +34,18 @@ Kargo Entegratör execution is gated by environment flags. Vendor branch identif
 
 When execution is disabled, the adapter returns a dry-run pending response and does not call Kargo Entegratör.
 
+## Dummy Kargo Sandbox Flow
+
+Dummy Kargo execution is explicit sandbox/test behavior:
+
+- `SHIPPING_SANDBOX_MODE=true` enables Dummy Kargo payload construction.
+- `KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true` allows sandbox webhook ingestion.
+- Dummy creation uses the documented Kargo Entegratör shipment endpoint (`POST /api/shipments`) through the existing adapter base URL.
+- Dummy payloads include `cargo_company.id = "dummy"` plus the documented customer, warehouse, package, payment, desi, platform, notification, and line fields.
+- Required receiver fields (`name`, `surname`, `phone`, `email`, `country`, `postcode`, `city`, `district`, `address`) are validated before the provider is called. Missing fields block shipment creation with an actionable error.
+- Sandbox webhooks update only local `ShipmentExecution` evidence and timeline data. They do not create Shopify fulfillments, submit tracking to Shopify, mark orders delivered, or mutate finance state.
+- The Kargo helper endpoint `POST /api/helpers/test-status-webhook` is documented by the Postman collection, but the local platform does not call it yet because the helper request contract is not stored in the repo.
+
 ## Vendor Carrier Configuration
 
 `VendorShippingConfig` stores vendor-level carrier preferences:

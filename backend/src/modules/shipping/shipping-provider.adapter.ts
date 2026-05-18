@@ -65,6 +65,17 @@ function readNumber(value: Record<string, unknown>, keys: string[]) {
   return null;
 }
 
+function readBoolean(value: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'boolean') {
+      return raw;
+    }
+  }
+
+  return null;
+}
+
 function parseResponseBody(contentType: string, responseText: string): unknown {
   if (!contentType.includes('application/json') || !responseText) {
     return responseText;
@@ -300,7 +311,15 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       shippingCost: readNumber(body, ['shipping_cost', 'shippingCost', 'cost', 'amount', 'cargoPrice']),
       shippingVat: readNumber(body, ['shipping_vat', 'shippingVat', 'shippingVatAmount', 'vat']),
       currency: readString(body, ['currency']) ?? 'TRY',
-      responseSnapshot,
+      responseSnapshot: {
+        ...responseSnapshot,
+        barcode: readString(body, ['barcode', 'barcode_number', 'barcodeNumber']),
+        dummyCarrierDetected:
+          readString(body, ['cargo_company_id', 'cargoCompanyId', 'carrier_id', 'carrierId']) === 'dummy' ||
+          readString(body, ['cargo_company', 'cargoCompany', 'carrier']) === 'dummy' ||
+          readBoolean(body, ['dummyCarrierDetected']) === true,
+        lastProviderResponseAt: new Date().toISOString(),
+      },
     };
   }
 

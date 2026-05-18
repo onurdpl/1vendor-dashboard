@@ -31,6 +31,18 @@ export type ShipmentExecution = {
   shippingVat: string | null;
   currency: string;
   shippingCostLinked: boolean;
+  providerStatus?: string | null;
+  barcode?: string | null;
+  lastProviderResponseAt?: string | null;
+  dummyCarrierDetected?: boolean;
+  webhookReceived?: boolean;
+  barcodeAssigned?: boolean;
+  trackingAssigned?: boolean;
+  timeline?: Array<{
+    label: string;
+    at: string;
+    status: string | null;
+  }>;
   createdAt: string;
   updatedAt: string;
   providerResponseSummary?: {
@@ -55,9 +67,11 @@ export type ShipmentExecution = {
 export type ShippingProviderDiagnostics = {
   provider: 'hepsijet' | 'kargo_entegrator' | 'mng' | 'yurtici' | 'aras';
   executionReady: boolean;
+  sandboxModeEnabled?: boolean;
   shippingExecutionEnabled: boolean;
   providerSelected?: boolean;
   providerEnabled: boolean;
+  webhookIngestEnabled?: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   cargoIntegrationIdConfigured?: boolean;
@@ -66,7 +80,7 @@ export type ShippingProviderDiagnostics = {
   notificationUrlConfigured?: boolean;
   webhookRouteImplemented?: boolean;
   receiverAddressAvailability?: 'unknown_required';
-  dummyKargoSupport?: 'not_implemented';
+  dummyKargoSupport?: 'available' | 'not_implemented';
   statusSyncSupport?: 'not_implemented';
   missing: string[];
   deprecatedEnvFallbacks?: string[];

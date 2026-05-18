@@ -11,6 +11,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   shipmentExecution: {
     findUnique: vi.fn(),
+    findFirst: vi.fn(),
     findMany: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
@@ -33,6 +34,7 @@ const {
   createShipmentExecution,
   getShippingProviderGateDiagnostics,
   getShippingProviderReadinessDiagnostics,
+  ingestKargoEntegratorWebhook,
   inferShipmentDesi,
   previewShipmentExecution,
   retryDryRunShipmentExecution,
@@ -64,8 +66,10 @@ const env = {
   INVOICE_PROVIDER: 'bizimhesap' as const,
   BIZIMHESAP_ENABLED: false,
   SHIPPING_EXECUTION_ENABLED: true,
+  SHIPPING_SANDBOX_MODE: false,
   SHIPPING_PROVIDER: 'hepsijet' as const,
   KARGO_ENTEGRATOR_ENABLED: true,
+  KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
   KARGO_ENTEGRATOR_BASE_URL: 'https://kargo.example',
   KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
 };
@@ -161,6 +165,7 @@ describe('shipping execution foundation', () => {
     prismaMock.vendorShippingConfig.findUnique.mockReset();
     prismaMock.vendorShippingConfig.upsert.mockReset();
     prismaMock.shipmentExecution.findUnique.mockReset();
+    prismaMock.shipmentExecution.findFirst.mockReset();
     prismaMock.shipmentExecution.findMany.mockReset();
     prismaMock.shipmentExecution.create.mockReset();
     prismaMock.shipmentExecution.update.mockReset();
@@ -855,7 +860,7 @@ describe('shipping execution foundation', () => {
       providerEnabled: true,
       baseUrlConfigured: true,
       apiKeyConfigured: true,
-      webhookRouteImplemented: false,
+      webhookRouteImplemented: true,
       receiverAddressAvailability: 'unknown_required',
       dummyKargoSupport: 'not_implemented',
       statusSyncSupport: 'not_implemented',
@@ -907,22 +912,24 @@ describe('shipping execution foundation', () => {
     expect(diagnostics).toMatchObject({
       provider: 'kargo_entegrator',
       executionReady: true,
+      sandboxModeEnabled: false,
       shippingExecutionEnabled: true,
       providerSelected: true,
       providerEnabled: true,
+      webhookIngestEnabled: false,
       baseUrlConfigured: true,
       apiKeyConfigured: true,
       cargoIntegrationIdConfigured: true,
       warehouseIdConfigured: true,
       defaultDesiConfigured: true,
       notificationUrlConfigured: false,
-      webhookRouteImplemented: false,
+      webhookRouteImplemented: true,
       receiverAddressAvailability: 'unknown_required',
       dummyKargoSupport: 'not_implemented',
       statusSyncSupport: 'not_implemented',
       missing: [],
     });
-    expect(diagnostics.warnings).toEqual(expect.arrayContaining(['Dummy Kargo creation is not implemented.']));
+    expect(diagnostics.warnings).toEqual(expect.arrayContaining(['Dummy Kargo creation is not enabled.']));
     expect(JSON.stringify(diagnostics)).not.toContain('configured-secret');
     expect(JSON.stringify(diagnostics)).not.toContain('2547');
     expect(JSON.stringify(diagnostics)).not.toContain('1774');
@@ -979,9 +986,153 @@ describe('shipping execution foundation', () => {
         'Kargo Entegratör create contract is not verified.',
         'Receiver address and phone requirements are unknown.',
         'Kargo Entegratör webhook/status sync is not implemented.',
-        'Dummy Kargo creation is not implemented.',
+        'Dummy Kargo creation is not enabled.',
       ]),
     );
+  });
+
+  it('builds documented Dummy Kargo sandbox payload when required customer address fields exist', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+905551112233',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        carrierId: 'dummy',
+        notificationUrl: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+      },
+      {
+        vendorId: 'sporjinal',
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+      },
+    );
+
+    expect(preview.payload).toMatchObject({
+      cargo_integration_id: 2547,
+      warehouse_id: 1774,
+      cargo_company: { id: 'dummy' },
+      customer: {
+        name: 'Test',
+        surname: 'Customer',
+        phone: '+905551112233',
+        email: 'customer@example.com',
+        country: 'TR',
+        postcode: '34000',
+        city: 'Istanbul',
+        district: 'Kadikoy',
+        address: 'Test Mahallesi 1. Sokak No: 1',
+      },
+      payment_type: 'cash_money',
+      package_type: 'package',
+      payor_type: 'sender',
+      desi: 3,
+      note: '',
+      platform_id: 2547,
+      platform_d_id: 1774,
+      notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+    });
+    expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('blocks Dummy Kargo creation outside sandbox mode', async () => {
+    await expect(
+      previewShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          carrierId: 'dummy',
+        },
+        {
+          vendorId: 'sporjinal',
+          env,
+        },
+      ),
+    ).rejects.toThrow('Dummy Kargo shipment creation is available only when shipping sandbox mode is enabled.');
+  });
+
+  it('blocks Dummy Kargo shipment create when required receiver fields are missing', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          carrierId: 'dummy',
+        },
+        {
+          vendorId: 'sporjinal',
+          env: {
+            ...env,
+            SHIPPING_SANDBOX_MODE: true,
+            SHIPPING_PROVIDER: 'kargo_entegrator',
+          },
+        },
+      ),
+    ).rejects.toThrow('Dummy Kargo shipment requires customer/address fields:');
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
   it('registers a Kargo webhook placeholder that returns 501 without mutating shipment data', async () => {
@@ -1011,6 +1162,65 @@ describe('shipping execution foundation', () => {
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('ingests Dummy Kargo sandbox webhook updates into shipment execution only', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      providerShipmentId: 'ke-dummy-1',
+      responseSnapshot: {
+        ok: true,
+        dummyCarrierDetected: true,
+        timeline: [{ label: 'Shipment created', at: '2026-05-15T10:00:00.000Z', status: 'created' }],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await ingestKargoEntegratorWebhook(
+      {
+        data: {
+          id: 'ke-dummy-1',
+          status: 'created',
+          tracking_number: 'DUMMY-TRACK-1',
+          barcode: 'DUMMY-BARCODE-1',
+        },
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      shipmentExecutionId: 'shipment-kargo_entegrator-alloc-1',
+      shipmentStatus: 'created',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-kargo_entegrator-alloc-1' },
+        data: expect.objectContaining({
+          trackingNumber: 'DUMMY-TRACK-1',
+          shipmentStatus: 'CREATED',
+          responseSnapshot: expect.objectContaining({
+            webhookReceived: true,
+            dummyCarrierDetected: true,
+            providerStatus: 'created',
+            barcode: 'DUMMY-BARCODE-1',
+            timeline: expect.arrayContaining([
+              expect.objectContaining({ label: 'Tracking assigned', status: 'created' }),
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
   });
 
   it('diagnoses deprecated Kargo cargo integration env fallback without exposing values', () => {

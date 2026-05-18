@@ -69,6 +69,19 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByText('Linked order unavailable')).toHaveCount(0);
   });
 
+  test('order shipment action remains available in the routed workspace', async ({ page }) => {
+    await login(page, 'vendor-b@demo.com');
+    await page.goto('/orders?order=2001');
+
+    await expect(page.getByRole('heading', { name: 'Shopify #2001' })).toBeVisible();
+    await page.getByRole('link', { name: 'Open' }).first().click();
+    await expect(page.getByRole('heading', { name: 'Order #2001' })).toBeVisible();
+    await page.getByRole('button', { name: 'Create shipment' }).click();
+
+    await expect(page.getByText('Shipping label creation requested (mock).')).toBeVisible();
+    await expectNoOperationalAuthError(page);
+  });
+
   test('support ticket can receive a public reply', async ({ page }) => {
     await login(page, 'vendor-a@demo.com');
     await page.goto('/returns/RET-A-1001');

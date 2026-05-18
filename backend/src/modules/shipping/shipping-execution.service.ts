@@ -24,6 +24,7 @@ import type {
 } from './shipping-execution.types.js';
 
 const SHIPPING_VAT_PERCENT = 18;
+const DUMMY_KARGO_CARRIER_ID = 'dummy';
 type StoredShippingConfig = VendorShippingConfig & {
   warehouses?: VendorShippingWarehouse[];
 };
@@ -109,6 +110,13 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
 }
 
 function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinked?: boolean }): ShipmentExecutionDto {
+  const snapshot = readSnapshot(execution);
+  const providerStatus = readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']);
+  const barcode = readString(snapshot, ['barcode', 'barcodeNumber']);
+  const lastProviderResponseAt = readString(snapshot, ['lastProviderResponseAt']);
+  const timeline = readTimeline(snapshot);
+  const dummyCarrierDetected = readBoolean(snapshot, ['dummyCarrierDetected']);
+  const webhookReceived = readBoolean(snapshot, ['webhookReceived']);
   return {
     id: execution.id,
     allocationId: execution.allocationId,
@@ -129,6 +137,14 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
     shippingVat: execution.shippingVat === null ? null : toAmountString(toNumber(execution.shippingVat)),
     currency: execution.currency,
     shippingCostLinked: Boolean(execution.shippingCostLinked),
+    providerStatus,
+    barcode,
+    lastProviderResponseAt,
+    dummyCarrierDetected,
+    webhookReceived,
+    barcodeAssigned: Boolean(barcode),
+    trackingAssigned: Boolean(execution.trackingNumber),
+    timeline,
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),
   };
@@ -136,6 +152,67 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      return raw.trim();
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(raw);
+    }
+  }
+
+  return null;
+}
+
+function readBoolean(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return keys.some((key) => value[key] === true);
+}
+
+function readSnapshot(execution: { responseSnapshot?: unknown }) {
+  return isRecord(execution.responseSnapshot) ? execution.responseSnapshot : {};
+}
+
+function readTimeline(snapshot: Record<string, unknown>) {
+  const events = Array.isArray(snapshot.timeline) ? snapshot.timeline : [];
+  return events
+    .filter(isRecord)
+    .map((event) => ({
+      label: readString(event, ['label']) ?? 'Shipment update',
+      at: readString(event, ['at']) ?? new Date().toISOString(),
+      status: readString(event, ['status']),
+    }));
+}
+
+function appendTimelineEvent(snapshot: unknown, event: { label: string; status?: string | null }) {
+  const base = isRecord(snapshot) ? snapshot : {};
+  const timeline = readTimeline(base);
+  return {
+    ...base,
+    timeline: [
+      ...timeline,
+      {
+        label: event.label,
+        at: new Date().toISOString(),
+        status: event.status ?? null,
+      },
+    ],
+  };
+}
+
+function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) {
+  return input.carrierId === DUMMY_KARGO_CARRIER_ID || Boolean(env?.SHIPPING_SANDBOX_MODE);
 }
 
 export function inferShipmentDesi(
@@ -267,6 +344,34 @@ function splitCustomerName(name: string | null | undefined) {
 
 function buildNotificationUrl(input?: string | null) {
   return input?.trim() || null;
+}
+
+function buildKargoCustomer(input: {
+  order: unknown;
+  customerName: string | null | undefined;
+  customerEmail: string | null | undefined;
+}) {
+  const orderRecord = isRecord(input.order) ? input.order : {};
+  const name = splitCustomerName(input.customerName);
+  const customer = {
+    name: name.name,
+    surname: name.surname,
+    phone: readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone']),
+    email: input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
+    country: readString(orderRecord, ['shippingCountry', 'country']),
+    postcode: readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']),
+    city: readString(orderRecord, ['shippingCity', 'city']),
+    district: readString(orderRecord, ['shippingDistrict', 'district']),
+    address: readString(orderRecord, ['shippingAddress', 'address']),
+  };
+  const missingFields = Object.entries(customer)
+    .filter(([, value]) => !value)
+    .map(([key]) => `customer.${key}`);
+
+  return {
+    customer,
+    missingFields,
+  };
 }
 
 async function getStoredShippingConfig(vendorId: string) {
@@ -424,18 +529,20 @@ export function getShippingProviderGateDiagnostics(
   return {
     provider,
     executionReady: env.SHIPPING_EXECUTION_ENABLED && providerEnabled && baseUrlConfigured && apiKeyConfigured,
+    sandboxModeEnabled: env.SHIPPING_SANDBOX_MODE,
     shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
     providerSelected,
     providerEnabled,
+    webhookIngestEnabled: env.SHIPPING_SANDBOX_MODE && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED,
     baseUrlConfigured,
     apiKeyConfigured,
     cargoIntegrationIdConfigured,
     warehouseIdConfigured: false,
     defaultDesiConfigured: false,
     notificationUrlConfigured: false,
-    webhookRouteImplemented: false,
+    webhookRouteImplemented: true,
     receiverAddressAvailability: 'unknown_required',
-    dummyKargoSupport: 'not_implemented',
+    dummyKargoSupport: env.SHIPPING_SANDBOX_MODE ? 'available' : 'not_implemented',
     statusSyncSupport: 'not_implemented',
     missing,
     deprecatedEnvFallbacks:
@@ -447,7 +554,7 @@ export function getShippingProviderGateDiagnostics(
           'Kargo Entegratör create contract is not verified.',
           'Receiver address and phone requirements are unknown.',
           'Kargo Entegratör webhook/status sync is not implemented.',
-          'Dummy Kargo creation is not implemented.',
+          env.SHIPPING_SANDBOX_MODE ? 'Dummy Kargo sandbox shipment creation is enabled.' : 'Dummy Kargo creation is not enabled.',
         ]
       : [],
   };
@@ -527,6 +634,114 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
       };
 }
 
+function getWebhookData(payload: unknown) {
+  if (!isRecord(payload)) {
+    return {};
+  }
+
+  if (isRecord(payload.data)) {
+    return payload.data;
+  }
+
+  if (isRecord(payload.shipment)) {
+    return payload.shipment;
+  }
+
+  return payload;
+}
+
+function normalizeProviderWebhookStatus(status: string | null) {
+  const normalized = status?.trim().toLowerCase() ?? '';
+  if (normalized === 'created') {
+    return ShipmentExecutionStatus.CREATED;
+  }
+  if (normalized === 'non_processed' || normalized === 'non processed') {
+    return ShipmentExecutionStatus.PENDING;
+  }
+  return null;
+}
+
+export async function ingestKargoEntegratorWebhook(
+  payload: unknown,
+  options: {
+    env: AppEnv;
+  },
+): Promise<{ ok: true; shipmentExecutionId: string; shipmentStatus: ShipmentExecutionDto['shipmentStatus'] } | { ok: false; message: string }> {
+  if (!options.env.SHIPPING_SANDBOX_MODE || !options.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED) {
+    return {
+      ok: false,
+      message: 'Kargo Entegratör webhook ingestion is not implemented yet.',
+    };
+  }
+
+  const data = getWebhookData(payload);
+  const providerShipmentId = readString(data, ['providerShipmentId', 'shipmentId', 'id', 'cargoId']);
+  const allocationId = readString(data, ['allocationId', 'allocation_id']);
+  const trackingNumber = readString(data, ['tracking_number', 'trackingNumber', 'trackingNo', 'cargoTrackingNo']);
+  const trackingUrl = readString(data, ['tracking_url', 'trackingUrl', 'trackingLink', 'cargoTrackingUrl']);
+  const barcode = readString(data, ['barcode', 'barcodeNumber', 'barcode_number']);
+  const providerStatus = readString(data, ['status', 'shipmentStatus', 'cargoStatus']) ?? (trackingNumber ? 'tracking_assigned' : null);
+  const normalizedStatus = normalizeProviderWebhookStatus(providerStatus);
+  if (!providerShipmentId && !allocationId) {
+    return {
+      ok: false,
+      message: 'Kargo Entegratör webhook did not include a shipment or allocation identifier.',
+    };
+  }
+
+  const execution = await prisma.shipmentExecution.findFirst({
+    where: {
+      provider: ShippingProvider.KARGO_ENTEGRATOR,
+      OR: [
+        providerShipmentId ? { providerShipmentId } : undefined,
+        allocationId ? { allocationId } : undefined,
+      ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+    },
+  });
+
+  if (!execution) {
+    return {
+      ok: false,
+      message: 'Shipment execution could not be matched for the Kargo Entegratör webhook.',
+    };
+  }
+
+  const snapshot = appendTimelineEvent(
+    {
+      ...readSnapshot(execution),
+      webhookReceived: true,
+      dummyCarrierDetected: true,
+      providerStatus,
+      barcode: barcode ?? readString(readSnapshot(execution), ['barcode', 'barcodeNumber']),
+      lastProviderResponseAt: new Date().toISOString(),
+      responseKeys: Object.keys(data).sort(),
+    },
+    {
+      label: trackingNumber ? 'Tracking assigned' : barcode ? 'Barcode assigned' : 'Provider status update',
+      status: providerStatus,
+    },
+  );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: execution.id,
+    },
+    data: {
+      providerShipmentId: execution.providerShipmentId ?? providerShipmentId,
+      trackingNumber: execution.trackingNumber ?? trackingNumber,
+      trackingUrl: execution.trackingUrl ?? trackingUrl,
+      shipmentStatus: normalizedStatus ?? execution.shipmentStatus,
+      responseSnapshot: snapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    ok: true,
+    shipmentExecutionId: updated.id,
+    shipmentStatus: mapStatus(updated.shipmentStatus),
+  };
+}
+
 async function persistProviderShipmentResult(input: {
   executionId: string;
   allocation: {
@@ -549,6 +764,16 @@ async function persistProviderShipmentResult(input: {
   const shippingVat =
     result.shippingVat ??
     (result.shippingCost === null ? null : Number((result.shippingCost * (shippingVatPercent / 100)).toFixed(2)));
+  const responseSnapshot = appendTimelineEvent(
+    {
+      ...result.responseSnapshot,
+      providerStatus: readString(result.responseSnapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
+    },
+    {
+      label: 'Shipment created',
+      status: result.shipmentStatus,
+    },
+  );
 
   const updated = await prisma.$transaction(async (tx) => {
     const execution = await tx.shipmentExecution.update({
@@ -564,7 +789,7 @@ async function persistProviderShipmentResult(input: {
         shippingCost: result.shippingCost,
         shippingVat,
         currency: result.currency,
-        responseSnapshot: result.responseSnapshot as Prisma.InputJsonValue,
+        responseSnapshot: responseSnapshot as Prisma.InputJsonValue,
       },
     });
 
@@ -758,29 +983,52 @@ async function buildShipmentRequestPreview(
   }));
   const desi = inferShipmentDesi(lineItems, Number(config.defaultDesi));
   const customer = splitCustomerName(allocation.order.customerName);
+  const dummyKargoRequested = provider === ShippingProvider.KARGO_ENTEGRATOR && isDummyKargoRequested(input, options.env);
+  if (input.carrierId === DUMMY_KARGO_CARRIER_ID && !options.env?.SHIPPING_SANDBOX_MODE) {
+    throw new Error('Dummy Kargo shipment creation is available only when shipping sandbox mode is enabled.');
+  }
+  const kargoCustomer = buildKargoCustomer({
+    order: allocation.order,
+    customerName: allocation.order.customerName,
+    customerEmail: allocation.order.customerEmail,
+  });
   const missingCustomerFields = [
-    customer.name ? null : 'customer.name',
-    customer.surname ? null : 'customer.surname',
+    ...(dummyKargoRequested ? kargoCustomer.missingFields : [
+      customer.name ? null : 'customer.name',
+      customer.surname ? null : 'customer.surname',
+    ]),
   ].filter((field): field is string => Boolean(field));
+  if (dummyKargoRequested && missingCustomerFields.length > 0) {
+    throw new Error(`Dummy Kargo shipment requires customer/address fields: ${missingCustomerFields.join(', ')}.`);
+  }
   const notificationUrl = buildNotificationUrl(input.notificationUrl);
   const cargoIntegrationId = warehouseConfig?.cargoIntegrationId ?? null;
   const warehouseId = warehouseConfig?.warehouseId ?? null;
   const numericCargoIntegrationId = Number(cargoIntegrationId);
   const numericWarehouseId = Number(warehouseId);
+  const orderRecord = isRecord(allocation.order) ? allocation.order : {};
+  const kg = readString(orderRecord, ['shippingKg', 'kg']);
+  const note = readString(orderRecord, ['shippingNote', 'shipmentNote']) ?? '';
 
   const payload = {
     cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
     warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
+    ...(dummyKargoRequested ? { cargo_company: { id: DUMMY_KARGO_CARRIER_ID } } : {}),
     platform_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
     platform_d_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
     notification_url: notificationUrl,
-    customer: {
-      name: customer.name,
-      surname: customer.surname,
-      email: allocation.order.customerEmail,
-    },
+    customer: dummyKargoRequested
+      ? kargoCustomer.customer
+      : {
+          name: customer.name,
+          surname: customer.surname,
+          email: allocation.order.customerEmail,
+        },
     payment_type: 'cash_money',
+    ...(dummyKargoRequested ? { package_type: 'package', payor_type: 'sender' } : {}),
     desi,
+    ...(dummyKargoRequested && kg ? { kg: Number.isFinite(Number(kg)) ? Number(kg) : kg } : {}),
+    ...(dummyKargoRequested ? { note } : {}),
     lines: lineItems.map((lineItem) => ({
       title: lineItem.title,
       quantity: lineItem.quantity,
@@ -811,7 +1059,7 @@ async function buildShipmentRequestPreview(
             'Kargo Entegratör create contract is not verified.',
             'Receiver address and phone requirements are unknown.',
             'Kargo Entegratör webhook/status sync is not implemented.',
-            'Dummy Kargo creation is not implemented.',
+            dummyKargoRequested ? 'Dummy Kargo sandbox shipment creation is enabled.' : 'Dummy Kargo creation is not enabled.',
           ]
         : [],
   };

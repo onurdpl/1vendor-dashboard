@@ -51,6 +51,18 @@ export type OrderShipmentExecutionDto = {
   shippingCost: string | null;
   shippingVat: string | null;
   currency: string;
+  providerStatus: string | null;
+  barcode: string | null;
+  lastProviderResponseAt: string | null;
+  dummyCarrierDetected: boolean;
+  webhookReceived: boolean;
+  barcodeAssigned: boolean;
+  trackingAssigned: boolean;
+  timeline: Array<{
+    label: string;
+    at: string;
+    status: string | null;
+  }>;
   createdAt: string;
   updatedAt: string;
   providerResponseSummary?: {

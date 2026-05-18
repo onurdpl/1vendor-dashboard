@@ -31,7 +31,9 @@ describe('backend env shipping provider gates', () => {
 
     expect(env.SHIPPING_PROVIDER).toBe('kargo_entegrator');
     expect(env.SHIPPING_EXECUTION_ENABLED).toBe(false);
+    expect(env.SHIPPING_SANDBOX_MODE).toBe(false);
     expect(env.KARGO_ENTEGRATOR_ENABLED).toBe(true);
+    expect(env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED).toBe(false);
     expect(env.KARGO_ENTEGRATOR_BASE_URL).toBe('https://app.kargoentegrator.com/api');
     expect(env.KARGO_ENTEGRATOR_API_KEY).toBe('configured');
   });
@@ -85,5 +87,17 @@ describe('backend env shipping provider gates', () => {
 
     expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID).toBe('2547');
     expect(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE).toBe('primary');
+  });
+
+  it('parses sandbox and Kargo webhook ingest gates as explicit test-mode controls', () => {
+    resetEnv({
+      SHIPPING_SANDBOX_MODE: 'true',
+      KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: 'true',
+    });
+
+    const env = loadEnv();
+
+    expect(env.SHIPPING_SANDBOX_MODE).toBe(true);
+    expect(env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED).toBe(true);
   });
 });

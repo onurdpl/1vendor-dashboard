@@ -44,6 +44,25 @@ function readString(value: Record<string, unknown> | null, keys: string[]) {
   return null;
 }
 
+function readBoolean(value: Record<string, unknown> | null, keys: string[]) {
+  if (!value) {
+    return false;
+  }
+
+  return keys.some((key) => value[key] === true);
+}
+
+function readShipmentTimeline(value: Record<string, unknown> | null) {
+  const events = Array.isArray(value?.timeline) ? value.timeline : [];
+  return events
+    .filter(isRecord)
+    .map((event) => ({
+      label: readString(event, ['label']) ?? 'Shipment update',
+      at: readString(event, ['at']) ?? new Date().toISOString(),
+      status: readString(event, ['status']),
+    }));
+}
+
 function buildShipmentProviderResponseSummary(
   execution: {
     providerShipmentId: string | null;
@@ -110,6 +129,8 @@ function mapShipmentExecution(execution: {
   if (!execution) {
     return null;
   }
+  const snapshot = isRecord(execution.responseSnapshot) ? execution.responseSnapshot : null;
+  const barcode = readString(snapshot, ['barcode', 'barcodeNumber']);
 
   return {
     id: execution.id,
@@ -128,6 +149,14 @@ function mapShipmentExecution(execution: {
     shippingCost: execution.shippingCost === null || execution.shippingCost === undefined ? null : toAmountString(toNumber(execution.shippingCost)),
     shippingVat: execution.shippingVat === null || execution.shippingVat === undefined ? null : toAmountString(toNumber(execution.shippingVat)),
     currency: execution.currency,
+    providerStatus: readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
+    barcode,
+    lastProviderResponseAt: readString(snapshot, ['lastProviderResponseAt']),
+    dummyCarrierDetected: readBoolean(snapshot, ['dummyCarrierDetected']),
+    webhookReceived: readBoolean(snapshot, ['webhookReceived']),
+    barcodeAssigned: Boolean(barcode),
+    trackingAssigned: Boolean(execution.trackingNumber),
+    timeline: readShipmentTimeline(snapshot),
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),
     providerResponseSummary: buildShipmentProviderResponseSummary(

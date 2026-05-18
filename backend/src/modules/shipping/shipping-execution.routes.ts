@@ -8,6 +8,7 @@ import {
   getShipmentExecutionById,
   getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
+  ingestKargoEntegratorWebhook,
   listShipmentExecutions,
   previewShipmentExecution,
   retryDryRunShipmentExecution,
@@ -28,10 +29,15 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
 
-  app.post('/webhooks/shipping/kargo-entegrator', async (_request, reply) => {
-    return reply.code(501).send({
-      message: 'Kargo Entegratör webhook ingestion is not implemented yet.',
-    });
+  app.post('/webhooks/shipping/kargo-entegrator', async (request, reply) => {
+    const result = await ingestKargoEntegratorWebhook(request.body, { env });
+    if (!result.ok) {
+      return reply.code(501).send({
+        message: result.message,
+      });
+    }
+
+    return result;
   });
 
   app.get(

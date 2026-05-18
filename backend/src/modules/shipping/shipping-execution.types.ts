@@ -35,9 +35,11 @@ export type VendorShippingConfigDto = {
 export type ShippingProviderGateDiagnosticsDto = {
   provider: ShippingProviderDto;
   executionReady: boolean;
+  sandboxModeEnabled: boolean;
   shippingExecutionEnabled: boolean;
   providerSelected: boolean;
   providerEnabled: boolean;
+  webhookIngestEnabled: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   cargoIntegrationIdConfigured: boolean;
@@ -46,11 +48,17 @@ export type ShippingProviderGateDiagnosticsDto = {
   notificationUrlConfigured: boolean;
   webhookRouteImplemented: boolean;
   receiverAddressAvailability: 'unknown_required';
-  dummyKargoSupport: 'not_implemented';
+  dummyKargoSupport: 'available' | 'not_implemented';
   statusSyncSupport: 'not_implemented';
   missing: string[];
   deprecatedEnvFallbacks: string[];
   warnings: string[];
+};
+
+export type ShipmentTimelineEventDto = {
+  label: string;
+  at: string;
+  status: string | null;
 };
 
 export type ShipmentExecutionDto = {
@@ -73,6 +81,14 @@ export type ShipmentExecutionDto = {
   shippingVat: string | null;
   currency: string;
   shippingCostLinked: boolean;
+  providerStatus: string | null;
+  barcode: string | null;
+  lastProviderResponseAt: string | null;
+  dummyCarrierDetected: boolean;
+  webhookReceived: boolean;
+  barcodeAssigned: boolean;
+  trackingAssigned: boolean;
+  timeline: ShipmentTimelineEventDto[];
   createdAt: string;
   updatedAt: string;
 };
@@ -81,6 +97,7 @@ export type CreateShipmentExecutionDto = {
   allocationId: string;
   provider?: ShippingProviderDto;
   notificationUrl?: string;
+  carrierId?: 'dummy';
 };
 
 export type ShipmentExecutionPreviewDto = {
