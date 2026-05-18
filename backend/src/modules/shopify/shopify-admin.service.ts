@@ -614,9 +614,10 @@ export function createShopifyAdminService(env: AppEnv) {
   }
 
   async function fetchFulfillmentOrders(shopifyOrderId: string): Promise<ShopifyFulfillmentOrdersResponse> {
-    if (mockFulfillmentOrdersByOrderId[shopifyOrderId]) {
+    const normalizedShopifyOrderId = extractShopifyGidTail(shopifyOrderId) ?? shopifyOrderId;
+    if (mockFulfillmentOrdersByOrderId[shopifyOrderId] || mockFulfillmentOrdersByOrderId[normalizedShopifyOrderId]) {
       return {
-        fulfillmentOrders: mockFulfillmentOrdersByOrderId[shopifyOrderId],
+        fulfillmentOrders: mockFulfillmentOrdersByOrderId[shopifyOrderId] ?? mockFulfillmentOrdersByOrderId[normalizedShopifyOrderId],
         source: 'mock',
       };
     }
@@ -629,7 +630,7 @@ export function createShopifyAdminService(env: AppEnv) {
     }
 
     const response = await fetch(
-      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/orders/${encodeURIComponent(shopifyOrderId)}/fulfillment_orders.json`,
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/orders/${encodeURIComponent(normalizedShopifyOrderId)}/fulfillment_orders.json`,
       {
         headers: {
           'content-type': 'application/json',

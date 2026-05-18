@@ -557,6 +557,10 @@ Webhook processing lifecycle states:
   "shopifyFulfillmentSkippedReason": null,
   "shopifyFulfillmentOrderIdPresent": true,
   "shopifyFulfillmentIdPresent": true,
+  "shopifyFulfillmentOrderLookupAttempted": true,
+  "shopifyFulfillmentOrderLookupSuccess": true,
+  "shopifyFulfillmentOrderCount": 1,
+  "shopifySelectedFulfillmentOrderIdPresent": true,
   "fulfilledAt": "2026-05-12T13:22:52.000Z",
   "shipmentCreatedAt": "2026-05-12T13:22:52.000Z",
   "shipmentUpdatedAt": "2026-05-12T13:22:59.000Z"
@@ -582,7 +586,9 @@ Webhook processing lifecycle states:
   - route submits tracking with `tracking_info.number`, `tracking_info.company`, and optional `tracking_info.url`
   - route may set `notify_customer: true`
   - route only reports success after Shopify returns a fulfillment id
-  - route returns safe fulfillment diagnostics: whether a fulfillment was created, whether a fulfillment order id was available, whether a fulfillment id was returned, and any idempotent skip reason
+  - route resolves Shopify fulfillment orders before creation, using the normalized Shopify order id when local storage contains a GID
+  - route selects matching open fulfillment orders only; closed/cancelled/fulfilled order data is not used to create duplicate fulfillments
+  - route returns safe fulfillment diagnostics: whether a fulfillment was created, whether a fulfillment order id was available, whether a fulfillment id was returned, lookup attempted/success status, lookup order count, selected fulfillment order id presence, and any idempotent skip reason
 - Current frontend real-mode safety note:
   - the vendor order-detail UI defaults `notifyCustomer` to `false` unless the user explicitly opts in during tracking submission
 - Suggested status transitions:

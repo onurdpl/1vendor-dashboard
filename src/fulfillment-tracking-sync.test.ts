@@ -173,6 +173,10 @@ describe('fulfillment tracking sync', () => {
       shopifyFulfillmentSkippedReason: null,
       shopifyFulfillmentOrderIdPresent: true,
       shopifyFulfillmentIdPresent: true,
+      shopifyFulfillmentOrderLookupAttempted: true,
+      shopifyFulfillmentOrderLookupSuccess: true,
+      shopifyFulfillmentOrderCount: 1,
+      shopifySelectedFulfillmentOrderIdPresent: true,
     });
   });
 
@@ -218,6 +222,35 @@ describe('fulfillment tracking sync', () => {
   it('blocks safely when Shopify fulfillment order data is missing', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
     shopifyAdminMock.fetchFulfillmentOrders.mockResolvedValue({ fulfillmentOrders: [] });
+    const service = createFulfillmentService(env);
+
+    const result = await service.updateAllocationTracking(buildRequest());
+
+    expect(result).toEqual({
+      ok: false,
+      code: 502,
+      message: 'Shopify fulfillment order data is missing; cannot sync tracking automatically.',
+    });
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('does not create a fulfillment from a non-open Shopify fulfillment order', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
+    shopifyAdminMock.fetchFulfillmentOrders.mockResolvedValue({
+      fulfillmentOrders: [
+        {
+          id: 'gid://shopify/FulfillmentOrder/closed-1039',
+          status: 'CLOSED',
+          lineItems: [
+            {
+              id: 'gid://shopify/FulfillmentOrderLineItem/closed-line-1039',
+              lineItemId: 'gid://shopify/LineItem/20346971095377',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
     const service = createFulfillmentService(env);
 
     const result = await service.updateAllocationTracking(buildRequest());
@@ -314,6 +347,7 @@ describe('fulfillment tracking sync', () => {
       expect.objectContaining({
         update: expect.objectContaining({
           fulfillmentStatus: 'fulfillment_sync_failed',
+          shopifyFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/fo-1039',
           errorMessage: 'Shopify fulfillment creation response did not include a fulfillment id.',
         }),
       }),

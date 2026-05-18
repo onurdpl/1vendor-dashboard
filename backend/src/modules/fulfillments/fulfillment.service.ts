@@ -35,6 +35,10 @@ function sameShopifyIdentifier(left: string | number | null | undefined, right: 
   return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
 }
 
+function isOpenFulfillmentOrderStatus(status: string | null | undefined) {
+  return (status ?? '').trim().toLowerCase() === 'open';
+}
+
 export function createFulfillmentService(env: AppEnv) {
   const shopifyAdminService = createShopifyAdminService(env);
 
@@ -137,6 +141,10 @@ export function createFulfillmentService(env: AppEnv) {
           shopifyFulfillmentSkippedReason: 'already_synced',
           shopifyFulfillmentOrderIdPresent: Boolean(allocation.fulfillment.shopifyFulfillmentOrderId),
           shopifyFulfillmentIdPresent: true,
+          shopifyFulfillmentOrderLookupAttempted: false,
+          shopifyFulfillmentOrderLookupSuccess: Boolean(allocation.fulfillment.shopifyFulfillmentOrderId),
+          shopifyFulfillmentOrderCount: allocation.fulfillment.shopifyFulfillmentOrderId ? 1 : 0,
+          shopifySelectedFulfillmentOrderIdPresent: Boolean(allocation.fulfillment.shopifyFulfillmentOrderId),
           fulfilledAt: fulfilledAt.toISOString(),
           shipmentCreatedAt: shipmentCreatedAt.toISOString(),
           shipmentUpdatedAt: shipmentUpdatedAt.toISOString(),
@@ -158,7 +166,9 @@ export function createFulfillmentService(env: AppEnv) {
       .map((lineItem) => lineItem.shopifyOrderLineItem.sourceLineItemId)
       .filter((lineItemId): lineItemId is string => Boolean(lineItemId));
 
+    const fulfillmentOrderCount = fulfillmentOrdersResponse.fulfillmentOrders.length;
     const matchedFulfillmentOrders = fulfillmentOrdersResponse.fulfillmentOrders
+      .filter((fulfillmentOrder) => isOpenFulfillmentOrderStatus(fulfillmentOrder.status))
       .map((fulfillmentOrder) => ({
         fulfillmentOrderId: fulfillmentOrder.id,
         fulfillmentOrderLineItems: fulfillmentOrder.lineItems
@@ -173,6 +183,7 @@ export function createFulfillmentService(env: AppEnv) {
           })),
       }))
       .filter((entry) => entry.fulfillmentOrderLineItems.length > 0);
+    const primaryFulfillmentOrderId = matchedFulfillmentOrders[0]?.fulfillmentOrderId ?? null;
 
     if (matchedFulfillmentOrders.length === 0) {
       const missingFulfillmentOrderMessage = 'Shopify fulfillment order data is missing; cannot sync tracking automatically.';
@@ -186,6 +197,7 @@ export function createFulfillmentService(env: AppEnv) {
           carrier,
           trackingUrl,
           notifyCustomer,
+          shopifyFulfillmentOrderId: null,
           syncStatus: 'fulfillment_sync_failed',
           errorMessage: missingFulfillmentOrderMessage,
         },
@@ -196,6 +208,7 @@ export function createFulfillmentService(env: AppEnv) {
           carrier,
           trackingUrl,
           notifyCustomer,
+          shopifyFulfillmentOrderId: null,
           syncStatus: 'fulfillment_sync_failed',
           errorMessage: missingFulfillmentOrderMessage,
         },
@@ -233,7 +246,6 @@ export function createFulfillmentService(env: AppEnv) {
         throw new Error('Shopify fulfillment creation response did not include a fulfillment id.');
       }
 
-      const primaryFulfillmentOrderId = matchedFulfillmentOrders[0]?.fulfillmentOrderId ?? null;
       const submittedAt = new Date();
 
       await prisma.$transaction(async (tx) => {
@@ -297,6 +309,10 @@ export function createFulfillmentService(env: AppEnv) {
         shopifyFulfillmentSkippedReason: fulfillmentResult.skippedReason,
         shopifyFulfillmentOrderIdPresent: fulfillmentResult.fulfillmentOrderIdPresent,
         shopifyFulfillmentIdPresent: fulfillmentResult.fulfillmentIdPresent,
+        shopifyFulfillmentOrderLookupAttempted: true,
+        shopifyFulfillmentOrderLookupSuccess: true,
+        shopifyFulfillmentOrderCount: fulfillmentOrderCount,
+        shopifySelectedFulfillmentOrderIdPresent: Boolean(primaryFulfillmentOrderId),
         fulfilledAt: submittedAt.toISOString(),
         shipmentCreatedAt: submittedAt.toISOString(),
         shipmentUpdatedAt: submittedAt.toISOString(),
@@ -315,6 +331,7 @@ export function createFulfillmentService(env: AppEnv) {
             carrier,
             trackingUrl,
             notifyCustomer,
+            shopifyFulfillmentOrderId: primaryFulfillmentOrderId,
             syncStatus: 'fulfillment_sync_failed',
             errorMessage: message,
           },
@@ -325,6 +342,7 @@ export function createFulfillmentService(env: AppEnv) {
             carrier,
             trackingUrl,
             notifyCustomer,
+            shopifyFulfillmentOrderId: primaryFulfillmentOrderId,
             syncStatus: 'fulfillment_sync_failed',
             errorMessage: message,
           },
