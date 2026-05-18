@@ -911,7 +911,7 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
-  it('retries failed shipment executions with corrected shipment-only overrides', async () => {
+  it('retries failed shipment executions in sandbox without forcing Dummy Kargo payloads', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-kargo_entegrator-alloc-1',
       provider: 'KARGO_ENTEGRATOR',
@@ -987,12 +987,18 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).toHaveBeenCalledWith(
       expect.objectContaining({
         requestSnapshot: expect.objectContaining({
-          customer: expect.objectContaining({
-            district: 'Kadikoy',
-          }),
+          customer: {
+            name: 'Test',
+            surname: 'Customer',
+            email: 'customer@example.com',
+          },
+          package_type: 'box',
         }),
       }),
     );
+    const requestSnapshot = adapter.createShipment.mock.calls[0][0].requestSnapshot;
+    expect(requestSnapshot).not.toHaveProperty('cargo_company');
+    expect(requestSnapshot).not.toHaveProperty('payor_type');
   });
 
   it('preserves vendor isolation when creating shipments', async () => {
@@ -1346,6 +1352,94 @@ describe('shipping execution foundation', () => {
       notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
     });
     expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('keeps real Kargo provider payload when sandbox mode is enabled without explicit dummy carrier', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-live-1027',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargo_entegrator',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_SANDBOX_MODE: true,
+          SHIPPING_PROVIDER: 'kargo_entegrator',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kargo_entegrator',
+        requestSnapshot: expect.objectContaining({
+          package_type: 'box',
+          customer: {
+            name: 'Test',
+            surname: 'Customer',
+            email: 'customer@example.com',
+          },
+        }),
+      }),
+    );
+    const requestSnapshot = adapter.createShipment.mock.calls[0]?.[0]?.requestSnapshot;
+    expect(requestSnapshot).not.toHaveProperty('cargo_company');
+    expect(requestSnapshot).not.toHaveProperty('payor_type');
   });
 
   it('blocks invalid Kargo package_type before calling the provider', async () => {

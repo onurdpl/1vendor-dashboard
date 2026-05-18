@@ -228,7 +228,8 @@ function appendTimelineEvent(snapshot: unknown, event: { label: string; status?:
 }
 
 function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) {
-  return input.carrierId === DUMMY_KARGO_CARRIER_ID || Boolean(env?.SHIPPING_SANDBOX_MODE);
+  void env;
+  return input.carrierId === DUMMY_KARGO_CARRIER_ID;
 }
 
 function getKargoRequestTarget(baseUrl: string | undefined) {
