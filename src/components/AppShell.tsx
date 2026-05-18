@@ -10,6 +10,7 @@ import { ActionFeedback } from './ActionFeedback';
 
 const workspaceNavItems = [
   { to: '/', label: 'Dashboard', icon: 'D' },
+  { to: '/support/inbox', label: 'Inbox', icon: 'I' },
   { to: '/support', label: 'Support', icon: 'S' },
 ];
 

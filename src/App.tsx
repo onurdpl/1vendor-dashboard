@@ -33,6 +33,9 @@ const AdminSupportAnalyticsPage = lazy(() =>
 const VendorSupportTicketsPage = lazy(() =>
   import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
 );
+const VendorInboxPage = lazy(() =>
+  import('./pages/VendorInboxPage').then((module) => ({ default: module.VendorInboxPage })),
+);
 const SupportTicketDetailPage = lazy(() =>
   import('./pages/SupportTicketDetailPage').then((module) => ({ default: module.SupportTicketDetailPage })),
 );
@@ -198,6 +201,16 @@ export default function App() {
               <RequirePermission permission="automation:read">
                 <Suspense fallback={loadingFallback}>
                   <AutomationPage />
+                </Suspense>
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/support/inbox"
+            element={
+              <RequirePermission permission="orders:read">
+                <Suspense fallback={loadingFallback}>
+                  <VendorInboxPage />
                 </Suspense>
               </RequirePermission>
             }

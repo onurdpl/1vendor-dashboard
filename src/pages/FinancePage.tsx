@@ -33,6 +33,7 @@ import type { FinanceTransaction, OperationsRecommendation } from '../lib/api/co
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import {
   supportTicketMatchesFinance,
   type OperationalEventInput,
@@ -1207,6 +1208,7 @@ export function FinancePage() {
                 recommendations={financeRecommendations}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
+              <AdminCollaborationNotes contextType="finance" contextId={selectedRecord.id} currentUser={currentUser} />
               <div className="finance-detail-card finance-invoice-card">
                 <div className="finance-detail-card-heading">
                   <h4>Customer invoice/accounting</h4>

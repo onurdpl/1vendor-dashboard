@@ -24,10 +24,33 @@ import { useActionFeedback } from '../lib/ui';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import { MentionText } from '../components/MentionText';
 import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
 import type { OperationsRecommendation } from '../lib/api/contracts';
 
 const ADMIN_STATUSES: SupportTicketStatus[] = ['IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
+const ADMIN_REPLY_TEMPLATES = [
+  {
+    label: 'Tracking required',
+    value: 'Hi, please add tracking information when the shipment is ready so we can keep the customer updated.',
+  },
+  {
+    label: 'Awaiting vendor response',
+    value: 'Hi, we need one more update from your team before we can continue reviewing this request.',
+  },
+  {
+    label: 'Refund approved',
+    value: 'Hi, the return review has been approved. The refund update will be reflected in the operational view.',
+  },
+  {
+    label: 'Shipment delayed',
+    value: 'Hi, we noticed the shipment may be delayed. Please confirm the latest carrier status.',
+  },
+  {
+    label: 'Payout pending',
+    value: 'Hi, this payout item is still pending review. We will update the ticket once the finance status changes.',
+  },
+] as const;
 
 function formatDate(value: string | null | undefined) {
   if (!value) {
@@ -599,10 +622,30 @@ export function SupportTicketDetailPage() {
                   rows={4}
                 />
                 {isAdmin ? (
-                  <select value={replyStatus} onChange={(event) => setReplyStatus(event.target.value as typeof replyStatus)}>
-                    <option value="keep">Keep current status</option>
-                    <option value="WAITING_FOR_VENDOR">Set waiting for vendor</option>
-                  </select>
+                  <div className="support-reply-tools">
+                    <select
+                      aria-label="Reply template"
+                      defaultValue=""
+                      onChange={(event) => {
+                        const template = ADMIN_REPLY_TEMPLATES.find((item) => item.label === event.target.value);
+                        if (template) {
+                          setReplyMessage(template.value);
+                        }
+                        event.currentTarget.value = '';
+                      }}
+                    >
+                      <option value="">Insert reply template</option>
+                      {ADMIN_REPLY_TEMPLATES.map((template) => (
+                        <option key={template.label} value={template.label}>
+                          {template.label}
+                        </option>
+                      ))}
+                    </select>
+                    <select value={replyStatus} onChange={(event) => setReplyStatus(event.target.value as typeof replyStatus)}>
+                      <option value="keep">Keep current status</option>
+                      <option value="WAITING_FOR_VENDOR">Set waiting for vendor</option>
+                    </select>
+                  </div>
                 ) : null}
                 <button type="submit" className="button button-primary" disabled={replyMutation.isPending || !replyMessage.trim()}>
                   {replyMutation.isPending ? 'Posting...' : 'Post reply'}
@@ -740,7 +783,9 @@ export function SupportTicketDetailPage() {
                     <div key={item.id} className="support-note">
                       <strong>{item.authorName}</strong>
                       <span>{formatDate(item.createdAt)}</span>
-                      <p>{item.content}</p>
+                      <p>
+                        <MentionText text={item.content} />
+                      </p>
                     </div>
                   ))
                 ) : (

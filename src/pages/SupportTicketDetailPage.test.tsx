@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setCurrentUser, setToken } from '../lib/auth';
@@ -140,5 +141,27 @@ describe('SupportTicketDetailPage context visibility', () => {
       expect(screen.getByText('internal-review')).toBeInTheDocument();
     });
     expect(screen.getByText('webhook-synced')).toBeInTheDocument();
+  });
+
+  it('lets admins insert editable public reply templates', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['vendor-a'],
+      vendorDetails: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'vendor-a',
+    });
+    getAdminSupportTicketMock.mockResolvedValueOnce(ticket());
+
+    renderPage('/admin/support/ticket-1');
+
+    await screen.findByRole('heading', { name: 'Public thread' });
+    await userEvent.selectOptions(screen.getByLabelText('Reply template'), 'Tracking required');
+
+    expect(screen.getByPlaceholderText('Write a public reply...')).toHaveValue(
+      'Hi, please add tracking information when the shipment is ready so we can keep the customer updated.',
+    );
   });
 });

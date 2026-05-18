@@ -30,5 +30,6 @@ Covered flows:
 - Finance linked order navigation into the selected Orders workspace row.
 - Return detail linked order navigation.
 - Vendor support ticket reply thread.
+- Vendor communication inbox and linked support context.
 - Admin vendor switching without stale cross-vendor selection.
 - Expired-session redirect with destination restoration.

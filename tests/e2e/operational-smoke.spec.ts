@@ -90,6 +90,26 @@ test.describe('operational browser smoke', () => {
     await expect(page.getByText('Smoke reply from vendor.').first()).toBeVisible();
   });
 
+  test('vendor inbox opens linked communication context', async ({ page }) => {
+    await login(page, 'vendor-a@demo.com');
+    await page.goto('/returns/RET-A-1001');
+
+    await page.getByRole('button', { name: 'Contact support' }).click();
+    await page.getByLabel('Subject').fill('Inbox smoke request');
+    await page.getByLabel('Message').fill('Browser smoke is checking the communication center.');
+    await page.getByRole('button', { name: 'Create ticket' }).click();
+    await expect(page.getByText('Support ticket created.').first()).toBeVisible();
+
+    await page.getByRole('link', { name: 'Inbox', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Communication center' })).toBeVisible();
+    await expect(page.getByText('Inbox smoke request').first()).toBeVisible();
+    await page.getByText('Inbox smoke request').first().click();
+    await page.getByRole('link', { name: 'Open linked record' }).click();
+
+    await expect(page).toHaveURL(/\/support\/mock-support-/);
+    await expect(page.getByRole('heading', { name: 'Inbox smoke request' })).toBeVisible();
+  });
+
   test('admin vendor switch refreshes operations without stale selected rows', async ({ page }) => {
     await login(page);
     await page.goto('/orders?order=1001');

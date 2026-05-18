@@ -24,6 +24,7 @@ import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import type { OperationsRecommendation } from '../lib/api/contracts';
 import {
   sameOperationalOrderNumber,
@@ -712,6 +713,10 @@ export function OrderDetailPage() {
             recommendations={orderRecommendations}
             audience={audience}
           />
+
+          {order ? (
+            <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
+          ) : null}
 
           <OperationalTimeline
             title="Unified activity"

@@ -20,6 +20,7 @@ import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
+import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import type { OperationsRecommendation } from '../lib/api/contracts';
 import {
   sameOperationalOrderNumber,
@@ -604,6 +605,8 @@ export function ReturnDetailPage() {
             recommendations={returnRecommendations}
             audience={audience}
           />
+
+          <AdminCollaborationNotes contextType="return" contextId={returnRequest.id} currentUser={currentUser} />
 
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
