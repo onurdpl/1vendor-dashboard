@@ -45,9 +45,10 @@ export type ShippingProviderGateDiagnosticsDto = {
   cargoIntegrationIdConfigured: boolean;
   warehouseIdConfigured: boolean;
   defaultDesiConfigured: boolean;
+  packageTypeUsed: string;
   notificationUrlConfigured: boolean;
   webhookRouteImplemented: boolean;
-  receiverAddressAvailability: 'unknown_required';
+  receiverAddressAvailability: 'confirmed_required';
   dummyKargoSupport: 'available' | 'not_implemented';
   statusSyncSupport: 'not_implemented';
   missing: string[];

@@ -27,6 +27,8 @@ import type {
 
 const SHIPPING_VAT_PERCENT = 18;
 const DUMMY_KARGO_CARRIER_ID = 'dummy';
+const DEFAULT_KARGO_PACKAGE_TYPE = 'box';
+const ALLOWED_KARGO_PACKAGE_TYPES = new Set(['box', 'document']);
 type StoredShippingConfig = VendorShippingConfig & {
   warehouses?: VendorShippingWarehouse[];
 };
@@ -184,6 +186,16 @@ function readBoolean(value: unknown, keys: string[]) {
 
 function readSnapshot(execution: { responseSnapshot?: unknown }) {
   return isRecord(execution.responseSnapshot) ? execution.responseSnapshot : {};
+}
+
+function resolveKargoPackageType(providerMetadata: unknown) {
+  return (readString(providerMetadata, ['packageType', 'package_type']) ?? DEFAULT_KARGO_PACKAGE_TYPE).trim().toLowerCase();
+}
+
+function assertValidKargoPackageType(value: string): asserts value is 'box' | 'document' {
+  if (!ALLOWED_KARGO_PACKAGE_TYPES.has(value)) {
+    throw new Error('Invalid Kargo package_type. Allowed values: box, document.');
+  }
 }
 
 function readTimeline(snapshot: Record<string, unknown>) {
@@ -594,6 +606,7 @@ export function getShippingProviderGateDiagnostics(
   const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : false;
   const apiKeyConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_API_KEY) : false;
   const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
+  const packageTypeUsed = DEFAULT_KARGO_PACKAGE_TYPE;
   const missing = [
     !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
     isKargo && !env.KARGO_ENTEGRATOR_ENABLED ? 'KARGO_ENTEGRATOR_ENABLED' : null,
@@ -614,9 +627,10 @@ export function getShippingProviderGateDiagnostics(
     cargoIntegrationIdConfigured,
     warehouseIdConfigured: false,
     defaultDesiConfigured: false,
+    packageTypeUsed,
     notificationUrlConfigured: false,
     webhookRouteImplemented: true,
-    receiverAddressAvailability: 'unknown_required',
+    receiverAddressAvailability: 'confirmed_required',
     dummyKargoSupport: env.SHIPPING_SANDBOX_MODE ? 'available' : 'not_implemented',
     statusSyncSupport: 'not_implemented',
     missing,
@@ -626,10 +640,10 @@ export function getShippingProviderGateDiagnostics(
         : [],
     warnings: isKargo
       ? [
-          'Kargo Entegratör create contract is not verified.',
-          'Receiver address and phone requirements are unknown.',
           'Kargo Entegratör webhook/status sync is not implemented.',
-          env.SHIPPING_SANDBOX_MODE ? 'Dummy Kargo sandbox shipment creation is enabled.' : 'Dummy Kargo creation is not enabled.',
+          env.SHIPPING_SANDBOX_MODE
+            ? 'Dummy Kargo sandbox shipment creation is enabled.'
+            : 'Live carrier execution is not enabled or verified.',
         ]
       : [],
   };
@@ -667,6 +681,7 @@ export async function getShippingProviderReadinessDiagnostics(
     cargoIntegrationIdConfigured,
     warehouseIdConfigured,
     defaultDesiConfigured,
+    packageTypeUsed: resolveKargoPackageType(config.providerMetadata),
     missing,
   };
 }
@@ -1155,6 +1170,12 @@ async function buildShipmentRequestPreview(
   const orderRecord = isRecord(allocation.order) ? allocation.order : {};
   const kg = readString(orderRecord, ['shippingKg', 'kg']);
   const note = readString(orderRecord, ['shippingNote', 'shipmentNote']) ?? '';
+  const packageType = provider === ShippingProvider.KARGO_ENTEGRATOR
+    ? resolveKargoPackageType(config.providerMetadata)
+    : DEFAULT_KARGO_PACKAGE_TYPE;
+  if (provider === ShippingProvider.KARGO_ENTEGRATOR) {
+    assertValidKargoPackageType(packageType);
+  }
 
   const payload = {
     cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
@@ -1171,7 +1192,8 @@ async function buildShipmentRequestPreview(
           email: allocation.order.customerEmail,
         },
     payment_type: 'cash_money',
-    ...(dummyKargoRequested ? { package_type: 'package', payor_type: 'sender' } : {}),
+    ...(provider === ShippingProvider.KARGO_ENTEGRATOR ? { package_type: packageType } : {}),
+    ...(dummyKargoRequested ? { payor_type: 'sender' } : {}),
     desi,
     ...(dummyKargoRequested && kg ? { kg: Number.isFinite(Number(kg)) ? Number(kg) : kg } : {}),
     ...(dummyKargoRequested ? { note } : {}),
@@ -1202,10 +1224,10 @@ async function buildShipmentRequestPreview(
     warnings:
       provider === ShippingProvider.KARGO_ENTEGRATOR
         ? [
-            'Kargo Entegratör create contract is not verified.',
-            'Receiver address and phone requirements are unknown.',
             'Kargo Entegratör webhook/status sync is not implemented.',
-            dummyKargoRequested ? 'Dummy Kargo sandbox shipment creation is enabled.' : 'Dummy Kargo creation is not enabled.',
+            dummyKargoRequested
+              ? 'Dummy Kargo sandbox shipment creation is enabled.'
+              : 'Live carrier execution is not enabled or verified.',
           ]
         : [],
   };

@@ -96,7 +96,8 @@ export type ShippingProviderDiagnostics = {
   defaultDesiConfigured?: boolean;
   notificationUrlConfigured?: boolean;
   webhookRouteImplemented?: boolean;
-  receiverAddressAvailability?: 'unknown_required';
+  packageTypeUsed?: string;
+  receiverAddressAvailability?: 'confirmed_required' | 'unknown_required';
   dummyKargoSupport?: 'available' | 'not_implemented';
   statusSyncSupport?: 'not_implemented';
   missing: string[];

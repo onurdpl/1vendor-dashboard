@@ -1121,7 +1121,8 @@ describe('shipping execution foundation', () => {
       baseUrlConfigured: true,
       apiKeyConfigured: true,
       webhookRouteImplemented: true,
-      receiverAddressAvailability: 'unknown_required',
+      packageTypeUsed: 'box',
+      receiverAddressAvailability: 'confirmed_required',
       dummyKargoSupport: 'not_implemented',
       statusSyncSupport: 'not_implemented',
       missing: ['SHIPPING_EXECUTION_ENABLED'],
@@ -1182,20 +1183,30 @@ describe('shipping execution foundation', () => {
       cargoIntegrationIdConfigured: true,
       warehouseIdConfigured: true,
       defaultDesiConfigured: true,
+      packageTypeUsed: 'box',
       notificationUrlConfigured: false,
       webhookRouteImplemented: true,
-      receiverAddressAvailability: 'unknown_required',
+      receiverAddressAvailability: 'confirmed_required',
       dummyKargoSupport: 'not_implemented',
       statusSyncSupport: 'not_implemented',
       missing: [],
     });
-    expect(diagnostics.warnings).toEqual(expect.arrayContaining(['Dummy Kargo creation is not enabled.']));
+    expect(diagnostics.warnings).toEqual(
+      expect.arrayContaining([
+        'Kargo Entegratör webhook/status sync is not implemented.',
+        'Live carrier execution is not enabled or verified.',
+      ]),
+    );
+    expect(diagnostics.warnings).not.toEqual(expect.arrayContaining([
+      'Kargo Entegratör create contract is not verified.',
+      'Receiver address and phone requirements are unknown.',
+    ]));
     expect(JSON.stringify(diagnostics)).not.toContain('configured-secret');
     expect(JSON.stringify(diagnostics)).not.toContain('2547');
     expect(JSON.stringify(diagnostics)).not.toContain('1774');
   });
 
-  it('adds Kargo contract warnings to shipment previews without changing the payload', async () => {
+  it('adds current Kargo readiness warnings to shipment previews without changing the payload', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'KARGO_ENTEGRATOR',
@@ -1239,16 +1250,19 @@ describe('shipping execution foundation', () => {
     expect(preview.payload).toMatchObject({
       cargo_integration_id: 2547,
       warehouse_id: 1774,
+      package_type: 'box',
       notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
     });
     expect(preview.warnings).toEqual(
       expect.arrayContaining([
-        'Kargo Entegratör create contract is not verified.',
-        'Receiver address and phone requirements are unknown.',
         'Kargo Entegratör webhook/status sync is not implemented.',
-        'Dummy Kargo creation is not enabled.',
+        'Live carrier execution is not enabled or verified.',
       ]),
     );
+    expect(preview.warnings).not.toEqual(expect.arrayContaining([
+      'Kargo Entegratör create contract is not verified.',
+      'Receiver address and phone requirements are unknown.',
+    ]));
   });
 
   it('builds documented Dummy Kargo sandbox payload when required customer address fields exist', async () => {
@@ -1323,7 +1337,7 @@ describe('shipping execution foundation', () => {
         address: 'Test Mahallesi 1. Sokak No: 1',
       },
       payment_type: 'cash_money',
-      package_type: 'package',
+      package_type: 'box',
       payor_type: 'sender',
       desi: 3,
       note: '',
@@ -1332,6 +1346,73 @@ describe('shipping execution foundation', () => {
       notification_url: 'https://backend.example/webhooks/shipping/kargo-entegrator',
     });
     expect(preview.customerFieldsValid).toBe(true);
+  });
+
+  it('blocks invalid Kargo package_type before calling the provider', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: {
+        packageType: 'package',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          carrierId: 'dummy',
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'kargo_entegrator',
+            SHIPPING_SANDBOX_MODE: true,
+          },
+          vendorId: 'sporjinal',
+          adapter,
+        },
+      ),
+    ).rejects.toThrow('Invalid Kargo package_type. Allowed values: box, document.');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
   });
 
   it('uses province as Kargo district when Shopify district is unavailable', async () => {
@@ -1941,5 +2022,50 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(error.responseSnapshot)).not.toContain('test-kargo-key');
     expect(JSON.stringify(error.responseSnapshot)).not.toContain('should-not-render');
     expect(JSON.stringify(error.responseSnapshot)).not.toContain('+905551112233');
+  });
+
+  it('parses Kargo package_type validation failures clearly', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      mockProviderResponse(
+        JSON.stringify({
+          message: 'Seçilen paket tipi geçersiz.',
+          errors: {
+            package_type: ['Seçilen paket tipi geçersiz.'],
+          },
+        }),
+        {
+          status: 422,
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new KargoEntegratorAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'kargo_entegrator',
+      SHIPPING_EXECUTION_ENABLED: true,
+      KARGO_ENTEGRATOR_ENABLED: true,
+      KARGO_ENTEGRATOR_API_KEY: 'test-kargo-key',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'kargo_entegrator',
+        requestSnapshot: {
+          package_type: 'package',
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Kargo Entegratör shipment execution failed with HTTP 422.',
+      responseSnapshot: expect.objectContaining({
+        status: 422,
+        ok: false,
+        providerError: 'Seçilen paket tipi geçersiz.',
+        providerValidationErrors: ['Seçilen paket tipi geçersiz.'],
+        bodyKeys: expect.arrayContaining(['errors', 'message']),
+      }),
+    });
   });
 });

@@ -36,6 +36,9 @@ This checklist captures the current Kargo Entegrator contract gaps before real o
   - `desi`
   - `platform_id`
   - `platform_d_id`
+- Confirmed `package_type` values:
+  - `box`
+  - `document`
 
 ## Contract Gaps To Confirm
 
@@ -45,7 +48,7 @@ This checklist captures the current Kargo Entegrator contract gaps before real o
 - Whether `platform_id` and `platform_d_id` are required aliases or distinct provider concepts.
 - Carrier identifier for Surat/Sürat.
 - Allowed `payment_type` values and which one should be used for merchant-of-record shipments.
-- Required package, desi, weight, and dimension fields.
+- Required desi, weight, and dimension fields beyond confirmed `package_type`.
 - Label, barcode, PDF, or waybill response shape.
 - Tracking number timing: create response, later polling, or webhook only.
 - Full webhook endpoint payload shape.
@@ -57,7 +60,7 @@ This checklist captures the current Kargo Entegrator contract gaps before real o
 
 1. Which sender fields are required beyond warehouse selection?
 2. What values identify Sürat and other real carriers?
-3. What values are allowed for `payment_type`, `package_type`, and `payor_type`?
+3. What values are allowed for `payment_type` and `payor_type`?
 4. When are barcode, label/PDF URL, tracking number, and provider shipment id generated?
 5. What response keys should be considered canonical identifiers?
 6. What is the complete shipment webhook payload shape?

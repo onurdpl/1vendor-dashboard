@@ -1696,6 +1696,10 @@ export function OrderDetailPage() {
                       <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>
                     </div>
                     <div className="summary-row">
+                      <span>Package type</span>
+                      <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
+                    </div>
+                    <div className="summary-row">
                       <span>Notification URL configured</span>
                       <strong>{shippingProviderDiagnostics.notificationUrlConfigured ? 'yes' : 'no'}</strong>
                     </div>
@@ -1705,7 +1709,11 @@ export function OrderDetailPage() {
                     </div>
                     <div className="summary-row">
                       <span>Receiver address availability</span>
-                      <strong>{shippingProviderDiagnostics.receiverAddressAvailability === 'unknown_required' ? 'unknown / required' : '—'}</strong>
+                      <strong>
+                        {shippingProviderDiagnostics.receiverAddressAvailability === 'confirmed_required'
+                          ? 'confirmed required'
+                          : 'unknown / required'}
+                      </strong>
                     </div>
                     <div className="summary-row">
                       <span>Dummy Kargo support</span>

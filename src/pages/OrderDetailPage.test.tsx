@@ -197,14 +197,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       cargoIntegrationIdConfigured: true,
       warehouseIdConfigured: true,
       defaultDesiConfigured: true,
+      packageTypeUsed: 'box',
       notificationUrlConfigured: false,
       webhookRouteImplemented: false,
-      receiverAddressAvailability: 'unknown_required',
+      receiverAddressAvailability: 'confirmed_required',
       dummyKargoSupport: 'not_implemented',
       statusSyncSupport: 'not_implemented',
       missing: ['SHIPPING_EXECUTION_ENABLED'],
       deprecatedEnvFallbacks: [],
-      warnings: ['Dummy Kargo creation is not enabled.'],
+      warnings: ['Live carrier execution is not enabled or verified.'],
     });
     createShipmentExecutionMock.mockReset();
     createShipmentExecutionMock.mockResolvedValue({
@@ -276,9 +277,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Shipping execution enabled')).toBeInTheDocument();
     expect(screen.getByText('Cargo integration configured')).toBeInTheDocument();
     expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
+    expect(screen.getByText('Package type')).toBeInTheDocument();
+    expect(screen.getByText('box')).toBeInTheDocument();
     expect(screen.getByText('Webhook route implemented')).toBeInTheDocument();
     expect(screen.getByText('Dummy Kargo support')).toBeInTheDocument();
-    expect(screen.getByText('Dummy Kargo creation is not enabled.')).toBeInTheDocument();
+    expect(screen.getByText('Live carrier execution is not enabled or verified.')).toBeInTheDocument();
+    expect(screen.queryByText('Kargo Entegratör create contract is not verified.')).not.toBeInTheDocument();
+    expect(screen.queryByText('Receiver address and phone requirements are unknown.')).not.toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
