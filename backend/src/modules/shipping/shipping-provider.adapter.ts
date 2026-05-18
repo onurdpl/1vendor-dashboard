@@ -454,16 +454,21 @@ function buildTryOtoDeliveryLookupResponseDiagnostics(
 
 function buildTryOtoDeliveryFeePayload(payload: Record<string, unknown>) {
   const customer = isRecord(payload.customer) ? payload.customer : {};
+  const pickupLocationCode = readString(payload, ['pickupLocationCode']);
   const originCity = readString(payload, ['originCity']);
-  const destinationCity = readString(customer, ['city']);
-  const weight = readNumber(payload, ['packageWeight']);
-  if (!originCity || !destinationCity || weight === null || weight <= 0) {
+  const customerCity = readString(customer, ['city']);
+  const customerCountry = readString(customer, ['country']);
+  const packageWeight = readNumber(payload, ['packageWeight']);
+  const paymentMethod = readString(payload, ['payment_method']);
+  if (!pickupLocationCode || !customerCity || !customerCountry || packageWeight === null || packageWeight <= 0 || !paymentMethod) {
     return {
       ok: false as const,
       missing: [
-        !originCity ? 'originCity' : null,
-        !destinationCity ? 'customer.city' : null,
-        weight === null || weight <= 0 ? 'packageWeight' : null,
+        !pickupLocationCode ? 'pickupLocationCode' : null,
+        !customerCity ? 'customer.city' : null,
+        !customerCountry ? 'customer.country' : null,
+        packageWeight === null || packageWeight <= 0 ? 'packageWeight' : null,
+        !paymentMethod ? 'payment_method' : null,
       ].filter((field): field is string => Boolean(field)),
     };
   }
@@ -471,9 +476,14 @@ function buildTryOtoDeliveryFeePayload(payload: Record<string, unknown>) {
   return {
     ok: true as const,
     payload: {
-      originCity,
-      destinationCity,
-      weight,
+      pickupLocationCode,
+      ...(originCity ? { originCity } : {}),
+      packageWeight,
+      customer: {
+        city: customerCity,
+        country: customerCountry,
+      },
+      payment_method: paymentMethod,
       currency: readString(payload, ['currency']) ?? 'TRY',
       ...(readNumber(payload, ['packageCount']) ? { packageCount: readNumber(payload, ['packageCount']) } : {}),
       ...(readNumber(payload, ['amount_due']) && Number(readNumber(payload, ['amount_due'])) > 0

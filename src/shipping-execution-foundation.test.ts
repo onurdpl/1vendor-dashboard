@@ -2772,9 +2772,14 @@ describe('shipping execution foundation', () => {
       }),
     );
     expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      pickupLocationCode: 'tr-test-store-001',
       originCity: 'Istanbul',
-      destinationCity: 'Istanbul',
-      weight: 1,
+      packageWeight: 1,
+      customer: {
+        city: 'Istanbul',
+        country: 'TR',
+      },
+      payment_method: 'paid',
       currency: 'TRY',
       packageCount: 1,
     });
@@ -2841,13 +2846,13 @@ describe('shipping execution foundation', () => {
           selectedDeliveryOptionIdPresent: true,
           request: expect.objectContaining({
             endpoint: '/rest/v2/checkOTODeliveryFee',
-            topLevelKeys: ['currency', 'destinationCity', 'originCity', 'packageCount', 'weight'],
-            pickupLocationCodePresent: false,
+            topLevelKeys: ['currency', 'customer', 'originCity', 'packageCount', 'packageWeight', 'payment_method', 'pickupLocationCode'],
+            pickupLocationCodePresent: true,
             originCityPresent: true,
-            packageWeightPresent: false,
-            customerCityPresent: false,
-            customerCountryPresent: false,
-            paymentMethodPresent: false,
+            packageWeightPresent: true,
+            customerCityPresent: true,
+            customerCountryPresent: true,
+            paymentMethodPresent: true,
             sourceFieldPresence: {
               pickupLocationCode: true,
               originCity: true,
@@ -3157,6 +3162,81 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('serializes resolved Try OTO lookup fields even when origin city is unavailable', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, deliveryCompany: [] })));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'try_oto',
+        requestSnapshot: {
+          orderId: 'POC-TR-1004',
+          pickupLocationCode: 'tr-test-store-001',
+          payment_method: 'paid',
+          amount: 1299.9,
+          amount_due: 0,
+          currency: 'TRY',
+          packageWeight: 1,
+          customer: {
+            name: 'Sandbox Customer',
+            mobile: '905551112233',
+            address: 'Test Mahallesi 1. Sokak No: 1',
+            city: 'Istanbul',
+            country: 'TR',
+            district: 'Kadikoy',
+          },
+          items: [],
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.',
+      responseSnapshot: expect.objectContaining({
+        deliveryOptionLookup: expect.objectContaining({
+          called: true,
+          success: true,
+          request: expect.objectContaining({
+            topLevelKeys: ['currency', 'customer', 'packageWeight', 'payment_method', 'pickupLocationCode'],
+            pickupLocationCodePresent: true,
+            originCityPresent: false,
+            packageWeightPresent: true,
+            customerCityPresent: true,
+            customerCountryPresent: true,
+            paymentMethodPresent: true,
+          }),
+        }),
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      pickupLocationCode: 'tr-test-store-001',
+      packageWeight: 1,
+      customer: {
+        city: 'Istanbul',
+        country: 'TR',
+      },
+      payment_method: 'paid',
+      currency: 'TRY',
+    });
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('905551112233');
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('Test Mahallesi');
+  });
+
   it('blocks Try OTO shipment creation when delivery options cannot be resolved', async () => {
     const fetchMock = vi
       .fn()
@@ -3210,13 +3290,13 @@ describe('shipping execution foundation', () => {
           selectedDeliveryOptionIdPresent: false,
           request: expect.objectContaining({
             endpoint: '/rest/v2/checkOTODeliveryFee',
-            topLevelKeys: ['currency', 'destinationCity', 'originCity', 'weight'],
-            pickupLocationCodePresent: false,
+            topLevelKeys: ['currency', 'customer', 'originCity', 'packageWeight', 'payment_method', 'pickupLocationCode'],
+            pickupLocationCodePresent: true,
             originCityPresent: true,
-            packageWeightPresent: false,
-            customerCityPresent: false,
-            customerCountryPresent: false,
-            paymentMethodPresent: false,
+            packageWeightPresent: true,
+            customerCityPresent: true,
+            customerCountryPresent: true,
+            paymentMethodPresent: true,
             sourceFieldPresence: {
               pickupLocationCode: true,
               originCity: true,

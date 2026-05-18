@@ -843,14 +843,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             selectedDeliveryCompanyName: 'surat-kargo-marketplace',
             selectedDeliveryOptionIdPresent: true,
             deliveryOptionLookupEndpoint: '/rest/v2/checkOTODeliveryFee',
-            deliveryOptionLookupRequestKeys: ['currency', 'destinationCity', 'originCity', 'weight'],
+            deliveryOptionLookupRequestKeys: ['currency', 'customer', 'packageWeight', 'payment_method', 'pickupLocationCode'],
             deliveryOptionLookupRequestPresence: {
-              pickupLocationCode: false,
-              originCity: true,
-              packageWeight: false,
-              customerCity: false,
-              customerCountry: false,
-              paymentMethod: false,
+              pickupLocationCode: true,
+              originCity: false,
+              packageWeight: true,
+              customerCity: true,
+              customerCountry: true,
+              paymentMethod: true,
             },
             deliveryOptionLookupSourcePresence: {
               pickupLocationCode: true,
@@ -894,9 +894,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Delivery lookup endpoint')).toBeInTheDocument();
     expect(screen.getByText('/rest/v2/checkOTODeliveryFee')).toBeInTheDocument();
     expect(screen.getByText('Delivery lookup request keys')).toBeInTheDocument();
-    expect(screen.getByText('currency, destinationCity, originCity, weight')).toBeInTheDocument();
+    expect(screen.getByText('currency, customer, packageWeight, payment_method, pickupLocationCode')).toBeInTheDocument();
     expect(screen.getByText('Delivery lookup payload fields')).toBeInTheDocument();
-    expect(screen.getByText(/pickup no · origin yes · weight no · customer\.city no · customer\.country no · payment no/)).toBeInTheDocument();
+    expect(screen.getByText(/pickup yes · origin no · weight yes · customer\.city yes · customer\.country yes · payment yes/)).toBeInTheDocument();
     expect(screen.getByText('Delivery lookup source fields')).toBeInTheDocument();
     expect(screen.getByText(/pickup yes · origin yes · weight yes · customer\.city yes · customer\.country yes · payment yes/)).toBeInTheDocument();
     expect(screen.getByText('Delivery lookup response')).toBeInTheDocument();
