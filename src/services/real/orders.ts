@@ -301,6 +301,7 @@ function mapOrderSummary(dto: OrderSummaryDto): OrderSummary {
     fulfilledByVendorId: dto.fulfilledAt ? dto.assignedVendorId : undefined,
     shipmentCreatedAt: dto.shipmentCreatedAt ?? undefined,
     shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
+    lineItemCount: dto.lineItemCount,
     date: dto.createdAt,
     customer: 'Customer unavailable',
     amount: formatCurrency(dto.totalAmount),

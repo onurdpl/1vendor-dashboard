@@ -87,6 +87,7 @@ describe('vendor orders list visibility', () => {
         carrier: 'try_oto',
         trackingNumber: 'OTO-TRACK-1038',
         trackingUrl: 'https://track.tryoto.example/OTO-TRACK-1038',
+        lineItemCount: 1,
         fulfilledAt: null,
         shipmentCreatedAt: '2026-05-18T11:55:00.000Z',
         shipmentUpdatedAt: '2026-05-18T12:00:00.000Z',

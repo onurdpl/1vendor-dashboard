@@ -267,6 +267,7 @@ export type OrderSummary = {
   carrier?: string;
   trackingUrl?: string;
   estimatedDelivery?: string;
+  lineItemCount: number;
   date: string;
   customer: string;
   amount: string;

@@ -42,6 +42,7 @@ const orderDetail: OrderDetail = {
   carrier: 'DHL',
   trackingUrl: 'https://tracking.example/TRK-A-1002',
   estimatedDelivery: '2026-05-09T12:00:00Z',
+  lineItemCount: 1,
   date: '2026-05-08T09:20:00Z',
   customer: 'Acme Supply Co.',
   amount: '$1,950.00',
@@ -77,6 +78,13 @@ const orderDetail: OrderDetail = {
 function toSummary(detail: OrderDetail): OrderSummary {
   const { shippingAddress: _shippingAddress, notes: _notes, lineItems: _lineItems, items: _items, timeline: _timeline, ...summary } = detail;
   return summary;
+}
+
+function buildSummary(overrides: Partial<OrderSummary> = {}): OrderSummary {
+  return {
+    ...toSummary(orderDetail),
+    ...overrides,
+  };
 }
 
 function renderOrdersPage(initialEntries = ['/orders']) {
@@ -136,6 +144,38 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
+  });
+
+  it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
+    const summary = buildSummary({
+      id: 'ORD-A-1038',
+      sourceShopifyOrderId: 'gid://shopify/Order/1038',
+      sourceShopifyOrderNumber: '#1038',
+      customer: 'Customer unavailable',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Processing',
+      shippingStatus: 'Label Created',
+      carrier: 'try_oto',
+      trackingNumber: 'OTO-TRACK-1038',
+      lineItemCount: 2,
+    });
+    listOrdersMock.mockResolvedValue([summary]);
+    getOrderMock.mockResolvedValue({
+      ...orderDetail,
+      ...summary,
+      lineItems: orderDetail.lineItems,
+      items: orderDetail.items,
+      timeline: orderDetail.timeline,
+      shippingAddress: orderDetail.shippingAddress,
+      notes: orderDetail.notes,
+    });
+
+    renderOrdersPage();
+
+    expect((await screen.findAllByText('#1038')).length).toBeGreaterThan(0);
+    expect(screen.getByText('2 line items')).toBeInTheDocument();
+    expect(screen.queryByText('0 line items')).not.toBeInTheDocument();
   });
 
   it('waits for auth and vendor readiness before calling the orders API', () => {

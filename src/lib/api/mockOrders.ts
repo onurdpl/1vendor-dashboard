@@ -444,6 +444,7 @@ function mapSourceOrder(sourceOrder: ShopifySourceOrder) {
       date: sourceOrder.date,
       customer: sourceOrder.customer,
       amount: formatMoney(amount),
+      lineItemCount: lineItems.length,
       channel: sourceOrder.channel,
       shippingAddress: sourceOrder.shippingAddress,
       notes: sourceOrder.notes,
