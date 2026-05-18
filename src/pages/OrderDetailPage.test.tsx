@@ -844,6 +844,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             createShipmentSuccess: true,
             createShipmentResponseKeys: ['message', 'success'],
             createShipmentProviderMessage: 'create shipment request is received.',
+            createShipmentProviderErrorCode: null,
+            createShipmentEndpoint: '/rest/v2/createShipment',
+            createShipmentResponseStatus: 200,
             createShipmentRequestKeys: ['deliveryOptionId', 'orderId'],
             createShipmentDeliveryOptionIdPresent: true,
             deliveryOptionIdPresent: true,
@@ -923,7 +926,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Selected delivery option')).toBeInTheDocument();
     expect(screen.getByText(/present · surat-kargo-marketplace/)).toBeInTheDocument();
     expect(screen.getByText('createShipment request keys')).toBeInTheDocument();
+    expect(screen.getByText('createShipment endpoint')).toBeInTheDocument();
+    expect(screen.getByText('/rest/v2/createShipment')).toBeInTheDocument();
     expect(screen.getByText('createShipment response keys')).toBeInTheDocument();
+    expect(screen.getByText('createShipment response status')).toBeInTheDocument();
+    expect(screen.getAllByText('200').length).toBeGreaterThan(0);
     expect(screen.getByText('create shipment request is received.')).toBeInTheDocument();
     expect(screen.getByText(/createOrder present · createShipment present/)).toBeInTheDocument();
     expect(screen.getByText('Depoya Atandı')).toBeInTheDocument();

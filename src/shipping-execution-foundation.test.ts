@@ -2899,6 +2899,7 @@ describe('shipping execution foundation', () => {
           providerError: 'create shipment request is received.',
         }),
         createShipmentRequestDiagnostics: {
+          endpoint: '/rest/v2/createShipment',
           topLevelKeys: ['deliveryOptionId', 'orderId'],
           orderIdPresent: true,
           deliveryOptionIdPresent: true,
@@ -2914,6 +2915,168 @@ describe('shipping execution foundation', () => {
     expect(serialized).not.toContain('oto-access-token');
     expect(serialized).not.toContain('905551112233');
     expect(serialized).not.toContain('Test Mahallesi');
+  });
+
+  it('surfaces Try OTO lookup 400 messages without calling createShipment', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: false,
+            otoErrorCode: 'OTO1009',
+            errorMsg: 'originCity is required',
+          }),
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'try_oto',
+        requestSnapshot: {
+          orderId: 'POC-TR-LOOKUP-400',
+          pickupLocationCode: 'tr-test-store-001',
+          originCity: 'Istanbul',
+          payment_method: 'paid',
+          amount: 1299.9,
+          amount_due: 0,
+          currency: 'TRY',
+          packageWeight: 1,
+          customer: {
+            name: 'Sandbox Customer',
+            mobile: '905551112233',
+            address: 'Test Mahallesi 1. Sokak No: 1',
+            city: 'Istanbul',
+            country: 'TR',
+            district: 'Kadikoy',
+          },
+          items: [],
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.',
+      responseSnapshot: expect.objectContaining({
+        deliveryOptionLookup: expect.objectContaining({
+          called: true,
+          success: false,
+          providerError: 'originCity is required',
+          response: expect.objectContaining({
+            status: 400,
+            providerError: 'originCity is required',
+            providerValidationErrors: [],
+          }),
+        }),
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/createShipment');
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('905551112233');
+  });
+
+  it('surfaces Try OTO createShipment 400 diagnostics safely', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            deliveryCompany: [
+              {
+                deliveryOptionId: 7109,
+                deliveryCompanyName: 'surat-kargo-marketplace',
+                price: 42,
+                currency: 'TRY',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ success: true, otoId: 540789 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: false,
+            otoErrorCode: 'OTO1010',
+            otoErrorMessage: 'delivery option is not available',
+          }),
+          { status: 400 },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'sporjinal',
+        provider: 'try_oto',
+        requestSnapshot: {
+          orderId: 'POC-TR-SHIPMENT-400',
+          pickupLocationCode: 'tr-test-store-001',
+          originCity: 'Istanbul',
+          payment_method: 'paid',
+          amount: 1299.9,
+          amount_due: 0,
+          currency: 'TRY',
+          packageWeight: 1,
+          customer: {
+            name: 'Sandbox Customer',
+            mobile: '905551112233',
+            address: 'Test Mahallesi 1. Sokak No: 1',
+            city: 'Istanbul',
+            country: 'TR',
+            district: 'Kadikoy',
+          },
+          items: [],
+        },
+      }),
+    ).rejects.toMatchObject({
+      message: 'Try OTO createShipment failed with HTTP 400.',
+      responseSnapshot: expect.objectContaining({
+        createShipment: expect.objectContaining({
+          status: 400,
+          ok: false,
+          bodyKeys: expect.arrayContaining(['otoErrorCode', 'otoErrorMessage', 'success']),
+          providerError: 'delivery option is not available',
+          providerErrorCode: 'OTO1010',
+        }),
+        createShipmentRequestDiagnostics: {
+          endpoint: '/rest/v2/createShipment',
+          topLevelKeys: ['deliveryOptionId', 'orderId'],
+          orderIdPresent: true,
+          deliveryOptionIdPresent: true,
+        },
+      }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.map((call) => call[0])).not.toContain('https://staging-api.tryoto.com/rest/v2/orderStatus');
   });
 
   it('builds Try OTO createOrder payload with required Turkey fields from allocation data', async () => {

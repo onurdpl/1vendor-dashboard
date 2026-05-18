@@ -122,6 +122,9 @@ export type OrderShipmentExecutionDto = {
       createShipmentSuccess: boolean | null;
       createShipmentResponseKeys: string[];
       createShipmentProviderMessage: string | null;
+      createShipmentProviderErrorCode?: string | null;
+      createShipmentEndpoint?: string | null;
+      createShipmentResponseStatus?: number | null;
       createShipmentRequestKeys: string[];
       createShipmentDeliveryOptionIdPresent: boolean | null;
       deliveryOptionIdPresent: boolean | null;

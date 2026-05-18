@@ -981,12 +981,23 @@ export function OrderDetailPage() {
           <strong>{diagnostics.createShipmentRequestKeys.length ? diagnostics.createShipmentRequestKeys.join(', ') : '—'}</strong>
         </div>
         <div className="summary-row">
+          <span>createShipment endpoint</span>
+          <strong>{diagnostics.createShipmentEndpoint || '—'}</strong>
+        </div>
+        <div className="summary-row">
           <span>createShipment response keys</span>
           <strong>{diagnostics.createShipmentResponseKeys.length ? diagnostics.createShipmentResponseKeys.join(', ') : '—'}</strong>
         </div>
         <div className="summary-row">
+          <span>createShipment response status</span>
+          <strong>{diagnostics.createShipmentResponseStatus ?? '—'}</strong>
+        </div>
+        <div className="summary-row">
           <span>createShipment message</span>
-          <strong>{diagnostics.createShipmentProviderMessage || '—'}</strong>
+          <strong>
+            {diagnostics.createShipmentProviderErrorCode ? `${diagnostics.createShipmentProviderErrorCode}: ` : ''}
+            {diagnostics.createShipmentProviderMessage || '—'}
+          </strong>
         </div>
         <div className="summary-row">
           <span>deliveryOptionId</span>

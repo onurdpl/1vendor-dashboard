@@ -132,10 +132,14 @@ function readSafeValidationErrors(value: Record<string, unknown>) {
 
 function readSafeProviderError(value: Record<string, unknown>) {
   return (
-    readString(value, ['message', 'error', 'detail', 'status']) ??
+    readString(value, ['providerError', 'errorMsg', 'otoErrorMessage', 'message', 'error', 'detail', 'status', 'errorMessage']) ??
     readSafeValidationErrors(value)[0] ??
     null
   );
+}
+
+function readSafeProviderErrorCode(value: Record<string, unknown>) {
+  return readString(value, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code']);
 }
 
 function parseResponseBody(contentType: string, responseText: string): unknown {
@@ -895,6 +899,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       detectedResponseFormat: getDetectedResponseFormat(contentType, parsedBody),
       responseSnippet: sanitizeResponseSnippet(responseText),
       providerError: readSafeProviderError(record),
+      providerErrorCode: readSafeProviderErrorCode(record),
       providerValidationErrors: readSafeValidationErrors(record),
     };
 
@@ -1055,11 +1060,63 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       response: deliveryOptionLookupResponseDiagnostics,
       lookupErrorMessage: null,
     };
+    if (!selectedDeliveryOptionId) {
+      throw new ShippingProviderExecutionError('Try OTO delivery option could not be resolved. Check pickup location, destination, package weight, and sandbox credit.', {
+        ok: false,
+        provider: 'try_oto',
+        operation: 'createShipment',
+        deliveryOptionLookup: deliveryOptionLookupDiagnostics,
+        createOrder: createOrder.snapshot,
+        createShipment: null,
+        createShipmentRequestDiagnostics: {
+          endpoint: '/rest/v2/createShipment',
+          topLevelKeys: [],
+          orderIdPresent: false,
+          deliveryOptionIdPresent: false,
+          blockedReason: 'missing_delivery_option',
+        },
+        payloadDiagnostics,
+      });
+    }
     const createShipmentRequest = {
       orderId,
-      ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
+      deliveryOptionId: selectedDeliveryOptionId,
     };
-    const createShipment = await this.postJson('/rest/v2/createShipment', createShipmentRequest, accessToken, 'createShipment');
+    const createShipmentRequestDiagnostics = {
+      endpoint: '/rest/v2/createShipment',
+      topLevelKeys: Object.keys(createShipmentRequest).sort(),
+      orderIdPresent: hasValue(createShipmentRequest.orderId),
+      deliveryOptionIdPresent: hasValue(createShipmentRequest.deliveryOptionId),
+    };
+    let createShipment: { snapshot: Record<string, unknown>; body: Record<string, unknown> };
+    try {
+      createShipment = await this.postJson('/rest/v2/createShipment', createShipmentRequest, accessToken, 'createShipment');
+    } catch (error) {
+      if (error instanceof ShippingProviderExecutionError) {
+        console.info('[shipping:try-oto:create-shipment-result]', {
+          provider: 'try_oto',
+          operation: 'createShipment',
+          request: createShipmentRequestDiagnostics,
+          response: {
+            status: error.responseSnapshot.status,
+            bodyKeys: error.responseSnapshot.bodyKeys,
+            providerError: readSafeProviderError(error.responseSnapshot),
+            providerErrorCode: readSafeProviderErrorCode(error.responseSnapshot),
+          },
+        });
+        throw new ShippingProviderExecutionError(`Try OTO createShipment failed with HTTP ${error.responseSnapshot.status ?? 'unknown'}.`, {
+          ...error.responseSnapshot,
+          provider: 'try_oto',
+          operation: 'createShipment',
+          deliveryOptionLookup: deliveryOptionLookupDiagnostics,
+          createOrder: createOrder.snapshot,
+          createShipment: error.responseSnapshot,
+          createShipmentRequestDiagnostics,
+          payloadDiagnostics,
+        });
+      }
+      throw error;
+    }
     let orderStatus: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
     try {
       orderStatus = await this.postJson('/rest/v2/orderStatus', { orderId }, accessToken, 'orderStatus');
@@ -1118,11 +1175,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
         createOrder: createOrder.snapshot,
         createShipment: createShipment.snapshot,
-        createShipmentRequestDiagnostics: {
-          topLevelKeys: Object.keys(createShipmentRequest).sort(),
-          orderIdPresent: hasValue(createShipmentRequest.orderId),
-          deliveryOptionIdPresent: hasValue(createShipmentRequest.deliveryOptionId),
-        },
+        createShipmentRequestDiagnostics,
         orderStatus: orderStatus?.snapshot,
         payloadDiagnostics,
         lastProviderResponseAt: new Date().toISOString(),

@@ -114,6 +114,11 @@ function buildShipmentProviderResponseSummary(
           ? createShipmentDiagnostics.bodyKeys.filter((key): key is string => typeof key === 'string')
           : [],
         createShipmentProviderMessage: readString(createShipmentDiagnostics, ['providerError', 'message', 'reason']),
+        createShipmentProviderErrorCode: readString(createShipmentDiagnostics, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code']),
+        createShipmentEndpoint:
+          readString(createShipmentRequestDiagnostics, ['endpoint']) ?? readString(createShipmentDiagnostics, ['requestPath']),
+        createShipmentResponseStatus:
+          typeof createShipmentDiagnostics?.status === 'number' ? createShipmentDiagnostics.status : null,
         createShipmentRequestKeys: Array.isArray(createShipmentRequestDiagnostics?.topLevelKeys)
           ? createShipmentRequestDiagnostics.topLevelKeys.filter((key): key is string => typeof key === 'string')
           : [],
