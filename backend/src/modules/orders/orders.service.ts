@@ -1,5 +1,11 @@
 import { prisma } from '../../db/prisma.js';
-import type { AdminOrderBreakdownDto, OrderDetailDto, OrderShipmentExecutionDto, OrderSummaryDto } from './orders.types.js';
+import type {
+  AdminOrderBreakdownDto,
+  OrderDetailDto,
+  OrderShipmentExecutionDto,
+  OrderSummaryDto,
+  ShopifyFulfillmentSyncDto,
+} from './orders.types.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -23,6 +29,45 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+function mapShopifyFulfillmentSync(
+  fulfillment:
+    | {
+        shopifyFulfillmentOrderId: string | null;
+        shopifyFulfillmentId: string | null;
+        syncStatus: string | null;
+        errorMessage: string | null;
+        trackingNumber: string | null;
+        updatedAt: Date;
+      }
+    | null
+    | undefined,
+  allocation: { trackingNumber: string | null; carrier: string | null; trackingUrl?: string | null },
+): ShopifyFulfillmentSyncDto {
+  const fulfillmentOrderIdPresent = Boolean(fulfillment?.shopifyFulfillmentOrderId);
+  const fulfillmentIdPresent = Boolean(fulfillment?.shopifyFulfillmentId);
+  const localTrackingPresent = Boolean(
+    allocation.trackingNumber || allocation.carrier || allocation.trackingUrl || fulfillment?.trackingNumber,
+  );
+  const failed = fulfillment?.syncStatus === 'fulfillment_sync_failed' || Boolean(fulfillment?.errorMessage);
+  const status = fulfillmentIdPresent
+    ? 'synced'
+    : failed
+      ? 'failed'
+      : localTrackingPresent
+        ? 'pending'
+        : 'not_available';
+
+  return {
+    status,
+    fulfillmentOrderIdPresent,
+    fulfillmentIdPresent,
+    syncStatus: fulfillment?.syncStatus ?? null,
+    skippedReason: null,
+    errorMessage: fulfillment?.errorMessage ?? null,
+    lastAttemptedAt: fulfillment ? fulfillment.updatedAt.toISOString() : null,
+  };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -447,6 +492,11 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
     fulfilledAt: toIsoString(allocation.fulfillment?.fulfilledAt),
     shipmentCreatedAt: toIsoString(allocation.fulfillment?.shipmentCreatedAt),
     shipmentUpdatedAt: toIsoString(allocation.fulfillment?.shipmentUpdatedAt),
+    shopifyFulfillmentSync: mapShopifyFulfillmentSync(allocation.fulfillment, {
+      trackingNumber: allocation.trackingNumber,
+      carrier: allocation.carrier,
+      trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
+    }),
     shipmentExecution: mapShipmentExecution(allocation.shipmentExecutions?.[0]),
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,

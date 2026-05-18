@@ -120,6 +120,54 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function getShopifyFulfillmentSyncSummary(order: OrderDetail, shipment?: ShipmentExecution | null) {
+  const sync = order.shopifyFulfillmentSync;
+  const trackingPresent = Boolean(
+    order.trackingNumber ||
+      order.carrier ||
+      order.trackingUrl ||
+      shipment?.trackingNumber ||
+      shipment?.trackingUrl,
+  );
+  const status = sync?.status ?? (trackingPresent ? 'pending' : 'not_available');
+  const fulfillmentIdPresent = sync?.fulfillmentIdPresent ?? false;
+  const localTrackingWithoutShopifyFulfillment = trackingPresent && !fulfillmentIdPresent;
+
+  if (status === 'synced' && fulfillmentIdPresent) {
+    return {
+      label: 'Synced',
+      tone: 'success',
+      message: 'Shopify fulfillment is confirmed.',
+      localTrackingWithoutShopifyFulfillment: false,
+    };
+  }
+
+  if (status === 'failed') {
+    return {
+      label: 'Failed',
+      tone: 'error',
+      message: 'Shopify fulfillment sync failed. Admin diagnostics include the safe error summary.',
+      localTrackingWithoutShopifyFulfillment,
+    };
+  }
+
+  if (localTrackingWithoutShopifyFulfillment) {
+    return {
+      label: 'Pending',
+      tone: 'warning',
+      message: 'Tracking is stored locally, but Shopify fulfillment has not been confirmed.',
+      localTrackingWithoutShopifyFulfillment: true,
+    };
+  }
+
+  return {
+    label: 'Not available',
+    tone: 'muted',
+    message: 'Tracking is not ready for Shopify fulfillment sync yet.',
+    localTrackingWithoutShopifyFulfillment: false,
+  };
+}
+
 function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fallbackCarrier?: string | null) {
   const providerCarrierName = shipment?.providerCarrierName?.trim();
   if (shipment?.provider === 'try_oto') {
@@ -642,6 +690,8 @@ export function OrderDetailPage() {
   const shipmentShopifyTrackingNumber = getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyTrackingUrl = getShipmentTrackingUrl(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
+  const shopifyFulfillmentSyncSummary =
+    order && visibleShipmentExecution ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution) : null;
   const canSyncShipmentTrackingToShopify =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -1917,6 +1967,48 @@ export function OrderDetailPage() {
                             ))}
                           </div>
                         ) : null}
+                        {shopifyFulfillmentSyncSummary ? (
+                          <div className="shipment-recovery-actions" aria-label="Shopify fulfillment status">
+                            <strong>Shopify fulfillment</strong>
+                            <span>
+                              {shopifyFulfillmentSyncSummary.label}
+                              {' · '}
+                              {shopifyFulfillmentSyncSummary.message}
+                            </span>
+                            {isAdmin && order.shopifyFulfillmentSync ? (
+                              <div className="provider-response-summary" aria-label="Shopify fulfillment diagnostics">
+                                <div className="provider-response-heading">
+                                  <strong>Shopify fulfillment diagnostics</strong>
+                                  <span>Admin only</span>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Fulfillment order id present</span>
+                                  <strong>{order.shopifyFulfillmentSync.fulfillmentOrderIdPresent ? 'yes' : 'no'}</strong>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Shopify fulfillment id present</span>
+                                  <strong>{order.shopifyFulfillmentSync.fulfillmentIdPresent ? 'yes' : 'no'}</strong>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Sync status</span>
+                                  <strong>{order.shopifyFulfillmentSync.syncStatus || order.shopifyFulfillmentSync.status}</strong>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Skipped reason</span>
+                                  <strong>{order.shopifyFulfillmentSync.skippedReason || '—'}</strong>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Sync error</span>
+                                  <strong>{order.shopifyFulfillmentSync.errorMessage || '—'}</strong>
+                                </div>
+                                <div className="summary-row">
+                                  <span>Last attempted</span>
+                                  <strong>{formatOptionalDate(order.shopifyFulfillmentSync.lastAttemptedAt ?? undefined)}</strong>
+                                </div>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
                         {canRefreshTryOtoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                             <strong>Try OTO status refresh</strong>
@@ -2350,6 +2442,48 @@ export function OrderDetailPage() {
                         <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
                           Open label PDF
                         </a>
+                      </div>
+                    ) : null}
+                    {shopifyFulfillmentSyncSummary ? (
+                      <div className="shipment-recovery-actions" aria-label="Shopify fulfillment status">
+                        <strong>Shopify fulfillment</strong>
+                        <span>
+                          {shopifyFulfillmentSyncSummary.label}
+                          {' · '}
+                          {shopifyFulfillmentSyncSummary.message}
+                        </span>
+                        {isAdmin && order.shopifyFulfillmentSync ? (
+                          <div className="provider-response-summary" aria-label="Shopify fulfillment diagnostics">
+                            <div className="provider-response-heading">
+                              <strong>Shopify fulfillment diagnostics</strong>
+                              <span>Admin only</span>
+                            </div>
+                            <div className="summary-row">
+                              <span>Fulfillment order id present</span>
+                              <strong>{order.shopifyFulfillmentSync.fulfillmentOrderIdPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Shopify fulfillment id present</span>
+                              <strong>{order.shopifyFulfillmentSync.fulfillmentIdPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Sync status</span>
+                              <strong>{order.shopifyFulfillmentSync.syncStatus || order.shopifyFulfillmentSync.status}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Skipped reason</span>
+                              <strong>{order.shopifyFulfillmentSync.skippedReason || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Sync error</span>
+                              <strong>{order.shopifyFulfillmentSync.errorMessage || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last attempted</span>
+                              <strong>{formatOptionalDate(order.shopifyFulfillmentSync.lastAttemptedAt ?? undefined)}</strong>
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {canRefreshTryOtoShipmentStatus ? (

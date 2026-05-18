@@ -75,6 +75,15 @@ type OrderSummaryDto = {
 type OrderDetailDto = OrderSummaryDto & {
   reassignmentRequired: boolean;
   cancellationReason: string | null;
+  shopifyFulfillmentSync?: {
+    status: 'synced' | 'pending' | 'failed' | 'not_available';
+    fulfillmentOrderIdPresent: boolean;
+    fulfillmentIdPresent: boolean;
+    syncStatus: string | null;
+    skippedReason: string | null;
+    errorMessage: string | null;
+    lastAttemptedAt: string | null;
+  };
   lineItems: Array<{
     id: string;
     sourceLineItemId: string;
@@ -327,6 +336,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shipmentCreatedAt: dto.shipmentCreatedAt ?? undefined,
     shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
     shipmentExecution: dto.shipmentExecution ?? null,
+    shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,

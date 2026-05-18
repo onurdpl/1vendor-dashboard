@@ -20,6 +20,16 @@ export type OrderSummaryDto = {
   updatedAt: string;
 };
 
+export type ShopifyFulfillmentSyncDto = {
+  status: 'synced' | 'pending' | 'failed' | 'not_available';
+  fulfillmentOrderIdPresent: boolean;
+  fulfillmentIdPresent: boolean;
+  syncStatus: string | null;
+  skippedReason: string | null;
+  errorMessage: string | null;
+  lastAttemptedAt: string | null;
+};
+
 export type OrderDetailLineItemDto = {
   id: string;
   sourceLineItemId: string;
@@ -178,6 +188,7 @@ export type OrderShipmentExecutionDto = {
 export type OrderDetailDto = OrderSummaryDto & {
   reassignmentRequired: boolean;
   cancellationReason: string | null;
+  shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
   shipmentExecution: OrderShipmentExecutionDto | null;

@@ -311,6 +311,15 @@ export type OrderDetail = OrderSummary & {
   items: OrderLineItem[];
   timeline: Array<{ label: string; at: string }>;
   shipmentExecution?: ShipmentExecution | null;
+  shopifyFulfillmentSync?: {
+    status: 'synced' | 'pending' | 'failed' | 'not_available';
+    fulfillmentOrderIdPresent: boolean;
+    fulfillmentIdPresent: boolean;
+    syncStatus: string | null;
+    skippedReason: string | null;
+    errorMessage: string | null;
+    lastAttemptedAt: string | null;
+  };
 };
 
 export type VendorAllocationSummary = {

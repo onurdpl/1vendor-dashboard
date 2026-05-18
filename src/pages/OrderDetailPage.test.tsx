@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -1654,6 +1654,145 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
     expect(screen.getByRole('link', { name: 'Open label PDF' })).toHaveAttribute('href', 'https://app.tryoto.example/label-1028.pdf');
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
+  });
+
+  it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'OTO-TRACK-1028',
+      fulfilledAt: '2026-05-15T19:47:00.000Z',
+      shopifyFulfillmentSync: {
+        status: 'synced',
+        fulfillmentOrderIdPresent: true,
+        fulfillmentIdPresent: true,
+        syncStatus: 'submitted',
+        skippedReason: null,
+        errorMessage: null,
+        lastAttemptedAt: '2026-05-15T19:47:00.000Z',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const fulfillmentStatus = await screen.findByLabelText('Shopify fulfillment status');
+    expect(within(fulfillmentStatus).getByText('Shopify fulfillment')).toBeInTheDocument();
+    expect(within(fulfillmentStatus).getByText('Synced · Shopify fulfillment is confirmed.')).toBeInTheDocument();
+  });
+
+  it('warns when tracking is stored locally but Shopify fulfillment is unconfirmed', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'OTO-TRACK-1028',
+      fulfilledAt: undefined,
+      shopifyFulfillmentSync: {
+        status: 'pending',
+        fulfillmentOrderIdPresent: true,
+        fulfillmentIdPresent: false,
+        syncStatus: 'carrier_created',
+        skippedReason: null,
+        errorMessage: null,
+        lastAttemptedAt: '2026-05-15T19:47:00.000Z',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(
+      await screen.findByText('Pending · Tracking is stored locally, but Shopify fulfillment has not been confirmed.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText('Shopify fulfillment diagnostics')).not.toBeInTheDocument();
+  });
+
+  it('shows admin-only Shopify fulfillment diagnostics for missing fulfillment order data', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'OTO-TRACK-1028',
+      fulfilledAt: undefined,
+      shopifyFulfillmentSync: {
+        status: 'failed',
+        fulfillmentOrderIdPresent: false,
+        fulfillmentIdPresent: false,
+        syncStatus: 'fulfillment_sync_failed',
+        skippedReason: null,
+        errorMessage: 'Shopify fulfillment order data is missing; cannot sync tracking automatically.',
+        lastAttemptedAt: '2026-05-15T19:47:00.000Z',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
+        shipmentStatus: 'created',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(
+      await screen.findByText('Failed · Shopify fulfillment sync failed. Admin diagnostics include the safe error summary.'),
+    ).toBeInTheDocument();
+    const diagnostics = screen.getByLabelText('Shopify fulfillment diagnostics');
+    expect(within(diagnostics).getByText('Fulfillment order id present')).toBeInTheDocument();
+    expect(within(diagnostics).getAllByText('no').length).toBeGreaterThanOrEqual(2);
+    expect(
+      within(diagnostics).getByText('Shopify fulfillment order data is missing; cannot sync tracking automatically.'),
+    ).toBeInTheDocument();
   });
 
   it('syncs Try OTO shipment tracking to Shopify with the selected carrier name', async () => {
