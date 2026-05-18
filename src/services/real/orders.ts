@@ -475,6 +475,21 @@ export async function retryShipmentExecution(shipmentExecutionId: string) {
   return apiClient.post<CreateShipmentExecutionResult>(`/admin/shipments/${shipmentExecutionId}/retry`, {});
 }
 
+export async function retryFailedShipmentExecution(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/retry`,
+    {
+      customerOverrides: options.customerOverrides,
+    },
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
 export async function getShippingProviderDiagnostics(
   provider: 'kargo_entegrator' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},

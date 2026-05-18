@@ -369,6 +369,36 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async retryFailedShipmentExecution(shipmentExecutionId: string, vendorId = getCurrentVendorId(), customerOverrides?: ShipmentCustomerOverrides) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.retryFailedShipmentExecution(shipmentExecutionId, { vendorId, customerOverrides });
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-kargo-/, ''),
+        vendorId,
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'kargo_entegrator' as const,
+        providerShipmentId: `mock-kargo-recovery-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created' as const,
+        desi: '3.00',
+        cargoIntegrationId: '2547',
+        warehouseId: '1774',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async shippingProviderDiagnostics() {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics('kargo_entegrator', { vendorId: getCurrentVendorId() });

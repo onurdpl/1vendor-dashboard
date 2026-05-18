@@ -12,6 +12,7 @@ const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
+const retryFailedShipmentExecutionMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
@@ -32,6 +33,10 @@ vi.mock('../features/orders/api', async () => {
     getShippingProviderDiagnostics: () => getShippingProviderDiagnosticsMock(),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) => createShipmentExecutionMock(allocationId, options),
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
+    retryFailedShipmentExecution: (
+      shipmentExecutionId: string,
+      options?: { vendorId?: string | null; customerOverrides?: Record<string, string> },
+    ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     submitFulfillmentTracking: vi.fn(),
   };
 });
@@ -217,6 +222,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       providerShipmentId: 'ke-live-1028',
       updatedAt: '2026-05-15T19:40:00.000Z',
     });
+    retryFailedShipmentExecutionMock.mockReset();
+    retryFailedShipmentExecutionMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-recovered-1028',
+      barcode: 'barcode-recovered-1028',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
     listReturnsMock.mockReset();
     listReturnsMock.mockResolvedValue([]);
     getFinanceDashboardMock.mockReset();
@@ -303,8 +316,140 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
     expect(screen.getByText('Validation failed.')).toBeInTheDocument();
+    expect(screen.getByText('Shipment recovery')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry shipment' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry provider request' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset failed execution' })).toBeDisabled();
+    expect(screen.getByRole('link', { name: 'View diagnostics' })).toBeInTheDocument();
     expect(screen.queryByText(/test-kargo-key/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/\+905551112233/)).not.toBeInTheDocument();
+  });
+
+  it('retries failed shipment executions and refreshes order detail', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 422,
+          providerError: 'Validation failed.',
+          providerValidationErrors: ['customer.district is required'],
+          dryRun: false,
+          disabledGates: [],
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry shipment' }));
+
+    expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+      customerOverrides: undefined,
+    });
+    expect((await screen.findAllByText('Shipment ke-recovered-1028 recorded.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/shipment-kargo_entegrator-alloc-sporjinal-7621783322961\/retry/)).toBeInTheDocument();
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('uses completed shipment-only fields when retrying a failed execution', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 400,
+          providerError: 'Missing required shipment fields.',
+          providerValidationErrors: ['customer.district is required'],
+          dryRun: false,
+          disabledGates: [],
+        },
+      },
+    });
+    retryFailedShipmentExecutionMock
+      .mockRejectedValueOnce(new Error('Missing required shipment fields:\n- customer.district\n\nProvider request blocked before create call.'))
+      .mockResolvedValueOnce({
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'created',
+        providerShipmentId: 'ke-recovered-1028',
+        barcode: 'barcode-recovered-1028',
+        updatedAt: '2026-05-15T19:45:00.000Z',
+      });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry shipment' }));
+    expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('District *'), 'Kadikoy');
+    await user.click(screen.getByRole('button', { name: 'Retry shipment with completed fields' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenLastCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      }),
+    );
+  });
+
+  it('does not expose failed shipment recovery when provider identifiers already exist', async () => {
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'failed',
+        providerShipmentId: 'ke-created-1028',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          dryRun: false,
+          disabledGates: [],
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Provider response summary')).toBeInTheDocument();
+    expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Retry shipment' })).not.toBeInTheDocument();
   });
 
   it('shows retry action to admins for eligible stale dry-run pending shipments', async () => {

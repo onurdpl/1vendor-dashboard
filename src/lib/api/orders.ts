@@ -40,6 +40,17 @@ export async function retryShipmentExecution(shipmentExecutionId: string) {
   return runtimeServices.orders.retryShipmentExecution(shipmentExecutionId);
 }
 
+export async function retryFailedShipmentExecution(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+) {
+  return runtimeServices.orders.retryFailedShipmentExecution(
+    shipmentExecutionId,
+    options.vendorId ?? undefined,
+    options.customerOverrides,
+  );
+}
+
 export async function getShippingProviderDiagnostics() {
   return runtimeServices.orders.shippingProviderDiagnostics();
 }

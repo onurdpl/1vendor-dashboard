@@ -38,6 +38,7 @@ const {
   inferShipmentDesi,
   previewShipmentExecution,
   retryDryRunShipmentExecution,
+  retryFailedShipmentExecution,
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
@@ -788,6 +789,210 @@ describe('shipping execution foundation', () => {
       }),
     ).rejects.toThrow('Admin access required.');
     expect(prismaMock.shipmentExecution.findUnique).not.toHaveBeenCalled();
+  });
+
+  it('retries failed shipment executions without creating duplicates', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        timeline: [{ label: 'Provider validation failed', at: '2026-05-15T10:00:00.000Z', status: '422' }],
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-recovered-1027',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, bodyKeys: ['data'] },
+    });
+
+    const result = await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargo_entegrator',
+        SHIPPING_SANDBOX_MODE: true,
+      },
+      vendorId: 'sporjinal',
+      notificationUrl: 'https://backend.example/webhooks/shipping/kargo-entegrator',
+      adapter,
+    });
+
+    expect(result).toMatchObject({
+      shipmentStatus: 'created',
+      providerShipmentId: 'ke-recovered-1027',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: existing.id },
+        data: expect.objectContaining({
+          shipmentStatus: 'PENDING',
+          responseSnapshot: expect.objectContaining({
+            timeline: expect.arrayContaining([
+              expect.objectContaining({
+                label: 'Retry attempted',
+                status: 'pending',
+              }),
+            ]),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('blocks failed shipment recovery when provider identifiers already exist', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'FAILED',
+      providerShipmentId: 'ke-existing',
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+
+    await expect(
+      retryFailedShipmentExecution(existing.id, {
+        env,
+        vendorId: 'sporjinal',
+        adapter,
+      }),
+    ).rejects.toThrow('provider shipment id');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('retries failed shipment executions with corrected shipment-only overrides', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'FAILED',
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'TR',
+        shippingPostcode: '34000',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-1774',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGO_ENTEGRATOR',
+          warehouseId: '1774',
+          name: 'Sporjinal default warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGO_ENTEGRATOR' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'ke-recovered-1027',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+
+    await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargo_entegrator',
+        SHIPPING_SANDBOX_MODE: true,
+      },
+      vendorId: 'sporjinal',
+      customerOverrides: {
+        district: 'Kadikoy',
+      },
+      adapter,
+    });
+
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          customer: expect.objectContaining({
+            district: 'Kadikoy',
+          }),
+        }),
+      }),
+    );
   });
 
   it('preserves vendor isolation when creating shipments', async () => {

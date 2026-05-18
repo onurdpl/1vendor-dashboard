@@ -8,6 +8,7 @@ import {
   createShipmentExecution,
   getOrder,
   getShippingProviderDiagnostics,
+  retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
   type ShipmentCustomerField,
@@ -260,6 +261,16 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: retryFailedShipmentMutation, isPending: isRetryingFailedShipment } = useMutationAction(
+    async (payload: { shipmentExecutionId: string; customerOverrides?: ShipmentCustomerOverrides }) =>
+      retryFailedShipmentExecution(payload.shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+        customerOverrides: payload.customerOverrides,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -298,12 +309,13 @@ export function OrderDetailPage() {
   const missingShipmentCustomerFields =
     shipmentActionState?.tone === 'error' ? getMissingShipmentCustomerFields(shipmentActionState.message) : [];
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
+  const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
   const shouldShowShipmentProviderSummary =
     isAdmin &&
     Boolean(shipmentProviderSummary) &&
     Boolean(
       visibleShipmentExecution &&
-        (['pending', 'failed', 'unknown'].includes(visibleShipmentExecution.shipmentStatus) ||
+        (['pending', 'failed', 'unknown'].includes(visibleShipmentStatus) ||
           !visibleShipmentExecution.providerShipmentId ||
           !visibleShipmentExecution.trackingNumber ||
           !visibleShipmentExecution.labelUrl),
@@ -315,6 +327,14 @@ export function OrderDetailPage() {
     !shipmentExecution.providerShipmentId &&
     !shipmentExecution.trackingNumber &&
     Boolean(shipmentProviderSummary?.dryRun === true || (shipmentProviderSummary?.disabledGates.length ?? 0) > 0);
+  const canRecoverFailedShipment =
+    Boolean(visibleShipmentExecution) &&
+    (['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
+      shipmentProviderSummary?.ok === false ||
+      Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length)) &&
+    !visibleShipmentExecution?.providerShipmentId &&
+    !visibleShipmentExecution?.trackingNumber &&
+    !visibleShipmentExecution?.labelUrl;
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -370,6 +390,51 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? 'POST /shipments/create',
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleRetryFailedShipment(fields: ShipmentCustomerField[] = []) {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    const customerOverrides = buildShipmentCustomerOverrides(fields);
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Retrying shipment provider request...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
+    });
+
+    void retryFailedShipmentMutation({ shipmentExecutionId: visibleShipmentExecution.id, customerOverrides })
+      .then((shipment) => {
+        setShipmentActionState({
+          tone: 'success',
+          message:
+            shipment.shipmentStatus === 'pending'
+              ? 'Shipment retry recorded. Carrier execution is pending.'
+              : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
+        });
+        setShipmentCustomerOverrides({});
+        showFeedback(
+          shipment.shipmentStatus === 'pending'
+            ? 'Shipment retry recorded. Carrier execution is pending.'
+            : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          'success',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = getCreateShipmentErrorMessage(mutationError);
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/retry`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -943,7 +1008,7 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
-                          <div className="provider-response-summary" aria-label="Provider response summary">
+                          <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
                             <div className="provider-response-heading">
                               <strong>Provider response summary</strong>
                               <span>Admin only</span>
@@ -1040,6 +1105,41 @@ export function OrderDetailPage() {
                                 {isRetryingShipment ? 'Retrying...' : 'Retry live shipment'}
                               </button>
                             ) : null}
+                            {canRecoverFailedShipment ? (
+                              <div className="shipment-recovery-actions">
+                                <strong>Shipment recovery</strong>
+                                <span>Provider execution failed before a shipment id or tracking was created.</span>
+                                <div className="order-inline-actions">
+                                  <button
+                                    type="button"
+                                    className="button button-primary"
+                                    disabled={isRetryingFailedShipment}
+                                    onClick={() => handleRetryFailedShipment()}
+                                  >
+                                    {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    disabled={isRetryingFailedShipment}
+                                    onClick={() => handleRetryFailedShipment()}
+                                  >
+                                    Retry provider request
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="button button-secondary"
+                                    disabled
+                                    title="Reset is not available after a provider attempt; retry preserves duplicate shipment protections."
+                                  >
+                                    Reset failed execution
+                                  </button>
+                                  <a className="button button-secondary button-link" href="#provider-response-summary">
+                                    View diagnostics
+                                  </a>
+                                </div>
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -1077,7 +1177,11 @@ export function OrderDetailPage() {
                             className="shipment-field-completion-form"
                             onSubmit={(event) => {
                               event.preventDefault();
-                              handleCreateShipment(missingShipmentCustomerFields);
+                              if (canRecoverFailedShipment) {
+                                handleRetryFailedShipment(missingShipmentCustomerFields);
+                              } else {
+                                handleCreateShipment(missingShipmentCustomerFields);
+                              }
                             }}
                           >
                             <div>
@@ -1101,8 +1205,18 @@ export function OrderDetailPage() {
                                 </label>
                               ))}
                             </div>
-                            <button type="submit" className="button button-primary" disabled={isCreatingShipment}>
-                              {isCreatingShipment ? 'Creating...' : 'Create shipment with completed fields'}
+                            <button
+                              type="submit"
+                              className="button button-primary"
+                              disabled={isCreatingShipment || isRetryingFailedShipment}
+                            >
+                              {isRetryingFailedShipment
+                                ? 'Retrying...'
+                                : isCreatingShipment
+                                  ? 'Creating...'
+                                  : canRecoverFailedShipment
+                                    ? 'Retry shipment with completed fields'
+                                    : 'Create shipment with completed fields'}
                             </button>
                           </form>
                         ) : null}
@@ -1258,7 +1372,7 @@ export function OrderDetailPage() {
                       <strong className={order.carrier ? '' : 'muted'}>{order.carrier ?? 'Not available'}</strong>
                     </div>
                     {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
-                      <div className="provider-response-summary" aria-label="Provider response summary">
+                      <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
                         <div className="provider-response-heading">
                           <strong>Provider response summary</strong>
                           <span>Admin only</span>
@@ -1330,6 +1444,107 @@ export function OrderDetailPage() {
                           >
                             {isRetryingShipment ? 'Retrying...' : 'Retry live shipment'}
                           </button>
+                        ) : null}
+                        {canRecoverFailedShipment ? (
+                          <div className="shipment-recovery-actions">
+                            <strong>Shipment recovery</strong>
+                            <span>Provider execution failed before a shipment id or tracking was created.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-primary"
+                                disabled={isRetryingFailedShipment}
+                                onClick={() => handleRetryFailedShipment()}
+                              >
+                                {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isRetryingFailedShipment}
+                                onClick={() => handleRetryFailedShipment()}
+                              >
+                                Retry provider request
+                              </button>
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled
+                                title="Reset is not available after a provider attempt; retry preserves duplicate shipment protections."
+                              >
+                                Reset failed execution
+                              </button>
+                              <a className="button button-secondary button-link" href="#provider-response-summary">
+                                View diagnostics
+                              </a>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {shipmentActionState ? (
+                      <div className={`shipment-action-feedback action-feedback action-${shipmentActionState.tone}`} aria-live="polite">
+                        <strong>{shipmentActionState.message}</strong>
+                        <span>Endpoint: {shipmentActionState.endpoint ?? shipmentActionState.diagnostics?.endpoint ?? 'POST /shipments/create'}</span>
+                        {shipmentActionState.diagnostics ? (
+                          <span>
+                            HTTP: {shipmentActionState.diagnostics.status ?? '—'}
+                            {shipmentActionState.diagnostics.requestId ? ` · Request: ${shipmentActionState.diagnostics.requestId}` : ''}
+                          </span>
+                        ) : null}
+                        {shipmentActionState.shipment ? (
+                          <span>
+                            Provider id: {shipmentActionState.shipment.providerShipmentId ? 'yes' : 'pending'} · Barcode:{' '}
+                            {shipmentActionState.shipment.barcode ? 'yes' : 'pending'}
+                          </span>
+                        ) : null}
+                        {missingShipmentCustomerFields.length > 0 ? (
+                          <form
+                            className="shipment-field-completion-form"
+                            onSubmit={(event) => {
+                              event.preventDefault();
+                              if (canRecoverFailedShipment) {
+                                handleRetryFailedShipment(missingShipmentCustomerFields);
+                              } else {
+                                handleCreateShipment(missingShipmentCustomerFields);
+                              }
+                            }}
+                          >
+                            <div>
+                              <span>Complete shipment-only fields</span>
+                              <p>These values are used only for this shipment request.</p>
+                            </div>
+                            <div className="shipment-field-completion-grid">
+                              {missingShipmentCustomerFields.map((field) => (
+                                <label className="field" key={field}>
+                                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
+                                  <input
+                                    required
+                                    value={shipmentCustomerOverrides[field] ?? ''}
+                                    onChange={(event) =>
+                                      setShipmentCustomerOverrides((current) => ({
+                                        ...current,
+                                        [field]: event.target.value,
+                                      }))
+                                    }
+                                  />
+                                </label>
+                              ))}
+                            </div>
+                            <button
+                              type="submit"
+                              className="button button-primary"
+                              disabled={isCreatingShipment || isRetryingFailedShipment}
+                            >
+                              {isRetryingFailedShipment
+                                ? 'Retrying...'
+                                : isCreatingShipment
+                                  ? 'Creating...'
+                                  : canRecoverFailedShipment
+                                    ? 'Retry shipment with completed fields'
+                                    : 'Create shipment with completed fields'}
+                            </button>
+                          </form>
                         ) : null}
                       </div>
                     ) : null}

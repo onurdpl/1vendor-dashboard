@@ -697,13 +697,16 @@ function assertDryRunRetryEligible(execution: ShipmentExecution) {
   }
 }
 
-function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider) {
+function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider, baseSnapshot?: unknown) {
+  const base = isRecord(baseSnapshot) ? baseSnapshot : {};
   const snapshot: Record<string, unknown> = error instanceof ShippingProviderExecutionError
     ? {
+        ...base,
         ...error.responseSnapshot,
         error: error.message,
       }
     : {
+        ...base,
         error: error instanceof Error ? error.message : 'Shipping provider execution failed.',
         provider,
       };
@@ -729,6 +732,24 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
     label,
     status: status ? String(status) : 'failed',
   });
+}
+
+function assertFailedRetryEligible(execution: ShipmentExecution) {
+  if (execution.shipmentStatus !== ShipmentExecutionStatus.FAILED) {
+    throw new Error('Only failed shipment executions can be retried.');
+  }
+
+  if (execution.providerShipmentId) {
+    throw new Error('Shipment execution already has a provider shipment id and cannot be retried.');
+  }
+
+  if (execution.trackingNumber) {
+    throw new Error('Shipment execution already has tracking and cannot be retried.');
+  }
+
+  if (execution.labelUrl) {
+    throw new Error('Shipment execution already has a label and cannot be retried.');
+  }
 }
 
 function getWebhookData(payload: unknown) {
@@ -1283,13 +1304,17 @@ export async function createShipmentExecution(
       result,
     });
   } catch (error) {
+    const attemptSnapshot = appendTimelineEvent({}, {
+      label: 'Create attempted',
+      status: 'failed',
+    });
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: executionId,
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: buildProviderFailureSnapshot(error, provider),
+        responseSnapshot: buildProviderFailureSnapshot(error, provider, attemptSnapshot),
       },
     });
 
@@ -1400,7 +1425,122 @@ export async function retryDryRunShipmentExecution(
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: buildProviderFailureSnapshot(error, provider),
+        responseSnapshot: buildProviderFailureSnapshot(error, provider, existing.responseSnapshot),
+      },
+    });
+
+    return mapShipmentExecution(failed);
+  }
+}
+
+export async function retryFailedShipmentExecution(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    notificationUrl?: string | null;
+    customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  assertFailedRetryEligible(existing);
+
+  const providerDto = mapProvider(existing.provider);
+  const diagnostics = getShippingProviderGateDiagnostics(options.env, providerDto);
+  if (!diagnostics.executionReady) {
+    const missing = diagnostics.missing.length ? diagnostics.missing.join(', ') : 'provider configuration';
+    throw new Error(`Shipping provider execution is not ready. Missing: ${missing}.`);
+  }
+
+  const preview = await buildShipmentRequestPreview(
+    {
+      allocationId: existing.allocationId,
+      provider: providerDto,
+      notificationUrl: options.notificationUrl ?? undefined,
+      customerOverrides: options.customerOverrides,
+    },
+    {
+      vendorId: existing.vendorId,
+      env: options.env,
+    },
+  );
+
+  const provider = normalizeProvider(preview.provider);
+  if (provider !== existing.provider) {
+    throw new Error('Vendor shipping provider no longer matches the shipment execution provider.');
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: existing.allocationId,
+    },
+    include: {
+      order: true,
+      fulfillment: true,
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+    },
+  });
+
+  if (!allocation || allocation.assignedVendorId !== existing.vendorId) {
+    throw new Error('Allocation could not be found for the selected shipment execution.');
+  }
+
+  const retrySnapshot = appendTimelineEvent(existing.responseSnapshot, {
+    label: 'Retry attempted',
+    status: 'pending',
+  });
+  const requestSnapshot = preview.payload;
+  await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      shipmentStatus: ShipmentExecutionStatus.PENDING,
+      desi: Number(preview.desi),
+      cargoIntegrationId: preview.cargoIntegrationId,
+      warehouseId: preview.warehouseId,
+      requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+      responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+    const result = await adapter.createShipment({
+      allocationId: allocation.id,
+      vendorId: allocation.assignedVendorId,
+      provider: providerDto,
+      requestSnapshot,
+    });
+
+    return persistProviderShipmentResult({
+      executionId: existing.id,
+      allocation,
+      provider,
+      result,
+    });
+  } catch (error) {
+    const failed = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        shipmentStatus: ShipmentExecutionStatus.FAILED,
+        responseSnapshot: buildProviderFailureSnapshot(error, provider, retrySnapshot),
       },
     });
 

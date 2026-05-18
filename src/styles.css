@@ -1548,6 +1548,24 @@ h3 {
   font-weight: 600;
 }
 
+.shipment-recovery-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(220, 38, 38, 0.14);
+}
+
+.shipment-recovery-actions > strong {
+  font-size: 0.85rem;
+}
+
+.shipment-recovery-actions > span {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
 .shipment-field-completion-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));

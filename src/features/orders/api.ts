@@ -4,6 +4,7 @@ export {
   getOrder,
   getShippingProviderDiagnostics,
   listOrders,
+  retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
 } from '../../lib/api/orders';

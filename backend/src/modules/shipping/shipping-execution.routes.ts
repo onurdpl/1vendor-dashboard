@@ -12,6 +12,7 @@ import {
   listShipmentExecutions,
   previewShipmentExecution,
   retryDryRunShipmentExecution,
+  retryFailedShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
@@ -129,6 +130,32 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       return shipment;
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/shipments/:id/retry',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        const body = (request.body ?? {}) as CreateShipmentExecutionDto;
+        return await retryFailedShipmentExecution(request.params.id, {
+          env,
+          vendorId,
+          notificationUrl: body.notificationUrl ?? resolveNotificationUrl(request),
+          customerOverrides: body.customerOverrides,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
+        return reply.code(400).send({ message });
+      }
     },
   );
 
