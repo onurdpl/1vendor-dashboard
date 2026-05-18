@@ -1745,6 +1745,43 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Shopify fulfillment diagnostics')).not.toBeInTheDocument();
   });
 
+  it('shows Shopify fulfillment sync status when no latest shipment execution is present', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'OTO-TRACK-1028',
+      trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+      fulfilledAt: undefined,
+      shipmentExecution: null,
+      shopifyFulfillmentSync: {
+        status: 'pending',
+        fulfillmentOrderIdPresent: true,
+        fulfillmentIdPresent: false,
+        syncStatus: 'carrier_created',
+        skippedReason: null,
+        errorMessage: null,
+        lastAttemptedAt: '2026-05-15T19:47:00.000Z',
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const fulfillmentStatus = await screen.findByLabelText('Shopify fulfillment status');
+    expect(within(fulfillmentStatus).getByText('Shopify fulfillment')).toBeInTheDocument();
+    expect(
+      within(fulfillmentStatus).getByText('Pending · Tracking is stored locally, but Shopify fulfillment has not been confirmed.'),
+    ).toBeInTheDocument();
+  });
+
   it('shows admin-only Shopify fulfillment diagnostics for missing fulfillment order data', async () => {
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,

@@ -627,6 +627,11 @@ export function OrderDetailPage() {
     order?.shippingStatus === 'In Transit' ||
     order?.shippingStatus === 'Delivered' ||
     order?.fulfillmentStatus === 'Fulfilled';
+  const hasShopifyFulfillmentSyncAttempt = Boolean(
+    order?.shopifyFulfillmentSync?.lastAttemptedAt ||
+      order?.shopifyFulfillmentSync?.syncStatus ||
+      order?.shopifyFulfillmentSync?.errorMessage,
+  );
   const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
   const shipmentExecution = order?.shipmentExecution ?? null;
   const visibleShipmentExecution = shipmentExecution ?? shipmentActionState?.shipment ?? null;
@@ -691,7 +696,9 @@ export function OrderDetailPage() {
   const shipmentShopifyTrackingUrl = getShipmentTrackingUrl(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
   const shopifyFulfillmentSyncSummary =
-    order && visibleShipmentExecution ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution) : null;
+    order && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt)
+      ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution)
+      : null;
   const canSyncShipmentTrackingToShopify =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -1882,7 +1889,7 @@ export function OrderDetailPage() {
               <div className="action-row vendor-action-panel">
                 {isRealMode ? (
                   <>
-                    {hasTrackingSync || hasShipmentExecution ? (
+                    {hasTrackingSync || hasShipmentExecution || hasShopifyFulfillmentSyncAttempt ? (
                       <div className="tracking-summary-card order-tracking-summary-card">
                         {visibleShipmentExecution ? (
                           <>
@@ -2400,25 +2407,29 @@ export function OrderDetailPage() {
               </div>
             ) : (
               <div className="action-row vendor-blocked-panel">
-                {isAdmin && shipmentExecution ? (
+                {(isAdmin || canUseFulfillmentActions) && (shipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
                   <div className="tracking-summary-card order-tracking-summary-card">
-                    <div className="summary-row">
-                      <span>Shipment provider</span>
-                      <strong>{formatShippingProviderName(shipmentExecution.provider)}</strong>
-                    </div>
-                    <div className="summary-row">
-                      <span>Carrier status</span>
-                      <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
-                    </div>
-                    {shipmentExecution.warehouseId ? (
-                      <div className="summary-row">
-                        <span>Warehouse</span>
-                        <strong>{shipmentExecution.warehouseId}</strong>
-                      </div>
+                    {shipmentExecution ? (
+                      <>
+                        <div className="summary-row">
+                          <span>Shipment provider</span>
+                          <strong>{formatShippingProviderName(shipmentExecution.provider)}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Carrier status</span>
+                          <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
+                        </div>
+                        {shipmentExecution.warehouseId ? (
+                          <div className="summary-row">
+                            <span>Warehouse</span>
+                            <strong>{shipmentExecution.warehouseId}</strong>
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                     <div className="summary-row">
                       <span>Tracking</span>
-                      <strong className={order.trackingNumber || shipmentExecution.trackingNumber ? '' : 'muted'}>
+                      <strong className={order.trackingNumber || shipmentExecution?.trackingNumber ? '' : 'muted'}>
                         {getShipmentTrackingNumber(order, shipmentExecution) ?? 'Not available'}
                       </strong>
                     </div>
@@ -2436,7 +2447,7 @@ export function OrderDetailPage() {
                         <strong className="muted">Not available</strong>
                       )}
                     </div>
-                    {shipmentExecution.labelUrl ? (
+                    {shipmentExecution?.labelUrl ? (
                       <div className="summary-row">
                         <span>Label</span>
                         <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
