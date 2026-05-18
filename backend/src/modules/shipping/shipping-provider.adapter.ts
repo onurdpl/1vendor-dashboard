@@ -206,6 +206,64 @@ function getProviderResponseRecord(parsedBody: unknown) {
   return parsedBody;
 }
 
+function readCargoCompanyId(snapshot: Record<string, unknown>) {
+  const cargoCompany = snapshot.cargo_company;
+  if (isRecord(cargoCompany)) {
+    return readString(cargoCompany, ['id']);
+  }
+
+  return readString(snapshot, ['cargo_company_id', 'cargoCompanyId', 'carrier_id', 'carrierId']);
+}
+
+function getKargoRequestTarget(baseUrl: string | undefined) {
+  if (!baseUrl) {
+    return {
+      selectedBaseUrl: null,
+      requestTargetHostname: null,
+      requestPath: null,
+      productionEndpointSelected: false,
+    };
+  }
+
+  const selectedBaseUrl = baseUrl.replace(/\/$/, '');
+  try {
+    const requestUrl = new URL(`${selectedBaseUrl}/shipments`);
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: requestUrl.hostname,
+      requestPath: requestUrl.pathname,
+      productionEndpointSelected: requestUrl.hostname === 'app.kargoentegrator.com',
+    };
+  } catch {
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: null,
+      requestPath: null,
+      productionEndpointSelected: false,
+    };
+  }
+}
+
+function logKargoProviderEnvironmentSelection(input: ShippingProviderCreateInput, env: AppEnv) {
+  const target = getKargoRequestTarget(env.KARGO_ENTEGRATOR_BASE_URL);
+  const dummyModeEnabled = readCargoCompanyId(input.requestSnapshot) === 'dummy';
+  const executionEnabled = env.SHIPPING_EXECUTION_ENABLED && env.KARGO_ENTEGRATOR_ENABLED;
+
+  console.info('[shipping:kargo:provider-environment]', {
+    provider: 'kargo_entegrator',
+    selectedEnvironment: env.SHIPPING_SANDBOX_MODE ? 'sandbox' : 'production',
+    selectedBaseUrl: target.selectedBaseUrl,
+    requestTargetHostname: target.requestTargetHostname,
+    requestPath: target.requestPath,
+    productionEndpointSelected: target.productionEndpointSelected,
+    providerMode: !executionEnabled ? 'disabled' : dummyModeEnabled ? 'dummy' : 'live',
+    dummyModeEnabled,
+    shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
+    providerEnabled: env.KARGO_ENTEGRATOR_ENABLED,
+    sandboxModeEnabled: env.SHIPPING_SANDBOX_MODE,
+  });
+}
+
 function mapShipmentStatus(value: string | null): ShipmentExecutionStatusDto {
   const normalized = value?.trim().toLowerCase() ?? '';
   if (normalized === 'in_transit' || normalized === 'in transit' || normalized === 'shipped') {
@@ -281,6 +339,8 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
   constructor(private readonly env: AppEnv) {}
 
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
+    logKargoProviderEnvironmentSelection(input, this.env);
+
     if (!this.env.SHIPPING_EXECUTION_ENABLED || !this.env.KARGO_ENTEGRATOR_ENABLED) {
       const disabledGates = [
         !this.env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
@@ -310,7 +370,8 @@ export class KargoEntegratorAdapter implements ShippingProviderAdapter {
       throw new Error('Kargo Entegratör shipment execution is not configured.');
     }
 
-    const response = await fetch(`${this.env.KARGO_ENTEGRATOR_BASE_URL.replace(/\/$/, '')}/shipments`, {
+    const requestUrl = `${this.env.KARGO_ENTEGRATOR_BASE_URL.replace(/\/$/, '')}/shipments`;
+    const response = await fetch(requestUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${this.env.KARGO_ENTEGRATOR_API_KEY}`,

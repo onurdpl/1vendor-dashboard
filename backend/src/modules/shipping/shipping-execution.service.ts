@@ -231,6 +231,60 @@ function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) 
   return input.carrierId === DUMMY_KARGO_CARRIER_ID || Boolean(env?.SHIPPING_SANDBOX_MODE);
 }
 
+function getKargoRequestTarget(baseUrl: string | undefined) {
+  if (!baseUrl) {
+    return {
+      selectedBaseUrl: null,
+      requestTargetHostname: null,
+      productionEndpointSelected: false,
+    };
+  }
+
+  const selectedBaseUrl = baseUrl.replace(/\/$/, '');
+  try {
+    const requestUrl = new URL(`${selectedBaseUrl}/shipments`);
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: requestUrl.hostname,
+      productionEndpointSelected: requestUrl.hostname === 'app.kargoentegrator.com',
+    };
+  } catch {
+    return {
+      selectedBaseUrl,
+      requestTargetHostname: null,
+      productionEndpointSelected: false,
+    };
+  }
+}
+
+function logKargoExecutionModeSelection(input: CreateShipmentExecutionDto, preview: ShipmentExecutionPreviewDto, env?: AppEnv) {
+  if (preview.provider !== 'kargo_entegrator') {
+    return;
+  }
+
+  const target = getKargoRequestTarget(env?.KARGO_ENTEGRATOR_BASE_URL);
+  const explicitDummyCarrierRequested = input.carrierId === DUMMY_KARGO_CARRIER_ID;
+  const sandboxModeEnabled = Boolean(env?.SHIPPING_SANDBOX_MODE);
+  const dummyModeEnabled = isDummyKargoRequested(input, env);
+
+  console.info('[shipping:kargo:execution-mode]', {
+    provider: 'kargo_entegrator',
+    selectedEnvironment: sandboxModeEnabled ? 'sandbox' : 'production',
+    selectedBaseUrl: target.selectedBaseUrl,
+    requestTargetHostname: target.requestTargetHostname,
+    productionEndpointSelected: target.productionEndpointSelected,
+    providerMode: dummyModeEnabled ? 'dummy' : 'live',
+    dummyModeEnabled,
+    dummyModeSources: {
+      explicitCarrierIdDummy: explicitDummyCarrierRequested,
+      sandboxMode: sandboxModeEnabled,
+    },
+    shippingExecutionEnabled: Boolean(env?.SHIPPING_EXECUTION_ENABLED),
+    providerEnabled: Boolean(env?.KARGO_ENTEGRATOR_ENABLED),
+    packageType: isRecord(preview.payload) ? readString(preview.payload, ['package_type']) : null,
+  });
+}
+
 export function inferShipmentDesi(
   lineItems: Array<{ title?: string | null; sku?: string | null }>,
   fallbackDesi = 3,
@@ -1330,6 +1384,7 @@ export async function createShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+    logKargoExecutionModeSelection(input, preview, options.env);
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
@@ -1444,6 +1499,15 @@ export async function retryDryRunShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+    logKargoExecutionModeSelection(
+      {
+        allocationId: existing.allocationId,
+        provider: providerDto,
+        notificationUrl: options.notificationUrl ?? undefined,
+      },
+      preview,
+      options.env,
+    );
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
@@ -1559,6 +1623,16 @@ export async function retryFailedShipmentExecution(
 
   try {
     const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+    logKargoExecutionModeSelection(
+      {
+        allocationId: existing.allocationId,
+        provider: providerDto,
+        notificationUrl: options.notificationUrl ?? undefined,
+        customerOverrides: options.customerOverrides,
+      },
+      preview,
+      options.env,
+    );
     const result = await adapter.createShipment({
       allocationId: allocation.id,
       vendorId: allocation.assignedVendorId,
