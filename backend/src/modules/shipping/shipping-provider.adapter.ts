@@ -384,6 +384,9 @@ function buildTryOtoPayloadDiagnostics(payload: Record<string, unknown>) {
     customerKeys: Object.keys(customer).sort(),
     itemCount: Array.isArray(payload.items) ? payload.items.length : 0,
     orderIdPresent: hasValue(payload.orderId),
+    externalOrderReferencePresent: hasValue(payload.externalOrderReference),
+    internalOrderReferencePresent: hasValue(payload.internalOrderReference),
+    legacyInternalReferenceUsed: payload.legacyInternalReferenceUsed === true,
     pickupLocationCodePresent: hasValue(payload.pickupLocationCode),
     paymentMethod: typeof payload.payment_method === 'string' ? payload.payment_method : null,
     amountPresent: hasValue(payload.amount),
@@ -1084,11 +1087,20 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       }
     }
 
+    const {
+      externalOrderReference: _externalOrderReference,
+      internalOrderReference: _internalOrderReference,
+      legacyInternalReferenceUsed: _legacyInternalReferenceUsed,
+      ...tryOtoProviderRequestSnapshot
+    } = input.requestSnapshot;
     const orderPayload = {
-      ...input.requestSnapshot,
+      ...tryOtoProviderRequestSnapshot,
       ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
     };
-    const payloadDiagnostics = buildTryOtoPayloadDiagnostics(orderPayload);
+    const payloadDiagnostics = buildTryOtoPayloadDiagnostics({
+      ...input.requestSnapshot,
+      ...(selectedDeliveryOptionId ? { deliveryOptionId: selectedDeliveryOptionId } : {}),
+    });
     const orderId = readString(input.requestSnapshot, ['orderId']);
     if (!orderId) {
       throw new ShippingProviderExecutionError('Try OTO createOrder payload is missing orderId.', {

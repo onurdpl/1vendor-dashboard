@@ -298,6 +298,55 @@ function readSnapshot(execution: { responseSnapshot?: unknown }) {
   return isRecord(execution.responseSnapshot) ? execution.responseSnapshot : {};
 }
 
+function sanitizeTryOtoReferencePart(value: string | null | undefined, fallback: string) {
+  const sanitized = (value ?? '')
+    .trim()
+    .replace(/^#+/, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toUpperCase();
+  return sanitized || fallback;
+}
+
+function buildTryOtoInternalOrderReference(allocation: { id: string; sourceShopifyOrderId: string | null; sourceShopifyOrderNumber: string | null }) {
+  return [
+    'shopify',
+    (allocation.sourceShopifyOrderId ?? allocation.sourceShopifyOrderNumber ?? allocation.id).replace(/[^a-zA-Z0-9]+/g, '-'),
+    'allocation',
+    allocation.id.replace(/[^a-zA-Z0-9]+/g, '-'),
+  ].join('-');
+}
+
+function buildTryOtoExternalOrderReference(allocation: { assignedVendorId: string; sourceShopifyOrderNumber: string | null; id: string }) {
+  const vendorPart = sanitizeTryOtoReferencePart(allocation.assignedVendorId, 'VENDOR');
+  const orderPart = sanitizeTryOtoReferencePart(allocation.sourceShopifyOrderNumber ?? allocation.id, 'ORDER');
+  return `${vendorPart}-${orderPart}`;
+}
+
+function applyExistingTryOtoOrderReference(existing: ShipmentExecution, requestSnapshot: Record<string, unknown>) {
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    return requestSnapshot;
+  }
+
+  const existingRequestSnapshot = isRecord(existing.requestSnapshot) ? existing.requestSnapshot : {};
+  const existingOrderId = readString(existingRequestSnapshot, ['externalOrderReference', 'orderId']);
+  if (!existingOrderId) {
+    return requestSnapshot;
+  }
+
+  return {
+    ...requestSnapshot,
+    orderId: existingOrderId,
+    externalOrderReference: existingOrderId,
+    legacyInternalReferenceUsed: Boolean(isInternalTryOtoOrderReference(existingOrderId)),
+  };
+}
+
+function isInternalTryOtoOrderReference(value: string | null) {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
+}
+
 function resolveKargoPackageType(providerMetadata: unknown) {
   return (readString(providerMetadata, ['packageType', 'package_type']) ?? DEFAULT_KARGO_PACKAGE_TYPE).trim().toLowerCase();
 }
@@ -1561,6 +1610,17 @@ function readTryOtoWebhookIdentifiers(data: Record<string, unknown>) {
   };
 }
 
+function hasTryOtoReference(value: string | null, ...records: Record<string, unknown>[]) {
+  if (!value) {
+    return false;
+  }
+
+  return records.some((record) =>
+    ['orderId', 'externalOrderReference', 'internalOrderReference', 'providerOrderId', 'otoId', 'shipmentId']
+      .some((key) => readString(record, [key]) === value),
+  );
+}
+
 function getTryOtoWebhookPayloadKeys(payload: unknown, data: Record<string, unknown>) {
   if (isRecord(payload)) {
     return Object.keys(payload).sort();
@@ -1583,8 +1643,7 @@ function resolveTryOtoWebhookMatchedByField(
   if (
     identifiers.orderId &&
     (resolveTryOtoStatusOrderId(execution) === identifiers.orderId ||
-      readString(requestSnapshot, ['orderId']) === identifiers.orderId ||
-      readString(responseSnapshot, ['orderId']) === identifiers.orderId)
+      hasTryOtoReference(identifiers.orderId, requestSnapshot, responseSnapshot))
   ) {
     return 'orderId';
   }
@@ -1648,8 +1707,8 @@ function matchesTryOtoExecution(execution: ShipmentExecution, candidates: string
     execution.providerShipmentId,
     execution.trackingNumber,
     resolveTryOtoStatusOrderId(execution),
-    readString(requestSnapshot, ['orderId', 'providerOrderId', 'otoId', 'shipmentId']),
-    readString(responseSnapshot, ['orderId', 'providerOrderId', 'otoId', 'shipmentId']),
+    ...['orderId', 'externalOrderReference', 'internalOrderReference', 'providerOrderId', 'otoId', 'shipmentId']
+      .flatMap((key) => [readString(requestSnapshot, [key]), readString(responseSnapshot, [key])]),
   ].filter((value): value is string => Boolean(value));
 
   return executionCandidates.some((value) => candidates.includes(value));
@@ -2100,7 +2159,7 @@ function resolveTryOtoStatusOrderId(execution: ShipmentExecution) {
   const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
   const responseSnapshot = readSnapshot(execution);
   return (
-    readString(requestSnapshot, ['orderId']) ??
+    readString(requestSnapshot, ['orderId', 'externalOrderReference']) ??
     readString(responseSnapshot, ['orderId', 'providerOrderId']) ??
     execution.providerShipmentId ??
     null
@@ -2529,16 +2588,15 @@ async function buildShipmentRequestPreview(
   const tryOtoDeliveryOptionId = provider === ShippingProvider.TRY_OTO
     ? resolveTryOtoDeliveryOptionId(config.providerMetadata)
     : null;
-  const tryOtoOrderId = [
-    'shopify',
-    (allocation.sourceShopifyOrderId ?? allocation.sourceShopifyOrderNumber ?? allocation.id).replace(/[^a-zA-Z0-9]+/g, '-'),
-    'allocation',
-    allocation.id.replace(/[^a-zA-Z0-9]+/g, '-'),
-  ].join('-');
+  const tryOtoInternalOrderReference = buildTryOtoInternalOrderReference(allocation);
+  const tryOtoExternalOrderReference = buildTryOtoExternalOrderReference(allocation);
 
   const payload = provider === ShippingProvider.TRY_OTO
     ? {
-        orderId: tryOtoOrderId,
+        orderId: tryOtoExternalOrderReference,
+        externalOrderReference: tryOtoExternalOrderReference,
+        internalOrderReference: tryOtoInternalOrderReference,
+        legacyInternalReferenceUsed: false,
         pickupLocationCode: tryOtoPickupLocationCode,
         payment_method: tryOtoPayment.payment_method,
         amount,
@@ -2825,7 +2883,7 @@ export async function retryDryRunShipmentExecution(
     throw new Error('Allocation could not be found for the selected shipment execution.');
   }
 
-  const requestSnapshot = preview.payload;
+  const requestSnapshot = applyExistingTryOtoOrderReference(existing, preview.payload);
   await prisma.shipmentExecution.update({
     where: {
       id: existing.id,
@@ -2961,7 +3019,7 @@ export async function retryFailedShipmentExecution(
     label: 'Retry attempted',
     status: 'pending',
   });
-  const requestSnapshot = preview.payload;
+  const requestSnapshot = applyExistingTryOtoOrderReference(existing, preview.payload);
   await prisma.shipmentExecution.update({
     where: {
       id: existing.id,

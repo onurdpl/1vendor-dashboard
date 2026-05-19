@@ -1038,13 +1038,15 @@ describe('shipping execution foundation', () => {
   });
 
   it('retries Try OTO shipments with the existing OTO order context', async () => {
-    const existingOrderId = 'shopify-7616544244049-allocation-alloc-1';
+    const existingOrderId = 'SPORJINAL-1027';
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
       provider: 'TRY_OTO',
       shipmentStatus: 'FAILED',
       requestSnapshot: {
         orderId: existingOrderId,
+        externalOrderReference: existingOrderId,
+        internalOrderReference: 'shopify-7616544244049-allocation-alloc-1',
       },
       responseSnapshot: {
         orderId: existingOrderId,
@@ -1112,6 +1114,9 @@ describe('shipping execution foundation', () => {
       expect.objectContaining({
         requestSnapshot: expect.objectContaining({
           orderId: existingOrderId,
+          externalOrderReference: existingOrderId,
+          internalOrderReference: 'shopify-7616544244049-allocation-alloc-1',
+          legacyInternalReferenceUsed: false,
         }),
         retryContext: {
           isRetry: true,
@@ -2595,6 +2600,65 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('matches Try OTO webhooks against legacy internal order references', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-legacy-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'SPORJINAL-1039',
+      requestSnapshot: {
+        orderId: 'SPORJINAL-1039',
+        externalOrderReference: 'SPORJINAL-1039',
+        internalOrderReference: 'shopify-7616544244039-allocation-alloc-1039',
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'SPORJINAL-1039',
+        timeline: [{ label: 'Shipment created', at: '2026-05-15T10:00:00.000Z', status: 'created' }],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(null);
+    prismaMock.shipmentExecution.findMany.mockResolvedValue([existing]);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'shopify-7616544244039-allocation-alloc-1039',
+          trackingNumber: 'OTO-TRACK-1039',
+          status: 'delivered',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentExecutionId: 'shipment-try_oto-legacy-alloc-1',
+      shipmentStatus: 'delivered',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-try_oto-legacy-alloc-1' },
+        data: expect.objectContaining({
+          trackingNumber: 'OTO-TRACK-1039',
+          shipmentStatus: 'DELIVERED',
+          responseSnapshot: expect.objectContaining({
+            lastTryOtoWebhookMatchedByField: 'orderId',
+            lastTryOtoWebhookStatusField: 'delivered',
+            lastTryOtoWebhookStatusMapped: true,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('maps observed Try OTO searchingDriver webhook status to an in-progress local shipment status', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
@@ -3426,6 +3490,9 @@ describe('shipping execution foundation', () => {
       provider: 'try_oto',
       requestSnapshot: {
         orderId: 'POC-TR-1001',
+        externalOrderReference: 'POC-TR-1001',
+        internalOrderReference: 'shopify-7616544244049-allocation-alloc-1',
+        legacyInternalReferenceUsed: false,
         pickupLocationCode: 'tr-test-store-001',
         originCity: 'Istanbul',
         payment_method: 'paid',
@@ -3525,6 +3592,9 @@ describe('shipping execution foundation', () => {
         }),
       ],
     });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).not.toHaveProperty('externalOrderReference');
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).not.toHaveProperty('internalOrderReference');
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).not.toHaveProperty('legacyInternalReferenceUsed');
     expect(JSON.parse((fetchMock.mock.calls[3][1] as RequestInit).body as string)).toEqual({
       orderId: 'POC-TR-1001',
       deliveryOptionId: '7109',
@@ -4256,7 +4326,10 @@ describe('shipping execution foundation', () => {
       provider: 'try_oto',
       warehouseId: 'tr-test-store-001',
       payload: {
-        orderId: expect.stringContaining('allocation-alloc-1'),
+        orderId: 'SPORJINAL-1027',
+        externalOrderReference: 'SPORJINAL-1027',
+        internalOrderReference: 'shopify-7616544244049-allocation-alloc-1',
+        legacyInternalReferenceUsed: false,
         pickupLocationCode: 'tr-test-store-001',
         originCity: 'Istanbul',
         payment_method: 'paid',
@@ -4473,13 +4546,13 @@ describe('shipping execution foundation', () => {
 
     expect(result).toMatchObject({
       shipmentStatus: 'created',
-      providerShipmentId: expect.stringContaining('shopify-7616544244049-allocation-alloc-1'),
+      providerShipmentId: 'SPORJINAL-1027',
     });
     expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
           shipmentStatus: 'CREATED',
-          providerShipmentId: expect.stringContaining('shopify-7616544244049-allocation-alloc-1'),
+          providerShipmentId: 'SPORJINAL-1027',
           responseSnapshot: expect.objectContaining({
             tryOtoAsyncPending: true,
             providerMessage: 'Shipment was created. Tracking or label may still be processing.',
