@@ -170,9 +170,11 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
   if (!probe) {
     return null;
   }
+  const skippedReason = readString(probe, ['skippedReason']);
+  const isLegacyMissingLabelGate = skippedReason === 'missing_return_label_url';
 
   return {
-    status: readString(probe, ['status']) ?? 'not_started',
+    status: isLegacyMissingLabelGate ? 'tracking_only_ready' : readString(probe, ['status']) ?? 'not_started',
     attemptedAt: readString(probe, ['attemptedAt']),
     reverseFulfillmentOrderIdPresent: readBoolean(probe, ['reverseFulfillmentOrderIdPresent']),
     reverseLineItemIdsPresent: readBoolean(probe, ['reverseLineItemIdsPresent']),
@@ -184,8 +186,13 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
     labelAccepted: readBoolean(probe, ['labelAccepted']),
     returnedCarrierName: readString(probe, ['returnedCarrierName']),
     carrierNamePresent: readBoolean(probe, ['carrierNamePresent']),
-    skippedReason: readString(probe, ['skippedReason']),
-    errorMessage: readString(probe, ['errorMessage']),
+    trackingOnlyMode: isLegacyMissingLabelGate || readBoolean(probe, ['trackingOnlyMode']),
+    labelInputSent: readBoolean(probe, ['labelInputSent']),
+    shopifyCallAttempted: readBoolean(probe, ['shopifyCallAttempted']),
+    skippedReason: isLegacyMissingLabelGate ? 'return_label_url_missing_tracking_only' : skippedReason,
+    errorMessage: isLegacyMissingLabelGate
+      ? 'Return label URL missing; probing Shopify with tracking only.'
+      : readString(probe, ['errorMessage']),
   };
 }
 

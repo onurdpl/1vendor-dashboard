@@ -175,6 +175,9 @@ export type ShipmentExecution = {
       labelAccepted: boolean;
       returnedCarrierName?: string | null;
       carrierNamePresent?: boolean;
+      trackingOnlyMode?: boolean;
+      labelInputSent?: boolean;
+      shopifyCallAttempted?: boolean;
       skippedReason: string | null;
       errorMessage: string | null;
     } | null;

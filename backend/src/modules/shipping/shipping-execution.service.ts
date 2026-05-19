@@ -212,9 +212,11 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
   if (!probe) {
     return null;
   }
+  const skippedReason = readString(probe, ['skippedReason']);
+  const isLegacyMissingLabelGate = skippedReason === 'missing_return_label_url';
 
   return {
-    status: readString(probe, ['status']) ?? 'not_started',
+    status: isLegacyMissingLabelGate ? 'tracking_only_ready' : readString(probe, ['status']) ?? 'not_started',
     attemptedAt: readString(probe, ['attemptedAt']),
     reverseFulfillmentOrderIdPresent: readBoolean(probe, ['reverseFulfillmentOrderIdPresent']),
     reverseLineItemIdsPresent: readBoolean(probe, ['reverseLineItemIdsPresent']),
@@ -226,8 +228,13 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
     labelAccepted: readBoolean(probe, ['labelAccepted']),
     returnedCarrierName: readString(probe, ['returnedCarrierName']),
     carrierNamePresent: readBoolean(probe, ['carrierNamePresent']),
-    skippedReason: readString(probe, ['skippedReason']),
-    errorMessage: readString(probe, ['errorMessage']),
+    trackingOnlyMode: isLegacyMissingLabelGate || readBoolean(probe, ['trackingOnlyMode']),
+    labelInputSent: readBoolean(probe, ['labelInputSent']),
+    shopifyCallAttempted: readBoolean(probe, ['shopifyCallAttempted']),
+    skippedReason: isLegacyMissingLabelGate ? 'return_label_url_missing_tracking_only' : skippedReason,
+    errorMessage: isLegacyMissingLabelGate
+      ? 'Return label URL missing; probing Shopify with tracking only.'
+      : readString(probe, ['errorMessage']),
   };
 }
 
@@ -2847,6 +2854,9 @@ function buildShopifyReturnLabelUploadProbeSnapshot(input: {
   labelAccepted?: boolean;
   returnedCarrierName?: string | null;
   carrierNamePresent?: boolean;
+  trackingOnlyMode?: boolean;
+  labelInputSent?: boolean;
+  shopifyCallAttempted?: boolean;
   skippedReason?: string | null;
   errorMessage?: string | null;
 }) {
@@ -2863,6 +2873,9 @@ function buildShopifyReturnLabelUploadProbeSnapshot(input: {
     labelAccepted: Boolean(input.labelAccepted),
     returnedCarrierName: input.returnedCarrierName ?? null,
     carrierNamePresent: Boolean(input.carrierNamePresent),
+    trackingOnlyMode: Boolean(input.trackingOnlyMode),
+    labelInputSent: Boolean(input.labelInputSent),
+    shopifyCallAttempted: Boolean(input.shopifyCallAttempted),
     skippedReason: input.skippedReason ?? null,
     errorMessage: input.errorMessage ?? null,
   };
@@ -3643,11 +3656,14 @@ export async function probeShopifyReturnLabelUpload(
         labelAccepted: result.labelAccepted,
         returnedCarrierName: result.returnedCarrierName,
         carrierNamePresent: Boolean(returnCarrierName),
+        trackingOnlyMode: !returnLabelUrl,
+        labelInputSent: Boolean(returnLabelUrl),
+        shopifyCallAttempted: true,
         skippedReason: result.labelAccepted
           ? null
           : returnLabelUrl
             ? 'staged_upload_required_or_external_file_url_rejected'
-            : 'label_upload_skipped_provider_label_url_missing',
+            : 'return_label_url_missing_tracking_only',
         errorMessage: result.userErrors.map((error) => error.message).filter(Boolean).join('; ') || null,
       }),
     );
@@ -3658,6 +3674,9 @@ export async function probeShopifyReturnLabelUpload(
       buildShopifyReturnLabelUploadProbeSnapshot({
         status: 'failed',
         attemptedAt,
+        trackingOnlyMode: !returnLabelUrl,
+        labelInputSent: Boolean(returnLabelUrl),
+        shopifyCallAttempted: true,
         skippedReason: 'shopify_probe_failed',
         errorMessage: message,
       }),

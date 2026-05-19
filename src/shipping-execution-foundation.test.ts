@@ -3574,9 +3574,12 @@ describe('shipping execution foundation', () => {
     });
     expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
       status: 'success',
-      skippedReason: 'label_upload_skipped_provider_label_url_missing',
+      skippedReason: 'return_label_url_missing_tracking_only',
       trackingAccepted: true,
       labelAccepted: false,
+      trackingOnlyMode: true,
+      labelInputSent: false,
+      shopifyCallAttempted: true,
     });
   });
 

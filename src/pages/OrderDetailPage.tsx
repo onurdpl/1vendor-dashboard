@@ -2849,6 +2849,18 @@ export function OrderDetailPage() {
                                           <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? 'yes' : 'no'}</strong>
                                         </div>
                                         <div className="summary-row">
+                                          <span>Tracking-only mode</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingOnlyMode ? 'yes' : 'no'}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Label input sent</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelInputSent ? 'yes' : 'no'}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Shopify call attempted</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyCallAttempted ? 'yes' : 'no'}</strong>
+                                        </div>
+                                        <div className="summary-row">
                                           <span>Label accepted</span>
                                           <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
                                         </div>
@@ -3805,6 +3817,18 @@ export function OrderDetailPage() {
                             <div className="summary-row">
                               <span>Tracking accepted</span>
                               <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Tracking-only mode</span>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingOnlyMode ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Label input sent</span>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelInputSent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Shopify call attempted</span>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyCallAttempted ? 'yes' : 'no'}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Label accepted</span>
