@@ -553,6 +553,13 @@ export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string)
   );
 }
 
+export async function probeTryOtoReturnDetails(shipmentExecutionId: string) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/admin/shipments/${shipmentExecutionId}/probe-try-oto-return-details`,
+    {},
+  );
+}
+
 export async function getShippingProviderDiagnostics(
   provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},

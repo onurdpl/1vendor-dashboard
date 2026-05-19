@@ -142,6 +142,23 @@ export type ShipmentExecutionDto = {
       returnLabelRetrievable: boolean;
       providerStatusSource: string | null;
     } | null;
+    detailsProbe: {
+      status: string;
+      attemptedAt: string | null;
+      endpoint: string | null;
+      httpStatus: number | null;
+      responseKeys: string[];
+      nestedKeys: string[];
+      labelLikeFieldsPresent: boolean;
+      awbLikeFieldsPresent: boolean;
+      pdfLikeFieldsPresent: boolean;
+      urlLikeFieldsPresent: boolean;
+      trackingPresent: boolean;
+      barcodePresent: boolean;
+      providerStatus: string | null;
+      labelUrlPresent: boolean;
+      errorMessage: string | null;
+    } | null;
     shopifyReturnLabelUploadProbe: {
       status: string;
       attemptedAt: string | null;

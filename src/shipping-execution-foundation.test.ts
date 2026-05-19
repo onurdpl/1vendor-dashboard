@@ -42,6 +42,7 @@ const {
   ingestTryOtoWebhook,
   inferShipmentDesi,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnDetails,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
@@ -2523,6 +2524,143 @@ describe('shipping execution foundation', () => {
       returnBarcodePresent: true,
       returnFinalized: false,
       returnLabelRetrievable: false,
+    });
+  });
+
+  it('blocks Try OTO return details probe without a return reference', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnDetails(existing.id, {
+      env,
+      adapter: buildAdapter({ provider: 'TRY_OTO' as const }),
+    });
+
+    expect(result.returnShipment?.detailsProbe).toMatchObject({
+      status: 'blocked',
+      errorMessage: 'Try OTO return details probe requires a return order id, tracking number, or barcode.',
+    });
+  });
+
+  it('persists Try OTO return label URL found by getReturnDetails probe', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+          labelUrl: null,
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      probeReturnDetails: vi.fn().mockResolvedValue({
+        returnLabelUrl: 'https://labels.example/return.pdf',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: 'created',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['data'],
+          nestedKeys: ['data.printAWBURL', 'data.trackingNumber'],
+          labelLikeFieldsPresent: true,
+          awbLikeFieldsPresent: true,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: true,
+          trackingPresent: true,
+          barcodePresent: true,
+          providerStatus: 'created',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnDetails(existing.id, {
+      env,
+      adapter,
+    });
+
+    expect(adapter.probeReturnDetails).toHaveBeenCalledWith('OTO-ORDER-1-R1');
+    expect(result.returnShipment).toMatchObject({
+      labelUrl: 'https://labels.example/return.pdf',
+      labelRetrievalConfirmed: true,
+      labelRetrievable: true,
+      providerStatusSource: 'getReturnDetails',
+      detailsProbe: {
+        status: 'success',
+        labelUrlPresent: true,
+        responseKeys: ['data'],
+        nestedKeys: ['data.printAWBURL', 'data.trackingNumber'],
+      },
+    });
+  });
+
+  it('keeps safe fallback when getReturnDetails has no return label URL', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      probeReturnDetails: vi.fn().mockResolvedValue({
+        returnLabelUrl: null,
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnBarcode: null,
+        returnStatus: 'new_return',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['data'],
+          nestedKeys: ['data.status', 'data.trackingNumber'],
+          labelLikeFieldsPresent: false,
+          awbLikeFieldsPresent: false,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: false,
+          trackingPresent: true,
+          barcodePresent: false,
+          providerStatus: 'new_return',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnDetails(existing.id, {
+      env,
+      adapter,
+    });
+
+    expect(result.returnShipment).toMatchObject({
+      labelUrl: null,
+      labelRetrievalConfirmed: false,
+      labelRetrievable: false,
+      labelRetrievalNote: 'Return label is not available from getReturnDetails yet.',
+      detailsProbe: {
+        status: 'no_label',
+        labelLikeFieldsPresent: false,
+        labelUrlPresent: false,
+      },
     });
   });
 

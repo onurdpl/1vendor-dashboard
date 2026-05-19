@@ -11,6 +11,7 @@ import {
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnDetails,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
@@ -671,6 +672,12 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: probeTryOtoReturnDetailsMutation, isPending: isProbingTryOtoReturnDetails } = useMutationAction(
+    async (shipmentExecutionId: string) => probeTryOtoReturnDetails(shipmentExecutionId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -816,6 +823,14 @@ export function OrderDetailPage() {
     Boolean(order?.shopifyReturnSignal?.returnIdPresent) &&
     Boolean(visibleShipmentExecution.returnShipment?.labelUrl) &&
     Boolean(visibleShipmentExecution.returnShipment?.trackingNumber || visibleShipmentExecution.returnShipment?.barcode);
+  const canProbeTryOtoReturnDetails =
+    isAdmin &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(
+      visibleShipmentExecution.returnShipment?.returnOrderId ||
+        visibleShipmentExecution.returnShipment?.trackingNumber ||
+        visibleShipmentExecution.returnShipment?.barcode,
+    );
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -1052,6 +1067,46 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleProbeTryOtoReturnDetails() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Probing Try OTO return details...',
+      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
+    });
+
+    void probeTryOtoReturnDetailsMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const probe = shipment.returnShipment?.detailsProbe;
+        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
+        const message = foundLabel
+          ? 'Try OTO return label found in return details.'
+          : probe?.errorMessage || 'Return label is not available from getReturnDetails yet.';
+        setShipmentActionState({
+          tone: foundLabel ? 'success' : 'info',
+          message,
+          shipment,
+          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
+        });
+        showFeedback(message, foundLabel ? 'success' : 'info');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return details probe could not be run.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2272,6 +2327,83 @@ export function OrderDetailPage() {
                                   </div>
                                 ) : null}
                                 {isAdmin ? (
+                                  <div className="provider-response-summary" aria-label="Try OTO return details probe">
+                                    <div className="provider-response-heading">
+                                      <strong>Try OTO return details probe</strong>
+                                      <span>Admin only</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="secondary-action-button"
+                                      onClick={handleProbeTryOtoReturnDetails}
+                                      disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
+                                    >
+                                      {isProbingTryOtoReturnDetails ? 'Probing Try OTO...' : 'Probe Try OTO return details'}
+                                    </button>
+                                    {!canProbeTryOtoReturnDetails ? (
+                                      <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                                    ) : null}
+                                    {visibleShipmentExecution.returnShipment.detailsProbe ? (
+                                      <>
+                                        <div className="summary-row">
+                                          <span>Status</span>
+                                          <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.detailsProbe.status)}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>HTTP</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.detailsProbe.httpStatus ?? '—'}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Response keys</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.detailsProbe.responseKeys.length
+                                              ? visibleShipmentExecution.returnShipment.detailsProbe.responseKeys.join(', ')
+                                              : '—'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Nested keys</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.detailsProbe.nestedKeys.length
+                                              ? visibleShipmentExecution.returnShipment.detailsProbe.nestedKeys.slice(0, 12).join(', ')
+                                              : '—'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Label/AWB/PDF/URL fields</span>
+                                          <strong>
+                                            {[
+                                              visibleShipmentExecution.returnShipment.detailsProbe.labelLikeFieldsPresent ? 'label' : null,
+                                              visibleShipmentExecution.returnShipment.detailsProbe.awbLikeFieldsPresent ? 'awb' : null,
+                                              visibleShipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ? 'pdf' : null,
+                                              visibleShipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent ? 'url' : null,
+                                            ].filter(Boolean).join(', ') || 'missing'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Tracking/barcode</span>
+                                          <strong>
+                                            {[
+                                              visibleShipmentExecution.returnShipment.detailsProbe.trackingPresent ? 'tracking' : null,
+                                              visibleShipmentExecution.returnShipment.detailsProbe.barcodePresent ? 'barcode' : null,
+                                            ].filter(Boolean).join(', ') || 'missing'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Label URL</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.detailsProbe.labelUrlPresent ? 'present' : 'missing'}</strong>
+                                        </div>
+                                        {visibleShipmentExecution.returnShipment.detailsProbe.errorMessage ? (
+                                          <div className="summary-row">
+                                            <span>Message</span>
+                                            <strong>{visibleShipmentExecution.returnShipment.detailsProbe.errorMessage}</strong>
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {isAdmin ? (
                                   <div className="provider-response-summary" aria-label="Shopify return label upload probe">
                                     <div className="provider-response-heading">
                                       <strong>Shopify return label upload probe</strong>
@@ -2959,6 +3091,74 @@ export function OrderDetailPage() {
                           <span>Provider message</span>
                           <strong>{shipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
                         </div>
+                      </div>
+                    ) : null}
+                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                      <div className="provider-response-summary" aria-label="Try OTO return details probe">
+                        <div className="provider-response-heading">
+                          <strong>Try OTO return details probe</strong>
+                          <span>Admin only</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-action-button"
+                          onClick={handleProbeTryOtoReturnDetails}
+                          disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
+                        >
+                          {isProbingTryOtoReturnDetails ? 'Probing Try OTO...' : 'Probe Try OTO return details'}
+                        </button>
+                        {!canProbeTryOtoReturnDetails ? (
+                          <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                        ) : null}
+                        {shipmentExecution.returnShipment.detailsProbe ? (
+                          <>
+                            <div className="summary-row">
+                              <span>Status</span>
+                              <strong>{toTitleCaseLabel(shipmentExecution.returnShipment.detailsProbe.status)}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>HTTP</span>
+                              <strong>{shipmentExecution.returnShipment.detailsProbe.httpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Response keys</span>
+                              <strong>
+                                {shipmentExecution.returnShipment.detailsProbe.responseKeys.length
+                                  ? shipmentExecution.returnShipment.detailsProbe.responseKeys.join(', ')
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Nested keys</span>
+                              <strong>
+                                {shipmentExecution.returnShipment.detailsProbe.nestedKeys.length
+                                  ? shipmentExecution.returnShipment.detailsProbe.nestedKeys.slice(0, 12).join(', ')
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Label/AWB/PDF/URL fields</span>
+                              <strong>
+                                {[
+                                  shipmentExecution.returnShipment.detailsProbe.labelLikeFieldsPresent ? 'label' : null,
+                                  shipmentExecution.returnShipment.detailsProbe.awbLikeFieldsPresent ? 'awb' : null,
+                                  shipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ? 'pdf' : null,
+                                  shipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent ? 'url' : null,
+                                ].filter(Boolean).join(', ') || 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Label URL</span>
+                              <strong>{shipmentExecution.returnShipment.detailsProbe.labelUrlPresent ? 'present' : 'missing'}</strong>
+                            </div>
+                            {shipmentExecution.returnShipment.detailsProbe.errorMessage ? (
+                              <div className="summary-row">
+                                <span>Message</span>
+                                <strong>{shipmentExecution.returnShipment.detailsProbe.errorMessage}</strong>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
                     {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (

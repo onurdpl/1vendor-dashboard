@@ -13,6 +13,7 @@ import {
   ingestTryOtoWebhook,
   listShipmentExecutions,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnDetails,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
@@ -280,6 +281,27 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admin/shipments/:id/probe-try-oto-return-details',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await probeTryOtoReturnDetails(request.params.id, {
+          env,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Try OTO return details probe could not be run.';
         return reply.code(400).send({ message });
       }
     },

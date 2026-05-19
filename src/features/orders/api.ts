@@ -7,6 +7,7 @@ export {
   getVendorShippingConfig,
   listOrders,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnDetails,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,

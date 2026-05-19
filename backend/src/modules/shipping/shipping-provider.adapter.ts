@@ -46,6 +46,14 @@ export type ShippingProviderReturnCreateResult = {
   responseSnapshot: Record<string, unknown>;
 };
 
+export type ShippingProviderReturnDetailsProbeResult = {
+  returnLabelUrl: string | null;
+  returnTrackingNumber: string | null;
+  returnBarcode: string | null;
+  returnStatus: string | null;
+  responseSnapshot: Record<string, unknown>;
+};
+
 export class ShippingProviderExecutionError extends Error {
   constructor(
     message: string,
@@ -60,6 +68,7 @@ export interface ShippingProviderAdapter {
   provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
   createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
+  probeReturnDetails?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -433,6 +442,62 @@ function readTryOtoReturnOrderId(value: Record<string, unknown>) {
 
 function readTryOtoDeliveryOptionId(value: Record<string, unknown>) {
   return readString(value, ['deliveryOptionId', 'delivery_option_id']);
+}
+
+function collectNestedKeys(value: unknown, maxDepth = 3, prefix = ''): string[] {
+  if (maxDepth < 0 || !value) {
+    return [];
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 3).flatMap((item, index) => collectNestedKeys(item, maxDepth - 1, `${prefix}[${index}]`));
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  return Object.keys(value)
+    .sort()
+    .flatMap((key) => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      return [path, ...collectNestedKeys(value[key], maxDepth - 1, path)];
+    })
+    .slice(0, 80);
+}
+
+function findNestedStringByKeyPattern(value: unknown, pattern: RegExp): string | null {
+  if (!value) {
+    return null;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedStringByKeyPattern(item, pattern);
+      if (found) {
+        return found;
+      }
+    }
+    return null;
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const [key, item] of Object.entries(value)) {
+    if (pattern.test(key) && (typeof item === 'string' || typeof item === 'number')) {
+      const normalized = String(item).trim();
+      if (normalized) {
+        return normalized;
+      }
+    }
+    const found = findNestedStringByKeyPattern(item, pattern);
+    if (found) {
+      return found;
+    }
+  }
+  return null;
+}
+
+function hasNestedKeyPattern(value: unknown, pattern: RegExp) {
+  return collectNestedKeys(value).some((key) => pattern.test(key));
 }
 
 function readTryOtoDeliveryCompanyName(value: Record<string, unknown>) {
@@ -1540,6 +1605,52 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnLabelRetrievalNote: returnLabelUrl
           ? null
           : 'Return label is processing or not returned by Try OTO yet.',
+      },
+    };
+  }
+
+  async probeReturnDetails(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult> {
+    const trimmedOrderId = orderId.trim();
+    if (!trimmedOrderId) {
+      throw new ShippingProviderExecutionError('Try OTO getReturnDetails requires a return order id.', {
+        provider: 'try_oto',
+        operation: 'getReturnDetails',
+        endpoint: '/rest/v2/getReturnDetails',
+        orderIdPresent: false,
+      });
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    const result = await this.postJson('/rest/v2/getReturnDetails', { orderId: trimmedOrderId }, accessToken, 'getReturnDetails');
+    const body = result.body;
+    const nestedKeys = collectNestedKeys(body);
+    const labelUrl =
+      findNestedStringByKeyPattern(body, /(?:print.*(?:awb|label)|(?:awb|label).*url|pdf|fileUrl|file_url)/i) ??
+      readTryOtoLabelUrl(body);
+    const trackingNumber = findNestedStringByKeyPattern(body, /^(?:trackingNumber|dcTrackingNumber|tracking_number|dc_tracking_number)$/i);
+    const barcode = findNestedStringByKeyPattern(body, /(?:barcode|barCode|awbNumber|awb_number)/i);
+    const providerStatus = findNestedStringByKeyPattern(body, /^(?:status|shipmentStatus|dcStatus|returnStatus)$/i);
+
+    return {
+      returnLabelUrl: labelUrl,
+      returnTrackingNumber: trackingNumber,
+      returnBarcode: barcode,
+      returnStatus: providerStatus,
+      responseSnapshot: {
+        ...result.snapshot,
+        provider: 'try_oto',
+        operation: 'getReturnDetails',
+        endpoint: '/rest/v2/getReturnDetails',
+        requestKeys: ['orderId'],
+        nestedKeys,
+        labelLikeFieldsPresent: hasNestedKeyPattern(body, /(?:label|printLabel|printAWB|fileUrl|file_url)/i),
+        awbLikeFieldsPresent: hasNestedKeyPattern(body, /awb/i),
+        pdfLikeFieldsPresent: hasNestedKeyPattern(body, /pdf/i),
+        urlLikeFieldsPresent: hasNestedKeyPattern(body, /url/i),
+        trackingPresent: Boolean(trackingNumber),
+        barcodePresent: Boolean(barcode),
+        labelUrlPresent: Boolean(labelUrl),
+        providerStatus,
       },
     };
   }

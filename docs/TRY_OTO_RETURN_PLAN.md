@@ -76,6 +76,8 @@ Current runtime safety stance:
 - `createReturnShipment` without a confirmed return label/finalized shipment is treated as return request/reference creation.
 - UI wording should say “Return request created / awaiting provider shipment” when finalization is unconfirmed.
 - Admin diagnostics should show whether `deliveryOptionId` was sent, whether return option lookup was called, and whether a return finalization endpoint is implemented/confirmed.
+- Admin-only diagnostics may call documented `POST /rest/v2/getReturnDetails` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes return label/AWB/PDF URL fields after request creation.
+- `getReturnLink` exists in the collection, but its exact response semantics for label/PDF retrieval are still **Unknown**; do not use it for runtime label display until sandbox evidence confirms what it returns.
 
 ### Create Return Shipment
 
@@ -147,11 +149,15 @@ Unknowns:
 Candidates:
 - `POST /rest/v2/orderStatus`
 - `POST /rest/v2/orderHistory`
+- `POST /rest/v2/getReturnDetails`
+- `POST /rest/v2/getReturnLink`
 
 Expected identifier:
 - `returnOrderId`, if `createReturnShipment` returns it as documented.
 
 Unknowns:
+- Whether `getReturnDetails` includes a printable label/AWB/PDF URL after Try OTO panel finalizes return cargo.
+- Whether `getReturnLink` returns a customer portal link, label URL, or another return-management URL.
 - Whether return status enums differ from forward shipment statuses.
 - Whether return tracking uses `trackingNumber`, `dcTrackingNumber`, or another authoritative field.
 - Whether Try OTO webhook payload includes `reverseShipment=true` for return shipments consistently.
