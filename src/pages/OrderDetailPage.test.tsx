@@ -1896,13 +1896,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           provider: 'try_oto',
           returnOrderId: 'OTO-ORDER-1028-R1',
           trackingNumber: 'RET-TRACK-1028',
-          trackingUrl: null,
+          trackingUrl: 'https://tracking.tryoto.example/RET-TRACK-1028',
           labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
           barcode: 'RET-BARCODE-1028',
+          carrierName: 'Sürat Kargo',
           status: 'created',
           createdAt: '2026-05-15T19:46:00.000Z',
           requestKeys: ['items', 'orderId'],
-          responseKeys: ['printAWBURL', 'returnOrderId'],
+          responseKeys: ['printReturnAWBURL', 'returnOrderId', 'trackingNumber'],
           trackingPresent: true,
           labelPresent: true,
           labelRetrievalConfirmed: true,
@@ -1918,6 +1919,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Try OTO return shipment')).toBeInTheDocument();
     expect(screen.getByText('RET-TRACK-1028')).toBeInTheDocument();
+    expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open return tracking' })).toHaveAttribute(
+      'href',
+      'https://tracking.tryoto.example/RET-TRACK-1028',
+    );
     expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
@@ -1984,7 +1990,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const probeSection = await screen.findByLabelText('Shopify return label upload probe');
-    await user.click(within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' }));
+    const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
+    expect(probeButton).toBeEnabled();
+    await user.click(probeButton);
 
     expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Shopify accepted the return label PDF URL.')).length).toBeGreaterThan(0);

@@ -46,6 +46,7 @@ export type ShipmentExecution = {
     trackingUrl: string | null;
     labelUrl: string | null;
     barcode: string | null;
+    carrierName?: string | null;
     status: string | null;
     createdAt: string | null;
     requestKeys: string[];
@@ -66,7 +67,10 @@ export type ShipmentExecution = {
       returnTrackingPresent: boolean;
       returnBarcodePresent: boolean;
       returnStatus: string | null;
+      returnCarrierName?: string | null;
       labelFieldPresent: boolean;
+      returnLabelSourceChecked?: string | null;
+      returnTrackingSourceChecked?: string | null;
       providerMessage: string | null;
       returnSkippedReason?: string | null;
       forwardDeliveryOptionIdPresent?: boolean;

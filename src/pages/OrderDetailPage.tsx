@@ -2407,6 +2407,22 @@ export function OrderDetailPage() {
                                   <div className="summary-row">
                                     <span>Return tracking</span>
                                     <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
+                                    {visibleShipmentExecution.returnShipment.trackingUrl ? (
+                                      <a
+                                        className="inline-link"
+                                        href={visibleShipmentExecution.returnShipment.trackingUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        Open return tracking
+                                      </a>
+                                    ) : null}
+                                  </div>
+                                ) : null}
+                                {visibleShipmentExecution.returnShipment.carrierName ? (
+                                  <div className="summary-row">
+                                    <span>Return carrier</span>
+                                    <strong>{visibleShipmentExecution.returnShipment.carrierName}</strong>
                                   </div>
                                 ) : null}
                                 {visibleShipmentExecution.returnShipment.barcode ? (
@@ -2640,6 +2656,14 @@ export function OrderDetailPage() {
                                     <div className="summary-row">
                                       <span>Label retrievable</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Label source</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelSourceChecked ?? '—'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Tracking source</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnTrackingSourceChecked ?? '—'}</strong>
                                     </div>
                                     <div className="summary-row">
                                       <span>Status source</span>
@@ -3322,6 +3346,17 @@ export function OrderDetailPage() {
                           <div className="summary-row">
                             <span>Return tracking</span>
                             <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
+                            {visibleShipmentExecution.returnShipment.trackingUrl ? (
+                              <a className="inline-link" href={visibleShipmentExecution.returnShipment.trackingUrl} target="_blank" rel="noreferrer">
+                                Open return tracking
+                              </a>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {visibleShipmentExecution.returnShipment.carrierName ? (
+                          <div className="summary-row">
+                            <span>Return carrier</span>
+                            <strong>{visibleShipmentExecution.returnShipment.carrierName}</strong>
                           </div>
                         ) : null}
                         {visibleShipmentExecution.returnShipment.barcode ? (
@@ -3539,6 +3574,14 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Label retrievable</span>
                           <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Label source</span>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelSourceChecked ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Tracking source</span>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnTrackingSourceChecked ?? '—'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Status source</span>

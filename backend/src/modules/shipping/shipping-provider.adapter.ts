@@ -43,6 +43,7 @@ export type ShippingProviderReturnCreateResult = {
   returnTrackingUrl: string | null;
   returnLabelUrl: string | null;
   returnBarcode: string | null;
+  returnCarrierName?: string | null;
   returnStatus: string | null;
   responseSnapshot: Record<string, unknown>;
 };
@@ -419,6 +420,10 @@ function buildTryOtoPayloadDiagnostics(payload: Record<string, unknown>) {
 
 function readTryOtoLabelUrl(value: Record<string, unknown>) {
   return readString(value, [
+    'printReturnAWBURL',
+    'printReturnAWBUrl',
+    'printReturnAwbURL',
+    'printReturnAwbUrl',
     'printLabelURL',
     'printLabelUrl',
     'printAWBURL',
@@ -1641,20 +1646,25 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const accessToken = await this.refreshAccessToken();
     const result = await this.postJson('/rest/v2/createReturnShipment', payload, accessToken, 'createReturnShipment');
     const body = result.body;
-    const returnLabelUrl = readTryOtoLabelUrl(body);
+    const returnLabelUrl =
+      readString(body, ['printReturnAWBURL', 'printReturnAWBUrl', 'printReturnAwbURL', 'printReturnAwbUrl']) ??
+      readTryOtoLabelUrl(body);
     const returnTrackingNumber = readTryOtoTrackingNumber(body);
-    const returnBarcode = readTryOtoBarcode(body);
+    const returnBarcode = readTryOtoBarcode(body) ?? returnTrackingNumber;
     const returnOrderId = readTryOtoReturnOrderId(body);
-    const returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
+    const returnStatus = readString(body, ['returnStatus', 'returnOrderStatus', 'status', 'shipmentStatus', 'dcStatus']);
+    const returnCarrierName = readString(body, ['deliveryCompany', 'deliveryCompanyName', 'deliveryOptionName', 'carrier', 'carrierName']);
+    const returnTrackingUrl = readString(body, ['brandedTrackingURL', 'trackingUrl', 'trackingURL']);
     const returnFinalized = Boolean(returnLabelUrl || returnTrackingNumber || returnBarcode);
     const returnLabelRetrievable = Boolean(returnLabelUrl);
 
     return {
       returnOrderId,
       returnTrackingNumber,
-      returnTrackingUrl: readString(body, ['trackingUrl', 'trackingURL', 'brandedTrackingURL']),
+      returnTrackingUrl,
       returnLabelUrl,
       returnBarcode,
+      returnCarrierName,
       returnStatus,
       responseSnapshot: {
         ...result.snapshot,
@@ -1683,6 +1693,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnBarcodePresent: Boolean(returnBarcode),
         returnLabelPresent: Boolean(returnLabelUrl),
         returnStatus,
+        returnCarrierName,
+        returnTrackingSourceChecked: returnTrackingNumber ? 'createReturnShipment.trackingNumber' : 'createReturnShipment',
         returnFinalized,
         returnFinalizationEndpointConfirmed: false,
         returnFinalizeEndpointImplemented: false,
@@ -1699,13 +1711,15 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnLabelRetrievable,
         returnProviderStatusSource: 'createReturnShipment',
         returnLabelRetrievalConfirmed: returnLabelRetrievable,
-        returnLabelSourceChecked: 'createReturnShipment',
+        returnLabelSourceChecked: returnLabelUrl ? 'createReturnShipment.printReturnAWBURL' : 'createReturnShipment',
         createReturnShipmentLabelFieldPresent: Boolean(returnLabelUrl),
         webhookReverseShipmentPrintAwbUrlPresent: false,
         printEndpointImplemented: false,
         returnLabelRetrievalNote: returnLabelUrl
           ? null
-          : 'Return request created; waiting for Try OTO return shipment details.',
+          : returnFinalized
+            ? 'Return shipment finalized. Label PDF is not available yet.'
+            : 'Return request created; waiting for Try OTO return shipment details.',
       },
     };
   }

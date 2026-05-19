@@ -242,7 +242,10 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnTrackingPresent: readBoolean(diagnostics, ['returnTrackingPresent']),
     returnBarcodePresent: readBoolean(diagnostics, ['returnBarcodePresent']),
     returnStatus: readString(diagnostics, ['returnStatus']),
+    returnCarrierName: readString(diagnostics, ['returnCarrierName']),
     labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
+    returnLabelSourceChecked: readString(diagnostics, ['returnLabelSourceChecked']),
+    returnTrackingSourceChecked: readString(diagnostics, ['returnTrackingSourceChecked']),
     providerMessage: readString(diagnostics, ['providerMessage']),
     returnSkippedReason: readString(diagnostics, ['returnSkippedReason', 'skippedReason']),
     forwardDeliveryOptionIdPresent: readBoolean(diagnostics, ['forwardDeliveryOptionIdPresent']),
@@ -369,6 +372,7 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
     trackingUrl: readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']),
     labelUrl,
     barcode: readString(returnShipment, ['barcode', 'returnBarcode']),
+    carrierName: readString(returnShipment, ['carrierName', 'returnCarrierName']),
     status: readString(returnShipment, ['status', 'returnStatus']),
     createdAt: readString(returnShipment, ['createdAt']),
     requestKeys: readStringArray(returnShipment.requestKeys),
@@ -2972,6 +2976,7 @@ export async function createTryOtoReturnShipmentLabel(
     trackingUrl: result.returnTrackingUrl,
     labelUrl: result.returnLabelUrl,
     barcode: result.returnBarcode,
+    carrierName: result.returnCarrierName ?? readString(result.responseSnapshot, ['returnCarrierName']),
     status: returnStatus,
     createdAt: new Date().toISOString(),
     requestKeys: readStringArray(result.responseSnapshot.requestKeys),
@@ -2981,7 +2986,11 @@ export async function createTryOtoReturnShipmentLabel(
     labelRetrievalConfirmed: returnLabelRetrievable,
     labelRetrievalNote:
       readString(result.responseSnapshot, ['returnLabelRetrievalNote']) ??
-      (result.returnLabelUrl ? null : 'Return request created; waiting for Try OTO return shipment details.'),
+      (result.returnLabelUrl
+        ? null
+        : returnFinalized
+          ? 'Return shipment finalized. Label PDF is not available yet.'
+          : 'Return request created; waiting for Try OTO return shipment details.'),
     finalized: returnFinalized,
     labelRetrievable: returnLabelRetrievable,
     providerStatusSource: returnProviderStatusSource,
@@ -2994,6 +3003,7 @@ export async function createTryOtoReturnShipmentLabel(
       returnTrackingPresent: Boolean(result.returnTrackingNumber),
       returnBarcodePresent: Boolean(result.returnBarcode),
       returnStatus,
+      returnCarrierName: result.returnCarrierName ?? readString(result.responseSnapshot, ['returnCarrierName']),
       returnLabelPresent: Boolean(result.returnLabelUrl),
       returnItemSkuPresent: readBoolean(result.responseSnapshot, ['returnItemSkuPresent']),
       returnItemQuantityPresent: readBoolean(result.responseSnapshot, ['returnItemQuantityPresent']),
@@ -3022,6 +3032,7 @@ export async function createTryOtoReturnShipmentLabel(
       reverseCreateShipmentBarcodePresent: readBoolean(result.responseSnapshot, ['reverseCreateShipmentBarcodePresent']),
       reverseCreateShipmentLabelPresent: readBoolean(result.responseSnapshot, ['reverseCreateShipmentLabelPresent']),
       returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'createReturnShipment',
+      returnTrackingSourceChecked: readString(result.responseSnapshot, ['returnTrackingSourceChecked']) ?? 'createReturnShipment',
       createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
       printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
