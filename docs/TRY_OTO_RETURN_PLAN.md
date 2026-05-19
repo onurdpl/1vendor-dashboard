@@ -35,6 +35,26 @@ Important conflict:
 - The Postman collection documents `createReturnShipment` and `returnOrderId`.
 - Until sandbox confirms the exact sequence, prefer the Postman evidence for planning and do not implement runtime return creation.
 
+## Manual Sandbox PoC Observations
+
+Manual Try OTO panel return shipment PoC findings:
+- Return shipment creation flow reached carrier options.
+- Carrier selected: Sürat Kargo.
+- Return shipment/reference barcode was generated.
+- Initial print from the modal failed with:
+  - `errorMsg.printDataTransformError`
+  - `Bir hata oluştu!`
+- The created return shipments later appeared in the Try OTO returns/return-shipment area.
+- From the return shipment list, the return labels could be printed successfully.
+
+Confirmed from manual panel PoC:
+- Return shipment creation is confirmed in the Try OTO sandbox panel.
+- Return label printing is confirmed from the return shipment list.
+
+Interpretation:
+- The initial modal print failure appears to be a UI/print timing issue in the Try OTO panel, not a confirmed API blocker.
+- Runtime implementation remains blocked until the API endpoint, request fields, response fields, and print label retrieval path are confirmed by API sandbox calls or Try OTO support.
+
 ## Endpoint Candidates
 
 ### Create Return Shipment
@@ -99,6 +119,8 @@ Unknowns:
 - Whether either form works.
 - Whether `printAWBURL`, `printLabelURL`, or both appear for return labels.
 - Whether the return label URL is stable, expiring, public, or auth-protected.
+- Whether return label PDF is available immediately after reverse shipment creation or only after asynchronous processing.
+- Which API endpoint/field should be used to retrieve the return label PDF after the panel list can print it.
 
 ### Return Tracking And Status
 
@@ -225,6 +247,7 @@ Plan:
 
 Unknowns:
 - Whether Try OTO always sets `reverseShipment` for return shipment webhooks.
+- Whether `reverseShipment` identifies the return shipment separately from the forward shipment.
 - Whether return webhooks include original `orderId`, generated `returnOrderId`, `otoId`, `trackingNumber`, or `dcTrackingNumber`.
 - Whether return webhook status enum differs from forward enum.
 
@@ -347,6 +370,10 @@ Goals:
 16. Can return labels be generated for undelivered orders?
 17. Are return shipment webhook retries and idempotency keys provided?
 18. What webhook signature header, algorithm, and secret/public-key process should be used before production ingest?
+19. Is return label print expected immediately after reverse shipment creation, or only after asynchronous processing?
+20. Which endpoint and field should be used to retrieve the return label PDF after return shipment creation?
+21. Which field is authoritative for return barcode/tracking?
+22. Does `reverseShipment` webhook identify the return shipment separately from the forward shipment?
 
 ## Implementation Stop Conditions
 
