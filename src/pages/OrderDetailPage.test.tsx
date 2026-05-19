@@ -392,7 +392,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           mutationUsed: 'reverseDeliveryCreateWithShipping',
           shopifyUserErrors: [],
           reverseDeliveryIdPresent: true,
+          shopifyReturnIdPresent: true,
+          trackingAccepted: true,
           labelAccepted: true,
+          returnedCarrierName: 'Sürat Kargo',
+          carrierNamePresent: true,
           skippedReason: null,
           errorMessage: null,
         },
@@ -1996,6 +2000,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Shopify accepted the return label PDF URL.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Shopify return label attached')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tracking accepted')[0]).toBeInTheDocument();
+    expect(screen.getAllByText('Sürat Kargo').length).toBeGreaterThan(0);
   });
 
   it('lets admins probe Try OTO return details and shows safe diagnostics', async () => {

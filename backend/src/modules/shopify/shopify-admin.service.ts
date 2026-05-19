@@ -109,6 +109,7 @@ type ShopifyReturnReverseDeliveryInputsQueryResponse = {
                 publicFileUrl?: string | null;
               } | null;
               tracking?: {
+                carrierName?: string | null;
                 number?: string | null;
                 url?: string | null;
               } | null;
@@ -128,6 +129,11 @@ type ShopifyReverseDeliveryMutationResponse = {
         label?: {
           publicFileUrl?: string | null;
         } | null;
+        tracking?: {
+          carrierName?: string | null;
+          number?: string | null;
+          url?: string | null;
+        } | null;
       } | null;
     } | null;
     userErrors?: Array<{
@@ -141,6 +147,11 @@ type ShopifyReverseDeliveryMutationResponse = {
       deliverable?: {
         label?: {
           publicFileUrl?: string | null;
+        } | null;
+        tracking?: {
+          carrierName?: string | null;
+          number?: string | null;
+          url?: string | null;
         } | null;
       } | null;
     } | null;
@@ -728,6 +739,7 @@ export function createShopifyAdminService(env: AppEnv) {
                               publicFileUrl
                             }
                             tracking {
+                              carrierName
                               number
                               url
                             }
@@ -781,6 +793,7 @@ export function createShopifyAdminService(env: AppEnv) {
             labelPublicFileUrl: delivery.deliverable?.label?.publicFileUrl ?? null,
             trackingNumber: delivery.deliverable?.tracking?.number ?? null,
             trackingUrl: delivery.deliverable?.tracking?.url ?? null,
+            carrierName: delivery.deliverable?.tracking?.carrierName ?? null,
           }))
           .filter((delivery) => delivery.id),
       })),
@@ -855,6 +868,11 @@ export function createShopifyAdminService(env: AppEnv) {
                   label {
                     publicFileUrl
                   }
+                  tracking {
+                    carrierName
+                    number
+                    url
+                  }
                 }
               }
             }
@@ -886,6 +904,11 @@ export function createShopifyAdminService(env: AppEnv) {
                 ... on ReverseDeliveryShippingDeliverable {
                   label {
                     publicFileUrl
+                  }
+                  tracking {
+                    carrierName
+                    number
+                    url
                   }
                 }
               }
@@ -930,14 +953,20 @@ export function createShopifyAdminService(env: AppEnv) {
       : json.data?.reverseDeliveryCreateWithShipping;
     const userErrors = normalizeUserErrors(mutationPayload?.userErrors);
     const reverseDeliveryId = mutationPayload?.reverseDelivery?.id ?? null;
-    const labelPublicFileUrl = mutationPayload?.reverseDelivery?.deliverable?.label?.publicFileUrl ?? null;
+    const deliverable = mutationPayload?.reverseDelivery?.deliverable;
+    const labelPublicFileUrl = deliverable?.label?.publicFileUrl ?? null;
+    const returnedTrackingNumber = deliverable?.tracking?.number ?? null;
+    const returnedCarrierName = deliverable?.tracking?.carrierName ?? null;
+    const trackingAccepted = Boolean(returnedTrackingNumber) && returnedTrackingNumber === input.trackingNumber && userErrors.length === 0;
 
     return {
       mutationUsed,
       reverseFulfillmentOrderIdPresent: Boolean(reverseFulfillmentOrder.id),
       reverseLineItemIdsPresent: reverseFulfillmentOrder.lineItems.length > 0,
       reverseDeliveryId,
+      trackingAccepted,
       labelAccepted: Boolean(labelPublicFileUrl) && userErrors.length === 0,
+      returnedCarrierName,
       userErrors,
       source: 'shopify_admin',
     };

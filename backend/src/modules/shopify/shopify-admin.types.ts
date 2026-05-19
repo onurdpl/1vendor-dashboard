@@ -33,6 +33,7 @@ export type ShopifyReverseDeliveryInfo = {
   labelPublicFileUrl: string | null;
   trackingNumber: string | null;
   trackingUrl: string | null;
+  carrierName: string | null;
 };
 
 export type ShopifyReverseFulfillmentOrderInfo = {
@@ -66,6 +67,7 @@ export type ProbeShopifyReturnLabelUploadInput = {
   trackingNumber: string;
   trackingUrl?: string | null;
   labelUrl: string;
+  carrierName?: string | null;
 };
 
 export type ProbeShopifyReturnLabelUploadResult = {
@@ -73,7 +75,9 @@ export type ProbeShopifyReturnLabelUploadResult = {
   reverseFulfillmentOrderIdPresent: boolean;
   reverseLineItemIdsPresent: boolean;
   reverseDeliveryId: string | null;
+  trackingAccepted: boolean;
   labelAccepted: boolean;
+  returnedCarrierName: string | null;
   userErrors: ShopifyUserError[];
   source: 'mock' | 'shopify_admin';
 };

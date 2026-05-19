@@ -217,7 +217,11 @@ export type OrderShipmentExecutionDto = {
         message: string;
       }>;
       reverseDeliveryIdPresent: boolean;
+      shopifyReturnIdPresent: boolean;
+      trackingAccepted: boolean;
       labelAccepted: boolean;
+      returnedCarrierName: string | null;
+      carrierNamePresent: boolean;
       skippedReason: string | null;
       errorMessage: string | null;
     } | null;

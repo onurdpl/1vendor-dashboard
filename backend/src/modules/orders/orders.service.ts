@@ -179,7 +179,11 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
     mutationUsed: readString(probe, ['mutationUsed']),
     shopifyUserErrors: readShopifyUserErrors(probe.shopifyUserErrors),
     reverseDeliveryIdPresent: readBoolean(probe, ['reverseDeliveryIdPresent']),
+    shopifyReturnIdPresent: readBoolean(probe, ['shopifyReturnIdPresent']),
+    trackingAccepted: readBoolean(probe, ['trackingAccepted']),
     labelAccepted: readBoolean(probe, ['labelAccepted']),
+    returnedCarrierName: readString(probe, ['returnedCarrierName']),
+    carrierNamePresent: readBoolean(probe, ['carrierNamePresent']),
     skippedReason: readString(probe, ['skippedReason']),
     errorMessage: readString(probe, ['errorMessage']),
   };

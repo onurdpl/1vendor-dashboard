@@ -3497,6 +3497,7 @@ describe('shipping execution foundation', () => {
           trackingNumber: 'RET-TRACK-1',
           trackingUrl: 'https://tracking.example/RET-TRACK-1',
           labelUrl: 'https://labels.example/return.pdf',
+          carrierName: 'Sürat Kargo',
         },
       },
     });
@@ -3506,7 +3507,9 @@ describe('shipping execution foundation', () => {
         reverseFulfillmentOrderIdPresent: true,
         reverseLineItemIdsPresent: true,
         reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        trackingAccepted: true,
         labelAccepted: true,
+        returnedCarrierName: 'Sürat Kargo',
         userErrors: [],
         source: 'shopify_admin',
       }),
@@ -3527,14 +3530,19 @@ describe('shipping execution foundation', () => {
       trackingNumber: 'RET-TRACK-1',
       trackingUrl: 'https://tracking.example/RET-TRACK-1',
       labelUrl: 'https://labels.example/return.pdf',
+      carrierName: 'Sürat Kargo',
     });
     expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
       status: 'success',
       mutationUsed: 'reverseDeliveryCreateWithShipping',
+      shopifyReturnIdPresent: true,
       reverseFulfillmentOrderIdPresent: true,
       reverseLineItemIdsPresent: true,
       reverseDeliveryIdPresent: true,
+      trackingAccepted: true,
       labelAccepted: true,
+      returnedCarrierName: 'Sürat Kargo',
+      carrierNamePresent: true,
     });
   });
 
@@ -3551,6 +3559,7 @@ describe('shipping execution foundation', () => {
           returnOrderId: 'OTO-ORDER-1-R1',
           trackingNumber: 'RET-TRACK-1',
           labelUrl: 'https://labels.example/return.pdf',
+          carrierName: 'Sürat Kargo',
         },
       },
     });
@@ -3568,7 +3577,9 @@ describe('shipping execution foundation', () => {
           reverseFulfillmentOrderIdPresent: true,
           reverseLineItemIdsPresent: true,
           reverseDeliveryId: null,
+          trackingAccepted: false,
           labelAccepted: false,
+          returnedCarrierName: null,
           userErrors: [{ field: ['labelInput', 'fileUrl'], message: 'File URL is invalid.' }],
           source: 'shopify_admin',
         }),
@@ -3578,8 +3589,10 @@ describe('shipping execution foundation', () => {
     expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
       status: 'failed',
       mutationUsed: 'reverseDeliveryShippingUpdate',
-      skippedReason: 'staged_upload_required_or_unknown',
+      skippedReason: 'staged_upload_required_or_external_file_url_rejected',
+      trackingAccepted: false,
       labelAccepted: false,
+      carrierNamePresent: true,
       shopifyUserErrors: [{ field: ['labelInput', 'fileUrl'], message: 'File URL is invalid.' }],
     });
     expect(JSON.stringify(prismaMock.shipmentExecution.update.mock.calls)).not.toContain('Authorization');

@@ -221,7 +221,11 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
     mutationUsed: readString(probe, ['mutationUsed']),
     shopifyUserErrors: readShopifyUserErrors(probe.shopifyUserErrors),
     reverseDeliveryIdPresent: readBoolean(probe, ['reverseDeliveryIdPresent']),
+    shopifyReturnIdPresent: readBoolean(probe, ['shopifyReturnIdPresent']),
+    trackingAccepted: readBoolean(probe, ['trackingAccepted']),
     labelAccepted: readBoolean(probe, ['labelAccepted']),
+    returnedCarrierName: readString(probe, ['returnedCarrierName']),
+    carrierNamePresent: readBoolean(probe, ['carrierNamePresent']),
     skippedReason: readString(probe, ['skippedReason']),
     errorMessage: readString(probe, ['errorMessage']),
   };
@@ -2792,7 +2796,11 @@ function buildShopifyReturnLabelUploadProbeSnapshot(input: {
   mutationUsed?: string | null;
   shopifyUserErrors?: Array<{ field: string[]; message: string }>;
   reverseDeliveryIdPresent?: boolean;
+  shopifyReturnIdPresent?: boolean;
+  trackingAccepted?: boolean;
   labelAccepted?: boolean;
+  returnedCarrierName?: string | null;
+  carrierNamePresent?: boolean;
   skippedReason?: string | null;
   errorMessage?: string | null;
 }) {
@@ -2804,7 +2812,11 @@ function buildShopifyReturnLabelUploadProbeSnapshot(input: {
     mutationUsed: input.mutationUsed ?? null,
     shopifyUserErrors: input.shopifyUserErrors ?? [],
     reverseDeliveryIdPresent: Boolean(input.reverseDeliveryIdPresent),
+    shopifyReturnIdPresent: Boolean(input.shopifyReturnIdPresent),
+    trackingAccepted: Boolean(input.trackingAccepted),
     labelAccepted: Boolean(input.labelAccepted),
+    returnedCarrierName: input.returnedCarrierName ?? null,
+    carrierNamePresent: Boolean(input.carrierNamePresent),
     skippedReason: input.skippedReason ?? null,
     errorMessage: input.errorMessage ?? null,
   };
@@ -3502,6 +3514,7 @@ export async function probeShopifyReturnLabelUpload(
     readString(returnShipment, ['barcode', 'returnBarcode']);
   const returnTrackingUrl = readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']);
   const returnLabelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+  const returnCarrierName = readString(returnShipment, ['carrierName', 'returnCarrierName']);
 
   const blocked = async (skippedReason: string, errorMessage: string) =>
     persistShopifyReturnLabelUploadProbe(
@@ -3554,19 +3567,24 @@ export async function probeShopifyReturnLabelUpload(
       trackingNumber: returnTrackingNumber,
       trackingUrl: returnTrackingUrl,
       labelUrl: returnLabelUrl,
+      carrierName: returnCarrierName,
     });
     return persistShopifyReturnLabelUploadProbe(
       existing,
       buildShopifyReturnLabelUploadProbeSnapshot({
         status: result.labelAccepted ? 'success' : 'failed',
         attemptedAt,
+        shopifyReturnIdPresent: Boolean(returnGid),
         reverseFulfillmentOrderIdPresent: result.reverseFulfillmentOrderIdPresent,
         reverseLineItemIdsPresent: result.reverseLineItemIdsPresent,
         mutationUsed: result.mutationUsed,
         shopifyUserErrors: result.userErrors,
         reverseDeliveryIdPresent: Boolean(result.reverseDeliveryId),
+        trackingAccepted: result.trackingAccepted,
         labelAccepted: result.labelAccepted,
-        skippedReason: result.labelAccepted ? null : 'staged_upload_required_or_unknown',
+        returnedCarrierName: result.returnedCarrierName,
+        carrierNamePresent: Boolean(returnCarrierName),
+        skippedReason: result.labelAccepted ? null : 'staged_upload_required_or_external_file_url_rejected',
         errorMessage: result.userErrors.map((error) => error.message).filter(Boolean).join('; ') || null,
       }),
     );

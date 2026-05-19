@@ -2762,9 +2762,18 @@ export function OrderDetailPage() {
                                     ) : null}
                                     {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
                                       <>
+                                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
+                                          <span>Shopify return label attached</span>
+                                        ) : null}
                                         <div className="summary-row">
                                           <span>Status</span>
                                           <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Shopify return id</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyReturnIdPresent ? 'present' : 'missing'}
+                                          </strong>
                                         </div>
                                         <div className="summary-row">
                                           <span>Mutation</span>
@@ -2789,9 +2798,19 @@ export function OrderDetailPage() {
                                           </strong>
                                         </div>
                                         <div className="summary-row">
+                                          <span>Tracking accepted</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? 'yes' : 'no'}</strong>
+                                        </div>
+                                        <div className="summary-row">
                                           <span>Label accepted</span>
                                           <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
                                         </div>
+                                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.returnedCarrierName ? (
+                                          <div className="summary-row">
+                                            <span>Shopify carrier</span>
+                                            <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.returnedCarrierName}</strong>
+                                          </div>
+                                        ) : null}
                                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
                                           <div className="summary-row">
                                             <span>Skipped reason</span>
@@ -3671,9 +3690,18 @@ export function OrderDetailPage() {
                         ) : null}
                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
                           <>
+                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
+                              <span>Shopify return label attached</span>
+                            ) : null}
                             <div className="summary-row">
                               <span>Status</span>
                               <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Shopify return id</span>
+                              <strong>
+                                {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyReturnIdPresent ? 'present' : 'missing'}
+                              </strong>
                             </div>
                             <div className="summary-row">
                               <span>Mutation</span>
@@ -3698,9 +3726,19 @@ export function OrderDetailPage() {
                               </strong>
                             </div>
                             <div className="summary-row">
+                              <span>Tracking accepted</span>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Label accepted</span>
                               <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
                             </div>
+                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.returnedCarrierName ? (
+                              <div className="summary-row">
+                                <span>Shopify carrier</span>
+                                <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.returnedCarrierName}</strong>
+                              </div>
+                            ) : null}
                             {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
                               <div className="summary-row">
                                 <span>Skipped reason</span>
