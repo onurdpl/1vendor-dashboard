@@ -1879,6 +1879,58 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText('Try OTO return label created.')).length).toBeGreaterThan(0);
   });
 
+  it('does not describe unfinalized Try OTO return requests as created return shipments', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId', 'trackingNumber'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText(/Return request created \/ awaiting provider shipment/)).toBeInTheDocument();
+    expect(screen.getByText('Return request created. Provider shipment and label finalization are pending or unconfirmed.')).toBeInTheDocument();
+    expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
+  });
+
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,

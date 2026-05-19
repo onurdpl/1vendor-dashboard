@@ -122,6 +122,27 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
+  if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
+    return 'Return request created / awaiting provider shipment';
+  }
+
+  if (returnShipment.status) {
+    return toTitleCaseLabel(returnShipment.status);
+  }
+
+  return 'Return shipment created';
+}
+
+function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
+  return (
+    returnShipment.labelRetrievalNote ??
+    (returnShipment.finalized
+      ? 'Return shipment created. Label PDF is not available yet.'
+      : 'Return request created. Provider shipment and label finalization are pending or unconfirmed.')
+  );
+}
+
 function isInternalShipmentReference(value?: string | null) {
   const normalized = value?.trim().toLowerCase() ?? '';
   return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
@@ -962,18 +983,23 @@ export function OrderDetailPage() {
     void createReturnShipmentLabelMutation(visibleShipmentExecution.id)
       .then((shipment) => {
         const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
+        const returnFinalized = Boolean(shipment.returnShipment?.finalized || shipment.returnShipment?.labelRetrievable);
         setShipmentActionState({
           tone: hasReturnLabel ? 'success' : 'info',
           message: hasReturnLabel
             ? 'Try OTO return label created.'
-            : 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.',
+            : returnFinalized
+              ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
+              : 'Try OTO return request created. Provider shipment and label finalization are still pending or unconfirmed.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
         showFeedback(
           hasReturnLabel
             ? 'Try OTO return label created.'
-            : 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.',
+            : returnFinalized
+              ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
+              : 'Try OTO return request created. Provider shipment and label finalization are still pending or unconfirmed.',
           hasReturnLabel ? 'success' : 'info',
         );
         void refetch();
@@ -2137,9 +2163,7 @@ export function OrderDetailPage() {
                             {visibleShipmentExecution.returnShipment ? (
                               <>
                                 <span>
-                                  {visibleShipmentExecution.returnShipment.status
-                                    ? toTitleCaseLabel(visibleShipmentExecution.returnShipment.status)
-                                    : 'Return shipment created'}
+                                  {getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}
                                   {visibleShipmentExecution.returnShipment.returnOrderId
                                     ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}`
                                     : ''}
@@ -2166,11 +2190,61 @@ export function OrderDetailPage() {
                                     Open return label PDF
                                   </a>
                                 ) : (
-                                  <span className="muted">
-                                    {visibleShipmentExecution.returnShipment.labelRetrievalNote ??
-                                      'Return shipment created. Label PDF is not available yet.'}
-                                  </span>
+                                  <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                                 )}
+                                {isAdmin && visibleShipmentExecution.returnShipment.diagnostics ? (
+                                  <div className="provider-response-summary" aria-label="Try OTO return finalization diagnostics">
+                                    <div className="provider-response-heading">
+                                      <strong>Try OTO return finalization</strong>
+                                      <span>Admin only</span>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Endpoint</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>HTTP</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.httpStatus ?? '—'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Response keys</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.responseKeys.length
+                                          ? visibleShipmentExecution.returnShipment.diagnostics.responseKeys.join(', ')
+                                          : '—'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return provider id</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnProviderIdPresent ? 'present' : 'missing'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return tracking/barcode</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnTrackingPresent ||
+                                        visibleShipmentExecution.returnShipment.diagnostics.returnBarcodePresent
+                                          ? 'present'
+                                          : 'missing'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return finalized</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Label retrievable</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Status source</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerStatusSource ?? '—'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Provider message</span>
+                                      <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
+                                    </div>
+                                  </div>
+                                ) : null}
                                 {isAdmin ? (
                                   <div className="provider-response-summary" aria-label="Shopify return label upload probe">
                                     <div className="provider-response-heading">
@@ -2763,6 +2837,78 @@ export function OrderDetailPage() {
                         <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
                           Open label PDF
                         </a>
+                      </div>
+                    ) : null}
+                    {shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                      <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
+                        <strong>Try OTO return label</strong>
+                        <span>
+                          {getTryOtoReturnStatusLabel(shipmentExecution.returnShipment)}
+                          {shipmentExecution.returnShipment.returnOrderId ? ` · ${shipmentExecution.returnShipment.returnOrderId}` : ''}
+                        </span>
+                        {shipmentExecution.returnShipment.trackingNumber ? (
+                          <div className="summary-row">
+                            <span>Return tracking</span>
+                            <strong>{shipmentExecution.returnShipment.trackingNumber}</strong>
+                          </div>
+                        ) : null}
+                        {shipmentExecution.returnShipment.barcode ? (
+                          <div className="summary-row">
+                            <span>Return barcode</span>
+                            <strong>{shipmentExecution.returnShipment.barcode}</strong>
+                          </div>
+                        ) : null}
+                        {shipmentExecution.returnShipment.labelUrl ? (
+                          <a className="inline-link" href={shipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
+                            Open return label PDF
+                          </a>
+                        ) : (
+                          <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
+                        )}
+                      </div>
+                    ) : null}
+                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment?.diagnostics ? (
+                      <div className="provider-response-summary" aria-label="Try OTO return finalization diagnostics">
+                        <div className="provider-response-heading">
+                          <strong>Try OTO return finalization</strong>
+                          <span>Admin only</span>
+                        </div>
+                        <div className="summary-row">
+                          <span>Endpoint</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>HTTP</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.httpStatus ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Response keys</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.responseKeys.length
+                              ? shipmentExecution.returnShipment.diagnostics.responseKeys.join(', ')
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return provider id</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.returnProviderIdPresent ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return finalized</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Label retrievable</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Status source</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.providerStatusSource ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Provider message</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
+                        </div>
                       </div>
                     ) : null}
                     {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (

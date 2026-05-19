@@ -175,6 +175,21 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readNumber(value: Record<string, unknown> | null, keys: string[]) {
+  if (!value) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const numeric = Number(value[key]);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return null;
+}
+
 function readStringFieldArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -212,6 +227,29 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
   };
 }
 
+function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
+  const diagnostics = isRecord(returnShipment.diagnostics) ? returnShipment.diagnostics : null;
+  if (!diagnostics) {
+    return null;
+  }
+
+  return {
+    endpoint: readString(diagnostics, ['endpoint']),
+    httpStatus: readNumber(diagnostics, ['httpStatus']),
+    requestKeys: readStringArray(diagnostics.requestKeys),
+    responseKeys: readStringArray(diagnostics.responseKeys),
+    returnProviderIdPresent: readBoolean(diagnostics, ['returnProviderIdPresent']),
+    returnTrackingPresent: readBoolean(diagnostics, ['returnTrackingPresent']),
+    returnBarcodePresent: readBoolean(diagnostics, ['returnBarcodePresent']),
+    returnStatus: readString(diagnostics, ['returnStatus']),
+    labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
+    providerMessage: readString(diagnostics, ['providerMessage']),
+    returnFinalized: readBoolean(diagnostics, ['returnFinalized']),
+    returnLabelRetrievable: readBoolean(diagnostics, ['returnLabelRetrievable']),
+    providerStatusSource: readString(diagnostics, ['providerStatusSource']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecutionDto['returnShipment'] {
   const returnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
   if (!returnShipment) {
@@ -235,6 +273,10 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
     labelPresent: Boolean(labelUrl),
     labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
     labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+    finalized: readBoolean(returnShipment, ['finalized']),
+    labelRetrievable: readBoolean(returnShipment, ['labelRetrievable']),
+    providerStatusSource: readString(returnShipment, ['providerStatusSource']),
+    diagnostics: mapTryOtoReturnDiagnostics(returnShipment),
     shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }
@@ -2521,6 +2563,10 @@ export async function createTryOtoReturnShipmentLabel(
     items: fallbackItems,
     pickupLocationCode: readString(requestSnapshot, ['pickupLocationCode']),
   });
+  const returnFinalized = readBoolean(result.responseSnapshot, ['returnFinalized']) || Boolean(result.returnLabelUrl);
+  const returnLabelRetrievable = readBoolean(result.responseSnapshot, ['returnLabelRetrievable']) || Boolean(result.returnLabelUrl);
+  const returnProviderStatusSource = readString(result.responseSnapshot, ['returnProviderStatusSource']) ?? 'createReturnShipment';
+  const returnStatus = result.returnStatus ?? (returnFinalized ? 'created' : 'request_created');
   const returnShipment = {
     provider: 'try_oto',
     endpoint: '/rest/v2/createReturnShipment',
@@ -2529,27 +2575,38 @@ export async function createTryOtoReturnShipmentLabel(
     trackingUrl: result.returnTrackingUrl,
     labelUrl: result.returnLabelUrl,
     barcode: result.returnBarcode,
-    status: result.returnStatus,
+    status: returnStatus,
     createdAt: new Date().toISOString(),
     requestKeys: readStringArray(result.responseSnapshot.requestKeys),
     responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
     trackingPresent: Boolean(result.returnTrackingNumber),
     labelPresent: Boolean(result.returnLabelUrl),
-    labelRetrievalConfirmed: Boolean(result.returnLabelUrl),
+    labelRetrievalConfirmed: returnLabelRetrievable,
     labelRetrievalNote:
       readString(result.responseSnapshot, ['returnLabelRetrievalNote']) ??
-      (result.returnLabelUrl ? null : 'Return label is processing or not returned by Try OTO yet.'),
+      (result.returnLabelUrl ? null : 'Return request created. Provider shipment and label finalization are pending or unconfirmed.'),
+    finalized: returnFinalized,
+    labelRetrievable: returnLabelRetrievable,
+    providerStatusSource: returnProviderStatusSource,
     diagnostics: {
       endpoint: '/rest/v2/createReturnShipment',
       httpStatus: typeof result.responseSnapshot.status === 'number' ? result.responseSnapshot.status : null,
       responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
       requestKeys: readStringArray(result.responseSnapshot.requestKeys),
+      returnProviderIdPresent: readBoolean(result.responseSnapshot, ['returnProviderIdPresent', 'returnOrderIdPresent']),
       returnTrackingPresent: Boolean(result.returnTrackingNumber),
+      returnBarcodePresent: Boolean(result.returnBarcode),
+      returnStatus,
       returnLabelPresent: Boolean(result.returnLabelUrl),
+      labelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
+      providerMessage: readString(result.responseSnapshot, ['providerError']),
       returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'createReturnShipment',
       createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
       printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
+      returnFinalized,
+      returnLabelRetrievable,
+      providerStatusSource: returnProviderStatusSource,
     },
   };
   const mergedSnapshot = appendTimelineEvent(
@@ -2559,8 +2616,8 @@ export async function createTryOtoReturnShipmentLabel(
       lastProviderResponseAt: new Date().toISOString(),
     },
     {
-      label: 'Try OTO return shipment created',
-      status: result.returnStatus ?? 'created',
+      label: returnFinalized ? 'Try OTO return shipment created' : 'Try OTO return request created',
+      status: returnStatus,
     },
   );
 

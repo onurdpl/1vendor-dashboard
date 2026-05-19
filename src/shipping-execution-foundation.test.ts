@@ -2391,6 +2391,76 @@ describe('shipping execution foundation', () => {
     expect(result.returnShipment?.labelUrl).toBe('https://labels.example/return.pdf');
   });
 
+  it('marks Try OTO return creation without label as request created and unfinalized', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'OTO-ORDER-1-R1',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnTrackingUrl: null,
+        returnLabelUrl: null,
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: null,
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['returnOrderId', 'trackingNumber'],
+          requestKeys: ['items', 'orderId', 'pickupLocationCode'],
+          returnOrderIdPresent: true,
+          returnTrackingPresent: true,
+          returnBarcodePresent: true,
+          returnLabelPresent: false,
+          returnFinalized: false,
+          returnLabelRetrievable: false,
+          returnProviderStatusSource: 'createReturnShipment',
+          returnLabelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({ fulfillmentStatus: 'Fulfilled' }));
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result.returnShipment).toMatchObject({
+      returnOrderId: 'OTO-ORDER-1-R1',
+      trackingNumber: 'RET-TRACK-1',
+      labelUrl: null,
+      status: 'request_created',
+      finalized: false,
+      labelRetrievable: false,
+      providerStatusSource: 'createReturnShipment',
+      labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+    });
+    expect(result.returnShipment?.diagnostics).toMatchObject({
+      httpStatus: 200,
+      returnProviderIdPresent: true,
+      returnTrackingPresent: true,
+      returnBarcodePresent: true,
+      returnFinalized: false,
+      returnLabelRetrievable: false,
+    });
+  });
+
   it('blocks Shopify return label upload probe when Shopify return id is missing', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',

@@ -54,6 +54,24 @@ export type ShipmentExecution = {
     labelPresent: boolean;
     labelRetrievalConfirmed: boolean;
     labelRetrievalNote: string | null;
+    finalized?: boolean;
+    labelRetrievable?: boolean;
+    providerStatusSource?: string | null;
+    diagnostics?: {
+      endpoint: string | null;
+      httpStatus: number | null;
+      requestKeys: string[];
+      responseKeys: string[];
+      returnProviderIdPresent: boolean;
+      returnTrackingPresent: boolean;
+      returnBarcodePresent: boolean;
+      returnStatus: string | null;
+      labelFieldPresent: boolean;
+      providerMessage: string | null;
+      returnFinalized: boolean;
+      returnLabelRetrievable: boolean;
+      providerStatusSource: string | null;
+    } | null;
     shopifyReturnLabelUploadProbe?: {
       status: string;
       attemptedAt: string | null;

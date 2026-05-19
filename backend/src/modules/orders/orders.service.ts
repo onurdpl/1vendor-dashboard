@@ -106,6 +106,21 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readNumber(value: Record<string, unknown> | null, keys: string[]) {
+  if (!value) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const numeric = Number(value[key]);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return null;
+}
+
 function readStringFieldArray(value: unknown) {
   if (!Array.isArray(value)) {
     return [];
@@ -170,6 +185,29 @@ function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown
   };
 }
 
+function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
+  const diagnostics = readRecord(returnShipment, 'diagnostics');
+  if (!diagnostics) {
+    return null;
+  }
+
+  return {
+    endpoint: readString(diagnostics, ['endpoint']),
+    httpStatus: readNumber(diagnostics, ['httpStatus']),
+    requestKeys: readStringArray(diagnostics.requestKeys),
+    responseKeys: readStringArray(diagnostics.responseKeys),
+    returnProviderIdPresent: readBoolean(diagnostics, ['returnProviderIdPresent']),
+    returnTrackingPresent: readBoolean(diagnostics, ['returnTrackingPresent']),
+    returnBarcodePresent: readBoolean(diagnostics, ['returnBarcodePresent']),
+    returnStatus: readString(diagnostics, ['returnStatus']),
+    labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
+    providerMessage: readString(diagnostics, ['providerMessage']),
+    returnFinalized: readBoolean(diagnostics, ['returnFinalized']),
+    returnLabelRetrievable: readBoolean(diagnostics, ['returnLabelRetrievable']),
+    providerStatusSource: readString(diagnostics, ['providerStatusSource']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipmentExecutionDto['returnShipment'] {
   const returnShipment = readRecord(snapshot, 'returnShipment');
   if (!returnShipment) {
@@ -193,6 +231,10 @@ function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipm
     labelPresent: Boolean(labelUrl),
     labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
     labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+    finalized: readBoolean(returnShipment, ['finalized']),
+    labelRetrievable: readBoolean(returnShipment, ['labelRetrievable']),
+    providerStatusSource: readString(returnShipment, ['providerStatusSource']),
+    diagnostics: mapTryOtoReturnDiagnostics(returnShipment),
     shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }

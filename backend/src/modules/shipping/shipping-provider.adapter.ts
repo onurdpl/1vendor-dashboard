@@ -1495,14 +1495,17 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const returnLabelUrl = readTryOtoLabelUrl(body);
     const returnTrackingNumber = readTryOtoTrackingNumber(body);
     const returnBarcode = readTryOtoBarcode(body);
+    const returnOrderId = readTryOtoReturnOrderId(body);
+    const returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
+    const returnFinalized = Boolean(returnLabelUrl);
 
     return {
-      returnOrderId: readTryOtoReturnOrderId(body),
+      returnOrderId,
       returnTrackingNumber,
       returnTrackingUrl: readString(body, ['trackingUrl', 'trackingURL', 'brandedTrackingURL']),
       returnLabelUrl,
       returnBarcode,
-      returnStatus: readString(body, ['status', 'shipmentStatus', 'dcStatus']),
+      returnStatus,
       responseSnapshot: {
         ...result.snapshot,
         provider: 'try_oto',
@@ -1512,10 +1515,15 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         itemCount: items.length,
         orderIdPresent: true,
         pickupLocationCodePresent: Boolean(input.pickupLocationCode),
-        returnOrderIdPresent: Boolean(readTryOtoReturnOrderId(body)),
+        returnProviderIdPresent: Boolean(returnOrderId),
+        returnOrderIdPresent: Boolean(returnOrderId),
         returnTrackingPresent: Boolean(returnTrackingNumber),
         returnBarcodePresent: Boolean(returnBarcode),
         returnLabelPresent: Boolean(returnLabelUrl),
+        returnStatus,
+        returnFinalized,
+        returnLabelRetrievable: Boolean(returnLabelUrl),
+        returnProviderStatusSource: 'createReturnShipment',
         returnLabelRetrievalConfirmed: Boolean(returnLabelUrl),
         returnLabelSourceChecked: 'createReturnShipment',
         createReturnShipmentLabelFieldPresent: Boolean(returnLabelUrl),
