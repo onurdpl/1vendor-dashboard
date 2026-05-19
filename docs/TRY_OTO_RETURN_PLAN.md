@@ -77,7 +77,8 @@ Current runtime safety stance:
 - UI wording should say “Return request created / awaiting provider shipment” when finalization is unconfirmed.
 - Admin diagnostics should show whether `deliveryOptionId` was sent, whether return option lookup was called, and whether a return finalization endpoint is implemented/confirmed.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnDetails` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes return label/AWB/PDF URL fields after request creation.
-- `getReturnLink` exists in the collection, but its exact response semantics for label/PDF retrieval are still **Unknown**; do not use it for runtime label display until sandbox evidence confirms what it returns.
+- Admin-only diagnostics may call documented `POST /rest/v2/getReturnLink` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes a return finalization link, label/AWB/PDF URL, or next-action URL.
+- `getReturnLink` exact response semantics for label/PDF retrieval are still **Unknown**. Runtime may store a clear label/print URL if a label/AWB/PDF-like field is returned, but generic action/customer/return links must remain diagnostic-only until Try OTO confirms they are API-safe label URLs.
 
 ### Create Return Shipment
 

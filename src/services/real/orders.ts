@@ -560,6 +560,13 @@ export async function probeTryOtoReturnDetails(shipmentExecutionId: string) {
   );
 }
 
+export async function probeTryOtoReturnLink(shipmentExecutionId: string) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/admin/shipments/${shipmentExecutionId}/probe-try-oto-return-link`,
+    {},
+  );
+}
+
 export async function getShippingProviderDiagnostics(
   provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},

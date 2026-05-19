@@ -238,6 +238,33 @@ function mapTryOtoReturnDetailsProbe(returnShipment: Record<string, unknown>) {
   };
 }
 
+function mapTryOtoReturnLinkProbe(returnShipment: Record<string, unknown>) {
+  const probe = readRecord(returnShipment, 'linkProbe');
+  if (!probe) {
+    return null;
+  }
+
+  return {
+    status: readString(probe, ['status']) ?? 'not_started',
+    attemptedAt: readString(probe, ['attemptedAt']),
+    endpoint: readString(probe, ['endpoint']),
+    httpStatus: readNumber(probe, ['httpStatus']),
+    responseKeys: readStringArray(probe.responseKeys),
+    nestedKeys: readStringArray(probe.nestedKeys),
+    labelLikeFieldsPresent: readBoolean(probe, ['labelLikeFieldsPresent']),
+    awbLikeFieldsPresent: readBoolean(probe, ['awbLikeFieldsPresent']),
+    pdfLikeFieldsPresent: readBoolean(probe, ['pdfLikeFieldsPresent']),
+    urlLikeFieldsPresent: readBoolean(probe, ['urlLikeFieldsPresent']),
+    actionUrlPresent: readBoolean(probe, ['actionUrlPresent']),
+    trackingPresent: readBoolean(probe, ['trackingPresent']),
+    barcodePresent: readBoolean(probe, ['barcodePresent']),
+    providerStatus: readString(probe, ['providerStatus']),
+    labelUrlPresent: readBoolean(probe, ['labelUrlPresent']),
+    providerMessage: readString(probe, ['providerMessage']),
+    errorMessage: readString(probe, ['errorMessage']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipmentExecutionDto['returnShipment'] {
   const returnShipment = readRecord(snapshot, 'returnShipment');
   if (!returnShipment) {
@@ -266,6 +293,7 @@ function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipm
     providerStatusSource: readString(returnShipment, ['providerStatusSource']),
     diagnostics: mapTryOtoReturnDiagnostics(returnShipment),
     detailsProbe: mapTryOtoReturnDetailsProbe(returnShipment),
+    linkProbe: mapTryOtoReturnLinkProbe(returnShipment),
     shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }

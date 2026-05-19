@@ -8,6 +8,7 @@ export {
   listOrders,
   probeShopifyReturnLabelUpload,
   probeTryOtoReturnDetails,
+  probeTryOtoReturnLink,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,

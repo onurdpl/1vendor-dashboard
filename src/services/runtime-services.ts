@@ -659,6 +659,76 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async probeTryOtoReturnLink(shipmentExecutionId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.probeTryOtoReturnLink(shipmentExecutionId);
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-try_oto-/, ''),
+        vendorId: getCurrentVendorId(),
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'try_oto' as const,
+        providerShipmentId: `mock-oto-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `OTO-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: 'https://example.test/try-oto-label.pdf',
+        shipmentStatus: 'delivered' as const,
+        desi: '1.00',
+        cargoIntegrationId: null,
+        warehouseId: 'pickup-location',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        barcode: `BAR-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        returnShipment: {
+          provider: 'try_oto' as const,
+          returnOrderId: `mock-return-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+          trackingNumber: `RET-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+          trackingUrl: null,
+          labelUrl: 'https://example.test/try-oto-return-label.pdf',
+          barcode: `RET-BAR-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+          status: 'created',
+          createdAt: submittedAt,
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId'],
+          trackingPresent: true,
+          labelPresent: true,
+          labelRetrievalConfirmed: true,
+          labelRetrievalNote: null,
+          finalized: true,
+          labelRetrievable: true,
+          providerStatusSource: 'getReturnLink',
+          diagnostics: null,
+          linkProbe: {
+            status: 'success',
+            attemptedAt: submittedAt,
+            endpoint: '/rest/v2/getReturnLink',
+            httpStatus: 200,
+            responseKeys: ['data'],
+            nestedKeys: ['data.printAWBURL'],
+            labelLikeFieldsPresent: true,
+            awbLikeFieldsPresent: true,
+            pdfLikeFieldsPresent: false,
+            urlLikeFieldsPresent: true,
+            actionUrlPresent: false,
+            trackingPresent: false,
+            barcodePresent: false,
+            providerStatus: null,
+            labelUrlPresent: true,
+            providerMessage: null,
+            errorMessage: null,
+          },
+        },
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator') {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics(provider, { vendorId });

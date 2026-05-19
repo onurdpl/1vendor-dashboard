@@ -144,6 +144,25 @@ export type OrderShipmentExecutionDto = {
       labelUrlPresent: boolean;
       errorMessage: string | null;
     } | null;
+    linkProbe: {
+      status: string;
+      attemptedAt: string | null;
+      endpoint: string | null;
+      httpStatus: number | null;
+      responseKeys: string[];
+      nestedKeys: string[];
+      labelLikeFieldsPresent: boolean;
+      awbLikeFieldsPresent: boolean;
+      pdfLikeFieldsPresent: boolean;
+      urlLikeFieldsPresent: boolean;
+      actionUrlPresent: boolean;
+      trackingPresent: boolean;
+      barcodePresent: boolean;
+      providerStatus: string | null;
+      labelUrlPresent: boolean;
+      providerMessage: string | null;
+      errorMessage: string | null;
+    } | null;
     shopifyReturnLabelUploadProbe: {
       status: string;
       attemptedAt: string | null;

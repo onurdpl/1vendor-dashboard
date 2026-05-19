@@ -69,6 +69,7 @@ export interface ShippingProviderAdapter {
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
   createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
   probeReturnDetails?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
+  probeReturnLink?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -1651,6 +1652,54 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         barcodePresent: Boolean(barcode),
         labelUrlPresent: Boolean(labelUrl),
         providerStatus,
+      },
+    };
+  }
+
+  async probeReturnLink(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult> {
+    const trimmedOrderId = orderId.trim();
+    if (!trimmedOrderId) {
+      throw new ShippingProviderExecutionError('Try OTO getReturnLink requires a return order id.', {
+        provider: 'try_oto',
+        operation: 'getReturnLink',
+        endpoint: '/rest/v2/getReturnLink',
+        orderIdPresent: false,
+      });
+    }
+
+    const accessToken = await this.refreshAccessToken();
+    const result = await this.postJson('/rest/v2/getReturnLink', { orderId: trimmedOrderId }, accessToken, 'getReturnLink');
+    const body = result.body;
+    const nestedKeys = collectNestedKeys(body);
+    const labelUrl =
+      findNestedStringByKeyPattern(body, /(?:print.*(?:awb|label)|(?:awb|label).*url|pdf|fileUrl|file_url)/i) ??
+      readTryOtoLabelUrl(body);
+    const trackingNumber = findNestedStringByKeyPattern(body, /^(?:trackingNumber|dcTrackingNumber|tracking_number|dc_tracking_number)$/i);
+    const barcode = findNestedStringByKeyPattern(body, /(?:barcode|barCode|awbNumber|awb_number)/i);
+    const providerStatus = findNestedStringByKeyPattern(body, /^(?:status|shipmentStatus|dcStatus|returnStatus)$/i);
+
+    return {
+      returnLabelUrl: labelUrl,
+      returnTrackingNumber: trackingNumber,
+      returnBarcode: barcode,
+      returnStatus: providerStatus,
+      responseSnapshot: {
+        ...result.snapshot,
+        provider: 'try_oto',
+        operation: 'getReturnLink',
+        endpoint: '/rest/v2/getReturnLink',
+        requestKeys: ['orderId'],
+        nestedKeys,
+        labelLikeFieldsPresent: hasNestedKeyPattern(body, /(?:label|printLabel|printAWB|fileUrl|file_url)/i),
+        awbLikeFieldsPresent: hasNestedKeyPattern(body, /awb/i),
+        pdfLikeFieldsPresent: hasNestedKeyPattern(body, /pdf/i),
+        urlLikeFieldsPresent: hasNestedKeyPattern(body, /url|link/i),
+        actionUrlPresent: hasNestedKeyPattern(body, /url|link/i) && !Boolean(labelUrl),
+        trackingPresent: Boolean(trackingNumber),
+        barcodePresent: Boolean(barcode),
+        labelUrlPresent: Boolean(labelUrl),
+        providerStatus,
+        providerMessage: readSafeProviderError(body),
       },
     };
   }

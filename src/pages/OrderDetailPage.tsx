@@ -12,6 +12,7 @@ import {
   getVendorShippingConfig,
   probeShopifyReturnLabelUpload,
   probeTryOtoReturnDetails,
+  probeTryOtoReturnLink,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
@@ -678,6 +679,12 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: probeTryOtoReturnLinkMutation, isPending: isProbingTryOtoReturnLink } = useMutationAction(
+    async (shipmentExecutionId: string) => probeTryOtoReturnLink(shipmentExecutionId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -1107,6 +1114,46 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-details`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleProbeTryOtoReturnLink() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Probing Try OTO return link...',
+      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
+    });
+
+    void probeTryOtoReturnLinkMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const probe = shipment.returnShipment?.linkProbe;
+        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
+        const message = foundLabel
+          ? 'Try OTO return label found in return link response.'
+          : probe?.errorMessage || 'Return label is not available from getReturnLink yet.';
+        setShipmentActionState({
+          tone: foundLabel ? 'success' : 'info',
+          message,
+          shipment,
+          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
+        });
+        showFeedback(message, foundLabel ? 'success' : 'info');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return link probe could not be run.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2260,6 +2307,14 @@ export function OrderDetailPage() {
                                       >
                                         {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
                                       </button>
+                                      <button
+                                        type="button"
+                                        className="button button-secondary"
+                                        onClick={handleProbeTryOtoReturnLink}
+                                        disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnLink}
+                                      >
+                                        {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
+                                      </button>
                                     </div>
                                     {!canProbeTryOtoReturnDetails ? (
                                       <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
@@ -2282,6 +2337,22 @@ export function OrderDetailPage() {
                                         visibleShipmentExecution.returnShipment.detailsProbe.barcodePresent
                                           ? 'present'
                                           : 'missing'}
+                                      </span>
+                                    ) : null}
+                                    {visibleShipmentExecution.returnShipment.linkProbe ? (
+                                      <span>
+                                        Last link probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.linkProbe.attemptedAt ?? undefined)}
+                                        {' · '}
+                                        status {visibleShipmentExecution.returnShipment.linkProbe.providerStatus ?? '—'}
+                                        {' · '}
+                                        label/pdf/url{' '}
+                                        {visibleShipmentExecution.returnShipment.linkProbe.labelUrlPresent ||
+                                        visibleShipmentExecution.returnShipment.linkProbe.pdfLikeFieldsPresent ||
+                                        visibleShipmentExecution.returnShipment.linkProbe.urlLikeFieldsPresent
+                                          ? 'present'
+                                          : 'missing'}
+                                        {' · '}
+                                        action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
                                       </span>
                                     ) : null}
                                   </div>
@@ -3064,6 +3135,14 @@ export function OrderDetailPage() {
                               >
                                 {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
                               </button>
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={handleProbeTryOtoReturnLink}
+                                disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnLink}
+                              >
+                                {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
+                              </button>
                             </div>
                             {!canProbeTryOtoReturnDetails ? (
                               <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
@@ -3086,6 +3165,22 @@ export function OrderDetailPage() {
                                 shipmentExecution.returnShipment.detailsProbe.barcodePresent
                                   ? 'present'
                                   : 'missing'}
+                              </span>
+                            ) : null}
+                            {shipmentExecution.returnShipment.linkProbe ? (
+                              <span>
+                                Last link probe: {formatOptionalDate(shipmentExecution.returnShipment.linkProbe.attemptedAt ?? undefined)}
+                                {' · '}
+                                status {shipmentExecution.returnShipment.linkProbe.providerStatus ?? '—'}
+                                {' · '}
+                                label/pdf/url{' '}
+                                {shipmentExecution.returnShipment.linkProbe.labelUrlPresent ||
+                                shipmentExecution.returnShipment.linkProbe.pdfLikeFieldsPresent ||
+                                shipmentExecution.returnShipment.linkProbe.urlLikeFieldsPresent
+                                  ? 'present'
+                                  : 'missing'}
+                                {' · '}
+                                action URL {shipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
                               </span>
                             ) : null}
                           </div>
