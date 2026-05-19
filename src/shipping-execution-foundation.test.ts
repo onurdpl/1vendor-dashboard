@@ -2328,6 +2328,114 @@ describe('shipping execution foundation', () => {
     expect(result.returnShipment?.returnOrderId).toBe('OTO-ORDER-1-R1');
   });
 
+  it('finalizes existing Try OTO return requests without creating a duplicate request', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      desi: 3,
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: '31093945',
+          status: 'request_created',
+          finalized: false,
+          labelRetrievable: false,
+          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          createdAt: '2026-05-15T10:00:00.000Z',
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn(),
+      finalizeReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: '31093945',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnTrackingUrl: null,
+        returnLabelUrl: 'https://labels.example/return.pdf',
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: 'created',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['printAWBURL', 'trackingNumber'],
+          requestKeys: [],
+          returnProviderIdPresent: true,
+          returnTrackingPresent: true,
+          returnBarcodePresent: true,
+          returnLabelPresent: true,
+          returnFinalized: true,
+          returnDeliveryOptionLookupCalled: true,
+          returnDeliveryOptionLookupImplemented: true,
+          returnPriceLookupCalled: true,
+          returnPriceLookupSuccess: true,
+          returnPriceLookupOptionCount: 1,
+          selectedReturnPriceOptionIdPresent: true,
+          reverseCreateShipmentCalled: true,
+          reverseCreateShipmentSuccess: true,
+          reverseCreateShipmentResponseKeys: ['printAWBURL', 'trackingNumber'],
+          reverseCreateShipmentTrackingPresent: true,
+          reverseCreateShipmentBarcodePresent: true,
+          reverseCreateShipmentLabelPresent: true,
+          returnFinalizationEndpointConfirmed: true,
+          returnFinalizeEndpointImplemented: true,
+          returnLabelRetrievable: true,
+          returnProviderStatusSource: 'reverseCreateShipment',
+          returnLabelRetrievalNote: null,
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(adapter.finalizeReturnShipment).toHaveBeenCalledWith({
+      returnOrderId: '31093945',
+      packageWeight: 3,
+    });
+    expect(result.returnShipment).toMatchObject({
+      returnOrderId: '31093945',
+      trackingNumber: 'RET-TRACK-1',
+      barcode: 'RET-BARCODE-1',
+      labelUrl: 'https://labels.example/return.pdf',
+      finalized: true,
+      labelRetrievable: true,
+      providerStatusSource: 'reverseCreateShipment',
+      diagnostics: {
+        returnPriceLookupCalled: true,
+        returnPriceLookupSuccess: true,
+        returnPriceLookupOptionCount: 1,
+        selectedReturnPriceOptionIdPresent: true,
+        reverseCreateShipmentCalled: true,
+        reverseCreateShipmentSuccess: true,
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          responseSnapshot: expect.objectContaining({
+            returnShipment: expect.objectContaining({
+              returnOrderId: '31093945',
+              labelUrl: 'https://labels.example/return.pdf',
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('creates and persists Try OTO return shipment metadata', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
@@ -2679,6 +2787,93 @@ describe('shipping execution foundation', () => {
       selectedReturnPriceOptionIdPresent: false,
       reverseCreateShipmentCalled: false,
       returnLabelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+    });
+  });
+
+  it('finalizes an existing Try OTO return provider id through reverse createShipment', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            priceOptions: [
+              {
+                dcSettingsID: 55861,
+                priceOptionId: 257,
+                price: 80,
+                pickingType: 'PICKUP_BY_DC',
+                deliveryType: 'TO_CUSTOMER_DOORSTEP_OR_PICKUP_BY_CUSTOMER',
+                pickupDropoff: 'PICKUP_BY_DC',
+              },
+            ],
+          }),
+        ),
+      )
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            status: 'created',
+            trackingNumber: 'RET-TRACK-EXISTING',
+            barcodeNumber: 'RET-BARCODE-EXISTING',
+          }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.finalizeReturnShipment({
+      returnOrderId: '31093945',
+      packageWeight: 3,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(fetchMock.mock.calls.map((call) => call[0])).toEqual([
+      'https://staging-api.tryoto.com/rest/v2/refreshToken',
+      'https://staging-api.tryoto.com/rest/v2/getPriceList',
+      'https://staging-api.tryoto.com/rest/v2/createShipment',
+    ]);
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toMatchObject({
+      otoId: 31093945,
+      isReverseShipment: true,
+    });
+    expect(JSON.parse((fetchMock.mock.calls[2][1] as RequestInit).body as string)).toMatchObject({
+      reverseShipment: true,
+      items: [
+        {
+          ID: 31093945,
+          orderID: 31093945,
+          dcSettingsID: 55861,
+          priceOptionId: 257,
+          boxes: [
+            {
+              otoID: 31093945,
+            },
+          ],
+        },
+      ],
+    });
+    expect(result).toMatchObject({
+      returnOrderId: '31093945',
+      returnTrackingNumber: 'RET-TRACK-EXISTING',
+      returnBarcode: 'RET-BARCODE-EXISTING',
+      responseSnapshot: {
+        returnFinalized: true,
+        returnPriceLookupCalled: true,
+        reverseCreateShipmentCalled: true,
+        reverseCreateShipmentSuccess: true,
+      },
     });
   });
 

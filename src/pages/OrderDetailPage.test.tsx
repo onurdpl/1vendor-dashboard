@@ -2165,6 +2165,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
   });
 
   it('does not describe unfinalized Try OTO return requests as created return shipments', async () => {
+    const user = userEvent.setup();
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2214,6 +2215,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Return request created. Provider shipment and label finalization are pending or unconfirmed.')).toBeInTheDocument();
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Finalize Try OTO return shipment' }));
+    expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
   });
 
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {

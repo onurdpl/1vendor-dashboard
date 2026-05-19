@@ -823,12 +823,17 @@ export function OrderDetailPage() {
     Boolean(shipmentShopifyTrackingNumber) &&
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;
+  const hasUnfinalizedTryOtoReturnRequest =
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(visibleShipmentExecution.returnShipment?.returnOrderId) &&
+    !visibleShipmentExecution.returnShipment?.finalized &&
+    !visibleShipmentExecution.returnShipment?.labelRetrievable;
   const canCreateTryOtoReturnLabel =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
     ['delivered'].includes(visibleShipmentStatus) &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
-    !visibleShipmentExecution.returnShipment;
+    (!visibleShipmentExecution.returnShipment || hasUnfinalizedTryOtoReturnRequest);
   const canProbeShopifyReturnLabelUpload =
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -2299,6 +2304,16 @@ export function OrderDetailPage() {
                                 ) : (
                                   <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                                 )}
+                                {hasUnfinalizedTryOtoReturnRequest ? (
+                                  <button
+                                    type="button"
+                                    className="secondary-action-button"
+                                    onClick={handleCreateReturnShipmentLabel}
+                                    disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
+                                  >
+                                    {isCreatingReturnShipmentLabel ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                                  </button>
+                                ) : null}
                                 {isAdmin ? (
                                   <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                                     <strong>Return label discovery</strong>
@@ -3161,6 +3176,16 @@ export function OrderDetailPage() {
                         ) : (
                           <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
                         )}
+                        {hasUnfinalizedTryOtoReturnRequest ? (
+                          <button
+                            type="button"
+                            className="secondary-action-button"
+                            onClick={handleCreateReturnShipmentLabel}
+                            disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
+                          >
+                            {isCreatingReturnShipmentLabel ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                          </button>
+                        ) : null}
                         {isAdmin ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                             <strong>Return label discovery</strong>

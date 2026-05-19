@@ -2586,6 +2586,111 @@ export async function createTryOtoReturnShipmentLabel(
 
   const existingReturnShipment = readTryOtoReturnShipmentSnapshot(existing);
   if (existingReturnShipment) {
+    const existingReturnFinalized =
+      readBoolean(existingReturnShipment, ['finalized']) ||
+      readBoolean(existingReturnShipment, ['labelRetrievable']) ||
+      Boolean(readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']));
+    if (!existingReturnFinalized) {
+      const existingReturnOrderId = readString(existingReturnShipment, ['returnOrderId']);
+      if (!existingReturnOrderId) {
+        return mapShipmentExecution(existing);
+      }
+
+      const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
+      if (!adapter.finalizeReturnShipment) {
+        throw new Error('Try OTO return shipment finalization is not implemented for the selected provider adapter.');
+      }
+
+      const requestSnapshot = isRecord(existing.requestSnapshot) ? existing.requestSnapshot : {};
+      const result = await adapter.finalizeReturnShipment({
+        returnOrderId: existingReturnOrderId,
+        packageWeight: toNumber(existing.desi) ?? readNumber(requestSnapshot, ['packageWeight']) ?? 1,
+      });
+      const returnFinalized = readBoolean(result.responseSnapshot, ['returnFinalized']) || Boolean(result.returnLabelUrl);
+      const returnLabelRetrievable = readBoolean(result.responseSnapshot, ['returnLabelRetrievable']) || Boolean(result.returnLabelUrl);
+      const returnProviderStatusSource = readString(result.responseSnapshot, ['returnProviderStatusSource']) ?? 'reverseCreateShipment';
+      const returnStatus = result.returnStatus ?? readString(existingReturnShipment, ['status', 'returnStatus']) ?? (returnFinalized ? 'created' : 'request_created');
+      const returnShipment = {
+        ...existingReturnShipment,
+        provider: 'try_oto',
+        endpoint: readString(existingReturnShipment, ['endpoint']) ?? '/rest/v2/createReturnShipment',
+        returnOrderId: result.returnOrderId ?? existingReturnOrderId,
+        trackingNumber: result.returnTrackingNumber ?? readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber']),
+        trackingUrl: result.returnTrackingUrl ?? readString(existingReturnShipment, ['trackingUrl', 'returnTrackingUrl']),
+        labelUrl: result.returnLabelUrl ?? readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']),
+        barcode: result.returnBarcode ?? readString(existingReturnShipment, ['barcode', 'returnBarcode']),
+        status: returnStatus,
+        createdAt: readString(existingReturnShipment, ['createdAt']) ?? new Date().toISOString(),
+        requestKeys: readStringArray(existingReturnShipment.requestKeys),
+        responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
+        trackingPresent: Boolean(result.returnTrackingNumber ?? readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber'])),
+        labelPresent: Boolean(result.returnLabelUrl ?? readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl'])),
+        labelRetrievalConfirmed: returnLabelRetrievable,
+        labelRetrievalNote:
+          readString(result.responseSnapshot, ['returnLabelRetrievalNote']) ??
+          (result.returnLabelUrl ? null : readString(existingReturnShipment, ['labelRetrievalNote'])),
+        finalized: returnFinalized,
+        labelRetrievable: returnLabelRetrievable,
+        providerStatusSource: returnProviderStatusSource,
+        diagnostics: {
+          endpoint: '/rest/v2/createShipment',
+          httpStatus: typeof result.responseSnapshot.status === 'number' ? result.responseSnapshot.status : null,
+          responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
+          requestKeys: readStringArray(result.responseSnapshot.requestKeys),
+          returnProviderIdPresent: readBoolean(result.responseSnapshot, ['returnProviderIdPresent', 'returnOrderIdPresent']),
+          returnTrackingPresent: Boolean(result.returnTrackingNumber ?? readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber'])),
+          returnBarcodePresent: Boolean(result.returnBarcode ?? readString(existingReturnShipment, ['barcode', 'returnBarcode'])),
+          returnStatus,
+          returnLabelPresent: Boolean(result.returnLabelUrl ?? readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl'])),
+          labelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
+          providerMessage: readString(result.responseSnapshot, ['providerError', 'reverseCreateShipmentProviderMessage']),
+          returnDeliveryOptionIdPresent: readBoolean(result.responseSnapshot, ['returnDeliveryOptionIdPresent']),
+          returnDeliveryOptionLookupCalled: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupCalled']),
+          returnDeliveryOptionLookupImplemented: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupImplemented']),
+          returnPriceLookupCalled: readBoolean(result.responseSnapshot, ['returnPriceLookupCalled']),
+          returnPriceLookupSuccess: readBoolean(result.responseSnapshot, ['returnPriceLookupSuccess']),
+          returnPriceLookupOptionCount: readNumber(result.responseSnapshot, ['returnPriceLookupOptionCount']),
+          selectedReturnPriceOptionIdPresent: readBoolean(result.responseSnapshot, ['selectedReturnPriceOptionIdPresent']),
+          reverseCreateShipmentCalled: readBoolean(result.responseSnapshot, ['reverseCreateShipmentCalled']),
+          reverseCreateShipmentSuccess: readBoolean(result.responseSnapshot, ['reverseCreateShipmentSuccess']),
+          reverseCreateShipmentResponseKeys: readStringArray(result.responseSnapshot.reverseCreateShipmentResponseKeys),
+          reverseCreateShipmentTrackingPresent: readBoolean(result.responseSnapshot, ['reverseCreateShipmentTrackingPresent']),
+          reverseCreateShipmentBarcodePresent: readBoolean(result.responseSnapshot, ['reverseCreateShipmentBarcodePresent']),
+          reverseCreateShipmentLabelPresent: readBoolean(result.responseSnapshot, ['reverseCreateShipmentLabelPresent']),
+          returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'reverseCreateShipment',
+          createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
+          webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
+          printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
+          returnFinalized,
+          returnFinalizationEndpointConfirmed: readBoolean(result.responseSnapshot, ['returnFinalizationEndpointConfirmed']),
+          returnFinalizeEndpointImplemented: readBoolean(result.responseSnapshot, ['returnFinalizeEndpointImplemented']),
+          returnLabelRetrievable,
+          providerStatusSource: returnProviderStatusSource,
+        },
+      };
+      const mergedSnapshot = appendTimelineEvent(
+        {
+          ...readSnapshot(existing),
+          returnShipment,
+          lastProviderResponseAt: new Date().toISOString(),
+        },
+        {
+          label: returnFinalized ? 'Try OTO return shipment finalized' : 'Try OTO return finalization attempted',
+          status: returnStatus,
+        },
+      );
+
+      const updated = await prisma.shipmentExecution.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      return mapShipmentExecution(updated);
+    }
     return mapShipmentExecution(existing);
   }
 
