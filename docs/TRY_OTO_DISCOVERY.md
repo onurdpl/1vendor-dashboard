@@ -611,20 +611,70 @@ Description notes:
 - `secretKey` is used to sign the message so the receiver can validate it.
 - `authorizationKey` is a secure token to authenticate/validate incoming webhook requests.
 
+### Local Webhook Receiver
+
+Confirmed local receiver:
+- `POST /webhooks/try-oto`
+
+Confirmed local gates:
+- `TRY_OTO_ENABLED`
+- `TRY_OTO_WEBHOOK_INGEST_ENABLED`
+
+Sandbox finding:
+- Real Try OTO webhook delivery to the local backend receiver is confirmed in sandbox.
+- Auto-refresh remains in place as a fallback/bridge while webhook behavior is hardened.
+
+Production caution:
+- Do not enable Try OTO webhook ingest in production until Try OTO confirms the signature verification header, algorithm, and secret/public-key retrieval process.
+- Keep webhook matching idempotent.
+- Monitor duplicate status events.
+
 ### Order Status Webhook
 
 Confirmed:
 - `orderStatus` is a webhook type.
+- Sandbox webhook delivery was received successfully by `POST /webhooks/try-oto`.
+- Matching was confirmed by `providerOrderId`/`otoId` and by `trackingNumber`.
 
 Unknown:
-- Exact payload shape.
+- Complete payload shape across all statuses/carriers.
 - Exact headers.
 - Signature algorithm.
-- Whether status webhook includes `orderId`, `otoId`, `shipmentId`, `trackingNumber`, `dcTrackingNumber`, and `deliveryCompany`.
+- Whether all statuses include the same identifiers.
 
 Support clarification:
 - No `orderStatus` webhook payload example was provided.
-- Keep the payload shape **Unknown** until Try OTO provides an example or sandbox emits a real payload.
+- Keep unobserved payload fields and unobserved status values **Unknown** until Try OTO provides examples or sandbox emits them.
+
+Confirmed sandbox payload keys observed:
+- `attemptFailureReason`
+- `brandedTrackingURL`
+- `dcStatus`
+- `dcStatusCode`
+- `dcTrackingNumber`
+- `deliveryCompany`
+- `deliveryOptionName`
+- `feedbackLink`
+- `note`
+- `orderId`
+- `otoId`
+- `pickupLocationCode`
+- `printAWBURL`
+- `reverseShipment`
+- `shipmentWeight`
+- `status`
+- `timestamp`
+- `trackingNumber`
+- `trackingUrl`
+
+Confirmed sandbox statuses observed:
+- `searchingDriver`
+- `delivered`
+
+Confirmed local lifecycle mapping:
+- `searchingDriver` maps to local in-progress/carrier-processing shipment state (`in_transit`).
+- `delivered` maps to local delivered/completed shipment state (`delivered`).
+- Unknown Try OTO webhook statuses are diagnostic-only and must not mutate the local shipment lifecycle.
 
 ### Shipment Error Webhook
 
@@ -656,8 +706,8 @@ Unknown:
 - Replay protection requirements.
 
 Recommendation:
-- Do not enable webhook state mutations until signature/header rules are confirmed.
-- First implement a disabled/safe webhook receiver that records only sanitized diagnostics in sandbox.
+- Keep production webhook ingest disabled until signature/header rules are confirmed.
+- Sandbox webhook ingest can record sanitized diagnostics and update local shipment state only for confirmed status mappings.
 
 ## 6. Return / Reverse Shipment
 
