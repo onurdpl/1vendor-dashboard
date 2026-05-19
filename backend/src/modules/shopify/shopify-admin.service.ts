@@ -3,7 +3,10 @@ import type {
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
   FetchShopifyReturnDetailsResult,
+  FetchShopifyReturnReverseDeliveryInputsResult,
   FetchOrderSellerInfoResult,
+  ProbeShopifyReturnLabelUploadInput,
+  ProbeShopifyReturnLabelUploadResult,
   SellerInfoMap,
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
@@ -76,6 +79,75 @@ type ShopifyReturnQueryResponse = {
         };
       }>;
     };
+  } | null;
+};
+
+type ShopifyReturnReverseDeliveryInputsQueryResponse = {
+  return: {
+    id: string;
+    reverseFulfillmentOrders: {
+      nodes: Array<{
+        id: string;
+        status: string | null;
+        lineItems: {
+          nodes: Array<{
+            id: string;
+            totalQuantity: number | null;
+            fulfillmentLineItem?: {
+              lineItem?: {
+                id: string;
+                sku: string | null;
+              } | null;
+            } | null;
+          }>;
+        };
+        reverseDeliveries: {
+          nodes: Array<{
+            id: string;
+            deliverable?: {
+              label?: {
+                publicFileUrl?: string | null;
+              } | null;
+              tracking?: {
+                number?: string | null;
+                url?: string | null;
+              } | null;
+            } | null;
+          }>;
+        };
+      }>;
+    };
+  } | null;
+};
+
+type ShopifyReverseDeliveryMutationResponse = {
+  reverseDeliveryCreateWithShipping?: {
+    reverseDelivery?: {
+      id: string;
+      deliverable?: {
+        label?: {
+          publicFileUrl?: string | null;
+        } | null;
+      } | null;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
+  } | null;
+  reverseDeliveryShippingUpdate?: {
+    reverseDelivery?: {
+      id: string;
+      deliverable?: {
+        label?: {
+          publicFileUrl?: string | null;
+        } | null;
+      } | null;
+    } | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }>;
   } | null;
 };
 
@@ -613,6 +685,264 @@ export function createShopifyAdminService(env: AppEnv) {
     };
   }
 
+  async function fetchReturnReverseDeliveryInputs(returnGid: string): Promise<FetchShopifyReturnReverseDeliveryInputsResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return reverse delivery probe is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query GetReturnReverseDeliveryInputs($id: ID!) {
+              return(id: $id) {
+                id
+                reverseFulfillmentOrders(first: 20) {
+                  nodes {
+                    id
+                    status
+                    lineItems(first: 50) {
+                      nodes {
+                        id
+                        totalQuantity
+                        fulfillmentLineItem {
+                          lineItem {
+                            id
+                            sku
+                          }
+                        }
+                      }
+                    }
+                    reverseDeliveries(first: 20) {
+                      nodes {
+                        id
+                        deliverable {
+                          ... on ReverseDeliveryShippingDeliverable {
+                            label {
+                              publicFileUrl
+                            }
+                            tracking {
+                              number
+                              url
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: { id: returnGid },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return reverse delivery input fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReturnReverseDeliveryInputsQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return reverse delivery input fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const returnNode = json.data?.return;
+    if (!returnNode?.id) {
+      throw new Error('Shopify return reverse delivery input response did not include return.id.');
+    }
+
+    return {
+      returnGid: returnNode.id,
+      source: 'shopify_admin',
+      reverseFulfillmentOrders: (returnNode.reverseFulfillmentOrders.nodes || []).map((order) => ({
+        id: order.id,
+        status: order.status,
+        lineItems: (order.lineItems.nodes || [])
+          .map((lineItem) => ({
+            id: lineItem.id,
+            quantity: typeof lineItem.totalQuantity === 'number' && lineItem.totalQuantity > 0 ? lineItem.totalQuantity : 1,
+            lineItemGid: lineItem.fulfillmentLineItem?.lineItem?.id ?? null,
+            sku: lineItem.fulfillmentLineItem?.lineItem?.sku ?? null,
+          }))
+          .filter((lineItem) => lineItem.id),
+        reverseDeliveries: (order.reverseDeliveries.nodes || [])
+          .map((delivery) => ({
+            id: delivery.id,
+            labelPublicFileUrl: delivery.deliverable?.label?.publicFileUrl ?? null,
+            trackingNumber: delivery.deliverable?.tracking?.number ?? null,
+            trackingUrl: delivery.deliverable?.tracking?.url ?? null,
+          }))
+          .filter((delivery) => delivery.id),
+      })),
+    };
+  }
+
+  function normalizeUserErrors(
+    errors: Array<{ field?: string[] | null; message?: string | null }> | undefined,
+  ) {
+    return (errors ?? []).map((error) => ({
+      field: Array.isArray(error.field) ? error.field.filter((field): field is string => typeof field === 'string') : [],
+      message: error.message ?? 'Unknown Shopify user error.',
+    }));
+  }
+
+  async function probeReturnLabelUpload(input: ProbeShopifyReturnLabelUploadInput): Promise<ProbeShopifyReturnLabelUploadResult> {
+    const reverseInputs = await fetchReturnReverseDeliveryInputs(input.returnGid);
+    const reverseFulfillmentOrder = reverseInputs.reverseFulfillmentOrders.find((order) => order.lineItems.length > 0);
+    if (!reverseFulfillmentOrder) {
+      throw new Error('Shopify return did not include a reverse fulfillment order with line items.');
+    }
+
+    const existingReverseDelivery = reverseFulfillmentOrder.reverseDeliveries[0] ?? null;
+    const mutationUsed = existingReverseDelivery
+      ? 'reverseDeliveryShippingUpdate'
+      : 'reverseDeliveryCreateWithShipping';
+    const variables = existingReverseDelivery
+      ? {
+          reverseDeliveryId: existingReverseDelivery.id,
+          trackingInput: {
+            number: input.trackingNumber,
+            ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
+          },
+          labelInput: {
+            fileUrl: input.labelUrl,
+          },
+          notifyCustomer: false,
+        }
+      : {
+          reverseFulfillmentOrderId: reverseFulfillmentOrder.id,
+          reverseDeliveryLineItems: reverseFulfillmentOrder.lineItems.map((lineItem) => ({
+            reverseFulfillmentOrderLineItemId: lineItem.id,
+            quantity: lineItem.quantity,
+          })),
+          trackingInput: {
+            number: input.trackingNumber,
+            ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
+          },
+          labelInput: {
+            fileUrl: input.labelUrl,
+          },
+          notifyCustomer: false,
+        };
+    const query = existingReverseDelivery
+      ? `
+        mutation ProbeReverseDeliveryShippingUpdate(
+          $reverseDeliveryId: ID!
+          $trackingInput: ReverseDeliveryTrackingInput
+          $labelInput: ReverseDeliveryLabelInput
+          $notifyCustomer: Boolean
+        ) {
+          reverseDeliveryShippingUpdate(
+            reverseDeliveryId: $reverseDeliveryId
+            trackingInput: $trackingInput
+            labelInput: $labelInput
+            notifyCustomer: $notifyCustomer
+          ) {
+            reverseDelivery {
+              id
+              deliverable {
+                ... on ReverseDeliveryShippingDeliverable {
+                  label {
+                    publicFileUrl
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `
+      : `
+        mutation ProbeReverseDeliveryCreateWithShipping(
+          $reverseFulfillmentOrderId: ID!
+          $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+          $trackingInput: ReverseDeliveryTrackingInput
+          $labelInput: ReverseDeliveryLabelInput
+          $notifyCustomer: Boolean
+        ) {
+          reverseDeliveryCreateWithShipping(
+            reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+            reverseDeliveryLineItems: $reverseDeliveryLineItems
+            trackingInput: $trackingInput
+            labelInput: $labelInput
+            notifyCustomer: $notifyCustomer
+          ) {
+            reverseDelivery {
+              id
+              deliverable {
+                ... on ReverseDeliveryShippingDeliverable {
+                  label {
+                    publicFileUrl
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return label upload probe is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({ query, variables }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return label upload probe failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReverseDeliveryMutationResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return label upload probe returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const mutationPayload = existingReverseDelivery
+      ? json.data?.reverseDeliveryShippingUpdate
+      : json.data?.reverseDeliveryCreateWithShipping;
+    const userErrors = normalizeUserErrors(mutationPayload?.userErrors);
+    const reverseDeliveryId = mutationPayload?.reverseDelivery?.id ?? null;
+    const labelPublicFileUrl = mutationPayload?.reverseDelivery?.deliverable?.label?.publicFileUrl ?? null;
+
+    return {
+      mutationUsed,
+      reverseFulfillmentOrderIdPresent: Boolean(reverseFulfillmentOrder.id),
+      reverseLineItemIdsPresent: reverseFulfillmentOrder.lineItems.length > 0,
+      reverseDeliveryId,
+      labelAccepted: Boolean(labelPublicFileUrl) && userErrors.length === 0,
+      userErrors,
+      source: 'shopify_admin',
+    };
+  }
+
   async function fetchFulfillmentOrders(shopifyOrderId: string): Promise<ShopifyFulfillmentOrdersResponse> {
     const normalizedShopifyOrderId = extractShopifyGidTail(shopifyOrderId) ?? shopifyOrderId;
     if (mockFulfillmentOrdersByOrderId[shopifyOrderId] || mockFulfillmentOrdersByOrderId[normalizedShopifyOrderId]) {
@@ -874,6 +1204,8 @@ export function createShopifyAdminService(env: AppEnv) {
   return {
     fetchOrderSellerInfo,
     fetchReturnDetails,
+    fetchReturnReverseDeliveryInputs,
+    probeReturnLabelUpload,
     fetchFulfillmentOrders,
     fetchOrderFulfillmentState,
     createFulfillmentTracking,

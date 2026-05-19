@@ -17,6 +17,7 @@ const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
+const probeShopifyReturnLabelUploadMock = vi.fn();
 const submitFulfillmentTrackingMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
@@ -49,6 +50,7 @@ vi.mock('../features/orders/api', async () => {
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
     createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
+    probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
     submitFulfillmentTracking: (
       allocationId: string,
       payload: { trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer?: boolean },
@@ -354,6 +356,43 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
+    probeShopifyReturnLabelUploadMock.mockReset();
+    probeShopifyReturnLabelUploadMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: null,
+        labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+        barcode: 'RET-BARCODE-1028',
+        status: 'created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['items', 'orderId'],
+        responseKeys: ['printAWBURL', 'returnOrderId'],
+        trackingPresent: true,
+        labelPresent: true,
+        labelRetrievalConfirmed: true,
+        labelRetrievalNote: null,
+        shopifyReturnLabelUploadProbe: {
+          status: 'success',
+          attemptedAt: '2026-05-15T19:48:00.000Z',
+          reverseFulfillmentOrderIdPresent: true,
+          reverseLineItemIdsPresent: true,
+          mutationUsed: 'reverseDeliveryCreateWithShipping',
+          shopifyUserErrors: [],
+          reverseDeliveryIdPresent: true,
+          labelAccepted: true,
+          skippedReason: null,
+          errorMessage: null,
+        },
+      },
+      updatedAt: '2026-05-15T19:48:00.000Z',
+    });
     submitFulfillmentTrackingMock.mockReset();
     submitFulfillmentTrackingMock.mockResolvedValue({
       ok: true,
@@ -509,7 +548,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       source: 'configured',
       updatedAt: '2026-05-15T19:45:00.000Z',
     });
-
     renderOrderDetail();
 
     const pickupInput = await screen.findByLabelText('Try OTO pickup location code');
@@ -1738,6 +1776,71 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
     );
+    expect(screen.queryByLabelText('Shopify return label upload probe')).not.toBeInTheDocument();
+  });
+
+  it('lets admins probe Shopify return label upload from return shipment details', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shopifyReturnSignal: {
+        topic: 'returns/request',
+        receivedAt: '2026-05-19T08:00:00.000Z',
+        topLevelPayloadKeys: ['admin_graphql_api_id', 'id'],
+        orderIdPresent: true,
+        returnIdPresent: true,
+        lineItemIdsPresent: true,
+        refundIdPresent: false,
+        financialStatus: null,
+        fulfillmentStatus: null,
+        matchedOrderId: 'shopify-order-1028',
+        matchedByField: 'order_id',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+          barcode: 'RET-BARCODE-1028',
+          status: 'created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['printAWBURL', 'returnOrderId'],
+          trackingPresent: true,
+          labelPresent: true,
+          labelRetrievalConfirmed: true,
+          labelRetrievalNote: null,
+          shopifyReturnLabelUploadProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Shopify return label upload probe');
+    await user.click(within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' }));
+
+    expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
+    expect((await screen.findAllByText('Shopify accepted the return label PDF URL.')).length).toBeGreaterThan(0);
   });
 
   it('creates Try OTO return labels from delivered shipments', async () => {

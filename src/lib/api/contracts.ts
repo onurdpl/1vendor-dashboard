@@ -54,6 +54,21 @@ export type ShipmentExecution = {
     labelPresent: boolean;
     labelRetrievalConfirmed: boolean;
     labelRetrievalNote: string | null;
+    shopifyReturnLabelUploadProbe?: {
+      status: string;
+      attemptedAt: string | null;
+      reverseFulfillmentOrderIdPresent: boolean;
+      reverseLineItemIdsPresent: boolean;
+      mutationUsed: string | null;
+      shopifyUserErrors: Array<{
+        field: string[];
+        message: string;
+      }>;
+      reverseDeliveryIdPresent: boolean;
+      labelAccepted: boolean;
+      skippedReason: string | null;
+      errorMessage: string | null;
+    } | null;
   } | null;
   timeline?: Array<{
     label: string;

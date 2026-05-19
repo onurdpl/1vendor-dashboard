@@ -13,8 +13,10 @@ import {
   ShippingProviderExecutionError,
   type ShippingProviderAdapter,
 } from './shipping-provider.adapter.js';
+import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
+import type { ProbeShopifyReturnLabelUploadResult } from '../shopify/shopify-admin.types.js';
 import type {
   CreateShipmentExecutionDto,
   ShipmentExecutionPreviewDto,
@@ -173,6 +175,43 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readStringFieldArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function readShopifyUserErrors(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((error) => ({
+    field: readStringFieldArray(error.field),
+    message: readString(error, ['message']) ?? 'Unknown Shopify user error.',
+  }));
+}
+
+function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown>) {
+  const probe = isRecord(returnShipment.shopifyReturnLabelUploadProbe) ? returnShipment.shopifyReturnLabelUploadProbe : null;
+  if (!probe) {
+    return null;
+  }
+
+  return {
+    status: readString(probe, ['status']) ?? 'not_started',
+    attemptedAt: readString(probe, ['attemptedAt']),
+    reverseFulfillmentOrderIdPresent: readBoolean(probe, ['reverseFulfillmentOrderIdPresent']),
+    reverseLineItemIdsPresent: readBoolean(probe, ['reverseLineItemIdsPresent']),
+    mutationUsed: readString(probe, ['mutationUsed']),
+    shopifyUserErrors: readShopifyUserErrors(probe.shopifyUserErrors),
+    reverseDeliveryIdPresent: readBoolean(probe, ['reverseDeliveryIdPresent']),
+    labelAccepted: readBoolean(probe, ['labelAccepted']),
+    skippedReason: readString(probe, ['skippedReason']),
+    errorMessage: readString(probe, ['errorMessage']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecutionDto['returnShipment'] {
   const returnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
   if (!returnShipment) {
@@ -196,6 +235,7 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
     labelPresent: Boolean(labelUrl),
     labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
     labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+    shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }
 
@@ -2341,6 +2381,76 @@ function isTryOtoReturnAllowedByState(execution: ShipmentExecution, allocation: 
   return shipmentStatus === 'delivered' || fulfillmentStatus === 'fulfilled';
 }
 
+function toShopifyReturnGid(value: string | null) {
+  if (!value) {
+    return null;
+  }
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+  return normalized.startsWith('gid://shopify/Return/') ? normalized : `gid://shopify/Return/${normalized}`;
+}
+
+function buildShopifyReturnLabelUploadProbeSnapshot(input: {
+  status: 'blocked' | 'success' | 'failed';
+  attemptedAt: string;
+  reverseFulfillmentOrderIdPresent?: boolean;
+  reverseLineItemIdsPresent?: boolean;
+  mutationUsed?: string | null;
+  shopifyUserErrors?: Array<{ field: string[]; message: string }>;
+  reverseDeliveryIdPresent?: boolean;
+  labelAccepted?: boolean;
+  skippedReason?: string | null;
+  errorMessage?: string | null;
+}) {
+  return {
+    status: input.status,
+    attemptedAt: input.attemptedAt,
+    reverseFulfillmentOrderIdPresent: Boolean(input.reverseFulfillmentOrderIdPresent),
+    reverseLineItemIdsPresent: Boolean(input.reverseLineItemIdsPresent),
+    mutationUsed: input.mutationUsed ?? null,
+    shopifyUserErrors: input.shopifyUserErrors ?? [],
+    reverseDeliveryIdPresent: Boolean(input.reverseDeliveryIdPresent),
+    labelAccepted: Boolean(input.labelAccepted),
+    skippedReason: input.skippedReason ?? null,
+    errorMessage: input.errorMessage ?? null,
+  };
+}
+
+async function persistShopifyReturnLabelUploadProbe(
+  execution: ShipmentExecution,
+  probe: ReturnType<typeof buildShopifyReturnLabelUploadProbeSnapshot>,
+) {
+  const snapshot = readSnapshot(execution);
+  const existingReturnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : {};
+  const mergedSnapshot = appendTimelineEvent(
+    {
+      ...snapshot,
+      returnShipment: {
+        ...existingReturnShipment,
+        shopifyReturnLabelUploadProbe: probe,
+      },
+      lastProviderResponseAt: probe.attemptedAt,
+    },
+    {
+      label: probe.labelAccepted ? 'Shopify return label probe accepted' : 'Shopify return label probe recorded',
+      status: probe.status,
+    },
+  );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: execution.id,
+    },
+    data: {
+      responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return mapShipmentExecution(updated);
+}
+
 export async function createTryOtoReturnShipmentLabel(
   shipmentExecutionId: string,
   options: {
@@ -2464,6 +2574,117 @@ export async function createTryOtoReturnShipmentLabel(
   });
 
   return mapShipmentExecution(updated);
+}
+
+export async function probeShopifyReturnLabelUpload(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'probeReturnLabelUpload'>;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    throw new Error('Shopify return label upload probe is only available for Try OTO shipments.');
+  }
+
+  const attemptedAt = new Date().toISOString();
+  const responseSnapshot = readSnapshot(existing);
+  const returnShipment = isRecord(responseSnapshot.returnShipment) ? responseSnapshot.returnShipment : null;
+  const returnTrackingNumber =
+    readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']) ??
+    readString(returnShipment, ['barcode', 'returnBarcode']);
+  const returnTrackingUrl = readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']);
+  const returnLabelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+
+  const blocked = async (skippedReason: string, errorMessage: string) =>
+    persistShopifyReturnLabelUploadProbe(
+      existing,
+      buildShopifyReturnLabelUploadProbeSnapshot({
+        status: 'blocked',
+        attemptedAt,
+        skippedReason,
+        errorMessage,
+      }),
+    );
+
+  if (!returnShipment) {
+    return blocked('missing_try_oto_return_shipment', 'Try OTO return shipment data is required before probing Shopify label upload.');
+  }
+
+  if (!returnTrackingNumber) {
+    return blocked('missing_return_tracking', 'Try OTO return tracking or barcode is required before probing Shopify label upload.');
+  }
+
+  if (!returnLabelUrl) {
+    return blocked('missing_return_label_url', 'Try OTO return label URL is required before probing Shopify label upload.');
+  }
+
+  const returnRecord = await prisma.returnRecord.findFirst({
+    where: {
+      vendorAllocationId: existing.allocationId,
+      OR: [
+        { sourceShopifyReturnGid: { not: null } },
+        { sourceShopifyReturnId: { not: null } },
+      ],
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    select: {
+      sourceShopifyReturnGid: true,
+      sourceShopifyReturnId: true,
+    },
+  });
+  const returnGid = toShopifyReturnGid(returnRecord?.sourceShopifyReturnGid ?? returnRecord?.sourceShopifyReturnId ?? null);
+  if (!returnGid) {
+    return blocked('missing_shopify_return_id', 'Shopify return id is required before probing return label upload.');
+  }
+
+  try {
+    const shopifyAdminService = options.shopifyAdminService ?? createShopifyAdminService(options.env);
+    const result: ProbeShopifyReturnLabelUploadResult = await shopifyAdminService.probeReturnLabelUpload({
+      returnGid,
+      trackingNumber: returnTrackingNumber,
+      trackingUrl: returnTrackingUrl,
+      labelUrl: returnLabelUrl,
+    });
+    return persistShopifyReturnLabelUploadProbe(
+      existing,
+      buildShopifyReturnLabelUploadProbeSnapshot({
+        status: result.labelAccepted ? 'success' : 'failed',
+        attemptedAt,
+        reverseFulfillmentOrderIdPresent: result.reverseFulfillmentOrderIdPresent,
+        reverseLineItemIdsPresent: result.reverseLineItemIdsPresent,
+        mutationUsed: result.mutationUsed,
+        shopifyUserErrors: result.userErrors,
+        reverseDeliveryIdPresent: Boolean(result.reverseDeliveryId),
+        labelAccepted: result.labelAccepted,
+        skippedReason: result.labelAccepted ? null : 'staged_upload_required_or_unknown',
+        errorMessage: result.userErrors.map((error) => error.message).filter(Boolean).join('; ') || null,
+      }),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Shopify return label upload probe failed.';
+    return persistShopifyReturnLabelUploadProbe(
+      existing,
+      buildShopifyReturnLabelUploadProbeSnapshot({
+        status: 'failed',
+        attemptedAt,
+        skippedReason: 'shopify_probe_failed',
+        errorMessage: message,
+      }),
+    );
+  }
 }
 
 export async function refreshTryOtoShipmentStatus(

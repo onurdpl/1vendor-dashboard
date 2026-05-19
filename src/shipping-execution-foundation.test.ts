@@ -23,6 +23,9 @@ const prismaMock = vi.hoisted(() => ({
   fulfillment: {
     upsert: vi.fn(),
   },
+  returnRecord: {
+    findFirst: vi.fn(),
+  },
   $transaction: vi.fn(),
 }));
 
@@ -38,6 +41,7 @@ const {
   ingestKargoEntegratorWebhook,
   ingestTryOtoWebhook,
   inferShipmentDesi,
+  probeShopifyReturnLabelUpload,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
@@ -181,6 +185,7 @@ describe('shipping execution foundation', () => {
     prismaMock.shipmentShippingCost.findFirst.mockReset();
     prismaMock.shipmentShippingCost.upsert.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
+    prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.$transaction.mockReset();
 
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
@@ -210,6 +215,7 @@ describe('shipping execution foundation', () => {
       ...create,
       ...update,
     }));
+    prismaMock.returnRecord.findFirst.mockResolvedValue(null);
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
   });
 
@@ -2383,6 +2389,186 @@ describe('shipping execution foundation', () => {
       }),
     );
     expect(result.returnShipment?.labelUrl).toBe('https://labels.example/return.pdf');
+  });
+
+  it('blocks Shopify return label upload probe when Shopify return id is missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+          labelUrl: 'https://labels.example/return.pdf',
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.returnRecord.findFirst.mockResolvedValue(null);
+
+    const result = await probeShopifyReturnLabelUpload(existing.id, {
+      env,
+      shopifyAdminService: {
+        probeReturnLabelUpload: vi.fn(),
+      },
+    });
+
+    expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
+      status: 'blocked',
+      skippedReason: 'missing_shopify_return_id',
+      labelAccepted: false,
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          responseSnapshot: expect.objectContaining({
+            returnShipment: expect.objectContaining({
+              shopifyReturnLabelUploadProbe: expect.objectContaining({
+                skippedReason: 'missing_shopify_return_id',
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('blocks Shopify return label upload probe when return label URL is missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+
+    const result = await probeShopifyReturnLabelUpload(existing.id, {
+      env,
+      shopifyAdminService: {
+        probeReturnLabelUpload: vi.fn(),
+      },
+    });
+
+    expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
+      status: 'blocked',
+      skippedReason: 'missing_return_label_url',
+      labelAccepted: false,
+    });
+    expect(prismaMock.returnRecord.findFirst).not.toHaveBeenCalled();
+  });
+
+  it('stores successful Shopify return label upload probe diagnostics', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+          trackingUrl: 'https://tracking.example/RET-TRACK-1',
+          labelUrl: 'https://labels.example/return.pdf',
+        },
+      },
+    });
+    const shopifyAdminService = {
+      probeReturnLabelUpload: vi.fn().mockResolvedValue({
+        mutationUsed: 'reverseDeliveryCreateWithShipping',
+        reverseFulfillmentOrderIdPresent: true,
+        reverseLineItemIdsPresent: true,
+        reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        labelAccepted: true,
+        userErrors: [],
+        source: 'shopify_admin',
+      }),
+    };
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      sourceShopifyReturnGid: 'gid://shopify/Return/231',
+      sourceShopifyReturnId: '231',
+    });
+
+    const result = await probeShopifyReturnLabelUpload(existing.id, {
+      env,
+      shopifyAdminService,
+    });
+
+    expect(shopifyAdminService.probeReturnLabelUpload).toHaveBeenCalledWith({
+      returnGid: 'gid://shopify/Return/231',
+      trackingNumber: 'RET-TRACK-1',
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelUrl: 'https://labels.example/return.pdf',
+    });
+    expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
+      status: 'success',
+      mutationUsed: 'reverseDeliveryCreateWithShipping',
+      reverseFulfillmentOrderIdPresent: true,
+      reverseLineItemIdsPresent: true,
+      reverseDeliveryIdPresent: true,
+      labelAccepted: true,
+    });
+  });
+
+  it('persists Shopify user errors safely when external return label URL is rejected', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+          labelUrl: 'https://labels.example/return.pdf',
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      sourceShopifyReturnGid: null,
+      sourceShopifyReturnId: '231',
+    });
+
+    const result = await probeShopifyReturnLabelUpload(existing.id, {
+      env,
+      shopifyAdminService: {
+        probeReturnLabelUpload: vi.fn().mockResolvedValue({
+          mutationUsed: 'reverseDeliveryShippingUpdate',
+          reverseFulfillmentOrderIdPresent: true,
+          reverseLineItemIdsPresent: true,
+          reverseDeliveryId: null,
+          labelAccepted: false,
+          userErrors: [{ field: ['labelInput', 'fileUrl'], message: 'File URL is invalid.' }],
+          source: 'shopify_admin',
+        }),
+      },
+    });
+
+    expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
+      status: 'failed',
+      mutationUsed: 'reverseDeliveryShippingUpdate',
+      skippedReason: 'staged_upload_required_or_unknown',
+      labelAccepted: false,
+      shopifyUserErrors: [{ field: ['labelInput', 'fileUrl'], message: 'File URL is invalid.' }],
+    });
+    expect(JSON.stringify(prismaMock.shipmentExecution.update.mock.calls)).not.toContain('Authorization');
   });
 
   it('registers a Try OTO webhook route that is disabled by default', async () => {

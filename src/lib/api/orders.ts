@@ -71,6 +71,10 @@ export async function createReturnShipmentLabel(
   );
 }
 
+export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
+  return runtimeServices.orders.probeShopifyReturnLabelUpload(shipmentExecutionId);
+}
+
 export async function getShippingProviderDiagnostics(
   options: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null } = {},
 ) {

@@ -10,6 +10,7 @@ import {
   getOrder,
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
+  probeShopifyReturnLabelUpload,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
@@ -643,6 +644,12 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: probeShopifyReturnLabelUploadMutation, isPending: isProbingShopifyReturnLabelUpload } = useMutationAction(
+    async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -782,6 +789,12 @@ export function OrderDetailPage() {
     ['delivered'].includes(visibleShipmentStatus) &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
     !visibleShipmentExecution.returnShipment;
+  const canProbeShopifyReturnLabelUpload =
+    isAdmin &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(order?.shopifyReturnSignal?.returnIdPresent) &&
+    Boolean(visibleShipmentExecution.returnShipment?.labelUrl) &&
+    Boolean(visibleShipmentExecution.returnShipment?.trackingNumber || visibleShipmentExecution.returnShipment?.barcode);
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -973,6 +986,46 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/create-return`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleProbeShopifyReturnLabelUpload() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Probing Shopify return label upload...',
+      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
+    });
+
+    void probeShopifyReturnLabelUploadMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const probe = shipment.returnShipment?.shopifyReturnLabelUploadProbe;
+        const accepted = Boolean(probe?.labelAccepted);
+        const message = accepted
+          ? 'Shopify accepted the return label PDF URL.'
+          : probe?.errorMessage || 'Shopify return label upload probe completed with diagnostics.';
+        setShipmentActionState({
+          tone: accepted ? 'success' : 'info',
+          message,
+          shipment,
+          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
+        });
+        showFeedback(message, accepted ? 'success' : 'info');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Shopify return label upload probe could not be run.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-shopify-return-label`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2118,6 +2171,83 @@ export function OrderDetailPage() {
                                       'Return shipment created. Label PDF is not available yet.'}
                                   </span>
                                 )}
+                                {isAdmin ? (
+                                  <div className="provider-response-summary" aria-label="Shopify return label upload probe">
+                                    <div className="provider-response-heading">
+                                      <strong>Shopify return label upload probe</strong>
+                                      <span>Admin only</span>
+                                    </div>
+                                    <button
+                                      type="button"
+                                      className="secondary-action-button"
+                                      onClick={handleProbeShopifyReturnLabelUpload}
+                                      disabled={!canProbeShopifyReturnLabelUpload || isProbingShopifyReturnLabelUpload}
+                                    >
+                                      {isProbingShopifyReturnLabelUpload ? 'Probing Shopify...' : 'Probe Shopify return label upload'}
+                                    </button>
+                                    {!canProbeShopifyReturnLabelUpload ? (
+                                      <span className="muted">
+                                        Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
+                                      </span>
+                                    ) : null}
+                                    {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
+                                      <>
+                                        <div className="summary-row">
+                                          <span>Status</span>
+                                          <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Mutation</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.mutationUsed ?? '—'}</strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Reverse fulfillment order</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseFulfillmentOrderIdPresent ? 'present' : 'missing'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Reverse line items</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseLineItemIdsPresent ? 'present' : 'missing'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Reverse delivery id</span>
+                                          <strong>
+                                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseDeliveryIdPresent ? 'present' : 'missing'}
+                                          </strong>
+                                        </div>
+                                        <div className="summary-row">
+                                          <span>Label accepted</span>
+                                          <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
+                                        </div>
+                                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
+                                          <div className="summary-row">
+                                            <span>Skipped reason</span>
+                                            <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason}</strong>
+                                          </div>
+                                        ) : null}
+                                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage ? (
+                                          <div className="summary-row">
+                                            <span>Message</span>
+                                            <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage}</strong>
+                                          </div>
+                                        ) : null}
+                                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors.length ? (
+                                          <div className="summary-row">
+                                            <span>Shopify user errors</span>
+                                            <strong>
+                                              {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors
+                                                .map((error) => [error.field.join('.'), error.message].filter(Boolean).join(': '))
+                                                .join('; ')}
+                                            </strong>
+                                          </div>
+                                        ) : null}
+                                      </>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                               </>
                             ) : (
                               <>
@@ -2633,6 +2763,83 @@ export function OrderDetailPage() {
                         <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
                           Open label PDF
                         </a>
+                      </div>
+                    ) : null}
+                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                      <div className="provider-response-summary" aria-label="Shopify return label upload probe">
+                        <div className="provider-response-heading">
+                          <strong>Shopify return label upload probe</strong>
+                          <span>Admin only</span>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary-action-button"
+                          onClick={handleProbeShopifyReturnLabelUpload}
+                          disabled={!canProbeShopifyReturnLabelUpload || isProbingShopifyReturnLabelUpload}
+                        >
+                          {isProbingShopifyReturnLabelUpload ? 'Probing Shopify...' : 'Probe Shopify return label upload'}
+                        </button>
+                        {!canProbeShopifyReturnLabelUpload ? (
+                          <span className="muted">
+                            Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
+                          </span>
+                        ) : null}
+                        {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
+                          <>
+                            <div className="summary-row">
+                              <span>Status</span>
+                              <strong>{toTitleCaseLabel(shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Mutation</span>
+                              <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.mutationUsed ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Reverse fulfillment order</span>
+                              <strong>
+                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseFulfillmentOrderIdPresent ? 'present' : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Reverse line items</span>
+                              <strong>
+                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseLineItemIdsPresent ? 'present' : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Reverse delivery id</span>
+                              <strong>
+                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseDeliveryIdPresent ? 'present' : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Label accepted</span>
+                              <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
+                            </div>
+                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
+                              <div className="summary-row">
+                                <span>Skipped reason</span>
+                                <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason}</strong>
+                              </div>
+                            ) : null}
+                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage ? (
+                              <div className="summary-row">
+                                <span>Message</span>
+                                <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage}</strong>
+                              </div>
+                            ) : null}
+                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors.length ? (
+                              <div className="summary-row">
+                                <span>Shopify user errors</span>
+                                <strong>
+                                  {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors
+                                    .map((error) => [error.field.join('.'), error.message].filter(Boolean).join(': '))
+                                    .join('; ')}
+                                </strong>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
                       </div>
                     ) : null}
                     {shopifyFulfillmentSyncSummary ? (

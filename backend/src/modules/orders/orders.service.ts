@@ -106,6 +106,23 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readStringFieldArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function readShopifyUserErrors(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.filter(isRecord).map((error) => ({
+    field: readStringFieldArray(error.field),
+    message: readString(error, ['message']) ?? 'Unknown Shopify user error.',
+  }));
+}
+
 function readRecord(value: Record<string, unknown> | null, key: string) {
   if (!value) {
     return null;
@@ -133,6 +150,26 @@ function readShipmentTimeline(value: Record<string, unknown> | null) {
     }));
 }
 
+function mapShopifyReturnLabelUploadProbe(returnShipment: Record<string, unknown>) {
+  const probe = readRecord(returnShipment, 'shopifyReturnLabelUploadProbe');
+  if (!probe) {
+    return null;
+  }
+
+  return {
+    status: readString(probe, ['status']) ?? 'not_started',
+    attemptedAt: readString(probe, ['attemptedAt']),
+    reverseFulfillmentOrderIdPresent: readBoolean(probe, ['reverseFulfillmentOrderIdPresent']),
+    reverseLineItemIdsPresent: readBoolean(probe, ['reverseLineItemIdsPresent']),
+    mutationUsed: readString(probe, ['mutationUsed']),
+    shopifyUserErrors: readShopifyUserErrors(probe.shopifyUserErrors),
+    reverseDeliveryIdPresent: readBoolean(probe, ['reverseDeliveryIdPresent']),
+    labelAccepted: readBoolean(probe, ['labelAccepted']),
+    skippedReason: readString(probe, ['skippedReason']),
+    errorMessage: readString(probe, ['errorMessage']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipmentExecutionDto['returnShipment'] {
   const returnShipment = readRecord(snapshot, 'returnShipment');
   if (!returnShipment) {
@@ -156,6 +193,7 @@ function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipm
     labelPresent: Boolean(labelUrl),
     labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
     labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+    shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }
 

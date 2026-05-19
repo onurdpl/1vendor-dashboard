@@ -12,6 +12,7 @@ import {
   ingestKargoEntegratorWebhook,
   ingestTryOtoWebhook,
   listShipmentExecutions,
+  probeShopifyReturnLabelUpload,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
@@ -279,6 +280,27 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/admin/shipments/:id/probe-shopify-return-label',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await probeShopifyReturnLabelUpload(request.params.id, {
+          env,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shopify return label upload probe could not be run.';
         return reply.code(400).send({ message });
       }
     },

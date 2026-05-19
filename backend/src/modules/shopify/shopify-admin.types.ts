@@ -21,11 +21,60 @@ export type ShopifyReturnTrackingInfo = {
   trackingUrl: string | null;
 };
 
+export type ShopifyReverseDeliveryLineItem = {
+  id: string;
+  quantity: number;
+  lineItemGid: string | null;
+  sku: string | null;
+};
+
+export type ShopifyReverseDeliveryInfo = {
+  id: string;
+  labelPublicFileUrl: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+};
+
+export type ShopifyReverseFulfillmentOrderInfo = {
+  id: string;
+  status: string | null;
+  lineItems: ShopifyReverseDeliveryLineItem[];
+  reverseDeliveries: ShopifyReverseDeliveryInfo[];
+};
+
+export type FetchShopifyReturnReverseDeliveryInputsResult = {
+  returnGid: string;
+  reverseFulfillmentOrders: ShopifyReverseFulfillmentOrderInfo[];
+  source: 'mock' | 'shopify_admin';
+};
+
 export type FetchShopifyReturnDetailsResult = {
   returnGid: string;
   orderGid: string;
   lineItems: ShopifyReturnLineItem[];
   returnTracking: ShopifyReturnTrackingInfo | null;
+  source: 'mock' | 'shopify_admin';
+};
+
+export type ShopifyUserError = {
+  field: string[];
+  message: string;
+};
+
+export type ProbeShopifyReturnLabelUploadInput = {
+  returnGid: string;
+  trackingNumber: string;
+  trackingUrl?: string | null;
+  labelUrl: string;
+};
+
+export type ProbeShopifyReturnLabelUploadResult = {
+  mutationUsed: 'reverseDeliveryCreateWithShipping' | 'reverseDeliveryShippingUpdate';
+  reverseFulfillmentOrderIdPresent: boolean;
+  reverseLineItemIdsPresent: boolean;
+  reverseDeliveryId: string | null;
+  labelAccepted: boolean;
+  userErrors: ShopifyUserError[];
   source: 'mock' | 'shopify_admin';
 };
 
