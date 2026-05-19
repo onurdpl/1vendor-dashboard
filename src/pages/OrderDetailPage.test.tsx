@@ -2112,12 +2112,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
     expect(probeButton).toBeEnabled();
     expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('missing');
-    expect(await screen.findByText('Use this return tracking code/link for return shipment. Printable PDF label is not available yet.')).toBeInTheDocument();
+    expect(await screen.findByText('Use this return tracking code/link for return shipment. Printable return label unavailable.')).toBeInTheDocument();
     await user.click(probeButton);
 
     expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Shopify return tracking attached.')).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Shopify return tracking attached')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Shopify return tracking attached. Customer can track return shipment in Shopify.')).length).toBeGreaterThan(0);
   });
 
   it('lets admins probe Try OTO return details and shows safe diagnostics', async () => {
@@ -2148,7 +2148,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingUrl: null,
           labelUrl: null,
           barcode: 'RET-BARCODE-1028',
-          status: 'request_created',
+          status: 'newReturn',
           createdAt: '2026-05-15T19:46:00.000Z',
           requestKeys: ['items', 'orderId'],
           responseKeys: ['returnOrderId'],
@@ -2208,7 +2208,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingUrl: null,
           labelUrl: null,
           barcode: 'RET-BARCODE-1028',
-          status: 'request_created',
+          status: 'newReturn',
           createdAt: '2026-05-15T19:46:00.000Z',
           requestKeys: ['items', 'orderId'],
           responseKeys: ['returnOrderId'],
@@ -2310,7 +2310,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingUrl: null,
           labelUrl: null,
           barcode: 'RET-BARCODE-1028',
-          status: 'request_created',
+          status: 'newReturn',
           createdAt: '2026-05-15T19:46:00.000Z',
           requestKeys: ['items', 'orderId'],
           responseKeys: ['returnOrderId'],
@@ -2810,7 +2810,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: true,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
+          labelRetrievalNote: null,
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2822,7 +2822,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
+    expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Use this return tracking code/link for return shipment. Printable return label unavailable.')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
@@ -2863,7 +2865,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: false,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
+          labelRetrievalNote: null,
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2875,7 +2877,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             returnProviderIdPresent: true,
             returnTrackingPresent: false,
             returnBarcodePresent: false,
-            returnStatus: 'request_created',
+            returnStatus: 'newReturn',
             labelFieldPresent: false,
             providerMessage: null,
             returnDeliveryOptionIdPresent: false,
@@ -2904,7 +2906,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
+    expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Return created. Return tracking code will appear here when available.')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
   });
@@ -2943,7 +2947,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: false,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
+          labelRetrievalNote: null,
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2955,7 +2959,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             returnProviderIdPresent: false,
             returnTrackingPresent: false,
             returnBarcodePresent: false,
-            returnStatus: 'request_created',
+            returnStatus: 'newReturn',
             labelFieldPresent: false,
             providerMessage: null,
             returnDeliveryOptionIdPresent: false,
@@ -2984,7 +2988,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
+    expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Return created. Return tracking code will appear here when available.')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
   });
 

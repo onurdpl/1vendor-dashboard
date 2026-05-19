@@ -165,11 +165,23 @@ function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecutio
     return returnShipment.labelRetrievalNote ?? 'Try OTO return shipment was not created.';
   }
 
-  if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
-    return 'Return request created; waiting for Try OTO return shipment details.';
+  const normalizedStatus = returnShipment.status?.trim().toLowerCase() ?? '';
+  if (normalizedStatus === 'newreturn' || normalizedStatus === 'request_created') {
+    return 'Return created';
   }
 
-  const normalizedStatus = returnShipment.status?.trim().toLowerCase() ?? '';
+  if (normalizedStatus === 'reverseshipmentprocessing') {
+    return 'Return shipment processing';
+  }
+
+  if (normalizedStatus === 'reversereturned') {
+    return 'Returned';
+  }
+
+  if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
+    return 'Return created';
+  }
+
   if (returnShipment.finalized && (!normalizedStatus || normalizedStatus === 'created' || normalizedStatus === 'finalized')) {
     return 'Return shipment finalized';
   }
@@ -182,18 +194,21 @@ function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecutio
 }
 
 function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
-  if (returnShipment.labelRetrievalNote) {
+  if (
+    returnShipment.labelRetrievalNote &&
+    !returnShipment.labelRetrievalNote.toLowerCase().includes('waiting for try oto return shipment details')
+  ) {
     return returnShipment.labelRetrievalNote;
   }
 
   if ((returnShipment.trackingNumber || returnShipment.barcode || returnShipment.trackingUrl) && !returnShipment.labelUrl) {
-    return 'Use this return tracking code/link for return shipment. Printable PDF label is not available yet.';
+    return 'Use this return tracking code/link for return shipment. Printable return label unavailable.';
   }
 
   return (
     returnShipment.finalized
-      ? 'Return shipment created. Label PDF is not available yet.'
-      : 'Return request created; waiting for Try OTO return shipment details.'
+      ? 'Return shipment created. Printable return label unavailable.'
+      : 'Return created. Return tracking code will appear here when available.'
   );
 }
 
@@ -1115,8 +1130,8 @@ export function OrderDetailPage() {
           message: hasReturnLabel
             ? 'Try OTO return label created.'
             : returnFinalized
-              ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
-              : 'Try OTO return request created; waiting for Try OTO return shipment details.',
+              ? 'Try OTO return shipment created. Printable return label unavailable.'
+              : 'Try OTO return created. Return tracking code will appear here when available.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
@@ -1124,8 +1139,8 @@ export function OrderDetailPage() {
           hasReturnLabel
             ? 'Try OTO return label created.'
             : returnFinalized
-              ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
-              : 'Try OTO return request created; waiting for Try OTO return shipment details.',
+              ? 'Try OTO return shipment created. Printable return label unavailable.'
+              : 'Try OTO return created. Return tracking code will appear here when available.',
           hasReturnLabel ? 'success' : 'info',
         );
         void refetch();
@@ -2615,58 +2630,6 @@ export function OrderDetailPage() {
                                       </div>
                                     ) : null}
                                     <div className="summary-row">
-                                      <span>Return option lookup</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
-                                          ? 'called'
-                                          : visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
-                                            ? 'not called'
-                                            : 'not implemented'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
-                                      <span>Return price options</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
-                                          ? `${visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
-                                          : 'not called'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
-                                      <span>Selected price option</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent
-                                          ? 'present'
-                                          : 'missing'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
-                                      <span>Return finalization endpoint</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
-                                          ? 'implemented'
-                                          : 'disabled / unconfirmed'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
-                                      <span>Reverse createShipment</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
-                                          ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
-                                            ? 'succeeded'
-                                            : 'failed'
-                                          : 'not called'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
-                                      <span>Reverse response keys</span>
-                                      <strong>
-                                        {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
-                                          ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
-                                          : '—'}
-                                      </strong>
-                                    </div>
-                                    <div className="summary-row">
                                       <span>Label retrievable</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
                                     </div>
@@ -2810,7 +2773,7 @@ export function OrderDetailPage() {
                                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
                                           <span>Shopify return label attached</span>
                                         ) : visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? (
-                                          <span>Shopify return tracking attached</span>
+                                          <span>Shopify return tracking attached. Customer can track return shipment in Shopify.</span>
                                         ) : null}
                                         <div className="summary-row">
                                           <span>Status</span>
@@ -3602,54 +3565,6 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         <div className="summary-row">
-                          <span>Return option lookup</span>
-                          <strong>
-                            {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
-                              ? 'called'
-                              : visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
-                                ? 'not called'
-                                : 'not implemented'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Return price options</span>
-                          <strong>
-                            {visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
-                              ? `${visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
-                              : 'not called'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Selected price option</span>
-                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent ? 'present' : 'missing'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Return finalization endpoint</span>
-                          <strong>
-                            {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
-                              ? 'implemented'
-                              : 'disabled / unconfirmed'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Reverse createShipment</span>
-                          <strong>
-                            {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
-                              ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
-                                ? 'succeeded'
-                                : 'failed'
-                              : 'not called'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Reverse response keys</span>
-                          <strong>
-                            {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
-                              ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
-                              : '—'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
                           <span>Label retrievable</span>
                           <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
                         </div>
@@ -3780,7 +3695,7 @@ export function OrderDetailPage() {
                             {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
                               <span>Shopify return label attached</span>
                             ) : visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? (
-                              <span>Shopify return tracking attached</span>
+                              <span>Shopify return tracking attached. Customer can track return shipment in Shopify.</span>
                             ) : null}
                             <div className="summary-row">
                               <span>Status</span>
