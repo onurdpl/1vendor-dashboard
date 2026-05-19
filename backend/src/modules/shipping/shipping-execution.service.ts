@@ -1316,6 +1316,134 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
   });
 }
 
+function getTryOtoAsyncContextFromError(error: unknown, requestSnapshot: unknown) {
+  if (!(error instanceof ShippingProviderExecutionError)) {
+    return null;
+  }
+
+  const snapshot = error.responseSnapshot;
+  if (readString(snapshot, ['provider']) !== 'try_oto') {
+    return null;
+  }
+
+  const request = isRecord(requestSnapshot) ? requestSnapshot : {};
+  const orderId = readString(request, ['orderId']);
+  const createOrder = isRecord(snapshot.createOrder) ? snapshot.createOrder : null;
+  const createShipment = isRecord(snapshot.createShipment) ? snapshot.createShipment : null;
+  const providerErrorCode = (
+    readString(snapshot, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code']) ??
+    readString(createShipment, ['providerErrorCode', 'errorCode', 'otoErrorCode', 'code'])
+  )?.toUpperCase();
+  const validationErrors = Array.isArray(snapshot.providerValidationErrors)
+    ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const createShipmentValidationErrors = Array.isArray(createShipment?.providerValidationErrors)
+    ? createShipment.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+    : [];
+  const providerError = [
+    readString(snapshot, ['providerError', 'error', 'message', 'reason']),
+    readString(createShipment, ['providerError', 'error', 'message', 'reason']),
+  ].filter(Boolean).join(' ').toLowerCase();
+  const isNonRecoverable =
+    providerErrorCode === 'OTO1010' ||
+    validationErrors.length > 0 ||
+    createShipmentValidationErrors.length > 0 ||
+    providerError.includes('delivery option is not available') ||
+    providerError.includes('validation');
+
+  if (!orderId || !createOrder || createOrder.ok === false || isNonRecoverable) {
+    return null;
+  }
+
+  return {
+    orderId,
+    snapshot,
+  };
+}
+
+async function persistTryOtoAsyncShipmentContext(input: {
+  executionId: string;
+  allocation: {
+    id: string;
+    fulfillmentStatus: string;
+  };
+  error: unknown;
+  requestSnapshot: unknown;
+  baseSnapshot?: unknown;
+}) {
+  const context = getTryOtoAsyncContextFromError(input.error, input.requestSnapshot);
+  if (!context) {
+    return null;
+  }
+
+  const failureSnapshot = buildProviderFailureSnapshot(input.error, ShippingProvider.TRY_OTO, input.baseSnapshot);
+  const responseSnapshot = appendTimelineEvent(
+    {
+      ...failureSnapshot,
+      provider: 'try_oto',
+      providerOrderId: context.orderId,
+      orderId: context.orderId,
+      tryOtoAsyncPending: true,
+      effectiveShipmentStatus: 'created',
+      providerMessage: 'Shipment was created. Tracking or label may still be processing.',
+      lastProviderResponseAt: new Date().toISOString(),
+    },
+    {
+      label: 'Try OTO shipment pending provider finalization',
+      status: 'created',
+    },
+  );
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const execution = await tx.shipmentExecution.update({
+      where: {
+        id: input.executionId,
+      },
+      data: {
+        providerShipmentId: context.orderId,
+        shipmentStatus: ShipmentExecutionStatus.CREATED,
+        responseSnapshot: responseSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    await tx.vendorAllocation.update({
+      where: {
+        id: input.allocation.id,
+      },
+      data: {
+        shippingStatus: allocationShippingStatus('created'),
+        fulfillmentStatus: input.allocation.fulfillmentStatus === 'Pending' ? 'Processing' : input.allocation.fulfillmentStatus,
+        carrier: 'try_oto',
+      },
+    });
+
+    await tx.fulfillment.upsert({
+      where: {
+        vendorAllocationId: input.allocation.id,
+      },
+      update: {
+        fulfillmentStatus: 'shipment_created',
+        carrier: 'try_oto',
+        shipmentUpdatedAt: new Date(),
+        syncStatus: 'carrier_created',
+        errorMessage: null,
+      },
+      create: {
+        vendorAllocationId: input.allocation.id,
+        fulfillmentStatus: 'shipment_created',
+        carrier: 'try_oto',
+        shipmentCreatedAt: new Date(),
+        shipmentUpdatedAt: new Date(),
+        syncStatus: 'carrier_created',
+      },
+    });
+
+    return execution;
+  });
+
+  return mapShipmentExecution(updated);
+}
+
 function assertFailedRetryEligible(execution: ShipmentExecution) {
   if (execution.shipmentStatus !== ShipmentExecutionStatus.FAILED) {
     throw new Error('Only failed shipment executions can be retried.');
@@ -2603,6 +2731,18 @@ export async function createShipmentExecution(
       label: 'Create attempted',
       status: 'failed',
     });
+    if (provider === ShippingProvider.TRY_OTO) {
+      const recovered = await persistTryOtoAsyncShipmentContext({
+        executionId,
+        allocation,
+        error,
+        requestSnapshot,
+        baseSnapshot: attemptSnapshot,
+      });
+      if (recovered) {
+        return recovered;
+      }
+    }
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: executionId,
@@ -2725,6 +2865,18 @@ export async function retryDryRunShipmentExecution(
       result,
     });
   } catch (error) {
+    if (provider === ShippingProvider.TRY_OTO) {
+      const recovered = await persistTryOtoAsyncShipmentContext({
+        executionId: existing.id,
+        allocation,
+        error,
+        requestSnapshot,
+        baseSnapshot: existing.responseSnapshot,
+      });
+      if (recovered) {
+        return recovered;
+      }
+    }
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: existing.id,
@@ -2852,6 +3004,18 @@ export async function retryFailedShipmentExecution(
       result,
     });
   } catch (error) {
+    if (provider === ShippingProvider.TRY_OTO) {
+      const recovered = await persistTryOtoAsyncShipmentContext({
+        executionId: existing.id,
+        allocation,
+        error,
+        requestSnapshot,
+        baseSnapshot: retrySnapshot,
+      });
+      if (recovered) {
+        return recovered;
+      }
+    }
     const failed = await prisma.shipmentExecution.update({
       where: {
         id: existing.id,

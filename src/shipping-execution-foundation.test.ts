@@ -4394,6 +4394,198 @@ describe('shipping execution foundation', () => {
     expect(createData).not.toHaveProperty('allocationId');
   });
 
+  it('treats async Try OTO createShipment failures with existing order context as created', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        fulfillmentStatus: 'Pending',
+        order: {
+          id: 'order-1',
+          customerName: 'Sandbox Customer',
+          customerEmail: 'sandbox@example.com',
+          customerPhone: '0555 111 22 33',
+          shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'TR',
+          shippingPostcode: '34710',
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 1,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+    adapter.createShipment.mockRejectedValue(
+      new ShippingProviderExecutionError('Try OTO createShipment failed with HTTP 400.', {
+        provider: 'try_oto',
+        operation: 'createShipment',
+        status: 400,
+        ok: false,
+        createOrder: {
+          ok: true,
+          operation: 'createOrder',
+          bodyKeys: ['otoId'],
+        },
+        createShipment: {
+          status: 400,
+          ok: false,
+          bodyKeys: ['message'],
+          providerError: 'Shipment is still being prepared.',
+        },
+        providerError: 'Shipment is still being prepared.',
+      }),
+    );
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'try_oto',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'try_oto',
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_SANDBOX_MODE: true,
+          TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+          TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result).toMatchObject({
+      shipmentStatus: 'created',
+      providerShipmentId: expect.stringContaining('shopify-7616544244049-allocation-alloc-1'),
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shipmentStatus: 'CREATED',
+          providerShipmentId: expect.stringContaining('shopify-7616544244049-allocation-alloc-1'),
+          responseSnapshot: expect.objectContaining({
+            tryOtoAsyncPending: true,
+            providerMessage: 'Shipment was created. Tracking or label may still be processing.',
+            error: 'Try OTO createShipment failed with HTTP 400.',
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alloc-1' },
+        data: expect.objectContaining({
+          shippingStatus: 'label_created',
+          carrier: 'try_oto',
+        }),
+      }),
+    );
+  });
+
+  it('keeps non-recoverable Try OTO validation errors failed', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Sandbox Customer',
+          customerEmail: 'sandbox@example.com',
+          customerPhone: '0555 111 22 33',
+          shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'TR',
+          shippingPostcode: '34710',
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-try-oto',
+      vendorId: 'sporjinal',
+      preferredProvider: 'TRY_OTO',
+      shippingEnabled: true,
+      defaultDesi: 1,
+      cargoIntegrationId: null,
+      defaultWarehouseId: null,
+      shippingVatPercent: 18,
+      providerMetadata: {
+        tryOtoPickupLocationCode: 'tr-test-store-001',
+        tryOtoOriginCity: 'Istanbul',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+    });
+    adapter.createShipment.mockRejectedValue(
+      new ShippingProviderExecutionError('Try OTO createShipment failed with HTTP 422.', {
+        provider: 'try_oto',
+        operation: 'createShipment',
+        status: 422,
+        ok: false,
+        createOrder: {
+          ok: true,
+          operation: 'createOrder',
+        },
+        createShipment: {
+          status: 422,
+          ok: false,
+          providerValidationErrors: ['customer.mobile is required'],
+        },
+        providerValidationErrors: ['customer.mobile is required'],
+      }),
+    );
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'try_oto',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'try_oto',
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_SANDBOX_MODE: true,
+          TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+          TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result.shipmentStatus).toBe('failed');
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shipmentStatus: 'FAILED',
+          responseSnapshot: expect.objectContaining({
+            providerValidationErrors: ['customer.mobile is required'],
+          }),
+        }),
+      }),
+    );
+  });
+
   it('blocks Try OTO shipment execution before provider lookup when origin city is missing', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(
       buildAllocation({
@@ -4792,8 +4984,10 @@ describe('shipping execution foundation', () => {
       providerShipmentId: 'OTO-ORDER-1001',
       trackingNumber: null,
       labelUrl: null,
+      shipmentStatus: 'FAILED',
       responseSnapshot: {
         orderId: 'OTO-ORDER-1001',
+        providerError: 'Previous createShipment error',
       },
       requestSnapshot: {
         orderId: 'OTO-ORDER-1001',
@@ -4839,6 +5033,7 @@ describe('shipping execution foundation', () => {
           responseSnapshot: expect.objectContaining({
             barcode: 'OTO-BARCODE-1001',
             providerStatus: 'shipmentCreated',
+            providerError: 'Previous createShipment error',
           }),
         }),
       }),
