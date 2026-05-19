@@ -531,6 +531,19 @@ export async function refreshShipmentExecutionStatus(
   );
 }
 
+export async function createReturnShipmentLabel(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/create-return`,
+    {},
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
 export async function getShippingProviderDiagnostics(
   provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},

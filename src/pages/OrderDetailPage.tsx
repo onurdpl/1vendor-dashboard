@@ -5,6 +5,7 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
+  createReturnShipmentLabel,
   createShipmentExecution,
   getOrder,
   getShippingProviderDiagnostics,
@@ -572,6 +573,15 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: createReturnShipmentLabelMutation, isPending: isCreatingReturnShipmentLabel } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      createReturnShipmentLabel(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -705,6 +715,12 @@ export function OrderDetailPage() {
     Boolean(shipmentShopifyTrackingNumber) &&
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;
+  const canCreateTryOtoReturnLabel =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    ['delivered'].includes(visibleShipmentStatus) &&
+    Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
+    !visibleShipmentExecution.returnShipment;
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -853,6 +869,49 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleCreateReturnShipmentLabel() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Creating Try OTO return label...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
+    });
+
+    void createReturnShipmentLabelMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
+        setShipmentActionState({
+          tone: hasReturnLabel ? 'success' : 'info',
+          message: hasReturnLabel
+            ? 'Try OTO return label created.'
+            : 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.',
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
+        });
+        showFeedback(
+          hasReturnLabel
+            ? 'Try OTO return label created.'
+            : 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.',
+          hasReturnLabel ? 'success' : 'info',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return label could not be created.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -1956,6 +2015,65 @@ export function OrderDetailPage() {
                             <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
                               Open label PDF
                             </a>
+                          </div>
+                        ) : null}
+                        {visibleShipmentExecution?.provider === 'try_oto' ? (
+                          <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
+                            <strong>Try OTO return label</strong>
+                            {visibleShipmentExecution.returnShipment ? (
+                              <>
+                                <span>
+                                  {visibleShipmentExecution.returnShipment.status
+                                    ? toTitleCaseLabel(visibleShipmentExecution.returnShipment.status)
+                                    : 'Return shipment created'}
+                                  {visibleShipmentExecution.returnShipment.returnOrderId
+                                    ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}`
+                                    : ''}
+                                </span>
+                                {visibleShipmentExecution.returnShipment.trackingNumber ? (
+                                  <div className="summary-row">
+                                    <span>Return tracking</span>
+                                    <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
+                                  </div>
+                                ) : null}
+                                {visibleShipmentExecution.returnShipment.barcode ? (
+                                  <div className="summary-row">
+                                    <span>Return barcode</span>
+                                    <strong>{visibleShipmentExecution.returnShipment.barcode}</strong>
+                                  </div>
+                                ) : null}
+                                {visibleShipmentExecution.returnShipment.labelUrl ? (
+                                  <a
+                                    className="inline-link"
+                                    href={visibleShipmentExecution.returnShipment.labelUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                  >
+                                    Open return label PDF
+                                  </a>
+                                ) : (
+                                  <span className="muted">
+                                    {visibleShipmentExecution.returnShipment.labelRetrievalNote ??
+                                      'Return shipment created. Label PDF is not available yet.'}
+                                  </span>
+                                )}
+                              </>
+                            ) : (
+                              <>
+                                <span>Create a sandbox Try OTO reverse shipment label for this delivered shipment.</span>
+                                <button
+                                  type="button"
+                                  className="secondary-action-button"
+                                  onClick={handleCreateReturnShipmentLabel}
+                                  disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
+                                >
+                                  {isCreatingReturnShipmentLabel ? 'Creating return label...' : 'Create return label'}
+                                </button>
+                                {!canCreateTryOtoReturnLabel ? (
+                                  <span className="muted">Available after a Try OTO shipment is delivered and has a provider reference.</span>
+                                ) : null}
+                              </>
+                            )}
                           </div>
                         ) : null}
                         {visibleShipmentExecution?.shippingCost ? (

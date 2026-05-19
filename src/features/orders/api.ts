@@ -1,5 +1,6 @@
 export {
   createShipmentExecution,
+  createReturnShipmentLabel,
   getAdminShopifyOrderBreakdown,
   getOrder,
   getShippingProviderDiagnostics,

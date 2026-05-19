@@ -16,6 +16,7 @@ const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
+const createReturnShipmentLabelMock = vi.fn();
 const submitFulfillmentTrackingMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
@@ -46,6 +47,8 @@ vi.mock('../features/orders/api', async () => {
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
+    createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      createReturnShipmentLabelMock(shipmentExecutionId, options),
     submitFulfillmentTracking: (
       allocationId: string,
       payload: { trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer?: boolean },
@@ -324,6 +327,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       trackingNumber: 'OTO-TRACK-1028',
       barcode: 'OTO-BARCODE-1028',
       labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+      updatedAt: '2026-05-15T19:46:00.000Z',
+    });
+    createReturnShipmentLabelMock.mockReset();
+    createReturnShipmentLabelMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: null,
+        labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+        barcode: 'RET-BARCODE-1028',
+        status: 'created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['items', 'orderId'],
+        responseKeys: ['printAWBURL', 'returnOrderId'],
+        trackingPresent: true,
+        labelPresent: true,
+        labelRetrievalConfirmed: true,
+        labelRetrievalNote: null,
+      },
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
     submitFulfillmentTrackingMock.mockReset();
@@ -1654,6 +1682,92 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
     expect(screen.getByRole('link', { name: 'Open label PDF' })).toHaveAttribute('href', 'https://app.tryoto.example/label-1028.pdf');
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
+  });
+
+  it('renders Try OTO return label links when return shipment exists', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+          barcode: 'RET-BARCODE-1028',
+          status: 'created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['printAWBURL', 'returnOrderId'],
+          trackingPresent: true,
+          labelPresent: true,
+          labelRetrievalConfirmed: true,
+          labelRetrievalNote: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Try OTO return shipment')).toBeInTheDocument();
+    expect(screen.getByText('RET-TRACK-1028')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
+      'href',
+      'https://app.tryoto.example/return-label-1028.pdf',
+    );
+  });
+
+  it('creates Try OTO return labels from delivered shipments', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: null,
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create return label' }));
+
+    expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    expect((await screen.findAllByText('Try OTO return label created.')).length).toBeGreaterThan(0);
   });
 
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {

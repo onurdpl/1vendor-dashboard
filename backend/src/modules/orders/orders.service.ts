@@ -97,6 +97,10 @@ function readBoolean(value: Record<string, unknown> | null, keys: string[]) {
   return keys.some((key) => value[key] === true);
 }
 
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
 function readRecord(value: Record<string, unknown> | null, key: string) {
   if (!value) {
     return null;
@@ -122,6 +126,32 @@ function readShipmentTimeline(value: Record<string, unknown> | null) {
       at: readString(event, ['at']) ?? new Date().toISOString(),
       status: readString(event, ['status']),
     }));
+}
+
+function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipmentExecutionDto['returnShipment'] {
+  const returnShipment = readRecord(snapshot, 'returnShipment');
+  if (!returnShipment) {
+    return null;
+  }
+
+  const labelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+  const trackingNumber = readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']);
+  return {
+    provider: 'try_oto',
+    returnOrderId: readString(returnShipment, ['returnOrderId']),
+    trackingNumber,
+    trackingUrl: readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']),
+    labelUrl,
+    barcode: readString(returnShipment, ['barcode', 'returnBarcode']),
+    status: readString(returnShipment, ['status', 'returnStatus']),
+    createdAt: readString(returnShipment, ['createdAt']),
+    requestKeys: readStringArray(returnShipment.requestKeys),
+    responseKeys: readStringArray(returnShipment.responseKeys),
+    trackingPresent: Boolean(trackingNumber),
+    labelPresent: Boolean(labelUrl),
+    labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
+    labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+  };
 }
 
 function buildShipmentProviderResponseSummary(
@@ -398,6 +428,7 @@ function mapShipmentExecution(execution: {
     webhookReceived: readBoolean(snapshot, ['webhookReceived']),
     barcodeAssigned: Boolean(barcode),
     trackingAssigned: Boolean(execution.trackingNumber),
+    returnShipment: mapReturnShipment(snapshot),
     timeline: readShipmentTimeline(snapshot),
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),

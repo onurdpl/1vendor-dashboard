@@ -75,6 +75,22 @@ export type OrderShipmentExecutionDto = {
   webhookReceived: boolean;
   barcodeAssigned: boolean;
   trackingAssigned: boolean;
+  returnShipment: {
+    provider: 'try_oto';
+    returnOrderId: string | null;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+    labelUrl: string | null;
+    barcode: string | null;
+    status: string | null;
+    createdAt: string | null;
+    requestKeys: string[];
+    responseKeys: string[];
+    trackingPresent: boolean;
+    labelPresent: boolean;
+    labelRetrievalConfirmed: boolean;
+    labelRetrievalNote: string | null;
+  } | null;
   timeline: Array<{
     label: string;
     at: string;

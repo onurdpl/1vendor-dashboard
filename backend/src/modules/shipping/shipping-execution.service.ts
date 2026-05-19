@@ -169,6 +169,36 @@ function mapShippingConfig(config: StoredShippingConfig | null, vendorId: string
   };
 }
 
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
+function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecutionDto['returnShipment'] {
+  const returnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
+  if (!returnShipment) {
+    return null;
+  }
+
+  const labelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+  const trackingNumber = readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']);
+  return {
+    provider: 'try_oto',
+    returnOrderId: readString(returnShipment, ['returnOrderId']),
+    trackingNumber,
+    trackingUrl: readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']),
+    labelUrl,
+    barcode: readString(returnShipment, ['barcode', 'returnBarcode']),
+    status: readString(returnShipment, ['status', 'returnStatus']),
+    createdAt: readString(returnShipment, ['createdAt']),
+    requestKeys: readStringArray(returnShipment.requestKeys),
+    responseKeys: readStringArray(returnShipment.responseKeys),
+    trackingPresent: Boolean(trackingNumber),
+    labelPresent: Boolean(labelUrl),
+    labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
+    labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
+  };
+}
+
 function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinked?: boolean }): ShipmentExecutionDto {
   const snapshot = readSnapshot(execution);
   const providerStatus = readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']);
@@ -204,6 +234,7 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
     webhookReceived,
     barcodeAssigned: Boolean(barcode),
     trackingAssigned: Boolean(execution.trackingNumber),
+    returnShipment: mapReturnShipment(snapshot),
     timeline,
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),
@@ -1946,6 +1977,173 @@ function resolveTryOtoStatusOrderId(execution: ShipmentExecution) {
     execution.providerShipmentId ??
     null
   );
+}
+
+function readTryOtoReturnShipmentSnapshot(execution: ShipmentExecution) {
+  const snapshot = readSnapshot(execution);
+  return isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
+}
+
+function buildTryOtoReturnItemsFromSnapshot(snapshot: unknown) {
+  const record = isRecord(snapshot) ? snapshot : {};
+  const lines = Array.isArray(record.lines) ? record.lines : Array.isArray(record.items) ? record.items : [];
+  return lines
+    .filter(isRecord)
+    .map((line) => {
+      const sku = readString(line, ['sku']);
+      const quantity = readString(line, ['quantity']) ?? '1';
+      return sku ? { sku, quantity } : null;
+    })
+    .filter((item): item is { sku: string; quantity: string } => Boolean(item && Number(item.quantity) > 0));
+}
+
+function buildTryOtoReturnItemsFromAllocation(allocation: {
+  lineItems?: Array<{
+    quantity?: number | null;
+    shopifyOrderLineItem?: {
+      sku?: string | null;
+    } | null;
+  }>;
+}) {
+  return (allocation.lineItems ?? [])
+    .map((lineItem) => {
+      const sku = lineItem.shopifyOrderLineItem?.sku?.trim();
+      if (!sku) {
+        return null;
+      }
+      return {
+        sku,
+        quantity: String(lineItem.quantity ?? 1),
+      };
+    })
+    .filter((item): item is { sku: string; quantity: string } => Boolean(item && Number(item.quantity) > 0));
+}
+
+function isTryOtoReturnAllowedByState(execution: ShipmentExecution, allocation: { fulfillmentStatus?: string | null }) {
+  const shipmentStatus = mapStatus(execution.shipmentStatus);
+  const fulfillmentStatus = allocation.fulfillmentStatus?.trim().toLowerCase() ?? '';
+  return shipmentStatus === 'delivered' || fulfillmentStatus === 'fulfilled';
+}
+
+export async function createTryOtoReturnShipmentLabel(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    throw new Error('Return label creation is only available for Try OTO shipments.');
+  }
+
+  const existingReturnShipment = readTryOtoReturnShipmentSnapshot(existing);
+  if (existingReturnShipment) {
+    return mapShipmentExecution(existing);
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: existing.allocationId,
+    },
+    include: {
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+    },
+  });
+
+  if (!allocation || allocation.assignedVendorId !== existing.vendorId) {
+    throw new Error('Allocation could not be found for the selected shipment execution.');
+  }
+
+  if (!isTryOtoReturnAllowedByState(existing, allocation)) {
+    throw new Error('Try OTO return label creation requires a delivered or fulfilled shipment.');
+  }
+
+  const orderId = resolveTryOtoStatusOrderId(existing);
+  if (!orderId || (!existing.trackingNumber && !existing.providerShipmentId)) {
+    throw new Error('Try OTO return label creation requires a stored OTO order id or tracking reference.');
+  }
+
+  const requestSnapshot = isRecord(existing.requestSnapshot) ? existing.requestSnapshot : {};
+  const items = buildTryOtoReturnItemsFromSnapshot(requestSnapshot);
+  const fallbackItems = items.length > 0 ? items : buildTryOtoReturnItemsFromAllocation(allocation);
+  if (fallbackItems.length === 0) {
+    throw new Error('Try OTO return shipment requires returned item SKU and quantity; API contract is not confirmed for itemless returns.');
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
+  if (!adapter.createReturnShipment) {
+    throw new Error('Try OTO return shipment creation is not implemented for the selected provider adapter.');
+  }
+
+  const result = await adapter.createReturnShipment({
+    orderId,
+    items: fallbackItems,
+    pickupLocationCode: readString(requestSnapshot, ['pickupLocationCode']),
+  });
+  const returnShipment = {
+    provider: 'try_oto',
+    endpoint: '/rest/v2/createReturnShipment',
+    returnOrderId: result.returnOrderId,
+    trackingNumber: result.returnTrackingNumber,
+    trackingUrl: result.returnTrackingUrl,
+    labelUrl: result.returnLabelUrl,
+    barcode: result.returnBarcode,
+    status: result.returnStatus,
+    createdAt: new Date().toISOString(),
+    requestKeys: readStringArray(result.responseSnapshot.requestKeys),
+    responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
+    trackingPresent: Boolean(result.returnTrackingNumber),
+    labelPresent: Boolean(result.returnLabelUrl),
+    labelRetrievalConfirmed: Boolean(result.returnLabelUrl),
+    labelRetrievalNote:
+      readString(result.responseSnapshot, ['returnLabelRetrievalNote']) ??
+      (result.returnLabelUrl ? null : 'Try OTO return label retrieval path is not confirmed by sandbox response yet.'),
+    diagnostics: {
+      endpoint: '/rest/v2/createReturnShipment',
+      httpStatus: typeof result.responseSnapshot.status === 'number' ? result.responseSnapshot.status : null,
+      responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
+      requestKeys: readStringArray(result.responseSnapshot.requestKeys),
+      returnTrackingPresent: Boolean(result.returnTrackingNumber),
+      returnLabelPresent: Boolean(result.returnLabelUrl),
+    },
+  };
+  const mergedSnapshot = appendTimelineEvent(
+    {
+      ...readSnapshot(existing),
+      returnShipment,
+      lastProviderResponseAt: new Date().toISOString(),
+    },
+    {
+      label: 'Try OTO return shipment created',
+      status: result.returnStatus ?? 'created',
+    },
+  );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return mapShipmentExecution(updated);
 }
 
 export async function refreshTryOtoShipmentStatus(

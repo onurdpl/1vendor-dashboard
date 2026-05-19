@@ -26,6 +26,25 @@ export type ShippingProviderCreateResult = {
   responseSnapshot: Record<string, unknown>;
 };
 
+export type ShippingProviderReturnCreateInput = {
+  orderId: string;
+  items: Array<{
+    sku: string;
+    quantity: string;
+  }>;
+  pickupLocationCode?: string | null;
+};
+
+export type ShippingProviderReturnCreateResult = {
+  returnOrderId: string | null;
+  returnTrackingNumber: string | null;
+  returnTrackingUrl: string | null;
+  returnLabelUrl: string | null;
+  returnBarcode: string | null;
+  returnStatus: string | null;
+  responseSnapshot: Record<string, unknown>;
+};
+
 export class ShippingProviderExecutionError extends Error {
   constructor(
     message: string,
@@ -39,6 +58,7 @@ export class ShippingProviderExecutionError extends Error {
 export interface ShippingProviderAdapter {
   provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
+  createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -401,6 +421,10 @@ function readTryOtoTrackingNumber(value: Record<string, unknown>) {
 
 function readTryOtoBarcode(value: Record<string, unknown>) {
   return readString(value, ['barcode', 'barcodeNumber', 'barCode', 'awbNumber']);
+}
+
+function readTryOtoReturnOrderId(value: Record<string, unknown>) {
+  return readString(value, ['returnOrderId', 'return_order_id', 'reverseOrderId', 'reverseShipmentId', 'orderId']);
 }
 
 function readTryOtoDeliveryOptionId(value: Record<string, unknown>) {
@@ -1391,6 +1415,99 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         providerStatus,
         orderStatus: orderStatus.snapshot,
         lastProviderResponseAt: new Date().toISOString(),
+      },
+    };
+  }
+
+  async createReturnShipment(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult> {
+    const disabled = this.requireReady({
+      allocationId: '',
+      vendorId: '',
+      provider: 'try_oto',
+      requestSnapshot: {
+        orderId: input.orderId,
+        items: input.items,
+        ...(input.pickupLocationCode ? { pickupLocationCode: input.pickupLocationCode } : {}),
+      },
+    });
+    if (disabled) {
+      return {
+        returnOrderId: null,
+        returnTrackingNumber: null,
+        returnTrackingUrl: null,
+        returnLabelUrl: null,
+        returnBarcode: null,
+        returnStatus: null,
+        responseSnapshot: {
+          ...disabled.responseSnapshot,
+          operation: 'createReturnShipment',
+          endpoint: '/rest/v2/createReturnShipment',
+          returnLabelRetrievalConfirmed: false,
+        },
+      };
+    }
+
+    const orderId = input.orderId.trim();
+    const items = input.items
+      .map((item) => ({
+        sku: item.sku.trim(),
+        quantity: String(item.quantity).trim(),
+      }))
+      .filter((item) => item.sku && Number(item.quantity) > 0);
+    if (!orderId) {
+      throw new ShippingProviderExecutionError('Try OTO return shipment requires an orderId.', {
+        provider: 'try_oto',
+        operation: 'createReturnShipment',
+        endpoint: '/rest/v2/createReturnShipment',
+        orderIdPresent: false,
+      });
+    }
+    if (items.length === 0) {
+      throw new ShippingProviderExecutionError('Try OTO return shipment requires returned item SKU and quantity.', {
+        provider: 'try_oto',
+        operation: 'createReturnShipment',
+        endpoint: '/rest/v2/createReturnShipment',
+        orderIdPresent: true,
+        itemCount: 0,
+      });
+    }
+
+    const payload = {
+      orderId,
+      ...(input.pickupLocationCode ? { pickupLocationCode: input.pickupLocationCode } : {}),
+      items,
+    };
+    const accessToken = await this.refreshAccessToken();
+    const result = await this.postJson('/rest/v2/createReturnShipment', payload, accessToken, 'createReturnShipment');
+    const body = result.body;
+    const returnLabelUrl = readTryOtoLabelUrl(body);
+    const returnTrackingNumber = readTryOtoTrackingNumber(body);
+    const returnBarcode = readTryOtoBarcode(body);
+
+    return {
+      returnOrderId: readTryOtoReturnOrderId(body),
+      returnTrackingNumber,
+      returnTrackingUrl: readString(body, ['trackingUrl', 'trackingURL', 'brandedTrackingURL']),
+      returnLabelUrl,
+      returnBarcode,
+      returnStatus: readString(body, ['status', 'shipmentStatus', 'dcStatus']),
+      responseSnapshot: {
+        ...result.snapshot,
+        provider: 'try_oto',
+        operation: 'createReturnShipment',
+        endpoint: '/rest/v2/createReturnShipment',
+        requestKeys: Object.keys(payload).sort(),
+        itemCount: items.length,
+        orderIdPresent: true,
+        pickupLocationCodePresent: Boolean(input.pickupLocationCode),
+        returnOrderIdPresent: Boolean(readTryOtoReturnOrderId(body)),
+        returnTrackingPresent: Boolean(returnTrackingNumber),
+        returnBarcodePresent: Boolean(returnBarcode),
+        returnLabelPresent: Boolean(returnLabelUrl),
+        returnLabelRetrievalConfirmed: Boolean(returnLabelUrl),
+        returnLabelRetrievalNote: returnLabelUrl
+          ? null
+          : 'Try OTO return shipment was created, but the return label retrieval response field is still unconfirmed.',
       },
     };
   }

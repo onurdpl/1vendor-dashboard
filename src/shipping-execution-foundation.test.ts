@@ -32,6 +32,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 
 const {
   createShipmentExecution,
+  createTryOtoReturnShipmentLabel,
   getShippingProviderGateDiagnostics,
   getShippingProviderReadinessDiagnostics,
   ingestKargoEntegratorWebhook,
@@ -2258,6 +2259,125 @@ describe('shipping execution foundation', () => {
     );
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('blocks return label creation for non-Try OTO shipments', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargo_entegrator-alloc-1',
+      provider: 'KARGO_ENTEGRATOR',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'ke-1',
+      trackingNumber: 'KE-TRACK-1',
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+
+    await expect(
+      createTryOtoReturnShipmentLabel(existing.id, {
+        env,
+        vendorId: 'sporjinal',
+      }),
+    ).rejects.toThrow('Return label creation is only available for Try OTO shipments.');
+  });
+
+  it('does not create duplicate Try OTO return shipments', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          labelUrl: 'https://labels.example/return.pdf',
+          createdAt: '2026-05-15T10:00:00.000Z',
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(result.returnShipment?.returnOrderId).toBe('OTO-ORDER-1-R1');
+  });
+
+  it('creates and persists Try OTO return shipment metadata', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'OTO-ORDER-1-R1',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnTrackingUrl: 'https://tracking.example/RET-TRACK-1',
+        returnLabelUrl: 'https://labels.example/return.pdf',
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: 'created',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['printAWBURL', 'returnOrderId', 'trackingNumber'],
+          requestKeys: ['items', 'orderId', 'pickupLocationCode'],
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({ fulfillmentStatus: 'Fulfilled' }));
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).toHaveBeenCalledWith({
+      orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      items: [{ sku: 'SKU-1', quantity: '1' }],
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: existing.id },
+        data: expect.objectContaining({
+          responseSnapshot: expect.objectContaining({
+            returnShipment: expect.objectContaining({
+              returnOrderId: 'OTO-ORDER-1-R1',
+              trackingNumber: 'RET-TRACK-1',
+              labelUrl: 'https://labels.example/return.pdf',
+              barcode: 'RET-BARCODE-1',
+            }),
+          }),
+        }),
+      }),
+    );
+    expect(result.returnShipment?.labelUrl).toBe('https://labels.example/return.pdf');
   });
 
   it('registers a Try OTO webhook route that is disabled by default', async () => {
