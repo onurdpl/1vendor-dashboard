@@ -166,6 +166,22 @@ function isTryOtoReturnFinalizationPending(shipment: ShipmentExecution | null | 
   );
 }
 
+function getTryOtoReturnFinalizationDisabledReason(shipment: ShipmentExecution | null | undefined) {
+  if (shipment?.provider !== 'try_oto') {
+    return 'unsupported provider';
+  }
+  if (!shipment.returnShipment) {
+    return 'missing return request';
+  }
+  if (!hasTryOtoReturnProviderReference(shipment)) {
+    return 'missing return provider id';
+  }
+  if (shipment.returnShipment.finalized || shipment.returnShipment.labelRetrievable) {
+    return 'already finalized';
+  }
+  return null;
+}
+
 function isInternalShipmentReference(value?: string | null) {
   const normalized = value?.trim().toLowerCase() ?? '';
   return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
@@ -853,6 +869,7 @@ export function OrderDetailPage() {
   const canFinalizeTryOtoReturnShipment =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(hasUnfinalizedTryOtoReturnRequest);
+  const tryOtoReturnFinalizationDisabledReason = getTryOtoReturnFinalizationDisabledReason(visibleShipmentExecution);
   const canCreateTryOtoReturnLabel =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -2371,15 +2388,23 @@ export function OrderDetailPage() {
                                 ) : (
                                   <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                                 )}
-                                {hasUnfinalizedTryOtoReturnRequest ? (
-                                  <button
-                                    type="button"
-                                    className="secondary-action-button"
-                                    onClick={handleFinalizeReturnShipment}
-                                    disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
-                                  >
-                                    {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
-                                  </button>
+                                {visibleShipmentExecution.returnShipment ? (
+                                  <div className="shipment-recovery-actions" aria-label="Try OTO return finalization action">
+                                    <strong>Return shipment finalization</strong>
+                                    <span className="muted">
+                                      {tryOtoReturnFinalizationDisabledReason
+                                        ? `Unavailable: ${tryOtoReturnFinalizationDisabledReason}.`
+                                        : 'Ready to finalize the Try OTO reverse shipment.'}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      className="secondary-action-button"
+                                      onClick={handleFinalizeReturnShipment}
+                                      disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
+                                    >
+                                      {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                                    </button>
+                                  </div>
                                 ) : null}
                                 {isAdmin ? (
                                   <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
@@ -3243,15 +3268,23 @@ export function OrderDetailPage() {
                         ) : (
                           <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
                         )}
-                        {hasUnfinalizedTryOtoReturnRequest ? (
-                          <button
-                            type="button"
-                            className="secondary-action-button"
-                            onClick={handleFinalizeReturnShipment}
-                            disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
-                          >
-                            {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
-                          </button>
+                        {shipmentExecution.returnShipment ? (
+                          <div className="shipment-recovery-actions" aria-label="Try OTO return finalization action">
+                            <strong>Return shipment finalization</strong>
+                            <span className="muted">
+                              {tryOtoReturnFinalizationDisabledReason
+                                ? `Unavailable: ${tryOtoReturnFinalizationDisabledReason}.`
+                                : 'Ready to finalize the Try OTO reverse shipment.'}
+                            </span>
+                            <button
+                              type="button"
+                              className="secondary-action-button"
+                              onClick={handleFinalizeReturnShipment}
+                              disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
+                            >
+                              {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                            </button>
+                          </div>
                         ) : null}
                         {isAdmin ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
