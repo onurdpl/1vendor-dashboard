@@ -65,7 +65,7 @@ export type ShippingProviderGateDiagnosticsDto = {
   webhookRouteImplemented: boolean;
   receiverAddressAvailability: 'confirmed_required';
   dummyKargoSupport: 'available' | 'not_implemented';
-  statusSyncSupport: 'not_implemented';
+  statusSyncSupport: 'webhook_ingest' | 'not_implemented';
   missing: string[];
   deprecatedEnvFallbacks: string[];
   warnings: string[];

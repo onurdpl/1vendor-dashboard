@@ -1136,7 +1136,10 @@ export function getShippingProviderGateDiagnostics(
     webhookRouteImplemented: true,
     receiverAddressAvailability: 'confirmed_required',
     dummyKargoSupport: isKargo && env.SHIPPING_SANDBOX_MODE ? 'available' : 'not_implemented',
-    statusSyncSupport: 'not_implemented',
+    statusSyncSupport:
+      isTryOto && env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
+        ? 'webhook_ingest'
+        : 'not_implemented',
     missing,
     deprecatedEnvFallbacks:
       isKargo && env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID_SOURCE === 'deprecated'

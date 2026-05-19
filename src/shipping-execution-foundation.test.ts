@@ -2548,6 +2548,81 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('maps confirmed Try OTO delivered webhook status to the local delivered shipment state', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      trackingNumber: 'OTO-TRACK-1039',
+      labelUrl: 'https://labels.example/OTO-TRACK-1039.pdf',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+        providerError: 'prior createShipment failed',
+        timeline: [{ label: 'Shipment failed', at: '2026-05-15T10:00:00.000Z', status: 'failed' }],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          trackingNumber: 'OTO-TRACK-1039',
+          dcTrackingNumber: 'OTO-TRACK-1039',
+          trackingUrl: 'https://track.example/OTO-TRACK-1039',
+          printAWBURL: 'https://labels.example/OTO-TRACK-1039.pdf',
+          status: 'delivered',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentStatus: 'delivered',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          trackingNumber: 'OTO-TRACK-1039',
+          labelUrl: 'https://labels.example/OTO-TRACK-1039.pdf',
+          shipmentStatus: 'DELIVERED',
+          responseSnapshot: expect.objectContaining({
+            providerError: 'prior createShipment failed',
+            providerStatus: 'delivered',
+            lastTryOtoWebhookStatusMapped: true,
+            lastTryOtoWebhookMappedShipmentStatus: 'delivered',
+            latestProviderStatusSource: 'webhook',
+          }),
+        }),
+      }),
+    );
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      statusSyncSupport: 'webhook_ingest',
+      lastWebhookStatusValue: 'delivered',
+      lastWebhookStatusMapped: true,
+      lastWebhookMappedLocalStatus: 'delivered',
+    });
+  });
+
   it('keeps unknown Try OTO webhook statuses diagnostic-only', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',

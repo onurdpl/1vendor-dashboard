@@ -2949,7 +2949,11 @@ export function OrderDetailPage() {
                     ) : null}
                     <div className="summary-row">
                       <span>Status sync support</span>
-                      <strong>{shippingProviderDiagnostics.statusSyncSupport === 'not_implemented' ? 'not implemented' : '—'}</strong>
+                      <strong>
+                        {shippingProviderDiagnostics.statusSyncSupport === 'webhook_ingest'
+                          ? 'webhook ingest'
+                          : 'not implemented'}
+                      </strong>
                     </div>
                     <div className="summary-row">
                       <span>Missing env names</span>
