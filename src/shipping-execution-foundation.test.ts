@@ -2807,6 +2807,82 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('updates Try OTO return shipment label from reverseShipment webhooks', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      trackingNumber: 'OTO-TRACK-1039',
+      labelUrl: 'https://labels.example/forward.pdf',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1039-R1',
+          status: 'created',
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return label is processing or not returned by Try OTO yet.',
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(null);
+    prismaMock.shipmentExecution.findMany.mockResolvedValue([existing]);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'OTO-ORDER-1039-R1',
+          reverseShipment: true,
+          trackingNumber: 'RET-TRACK-1039',
+          trackingUrl: 'https://track.example/RET-TRACK-1039',
+          printAWBURL: 'https://labels.example/return-1039.pdf',
+          status: 'delivered',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentExecutionId: 'shipment-try_oto-alloc-1',
+      shipmentStatus: 'delivered',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-try_oto-alloc-1' },
+        data: expect.objectContaining({
+          responseSnapshot: expect.objectContaining({
+            tryOtoWebhookReverseShipment: true,
+            returnShipment: expect.objectContaining({
+              returnOrderId: 'OTO-ORDER-1039-R1',
+              trackingNumber: 'RET-TRACK-1039',
+              trackingUrl: 'https://track.example/RET-TRACK-1039',
+              labelUrl: 'https://labels.example/return-1039.pdf',
+              labelRetrievalConfirmed: true,
+              labelRetrievalNote: null,
+              diagnostics: expect.objectContaining({
+                webhookReverseShipment: true,
+                webhookReverseShipmentPrintAwbUrlPresent: true,
+                returnLabelSourceChecked: 'reverseShipmentWebhook',
+                printEndpointImplemented: false,
+              }),
+            }),
+          }),
+        }),
+      }),
+    );
+  });
+
   it('keeps unknown Try OTO webhook statuses diagnostic-only', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',

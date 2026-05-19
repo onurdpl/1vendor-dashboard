@@ -294,6 +294,17 @@ function readBoolean(value: unknown, keys: string[]) {
   return keys.some((key) => value[key] === true);
 }
 
+function readLooseBoolean(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return false;
+  }
+
+  return keys.some((key) => {
+    const raw = value[key];
+    return raw === true || (typeof raw === 'string' && raw.trim().toLowerCase() === 'true');
+  });
+}
+
 function readSnapshot(execution: { responseSnapshot?: unknown }) {
   return isRecord(execution.responseSnapshot) ? execution.responseSnapshot : {};
 }
@@ -1610,6 +1621,10 @@ function readTryOtoWebhookIdentifiers(data: Record<string, unknown>) {
   };
 }
 
+function readTryOtoWebhookBarcode(data: Record<string, unknown>) {
+  return readString(data, ['barcode', 'barcodeNumber', 'barCode', 'awbNumber']);
+}
+
 function hasTryOtoReference(value: string | null, ...records: Record<string, unknown>[]) {
   if (!value) {
     return false;
@@ -1635,6 +1650,7 @@ function resolveTryOtoWebhookMatchedByField(
 ) {
   const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
   const responseSnapshot = readSnapshot(execution);
+  const returnShipmentSnapshot = isRecord(responseSnapshot.returnShipment) ? responseSnapshot.returnShipment : {};
   if (identifiers.shipmentId && execution.providerShipmentId === identifiers.shipmentId) return 'shipmentId';
   if (identifiers.providerOrderId && execution.providerShipmentId === identifiers.providerOrderId) return 'providerOrderId';
   if (identifiers.orderId && execution.providerShipmentId === identifiers.orderId) return 'orderId';
@@ -1643,14 +1659,15 @@ function resolveTryOtoWebhookMatchedByField(
   if (
     identifiers.orderId &&
     (resolveTryOtoStatusOrderId(execution) === identifiers.orderId ||
-      hasTryOtoReference(identifiers.orderId, requestSnapshot, responseSnapshot))
+      hasTryOtoReference(identifiers.orderId, requestSnapshot, responseSnapshot, returnShipmentSnapshot))
   ) {
     return 'orderId';
   }
   if (
     identifiers.providerOrderId &&
     (readString(requestSnapshot, ['providerOrderId', 'otoId']) === identifiers.providerOrderId ||
-      readString(responseSnapshot, ['providerOrderId', 'otoId']) === identifiers.providerOrderId)
+      readString(responseSnapshot, ['providerOrderId', 'otoId']) === identifiers.providerOrderId ||
+      readString(returnShipmentSnapshot, ['returnOrderId']) === identifiers.providerOrderId)
   ) {
     return 'providerOrderId';
   }
@@ -1703,12 +1720,15 @@ function matchesTryOtoExecution(execution: ShipmentExecution, candidates: string
 
   const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
   const responseSnapshot = readSnapshot(execution);
+  const returnShipmentSnapshot = isRecord(responseSnapshot.returnShipment) ? responseSnapshot.returnShipment : {};
   const executionCandidates = [
     execution.providerShipmentId,
     execution.trackingNumber,
     resolveTryOtoStatusOrderId(execution),
     ...['orderId', 'externalOrderReference', 'internalOrderReference', 'providerOrderId', 'otoId', 'shipmentId']
       .flatMap((key) => [readString(requestSnapshot, [key]), readString(responseSnapshot, [key])]),
+    ...['returnOrderId', 'trackingNumber', 'returnTrackingNumber', 'barcode', 'returnBarcode']
+      .map((key) => readString(returnShipmentSnapshot, [key])),
   ].filter((value): value is string => Boolean(value));
 
   return executionCandidates.some((value) => candidates.includes(value));
@@ -1854,6 +1874,7 @@ export async function ingestTryOtoWebhook(
   const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link', 'brandedTrackingURL']);
   const labelUrl = readString(data, ['printLabelURL', 'printAWBURL', 'labelUrl', 'label_url', 'awbUrl', 'awbURL']);
   const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'deliveryOptionName', 'carrier', 'carrierName']);
+  const isReverseShipment = readLooseBoolean(data, ['reverseShipment']);
   const signatureWarning = TRY_OTO_WEBHOOK_SIGNATURE_WARNING;
 
   if (!identifiers.candidates.length) {
@@ -1936,6 +1957,114 @@ export async function ingestTryOtoWebhook(
     ? existingSnapshot.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
     : [];
   const isDuplicate = duplicateFingerprints.includes(fingerprint);
+  if (isReverseShipment) {
+    const existingReturnShipment = isRecord(existingSnapshot.returnShipment) ? existingSnapshot.returnShipment : {};
+    const nextReturnTrackingNumber =
+      readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber']) ??
+      identifiers.trackingNumber ??
+      identifiers.dcTrackingNumber;
+    const nextReturnLabelUrl = readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']) ?? labelUrl;
+    const nextReturnShipment = {
+      ...existingReturnShipment,
+      provider: 'try_oto',
+      returnOrderId:
+        readString(existingReturnShipment, ['returnOrderId']) ??
+        identifiers.orderId ??
+        identifiers.providerOrderId ??
+        identifiers.shipmentId,
+      trackingNumber: nextReturnTrackingNumber,
+      trackingUrl: readString(existingReturnShipment, ['trackingUrl', 'returnTrackingUrl']) ?? trackingUrl,
+      labelUrl: nextReturnLabelUrl,
+      barcode: readString(existingReturnShipment, ['barcode', 'returnBarcode']) ?? readTryOtoWebhookBarcode(data) ?? nextReturnTrackingNumber,
+      status: providerStatus ?? readString(existingReturnShipment, ['status', 'returnStatus']),
+      updatedAt: new Date().toISOString(),
+      responseKeys,
+      trackingPresent: Boolean(nextReturnTrackingNumber),
+      labelPresent: Boolean(nextReturnLabelUrl),
+      labelRetrievalConfirmed: Boolean(nextReturnLabelUrl),
+      labelRetrievalNote: nextReturnLabelUrl
+        ? null
+        : readString(existingReturnShipment, ['labelRetrievalNote']) ?? 'Return label is processing or not returned by Try OTO yet.',
+      diagnostics: {
+        ...(isRecord(existingReturnShipment.diagnostics) ? existingReturnShipment.diagnostics : {}),
+        webhookReverseShipment: true,
+        webhookReverseShipmentPrintAwbUrlPresent: Boolean(labelUrl),
+        returnLabelSourceChecked: 'reverseShipmentWebhook',
+        printEndpointImplemented: false,
+        statusValue: providerStatus,
+        responseKeys,
+      },
+    };
+    const reverseSnapshotBase = {
+      ...existingSnapshot,
+      provider: 'try_oto',
+      webhookReceived: true,
+      tryOtoWebhookReceived: true,
+      lastTryOtoWebhookReceivedAt: new Date().toISOString(),
+      lastTryOtoWebhookMatchStatus: 'matched',
+      lastTryOtoWebhookMatchedByField: matchedByField,
+      lastTryOtoWebhookHttpMethod: options.httpMethod ?? null,
+      lastTryOtoWebhookContentType: options.contentType ?? null,
+      lastTryOtoWebhookStatusField: providerStatus,
+      lastTryOtoWebhookStatusMapped: Boolean(normalizedStatus),
+      lastTryOtoWebhookMappedShipmentStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
+      latestProviderStatusSource: 'webhook',
+      lastTryOtoWebhookParseError: parseError,
+      tryOtoWebhookSignatureVerificationImplemented: false,
+      tryOtoWebhookWarning: signatureWarning,
+      tryOtoWebhookResponseKeys: responseKeys,
+      tryOtoWebhookReverseShipment: true,
+      returnShipment: nextReturnShipment,
+      lastProviderResponseAt: new Date().toISOString(),
+    };
+    const reverseReceivedSnapshot = appendTimelineEventOnce(
+      reverseSnapshotBase,
+      { label: 'Try OTO return webhook received', status: providerStatus },
+      fingerprint,
+    );
+    const reverseFinalSnapshot = isDuplicate
+      ? reverseReceivedSnapshot
+      : appendTimelineEventOnce(
+          {
+            ...reverseReceivedSnapshot,
+            timelineEventFingerprints: Array.isArray(reverseReceivedSnapshot.timelineEventFingerprints)
+              ? reverseReceivedSnapshot.timelineEventFingerprints
+              : duplicateFingerprints,
+          },
+          { label: labelUrl ? 'Try OTO return label updated' : 'Try OTO return status updated', status: providerStatus },
+          `${fingerprint}|return_updated`,
+        );
+
+    const updated = await prisma.shipmentExecution.update({
+      where: {
+        id: execution.id,
+      },
+      data: {
+        responseSnapshot: reverseFinalSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    updateTryOtoWebhookReceiveDiagnostics({
+      matchedShipment: true,
+      matchStatus: 'matched',
+      matchedByField,
+      statusValue: providerStatus,
+      statusMapped: Boolean(normalizedStatus),
+      mappedLocalStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
+      parseError,
+    });
+
+    return {
+      ok: true,
+      matched: true,
+      matchStatus: 'matched',
+      shipmentExecutionId: updated.id,
+      shipmentStatus: mapStatus(updated.shipmentStatus),
+      signatureVerificationImplemented: false,
+      warning: signatureWarning,
+    };
+  }
+
   const nextStatus = chooseWebhookStatus(execution.shipmentStatus, normalizedStatus);
   const nextTrackingNumber = execution.trackingNumber ?? identifiers.trackingNumber ?? identifiers.dcTrackingNumber;
   const nextProviderShipmentId = execution.providerShipmentId ?? identifiers.shipmentId ?? identifiers.providerOrderId ?? identifiers.orderId;
@@ -2299,7 +2428,7 @@ export async function createTryOtoReturnShipmentLabel(
     labelRetrievalConfirmed: Boolean(result.returnLabelUrl),
     labelRetrievalNote:
       readString(result.responseSnapshot, ['returnLabelRetrievalNote']) ??
-      (result.returnLabelUrl ? null : 'Try OTO return label retrieval path is not confirmed by sandbox response yet.'),
+      (result.returnLabelUrl ? null : 'Return label is processing or not returned by Try OTO yet.'),
     diagnostics: {
       endpoint: '/rest/v2/createReturnShipment',
       httpStatus: typeof result.responseSnapshot.status === 'number' ? result.responseSnapshot.status : null,
@@ -2307,6 +2436,10 @@ export async function createTryOtoReturnShipmentLabel(
       requestKeys: readStringArray(result.responseSnapshot.requestKeys),
       returnTrackingPresent: Boolean(result.returnTrackingNumber),
       returnLabelPresent: Boolean(result.returnLabelUrl),
+      returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'createReturnShipment',
+      createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
+      webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
+      printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
     },
   };
   const mergedSnapshot = appendTimelineEvent(

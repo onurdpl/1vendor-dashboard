@@ -1517,9 +1517,13 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnBarcodePresent: Boolean(returnBarcode),
         returnLabelPresent: Boolean(returnLabelUrl),
         returnLabelRetrievalConfirmed: Boolean(returnLabelUrl),
+        returnLabelSourceChecked: 'createReturnShipment',
+        createReturnShipmentLabelFieldPresent: Boolean(returnLabelUrl),
+        webhookReverseShipmentPrintAwbUrlPresent: false,
+        printEndpointImplemented: false,
         returnLabelRetrievalNote: returnLabelUrl
           ? null
-          : 'Try OTO return shipment was created, but the return label retrieval response field is still unconfirmed.',
+          : 'Return label is processing or not returned by Try OTO yet.',
       },
     };
   }
