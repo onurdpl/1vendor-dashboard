@@ -182,11 +182,18 @@ function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecutio
 }
 
 function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
+  if (returnShipment.labelRetrievalNote) {
+    return returnShipment.labelRetrievalNote;
+  }
+
+  if ((returnShipment.trackingNumber || returnShipment.barcode || returnShipment.trackingUrl) && !returnShipment.labelUrl) {
+    return 'Use this return tracking code/link for return shipment. Printable PDF label is not available yet.';
+  }
+
   return (
-    returnShipment.labelRetrievalNote ??
-    (returnShipment.finalized
+    returnShipment.finalized
       ? 'Return shipment created. Label PDF is not available yet.'
-      : 'Return request created; waiting for Try OTO return shipment details.')
+      : 'Return request created; waiting for Try OTO return shipment details.'
   );
 }
 
@@ -920,7 +927,6 @@ export function OrderDetailPage() {
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
     hasShopifyReturnIdForLabelProbe &&
-    hasReturnLabelUrlForLabelProbe &&
     hasReturnTrackingForLabelProbe;
   const tryOtoReturnOrderId = visibleShipmentExecution?.returnShipment?.returnOrderId?.trim() ?? '';
   const canProbeTryOtoReturnDetails =
@@ -1151,9 +1157,11 @@ export function OrderDetailPage() {
     void probeShopifyReturnLabelUploadMutation(visibleShipmentExecution.id)
       .then((shipment) => {
         const probe = shipment.returnShipment?.shopifyReturnLabelUploadProbe;
-        const accepted = Boolean(probe?.labelAccepted);
-        const message = accepted
+        const accepted = Boolean(probe?.trackingAccepted || probe?.labelAccepted);
+        const message = probe?.labelAccepted
           ? 'Shopify accepted the return label PDF URL.'
+          : probe?.trackingAccepted
+            ? 'Shopify return tracking attached.'
           : probe?.errorMessage || 'Shopify return label upload probe completed with diagnostics.';
         setShipmentActionState({
           tone: accepted ? 'success' : 'info',
@@ -2399,7 +2407,7 @@ export function OrderDetailPage() {
                         ) : null}
                         {visibleShipmentExecution?.provider === 'try_oto' ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
-                            <strong>Try OTO return label</strong>
+                            <strong>Try OTO return shipment</strong>
                             {visibleShipmentExecution.returnShipment ? (
                               <>
                                 <span>
@@ -2782,7 +2790,7 @@ export function OrderDetailPage() {
                                     </button>
                                     {!canProbeShopifyReturnLabelUpload ? (
                                       <span className="muted">
-                                        Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
+                                        Requires Shopify return id and Try OTO return tracking or barcode. PDF label upload is skipped until the provider returns a label URL.
                                       </span>
                                     ) : null}
                                     <div className="summary-row">
@@ -2801,6 +2809,8 @@ export function OrderDetailPage() {
                                       <>
                                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
                                           <span>Shopify return label attached</span>
+                                        ) : visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? (
+                                          <span>Shopify return tracking attached</span>
                                         ) : null}
                                         <div className="summary-row">
                                           <span>Status</span>
@@ -3393,7 +3403,7 @@ export function OrderDetailPage() {
                     ) : null}
                     {visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
                       <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
-                        <strong>Try OTO return label</strong>
+                        <strong>Try OTO return shipment</strong>
                         <span>
                           {getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}
                           {visibleShipmentExecution.returnShipment.returnOrderId ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}` : ''}
@@ -3738,7 +3748,7 @@ export function OrderDetailPage() {
                         </button>
                         {!canProbeShopifyReturnLabelUpload ? (
                           <span className="muted">
-                            Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
+                            Requires Shopify return id and Try OTO return tracking or barcode. PDF label upload is skipped until the provider returns a label URL.
                           </span>
                         ) : null}
                         <div className="summary-row">
@@ -3757,6 +3767,8 @@ export function OrderDetailPage() {
                           <>
                             {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
                               <span>Shopify return label attached</span>
+                            ) : visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted ? (
+                              <span>Shopify return tracking attached</span>
                             ) : null}
                             <div className="summary-row">
                               <span>Status</span>

@@ -3524,7 +3524,7 @@ describe('shipping execution foundation', () => {
     );
   });
 
-  it('blocks Shopify return label upload probe when return label URL is missing', async () => {
+  it('syncs Shopify return tracking without requiring a return label URL', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
       provider: 'TRY_OTO',
@@ -3536,24 +3536,48 @@ describe('shipping execution foundation', () => {
           provider: 'try_oto',
           returnOrderId: 'OTO-ORDER-1-R1',
           trackingNumber: 'RET-TRACK-1',
+          brandedTrackingURL: 'https://tracking.example/RET-TRACK-1',
+          carrierName: 'Sürat Kargo',
         },
       },
     });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      sourceShopifyReturnGid: 'gid://shopify/Return/231',
+      sourceShopifyReturnId: '231',
+    });
+    const probeReturnLabelUpload = vi.fn().mockResolvedValue({
+      mutationUsed: 'reverseDeliveryCreateWithShipping',
+      reverseFulfillmentOrderIdPresent: true,
+      reverseLineItemIdsPresent: true,
+      reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+      trackingAccepted: true,
+      labelAccepted: false,
+      returnedCarrierName: 'Sürat Kargo',
+      userErrors: [],
+      source: 'shopify_admin',
+    });
 
     const result = await probeShopifyReturnLabelUpload(existing.id, {
       env,
       shopifyAdminService: {
-        probeReturnLabelUpload: vi.fn(),
+        probeReturnLabelUpload,
       },
     });
 
+    expect(probeReturnLabelUpload).toHaveBeenCalledWith({
+      returnGid: 'gid://shopify/Return/231',
+      trackingNumber: 'RET-TRACK-1',
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelUrl: null,
+      carrierName: 'Sürat Kargo',
+    });
     expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
-      status: 'blocked',
-      skippedReason: 'missing_return_label_url',
+      status: 'success',
+      skippedReason: 'label_upload_skipped_provider_label_url_missing',
+      trackingAccepted: true,
       labelAccepted: false,
     });
-    expect(prismaMock.returnRecord.findFirst).not.toHaveBeenCalled();
   });
 
   it('stores successful Shopify return label upload probe diagnostics', async () => {

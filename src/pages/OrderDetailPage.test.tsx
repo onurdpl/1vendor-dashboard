@@ -2008,6 +2008,115 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('Sürat Kargo').length).toBeGreaterThan(0);
   });
 
+  it('lets admins sync Shopify return tracking when Try OTO return label URL is missing', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shopifyReturnSignal: {
+        topic: 'returns/request',
+        receivedAt: '2026-05-19T08:00:00.000Z',
+        topLevelPayloadKeys: ['admin_graphql_api_id', 'id'],
+        orderIdPresent: true,
+        returnIdPresent: true,
+        lineItemIdsPresent: true,
+        refundIdPresent: false,
+        financialStatus: null,
+        fulfillmentStatus: null,
+        matchedOrderId: 'shopify-order-1028',
+        matchedByField: 'order_id',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: 'https://tracking.example/RET-TRACK-1028',
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['brandedTrackingURL', 'returnOrderId', 'trackingNumber'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: null,
+          shopifyReturnLabelUploadProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+    probeShopifyReturnLabelUploadMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution,
+      id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: 'https://tracking.example/RET-TRACK-1028',
+        labelUrl: null,
+        barcode: 'RET-BARCODE-1028',
+        status: 'created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['items', 'orderId'],
+        responseKeys: ['brandedTrackingURL', 'returnOrderId', 'trackingNumber'],
+        trackingPresent: true,
+        labelPresent: false,
+        labelRetrievalConfirmed: false,
+        labelRetrievalNote: null,
+        shopifyReturnLabelUploadProbe: {
+          status: 'success',
+          attemptedAt: '2026-05-15T19:48:00.000Z',
+          reverseFulfillmentOrderIdPresent: true,
+          reverseLineItemIdsPresent: true,
+          mutationUsed: 'reverseDeliveryCreateWithShipping',
+          shopifyUserErrors: [],
+          reverseDeliveryIdPresent: true,
+          shopifyReturnIdPresent: true,
+          trackingAccepted: true,
+          labelAccepted: false,
+          returnedCarrierName: 'Sürat Kargo',
+          carrierNamePresent: true,
+          skippedReason: 'label_upload_skipped_provider_label_url_missing',
+          errorMessage: null,
+        },
+      },
+      updatedAt: '2026-05-15T19:48:00.000Z',
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Shopify return label upload probe');
+    const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
+    expect(probeButton).toBeEnabled();
+    expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('missing');
+    expect(await screen.findByText('Use this return tracking code/link for return shipment. Printable PDF label is not available yet.')).toBeInTheDocument();
+    await user.click(probeButton);
+
+    expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
+    expect((await screen.findAllByText('Shopify return tracking attached.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Shopify return tracking attached')).length).toBeGreaterThan(0);
+  });
+
   it('lets admins probe Try OTO return details and shows safe diagnostics', async () => {
     const user = userEvent.setup();
     setCurrentUser({

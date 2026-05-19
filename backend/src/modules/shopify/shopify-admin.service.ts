@@ -820,6 +820,7 @@ export function createShopifyAdminService(env: AppEnv) {
     const mutationUsed = existingReverseDelivery
       ? 'reverseDeliveryShippingUpdate'
       : 'reverseDeliveryCreateWithShipping';
+    const labelInput = input.labelUrl ? { fileUrl: input.labelUrl } : null;
     const variables = existingReverseDelivery
       ? {
           reverseDeliveryId: existingReverseDelivery.id,
@@ -827,9 +828,7 @@ export function createShopifyAdminService(env: AppEnv) {
             number: input.trackingNumber,
             ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
           },
-          labelInput: {
-            fileUrl: input.labelUrl,
-          },
+          ...(labelInput ? { labelInput } : {}),
           notifyCustomer: false,
         }
       : {
@@ -842,9 +841,7 @@ export function createShopifyAdminService(env: AppEnv) {
             number: input.trackingNumber,
             ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
           },
-          labelInput: {
-            fileUrl: input.labelUrl,
-          },
+          ...(labelInput ? { labelInput } : {}),
           notifyCustomer: false,
         };
     const query = existingReverseDelivery

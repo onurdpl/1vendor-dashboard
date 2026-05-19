@@ -3598,10 +3598,6 @@ export async function probeShopifyReturnLabelUpload(
     return blocked('missing_return_tracking', 'Try OTO return tracking or barcode is required before probing Shopify label upload.');
   }
 
-  if (!returnLabelUrl) {
-    return blocked('missing_return_label_url', 'Try OTO return label URL is required before probing Shopify label upload.');
-  }
-
   const returnRecord = await prisma.returnRecord.findFirst({
     where: {
       vendorAllocationId: existing.allocationId,
@@ -3635,7 +3631,7 @@ export async function probeShopifyReturnLabelUpload(
     return persistShopifyReturnLabelUploadProbe(
       existing,
       buildShopifyReturnLabelUploadProbeSnapshot({
-        status: result.labelAccepted ? 'success' : 'failed',
+        status: result.trackingAccepted || result.labelAccepted ? 'success' : 'failed',
         attemptedAt,
         shopifyReturnIdPresent: Boolean(returnGid),
         reverseFulfillmentOrderIdPresent: result.reverseFulfillmentOrderIdPresent,
@@ -3647,7 +3643,11 @@ export async function probeShopifyReturnLabelUpload(
         labelAccepted: result.labelAccepted,
         returnedCarrierName: result.returnedCarrierName,
         carrierNamePresent: Boolean(returnCarrierName),
-        skippedReason: result.labelAccepted ? null : 'staged_upload_required_or_external_file_url_rejected',
+        skippedReason: result.labelAccepted
+          ? null
+          : returnLabelUrl
+            ? 'staged_upload_required_or_external_file_url_rejected'
+            : 'label_upload_skipped_provider_label_url_missing',
         errorMessage: result.userErrors.map((error) => error.message).filter(Boolean).join('; ') || null,
       }),
     );

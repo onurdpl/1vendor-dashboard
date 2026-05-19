@@ -66,7 +66,7 @@ export type ProbeShopifyReturnLabelUploadInput = {
   returnGid: string;
   trackingNumber: string;
   trackingUrl?: string | null;
-  labelUrl: string;
+  labelUrl?: string | null;
   carrierName?: string | null;
 };
 

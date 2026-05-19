@@ -217,4 +217,91 @@ describe('Shopify return tracking fetch', () => {
       userErrors: [],
     });
   });
+
+  it('probes Shopify reverse delivery with tracking only when return label URL is unavailable', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        return: {
+          id: 'gid://shopify/Return/231',
+          reverseFulfillmentOrders: {
+            nodes: [
+              {
+                id: 'gid://shopify/ReverseFulfillmentOrder/1',
+                status: 'OPEN',
+                lineItems: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseFulfillmentOrderLineItem/1',
+                      totalQuantity: 1,
+                      fulfillmentLineItem: {
+                        lineItem: {
+                          id: 'gid://shopify/LineItem/99',
+                          sku: 'SKU-99',
+                        },
+                      },
+                    },
+                  ],
+                },
+                reverseDeliveries: {
+                  nodes: [],
+                },
+              },
+            ],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        reverseDeliveryCreateWithShipping: {
+          reverseDelivery: {
+            id: 'gid://shopify/ReverseDelivery/1',
+            deliverable: {
+              label: null,
+              tracking: {
+                carrierName: 'Sürat Kargo',
+                number: 'RET-TRACK-1',
+                url: 'https://tracking.example/RET-TRACK-1',
+              },
+            },
+          },
+          userErrors: [],
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2025-07',
+    } as never).probeReturnLabelUpload({
+      returnGid: 'gid://shopify/Return/231',
+      trackingNumber: 'RET-TRACK-1',
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelUrl: null,
+      carrierName: 'Sürat Kargo',
+    });
+
+    const [, mutationInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const mutationBody = JSON.parse(String(mutationInit.body)) as {
+      query: string;
+      variables: {
+        trackingInput: { number: string; url?: string };
+        labelInput?: { fileUrl: string };
+      };
+    };
+    expect(mutationBody.query).toContain('reverseDeliveryCreateWithShipping');
+    expect(mutationBody.variables.trackingInput).toEqual({
+      number: 'RET-TRACK-1',
+      url: 'https://tracking.example/RET-TRACK-1',
+    });
+    expect(mutationBody.variables).not.toHaveProperty('labelInput');
+    expect(result).toMatchObject({
+      mutationUsed: 'reverseDeliveryCreateWithShipping',
+      reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+      trackingAccepted: true,
+      labelAccepted: false,
+      returnedCarrierName: 'Sürat Kargo',
+      userErrors: [],
+    });
+  });
 });
