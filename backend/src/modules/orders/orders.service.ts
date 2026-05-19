@@ -285,7 +285,7 @@ function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipm
   const trackingNumber = readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']);
   return {
     provider: 'try_oto',
-    returnOrderId: readString(returnShipment, ['returnOrderId']),
+    returnOrderId: readString(returnShipment, ['returnOrderId', 'returnProviderId', 'providerReturnId', 'returnOtoId']),
     trackingNumber,
     trackingUrl: readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']),
     labelUrl,

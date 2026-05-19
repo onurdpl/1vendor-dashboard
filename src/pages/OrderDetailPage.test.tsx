@@ -2258,6 +2258,89 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText('Try OTO return shipment finalized.')).length).toBeGreaterThan(0);
   });
 
+  it('renders return finalization button from diagnostics provider id when returnOrderId is missing', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: null,
+          trackingNumber: null,
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: null,
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnProviderId'],
+          trackingPresent: false,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: {
+            endpoint: '/rest/v2/createReturnShipment',
+            httpStatus: 200,
+            requestKeys: ['items', 'orderId'],
+            responseKeys: ['returnProviderId'],
+            returnProviderIdPresent: true,
+            returnTrackingPresent: false,
+            returnBarcodePresent: false,
+            returnStatus: 'request_created',
+            labelFieldPresent: false,
+            providerMessage: null,
+            returnDeliveryOptionIdPresent: false,
+            returnDeliveryOptionLookupCalled: false,
+            returnDeliveryOptionLookupImplemented: true,
+            returnPriceLookupCalled: false,
+            returnPriceLookupSuccess: false,
+            returnPriceLookupOptionCount: 0,
+            selectedReturnPriceOptionIdPresent: false,
+            reverseCreateShipmentCalled: false,
+            reverseCreateShipmentSuccess: false,
+            reverseCreateShipmentResponseKeys: [],
+            reverseCreateShipmentTrackingPresent: false,
+            reverseCreateShipmentBarcodePresent: false,
+            reverseCreateShipmentLabelPresent: false,
+            returnFinalized: false,
+            returnFinalizationEndpointConfirmed: true,
+            returnFinalizeEndpointImplemented: true,
+            returnLabelRetrievable: false,
+            providerStatusSource: 'createReturnShipment',
+          },
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Finalize Try OTO return shipment' }));
+    expect(finalizeReturnShipmentMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
+  });
+
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,

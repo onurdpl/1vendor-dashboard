@@ -151,6 +151,21 @@ function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecuti
   );
 }
 
+function hasTryOtoReturnProviderReference(shipment: ShipmentExecution | null | undefined) {
+  return Boolean(
+    shipment?.provider === 'try_oto' &&
+      (shipment.returnShipment?.returnOrderId || shipment.returnShipment?.diagnostics?.returnProviderIdPresent),
+  );
+}
+
+function isTryOtoReturnFinalizationPending(shipment: ShipmentExecution | null | undefined) {
+  return Boolean(
+    hasTryOtoReturnProviderReference(shipment) &&
+      shipment?.returnShipment?.finalized !== true &&
+      shipment?.returnShipment?.labelRetrievable !== true,
+  );
+}
+
 function isInternalShipmentReference(value?: string | null) {
   const normalized = value?.trim().toLowerCase() ?? '';
   return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
@@ -834,10 +849,7 @@ export function OrderDetailPage() {
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;
   const hasUnfinalizedTryOtoReturnRequest =
-    visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(visibleShipmentExecution.returnShipment?.returnOrderId) &&
-    !visibleShipmentExecution.returnShipment?.finalized &&
-    !visibleShipmentExecution.returnShipment?.labelRetrievable;
+    isTryOtoReturnFinalizationPending(visibleShipmentExecution);
   const canFinalizeTryOtoReturnShipment =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(hasUnfinalizedTryOtoReturnRequest);
