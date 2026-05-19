@@ -7,6 +7,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import {
   createReturnShipmentLabel,
   createShipmentExecution,
+  finalizeReturnShipment,
   getOrder,
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
@@ -672,6 +673,15 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: finalizeReturnShipmentMutation, isPending: isFinalizingReturnShipment } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      finalizeReturnShipment(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: probeShopifyReturnLabelUploadMutation, isPending: isProbingShopifyReturnLabelUpload } = useMutationAction(
     async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId),
     {
@@ -828,12 +838,15 @@ export function OrderDetailPage() {
     Boolean(visibleShipmentExecution.returnShipment?.returnOrderId) &&
     !visibleShipmentExecution.returnShipment?.finalized &&
     !visibleShipmentExecution.returnShipment?.labelRetrievable;
+  const canFinalizeTryOtoReturnShipment =
+    (isAdmin || canUseFulfillmentActions) &&
+    Boolean(hasUnfinalizedTryOtoReturnRequest);
   const canCreateTryOtoReturnLabel =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
     ['delivered'].includes(visibleShipmentStatus) &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
-    (!visibleShipmentExecution.returnShipment || hasUnfinalizedTryOtoReturnRequest);
+    !visibleShipmentExecution.returnShipment;
   const canProbeShopifyReturnLabelUpload =
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -1044,6 +1057,48 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/create-return`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleFinalizeReturnShipment() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Finalizing Try OTO return shipment...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
+    });
+
+    void finalizeReturnShipmentMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const returnFinalized = Boolean(shipment.returnShipment?.finalized);
+        const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
+        const message = returnFinalized
+          ? hasReturnLabel
+            ? 'Try OTO return shipment finalized.'
+            : 'Try OTO return shipment finalized. Return label retrieval is still pending or unconfirmed.'
+          : 'Try OTO return finalization completed with diagnostics.';
+        setShipmentActionState({
+          tone: returnFinalized ? 'success' : 'info',
+          message,
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
+        });
+        showFeedback(message, returnFinalized ? 'success' : 'info');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return shipment could not be finalized.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2308,10 +2363,10 @@ export function OrderDetailPage() {
                                   <button
                                     type="button"
                                     className="secondary-action-button"
-                                    onClick={handleCreateReturnShipmentLabel}
-                                    disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
+                                    onClick={handleFinalizeReturnShipment}
+                                    disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
                                   >
-                                    {isCreatingReturnShipmentLabel ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                                    {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
                                   </button>
                                 ) : null}
                                 {isAdmin ? (
@@ -3180,10 +3235,10 @@ export function OrderDetailPage() {
                           <button
                             type="button"
                             className="secondary-action-button"
-                            onClick={handleCreateReturnShipmentLabel}
-                            disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
+                            onClick={handleFinalizeReturnShipment}
+                            disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
                           >
-                            {isCreatingReturnShipmentLabel ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
+                            {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
                           </button>
                         ) : null}
                         {isAdmin ? (

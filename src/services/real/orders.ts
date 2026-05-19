@@ -546,6 +546,19 @@ export async function createReturnShipmentLabel(
   );
 }
 
+export async function finalizeReturnShipment(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/finalize-return`,
+    {},
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
 export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
   return apiClient.post<CreateShipmentExecutionResult>(
     `/admin/shipments/${shipmentExecutionId}/probe-shopify-return-label`,

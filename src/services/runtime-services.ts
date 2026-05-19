@@ -519,6 +519,13 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async finalizeReturnShipment(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.finalizeReturnShipment(shipmentExecutionId, { vendorId });
+      }
+
+      return this.createReturnShipmentLabel(shipmentExecutionId, vendorId);
+    },
     async probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.probeShopifyReturnLabelUpload(shipmentExecutionId);

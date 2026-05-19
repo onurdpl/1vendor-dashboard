@@ -17,6 +17,7 @@ const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
+const finalizeReturnShipmentMock = vi.fn();
 const probeShopifyReturnLabelUploadMock = vi.fn();
 const probeTryOtoReturnDetailsMock = vi.fn();
 const probeTryOtoReturnLinkMock = vi.fn();
@@ -52,6 +53,8 @@ vi.mock('../features/orders/api', async () => {
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
     createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
+    finalizeReturnShipment: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      finalizeReturnShipmentMock(shipmentExecutionId, options),
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
     probeTryOtoReturnDetails: (shipmentExecutionId: string) => probeTryOtoReturnDetailsMock(shipmentExecutionId),
     probeTryOtoReturnLink: (shipmentExecutionId: string) => probeTryOtoReturnLinkMock(shipmentExecutionId),
@@ -357,6 +360,35 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         labelPresent: true,
         labelRetrievalConfirmed: true,
         labelRetrievalNote: null,
+      },
+      updatedAt: '2026-05-15T19:46:00.000Z',
+    });
+    finalizeReturnShipmentMock.mockReset();
+    finalizeReturnShipmentMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: null,
+        labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+        barcode: 'RET-BARCODE-1028',
+        status: 'created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['items', 'orderId'],
+        responseKeys: ['printAWBURL', 'returnOrderId'],
+        trackingPresent: true,
+        labelPresent: true,
+        labelRetrievalConfirmed: true,
+        labelRetrievalNote: null,
+        finalized: true,
+        labelRetrievable: true,
+        providerStatusSource: 'reverseCreateShipment',
+        diagnostics: null,
       },
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
@@ -1859,6 +1891,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           labelPresent: true,
           labelRetrievalConfirmed: true,
           labelRetrievalNote: null,
+          finalized: true,
+          labelRetrievable: true,
         },
         providerResponseSummary: null,
       },
@@ -1872,6 +1906,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
     );
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shopify return label upload probe')).not.toBeInTheDocument();
   });
 
@@ -2216,9 +2251,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Finalize Try OTO return shipment' }));
-    expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
+    expect(finalizeReturnShipmentMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
       vendorId: 'sporjinal',
     });
+    expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
+    expect((await screen.findAllByText('Try OTO return shipment finalized.')).length).toBeGreaterThan(0);
   });
 
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {

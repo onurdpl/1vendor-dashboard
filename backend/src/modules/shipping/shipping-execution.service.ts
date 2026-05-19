@@ -2824,6 +2824,44 @@ export async function createTryOtoReturnShipmentLabel(
   return mapShipmentExecution(updated);
 }
 
+export async function finalizeTryOtoReturnShipment(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    throw new Error('Return finalization is only available for Try OTO shipments.');
+  }
+
+  const existingReturnShipment = readTryOtoReturnShipmentSnapshot(existing);
+  if (!existingReturnShipment || !readString(existingReturnShipment, ['returnOrderId'])) {
+    throw new Error('Try OTO return finalization requires an existing return provider id.');
+  }
+
+  const existingReturnFinalized =
+    readBoolean(existingReturnShipment, ['finalized']) ||
+    readBoolean(existingReturnShipment, ['labelRetrievable']) ||
+    Boolean(readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']));
+  if (existingReturnFinalized) {
+    return mapShipmentExecution(existing);
+  }
+
+  return createTryOtoReturnShipmentLabel(shipmentExecutionId, options);
+}
+
 function buildTryOtoReturnDetailsProbeSnapshot(input: {
   status: 'blocked' | 'success' | 'no_label' | 'failed';
   attemptedAt: string;
