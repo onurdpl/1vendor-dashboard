@@ -161,6 +161,10 @@ function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
 }
 
 function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
+  if (returnShipment.status === 'skipped') {
+    return returnShipment.labelRetrievalNote ?? 'Try OTO return shipment was not created.';
+  }
+
   if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
     return 'Return request created; waiting for Try OTO return shipment details.';
   }
@@ -2539,8 +2543,34 @@ export function OrderDetailPage() {
                                       <span>deliveryOptionId</span>
                                       <strong>
                                         {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdSource
+                                          ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdSource}`
+                                          : ''}
                                       </strong>
                                     </div>
+                                    <div className="summary-row">
+                                      <span>Forward delivery option</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdPresent ? 'present' : 'missing'}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource
+                                          ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource}`
+                                          : ''}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return request fields</span>
+                                      <strong>
+                                        pickup {visibleShipmentExecution.returnShipment.diagnostics.pickupLocationCodePresent ? 'yes' : 'no'} · sku{' '}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnItemSkuPresent ? 'yes' : 'no'} · quantity{' '}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnItemQuantityPresent ? 'yes' : 'no'}
+                                      </strong>
+                                    </div>
+                                    {visibleShipmentExecution.returnShipment.diagnostics.returnSkippedReason ? (
+                                      <div className="summary-row">
+                                        <span>Skipped reason</span>
+                                        <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnSkippedReason}</strong>
+                                      </div>
+                                    ) : null}
                                     <div className="summary-row">
                                       <span>Return option lookup</span>
                                       <strong>
@@ -3402,8 +3432,36 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>deliveryOptionId</span>
-                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}</strong>
+                          <strong>
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdSource
+                              ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdSource}`
+                              : ''}
+                          </strong>
                         </div>
+                        <div className="summary-row">
+                          <span>Forward delivery option</span>
+                          <strong>
+                            {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdPresent ? 'present' : 'missing'}
+                            {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource
+                              ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource}`
+                              : ''}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return request fields</span>
+                          <strong>
+                            pickup {visibleShipmentExecution.returnShipment.diagnostics.pickupLocationCodePresent ? 'yes' : 'no'} · sku{' '}
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnItemSkuPresent ? 'yes' : 'no'} · quantity{' '}
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnItemQuantityPresent ? 'yes' : 'no'}
+                          </strong>
+                        </div>
+                        {visibleShipmentExecution.returnShipment.diagnostics.returnSkippedReason ? (
+                          <div className="summary-row">
+                            <span>Skipped reason</span>
+                            <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnSkippedReason}</strong>
+                          </div>
+                        ) : null}
                         <div className="summary-row">
                           <span>Return option lookup</span>
                           <strong>

@@ -83,8 +83,12 @@ Observed but disabled from Try OTO panel Network trace:
 
 Current runtime safety stance:
 - `createReturnShipment` is the current confirmed runtime action for creating/finalizing a Try OTO return shipment when the confirmed payload fields are present.
+- Runtime treats `deliveryOptionId`, `pickupLocationCode`, and returned item `sku`/`quantity` as required local preflight fields for Turkey sandbox returns. If any are missing, the provider call is blocked before `createReturnShipment`.
+- The return `deliveryOptionId` is sourced from stored forward Try OTO shipment metadata. Forward shipment creation persists the selected delivery option returned by `checkOTODeliveryFee` / `checkDeliveryFee`, or the configured provider metadata override when one is used.
+- If an older forward shipment lacks persisted delivery-option metadata, the return flow records `missing_delivery_option_id` and shows: `Try OTO return shipment was not created because deliveryOptionId is missing.`
 - UI wording should show finalized return shipment state when `createReturnShipment` returns tracking, barcode, or label evidence. It should only say “Return request created; waiting for Try OTO return shipment details.” while those fields are still pending.
-- Admin diagnostics should show whether `deliveryOptionId`, `sku`, and `quantity` were sent and mark reverse `createShipment` finalization as disabled/unconfirmed.
+- Admin diagnostics should show whether the forward delivery option was available, its source, whether return `deliveryOptionId` was present, its source, and whether `pickupLocationCode`, `sku`, and `quantity` were present.
+- Admin diagnostics should mark reverse `createShipment` finalization as disabled/unconfirmed.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnDetails` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes return label/AWB/PDF URL fields after request creation.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnLink` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes a return finalization link, label/AWB/PDF URL, or next-action URL.
 - `getReturnLink` exact response semantics for label/PDF retrieval are still **Unknown**. Runtime may store a clear label/print URL if a label/AWB/PDF-like field is returned, but generic action/customer/return links must remain diagnostic-only until Try OTO confirms they are API-safe label URLs.
@@ -130,6 +134,7 @@ Unknowns:
 - Whether return shipment can be created before the forward shipment is delivered.
 - Whether `createShipment` is also involved in return label purchase despite the Postman `createReturnShipment` endpoint.
 - Whether `deliveryOptionId` should be selected through a return-specific delivery option lookup.
+- Whether the forward shipment's selected `deliveryOptionId` is always valid for return shipments. Runtime uses it only because it is the safest documented existing option source; it does not invent arbitrary IDs.
 - Whether return shipments use the same carrier option IDs as forward shipments.
 
 ### Print Return Label
@@ -357,8 +362,9 @@ Goals:
    - Call candidate `POST /rest/v2/createReturnShipment`.
    - Use original Try OTO forward `orderId`.
    - Include one returned item with SKU and quantity.
-   - Include `pickupLocationCode` only if sandbox/support confirms its meaning.
-   - Include `deliveryOptionId` only if sandbox/support confirms required or selected value.
+   - Include configured Try OTO `pickupLocationCode`.
+   - Include the selected forward Try OTO `deliveryOptionId` persisted during forward shipment creation.
+   - If `deliveryOptionId`, `pickupLocationCode`, `sku`, or `quantity` is missing, block before provider call and record the precise skipped reason.
    - Capture response status and keys.
    - Expected success field: `returnOrderId`.
 

@@ -1290,6 +1290,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       }
     }
 
+    const deliveryOptionIdSource = configuredDeliveryOptionId ? 'provider_metadata' : 'delivery_option_lookup';
     const deliveryOptionLookupDiagnostics = {
       called: !configuredDeliveryOptionId,
       success: configuredDeliveryOptionId ? null : Boolean(deliveryOptionLookup?.snapshot.ok),
@@ -1430,6 +1431,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         labelUrl,
         deliveryCompany: readString(statusBody, ['deliveryCompany']),
         providerStatus: readString(statusBody, ['status']),
+        deliveryOptionId: selectedDeliveryOptionId,
+        forwardDeliveryOptionId: selectedDeliveryOptionId,
+        forwardDeliveryOptionIdSource: deliveryOptionIdSource,
         selectedDeliveryOptionId,
         deliveryOptionLookup: {
           ...deliveryOptionLookupDiagnostics,
@@ -1601,11 +1605,29 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         itemCount: 0,
       });
     }
+    if (!input.deliveryOptionId?.trim()) {
+      throw new ShippingProviderExecutionError('Try OTO return shipment requires deliveryOptionId.', {
+        provider: 'try_oto',
+        operation: 'createReturnShipment',
+        endpoint: '/rest/v2/createReturnShipment',
+        orderIdPresent: true,
+        returnDeliveryOptionIdPresent: false,
+      });
+    }
+    if (!input.pickupLocationCode?.trim()) {
+      throw new ShippingProviderExecutionError('Try OTO return shipment requires pickupLocationCode.', {
+        provider: 'try_oto',
+        operation: 'createReturnShipment',
+        endpoint: '/rest/v2/createReturnShipment',
+        orderIdPresent: true,
+        pickupLocationCodePresent: false,
+      });
+    }
 
     const payload = {
       orderId,
-      ...(input.pickupLocationCode ? { pickupLocationCode: input.pickupLocationCode } : {}),
-      ...(input.deliveryOptionId ? { deliveryOptionId: input.deliveryOptionId } : {}),
+      pickupLocationCode: input.pickupLocationCode.trim(),
+      deliveryOptionId: input.deliveryOptionId.trim(),
       items,
     };
     const accessToken = await this.refreshAccessToken();

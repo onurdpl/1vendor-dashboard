@@ -244,7 +244,12 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnStatus: readString(diagnostics, ['returnStatus']),
     labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
     providerMessage: readString(diagnostics, ['providerMessage']),
+    returnSkippedReason: readString(diagnostics, ['returnSkippedReason', 'skippedReason']),
+    forwardDeliveryOptionIdPresent: readBoolean(diagnostics, ['forwardDeliveryOptionIdPresent']),
+    forwardDeliveryOptionIdSource: readString(diagnostics, ['forwardDeliveryOptionIdSource']),
     returnDeliveryOptionIdPresent: readBoolean(diagnostics, ['returnDeliveryOptionIdPresent']),
+    returnDeliveryOptionIdSource: readString(diagnostics, ['returnDeliveryOptionIdSource']),
+    pickupLocationCodePresent: readBoolean(diagnostics, ['pickupLocationCodePresent']),
     returnItemSkuPresent: readBoolean(diagnostics, ['returnItemSkuPresent']),
     returnItemQuantityPresent: readBoolean(diagnostics, ['returnItemQuantityPresent']),
     createReturnShipmentFinalized: readBoolean(diagnostics, ['createReturnShipmentFinalized']),
@@ -2563,16 +2568,50 @@ function buildTryOtoReturnItemsFromApprovedReturns(allocation: {
     .filter((item): item is { sku: string; quantity: string } => Boolean(item && Number(item.quantity) > 0));
 }
 
-function resolveTryOtoReturnDeliveryOptionId(requestSnapshot: Record<string, unknown>, responseSnapshot: Record<string, unknown>) {
+function resolveTryOtoReturnDeliveryOption(
+  requestSnapshot: Record<string, unknown>,
+  responseSnapshot: Record<string, unknown>,
+) {
   const createShipmentRequestDiagnostics = isRecord(responseSnapshot.createShipmentRequestDiagnostics)
     ? responseSnapshot.createShipmentRequestDiagnostics
     : {};
 
-  return (
-    readString(requestSnapshot, ['deliveryOptionId']) ??
-    readString(responseSnapshot, ['selectedDeliveryOptionId', 'deliveryOptionId']) ??
-    readString(createShipmentRequestDiagnostics, ['deliveryOptionId'])
-  );
+  const fromRequest = readString(requestSnapshot, ['deliveryOptionId']);
+  if (fromRequest) {
+    return {
+      deliveryOptionId: fromRequest,
+      source: 'request_snapshot',
+      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'request_snapshot',
+    };
+  }
+
+  const fromForwardSnapshot = readString(responseSnapshot, [
+    'forwardDeliveryOptionId',
+    'selectedDeliveryOptionId',
+    'deliveryOptionId',
+  ]);
+  if (fromForwardSnapshot) {
+    return {
+      deliveryOptionId: fromForwardSnapshot,
+      source: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'forward_shipment_metadata',
+      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'forward_shipment_metadata',
+    };
+  }
+
+  const fromCreateShipmentRequest = readString(createShipmentRequestDiagnostics, ['deliveryOptionId']);
+  if (fromCreateShipmentRequest) {
+    return {
+      deliveryOptionId: fromCreateShipmentRequest,
+      source: 'create_shipment_request_diagnostics',
+      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'create_shipment_request_diagnostics',
+    };
+  }
+
+  return {
+    deliveryOptionId: null,
+    source: null,
+    forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']),
+  };
 }
 
 function isTryOtoReturnAllowedByState(execution: ShipmentExecution, allocation: { fulfillmentStatus?: string | null }) {
@@ -2590,6 +2629,111 @@ function toShopifyReturnGid(value: string | null) {
     return null;
   }
   return normalized.startsWith('gid://shopify/Return/') ? normalized : `gid://shopify/Return/${normalized}`;
+}
+
+async function persistTryOtoReturnCreationSkipped(
+  execution: ShipmentExecution,
+  input: {
+    skippedReason: 'missing_delivery_option_id' | 'missing_return_items' | 'missing_pickup_location_code';
+    message: string;
+    orderId: string | null;
+    pickupLocationCode: string | null;
+    deliveryOption: ReturnType<typeof resolveTryOtoReturnDeliveryOption>;
+    itemCount: number;
+    itemSkuPresent: boolean;
+    itemQuantityPresent: boolean;
+  },
+) {
+  const now = new Date().toISOString();
+  const existingSnapshot = readSnapshot(execution);
+  const forwardDeliveryOptionId = input.deliveryOption.deliveryOptionId;
+  const returnShipment = {
+    provider: 'try_oto',
+    endpoint: '/rest/v2/createReturnShipment',
+    returnOrderId: null,
+    trackingNumber: null,
+    trackingUrl: null,
+    labelUrl: null,
+    barcode: null,
+    status: 'skipped',
+    createdAt: now,
+    requestKeys: [],
+    responseKeys: [],
+    trackingPresent: false,
+    labelPresent: false,
+    labelRetrievalConfirmed: false,
+    labelRetrievalNote: input.message,
+    finalized: false,
+    labelRetrievable: false,
+    providerStatusSource: 'createReturnShipment:blocked',
+    diagnostics: {
+      endpoint: '/rest/v2/createReturnShipment',
+      httpStatus: null,
+      requestKeys: [],
+      responseKeys: [],
+      returnProviderIdPresent: false,
+      returnTrackingPresent: false,
+      returnBarcodePresent: false,
+      returnStatus: 'skipped',
+      returnLabelPresent: false,
+      returnItemSkuPresent: input.itemSkuPresent,
+      returnItemQuantityPresent: input.itemQuantityPresent,
+      createReturnShipmentFinalized: false,
+      labelFieldPresent: false,
+      providerMessage: input.message,
+      returnSkippedReason: input.skippedReason,
+      forwardDeliveryOptionIdPresent: Boolean(forwardDeliveryOptionId),
+      forwardDeliveryOptionIdSource: input.deliveryOption.forwardSource,
+      returnDeliveryOptionIdPresent: Boolean(forwardDeliveryOptionId),
+      returnDeliveryOptionIdSource: input.deliveryOption.source,
+      pickupLocationCodePresent: Boolean(input.pickupLocationCode),
+      returnDeliveryOptionLookupCalled: false,
+      returnDeliveryOptionLookupImplemented: false,
+      returnPriceLookupCalled: false,
+      returnPriceLookupSuccess: false,
+      returnPriceLookupOptionCount: null,
+      selectedReturnPriceOptionIdPresent: false,
+      reverseCreateShipmentCalled: false,
+      reverseCreateShipmentSuccess: false,
+      reverseCreateShipmentResponseKeys: [],
+      reverseCreateShipmentTrackingPresent: false,
+      reverseCreateShipmentBarcodePresent: false,
+      reverseCreateShipmentLabelPresent: false,
+      returnLabelSourceChecked: 'createReturnShipment:blocked',
+      createReturnShipmentLabelFieldPresent: false,
+      webhookReverseShipmentPrintAwbUrlPresent: false,
+      printEndpointImplemented: true,
+      returnFinalized: false,
+      returnFinalizationEndpointConfirmed: false,
+      returnFinalizeEndpointImplemented: false,
+      returnLabelRetrievable: false,
+      providerStatusSource: 'createReturnShipment:blocked',
+      itemCount: input.itemCount,
+      orderIdPresent: Boolean(input.orderId),
+    },
+  };
+  const mergedSnapshot = appendTimelineEvent(
+    {
+      ...existingSnapshot,
+      returnShipment,
+      lastProviderResponseAt: now,
+    },
+    {
+      label: 'Try OTO return shipment skipped',
+      status: input.skippedReason,
+    },
+  );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: execution.id,
+    },
+    data: {
+      responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return mapShipmentExecution(updated);
 }
 
 function buildShopifyReturnLabelUploadProbeSnapshot(input: {
@@ -2674,7 +2818,10 @@ export async function createTryOtoReturnShipmentLabel(
   }
 
   const existingReturnShipment = readTryOtoReturnShipmentSnapshot(existing);
-  if (existingReturnShipment) {
+  const existingReturnOrderId = readString(existingReturnShipment, ['returnOrderId', 'returnProviderId', 'providerReturnId', 'returnOtoId']);
+  const existingReturnSkippedReason = readString(existingReturnShipment, ['skippedReason']) ??
+    readString(isRecord(existingReturnShipment?.diagnostics) ? existingReturnShipment.diagnostics : {}, ['returnSkippedReason', 'skippedReason']);
+  if (existingReturnShipment && (existingReturnOrderId || !existingReturnSkippedReason)) {
     return mapShipmentExecution(existing);
   }
 
@@ -2714,8 +2861,45 @@ export async function createTryOtoReturnShipmentLabel(
     : items.length > 0
       ? items
       : buildTryOtoReturnItemsFromAllocation(allocation);
-  if (fallbackItems.length === 0) {
-    throw new Error('Try OTO return shipment requires returned item SKU and quantity; API contract is not confirmed for itemless returns.');
+  const pickupLocationCode = readString(requestSnapshot, ['pickupLocationCode']);
+  const deliveryOption = resolveTryOtoReturnDeliveryOption(requestSnapshot, responseSnapshot);
+  const itemSkuPresent = fallbackItems.length > 0 && fallbackItems.every((item) => Boolean(item.sku));
+  const itemQuantityPresent = fallbackItems.length > 0 && fallbackItems.every((item) => Number(item.quantity) > 0);
+  if (!deliveryOption.deliveryOptionId) {
+    return persistTryOtoReturnCreationSkipped(existing, {
+      skippedReason: 'missing_delivery_option_id',
+      message: 'Try OTO return shipment was not created because deliveryOptionId is missing.',
+      orderId,
+      pickupLocationCode,
+      deliveryOption,
+      itemCount: fallbackItems.length,
+      itemSkuPresent,
+      itemQuantityPresent,
+    });
+  }
+  if (!pickupLocationCode) {
+    return persistTryOtoReturnCreationSkipped(existing, {
+      skippedReason: 'missing_pickup_location_code',
+      message: 'Try OTO return shipment was not created because pickupLocationCode is missing.',
+      orderId,
+      pickupLocationCode,
+      deliveryOption,
+      itemCount: fallbackItems.length,
+      itemSkuPresent,
+      itemQuantityPresent,
+    });
+  }
+  if (fallbackItems.length === 0 || !itemSkuPresent || !itemQuantityPresent) {
+    return persistTryOtoReturnCreationSkipped(existing, {
+      skippedReason: 'missing_return_items',
+      message: 'Try OTO return shipment was not created because returned item SKU or quantity is missing.',
+      orderId,
+      pickupLocationCode,
+      deliveryOption,
+      itemCount: fallbackItems.length,
+      itemSkuPresent,
+      itemQuantityPresent,
+    });
   }
 
   const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
@@ -2726,8 +2910,8 @@ export async function createTryOtoReturnShipmentLabel(
   const result = await adapter.createReturnShipment({
     orderId,
     items: fallbackItems,
-    pickupLocationCode: readString(requestSnapshot, ['pickupLocationCode']),
-    deliveryOptionId: resolveTryOtoReturnDeliveryOptionId(requestSnapshot, responseSnapshot),
+    pickupLocationCode,
+    deliveryOptionId: deliveryOption.deliveryOptionId,
     packageWeight: toNumber(existing.desi) ?? readNumber(requestSnapshot, ['packageWeight']) ?? 1,
   });
   const returnFinalized =
@@ -2772,7 +2956,12 @@ export async function createTryOtoReturnShipmentLabel(
       createReturnShipmentFinalized: readBoolean(result.responseSnapshot, ['createReturnShipmentFinalized']) ?? returnFinalized,
       labelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       providerMessage: readString(result.responseSnapshot, ['providerError']),
+      returnSkippedReason: null,
+      forwardDeliveryOptionIdPresent: Boolean(deliveryOption.deliveryOptionId),
+      forwardDeliveryOptionIdSource: deliveryOption.forwardSource,
       returnDeliveryOptionIdPresent: readBoolean(result.responseSnapshot, ['returnDeliveryOptionIdPresent']),
+      returnDeliveryOptionIdSource: deliveryOption.source,
+      pickupLocationCodePresent: Boolean(pickupLocationCode),
       returnDeliveryOptionLookupCalled: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupCalled']),
       returnDeliveryOptionLookupImplemented: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupImplemented']),
       returnPriceLookupCalled: readBoolean(result.responseSnapshot, ['returnPriceLookupCalled']),

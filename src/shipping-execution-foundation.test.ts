@@ -2391,6 +2391,7 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
       },
     });
     const adapter = buildAdapter({
@@ -2459,6 +2460,7 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
       },
     });
     const adapter = buildAdapter({
@@ -2505,6 +2507,110 @@ describe('shipping execution foundation', () => {
       returnDeliveryOptionLookupImplemented: false,
       returnFinalizationEndpointConfirmed: false,
       returnFinalizeEndpointImplemented: false,
+    });
+  });
+
+  it('blocks Try OTO return creation before provider call when deliveryOptionId is missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({ fulfillmentStatus: 'Fulfilled' }));
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(result.returnShipment).toMatchObject({
+      status: 'skipped',
+      returnOrderId: null,
+      labelRetrievalNote: 'Try OTO return shipment was not created because deliveryOptionId is missing.',
+      diagnostics: {
+        returnSkippedReason: 'missing_delivery_option_id',
+        forwardDeliveryOptionIdPresent: false,
+        returnDeliveryOptionIdPresent: false,
+        pickupLocationCodePresent: true,
+        returnItemSkuPresent: true,
+        returnItemQuantityPresent: true,
+      },
+    });
+  });
+
+  it('blocks Try OTO return creation before provider call when returned sku or quantity is missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        fulfillmentStatus: 'Fulfilled',
+        lineItems: [
+          {
+            quantity: 1,
+            lineAmount: 100,
+            shopifyOrderLineItem: {
+              sourceLineItemId: 'line-1',
+              sku: null,
+            },
+          },
+        ],
+      }),
+    );
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(result.returnShipment).toMatchObject({
+      status: 'skipped',
+      labelRetrievalNote: 'Try OTO return shipment was not created because returned item SKU or quantity is missing.',
+      diagnostics: {
+        returnSkippedReason: 'missing_return_items',
+        forwardDeliveryOptionIdPresent: true,
+        returnDeliveryOptionIdPresent: true,
+        returnItemSkuPresent: false,
+        returnItemQuantityPresent: false,
+      },
     });
   });
 
@@ -2624,6 +2730,7 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
       },
     });
     const adapter = buildAdapter({
@@ -2647,6 +2754,7 @@ describe('shipping execution foundation', () => {
           returnLabelRetrievable: false,
           returnProviderStatusSource: 'createReturnShipment',
           returnLabelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
+          returnDeliveryOptionIdPresent: true,
         },
       }),
     });
@@ -2677,6 +2785,7 @@ describe('shipping execution foundation', () => {
       returnBarcodePresent: true,
       returnFinalized: false,
       returnLabelRetrievable: false,
+      returnDeliveryOptionIdPresent: true,
     });
   });
 
@@ -2700,6 +2809,7 @@ describe('shipping execution foundation', () => {
     const result = await adapter.createReturnShipment({
       orderId: 'OTO-ORDER-1',
       pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
       items: [{ sku: 'SKU-1', quantity: '1' }],
       packageWeight: 3,
     });
@@ -2816,6 +2926,8 @@ describe('shipping execution foundation', () => {
 
     const result = await adapter.createReturnShipment({
       orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
       items: [{ sku: 'SKU-1', quantity: '1' }],
       packageWeight: 3,
     });
@@ -4741,6 +4853,10 @@ describe('shipping execution foundation', () => {
         trackingNumber: 'OTO-TRACK-1001',
         dcTrackingNumber: 'SURAT-1001',
         deliveryCompany: 'surat-kargo-marketplace',
+        deliveryOptionId: '7109',
+        forwardDeliveryOptionId: '7109',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        selectedDeliveryOptionId: '7109',
         payloadDiagnostics: {
           orderIdPresent: true,
           pickupLocationCodePresent: true,

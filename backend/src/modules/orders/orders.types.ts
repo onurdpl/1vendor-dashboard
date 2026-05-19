@@ -118,7 +118,12 @@ export type OrderShipmentExecutionDto = {
       returnStatus: string | null;
       labelFieldPresent: boolean;
       providerMessage: string | null;
+      returnSkippedReason: string | null;
+      forwardDeliveryOptionIdPresent: boolean;
+      forwardDeliveryOptionIdSource: string | null;
       returnDeliveryOptionIdPresent: boolean;
+      returnDeliveryOptionIdSource: string | null;
+      pickupLocationCodePresent: boolean;
       returnItemSkuPresent: boolean;
       returnItemQuantityPresent: boolean;
       createReturnShipmentFinalized: boolean;

@@ -17,6 +17,8 @@ Observed locally:
 - `getReturnLink` works.
 - Barcode, tracking, and label are not returned by those probes.
 - The reverse `createShipment` path is disabled as unconfirmed/incorrect.
+- A return created without a usable `deliveryOptionId` can remain as `newReturn` / `Yeni Iade`.
+- `GET /rest/v2/print/{returnOrderId}?printReverseShipment=true` returning `404` with `No shipment found for this order ...` means Try OTO has no printable return shipment for that `returnOrderId` yet; it should not be treated as evidence that reverse `createShipment` is required.
 
 ## High-Level Finding
 
@@ -30,6 +32,12 @@ The uploaded collection does not show `getReturnDetails` or `getReturnLink` as l
 - `orderStatus` webhooks that may include return fields such as `returnOrderId`, `returnStatus`, `printAWBURL`, `trackingNumber`, and `dcTrackingNumber`.
 
 Therefore, the most likely missing integration step, based strictly on the collection, is not reverse `createShipment`; it is calling the documented print/status paths with the generated `returnOrderId`.
+
+Runtime mitigation added after this finding:
+- Forward Try OTO shipment creation persists the selected forward `deliveryOptionId` as shipment metadata.
+- Return creation resolves `deliveryOptionId` from that persisted forward shipment metadata.
+- If `deliveryOptionId`, `pickupLocationCode`, `sku`, or `quantity` is missing, runtime blocks before calling `createReturnShipment` and stores a precise skipped reason.
+- Runtime does not guess a delivery option id and does not restore reverse `createShipment`.
 
 ## Confirmed Return Endpoints
 
@@ -426,6 +434,10 @@ Current runtime behavior that is not a confirmed bug:
    - Collection evidence: `createShipment` is documented for forward shipment creation; Return Shipments does not document reverse `createShipment`.
    - Current stance: keep disabled.
 
+4. `deliveryOptionId` is documented as optional in the Postman table, but runtime evidence shows missing `deliveryOptionId` produced only a `newReturn` / `Yeni Iade` request with no barcode/tracking/label.
+   - Collection evidence: the `createReturnShipment` example includes `deliveryOptionId`.
+   - Runtime stance: treat `deliveryOptionId` as required for Turkey sandbox return shipment creation and source it only from persisted forward shipment metadata.
+
 4. Webhook field shape differs between collection and observed runtime.
    - Collection: documents `returnStatus`, `returnOrderId`, and label/tracking fields.
    - Runtime: observed `reverseShipment` boolean in sandbox payloads.
@@ -475,4 +487,3 @@ No runtime code should be changed until these are checked against sandbox:
 4. If those fail, repeat print/status/history with the original forward `orderId` and document the exact response.
 5. Capture safe response keys and status/error codes.
 6. Update this document and `docs/TRY_OTO_RETURN_PLAN.md` with sandbox-confirmed behavior before implementing runtime label retrieval.
-
