@@ -1649,6 +1649,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const returnLabelUrl =
       readString(body, ['printReturnAWBURL', 'printReturnAWBUrl', 'printReturnAwbURL', 'printReturnAwbUrl']) ??
       readTryOtoLabelUrl(body);
+    const rawPrintReturnAwbUrlPresent = Boolean(
+      readString(body, ['printReturnAWBURL', 'printReturnAWBUrl', 'printReturnAwbURL', 'printReturnAwbUrl']),
+    );
     const returnTrackingNumber = readTryOtoTrackingNumber(body);
     const returnBarcode = readTryOtoBarcode(body) ?? returnTrackingNumber;
     const returnOrderId = readTryOtoReturnOrderId(body);
@@ -1692,6 +1695,10 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnTrackingPresent: Boolean(returnTrackingNumber),
         returnBarcodePresent: Boolean(returnBarcode),
         returnLabelPresent: Boolean(returnLabelUrl),
+        rawPrintReturnAwbUrlPresent,
+        normalizedReturnLabelUrlPresent: Boolean(returnLabelUrl),
+        returnLabelPersistenceStage: 'createReturnShipment',
+        returnLabelOverwrittenByStaleSnapshot: false,
         returnStatus,
         returnCarrierName,
         returnTrackingSourceChecked: returnTrackingNumber ? 'createReturnShipment.trackingNumber' : 'createReturnShipment',

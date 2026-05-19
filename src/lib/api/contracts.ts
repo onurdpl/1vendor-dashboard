@@ -71,6 +71,10 @@ export type ShipmentExecution = {
       labelFieldPresent: boolean;
       returnLabelSourceChecked?: string | null;
       returnTrackingSourceChecked?: string | null;
+      rawPrintReturnAwbUrlPresent?: boolean;
+      normalizedReturnLabelUrlPresent?: boolean;
+      returnLabelPersistenceStage?: string | null;
+      returnLabelOverwrittenByStaleSnapshot?: boolean;
       providerMessage: string | null;
       returnSkippedReason?: string | null;
       forwardDeliveryOptionIdPresent?: boolean;

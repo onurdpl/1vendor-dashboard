@@ -2671,6 +2671,26 @@ export function OrderDetailPage() {
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnTrackingSourceChecked ?? '—'}</strong>
                                     </div>
                                     <div className="summary-row">
+                                      <span>Raw return label field</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.rawPrintReturnAwbUrlPresent ? 'present' : 'missing'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Normalized label URL</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.normalizedReturnLabelUrlPresent ? 'present' : 'missing'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Label persistence</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnLabelPersistenceStage ?? '—'}
+                                        {' · stale overwrite '}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnLabelOverwrittenByStaleSnapshot ? 'yes' : 'no'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
                                       <span>Status source</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerStatusSource ?? '—'}</strong>
                                     </div>
@@ -3618,6 +3638,22 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Tracking source</span>
                           <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnTrackingSourceChecked ?? '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Raw return label field</span>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.rawPrintReturnAwbUrlPresent ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Normalized label URL</span>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.normalizedReturnLabelUrlPresent ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Label persistence</span>
+                          <strong>
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnLabelPersistenceStage ?? '—'}
+                            {' · stale overwrite '}
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnLabelOverwrittenByStaleSnapshot ? 'yes' : 'no'}
+                          </strong>
                         </div>
                         <div className="summary-row">
                           <span>Status source</span>

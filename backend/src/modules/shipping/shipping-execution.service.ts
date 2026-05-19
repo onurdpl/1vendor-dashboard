@@ -261,6 +261,10 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     labelFieldPresent: Boolean(normalizedReturnLabelUrl) || readBoolean(diagnostics, ['labelFieldPresent']),
     returnLabelSourceChecked: readString(diagnostics, ['returnLabelSourceChecked']) ?? normalizedReturnLabelSource,
     returnTrackingSourceChecked: readString(diagnostics, ['returnTrackingSourceChecked']),
+    rawPrintReturnAwbUrlPresent: readBoolean(diagnostics, ['rawPrintReturnAwbUrlPresent']),
+    normalizedReturnLabelUrlPresent: Boolean(normalizedReturnLabelUrl) || readBoolean(diagnostics, ['normalizedReturnLabelUrlPresent']),
+    returnLabelPersistenceStage: readString(diagnostics, ['returnLabelPersistenceStage']),
+    returnLabelOverwrittenByStaleSnapshot: readBoolean(diagnostics, ['returnLabelOverwrittenByStaleSnapshot']),
     providerMessage: readString(diagnostics, ['providerMessage']),
     returnSkippedReason: readString(diagnostics, ['returnSkippedReason', 'skippedReason']),
     forwardDeliveryOptionIdPresent: readBoolean(diagnostics, ['forwardDeliveryOptionIdPresent']),
@@ -2121,7 +2125,18 @@ export async function ingestTryOtoWebhook(
   const identifiers = readTryOtoWebhookIdentifiers(data);
   const normalizedStatus = normalizeTryOtoWebhookStatus(providerStatus);
   const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link', 'brandedTrackingURL']);
-  const labelUrl = readString(data, ['printLabelURL', 'printAWBURL', 'labelUrl', 'label_url', 'awbUrl', 'awbURL']);
+  const labelUrl = readString(data, [
+    'printReturnAWBURL',
+    'printReturnAWBUrl',
+    'printReturnAwbURL',
+    'printReturnAwbUrl',
+    'printLabelURL',
+    'printAWBURL',
+    'labelUrl',
+    'label_url',
+    'awbUrl',
+    'awbURL',
+  ]);
   const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'deliveryOptionName', 'carrier', 'carrierName']);
   const isReverseShipment = readLooseBoolean(data, ['reverseShipment']);
   const signatureWarning = TRY_OTO_WEBHOOK_SIGNATURE_WARNING;
@@ -2213,7 +2228,8 @@ export async function ingestTryOtoWebhook(
       readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber']) ??
       identifiers.trackingNumber ??
       identifiers.dcTrackingNumber;
-    const nextReturnLabelUrl = readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']) ?? labelUrl;
+    const existingReturnLabelUrl = readTryOtoReturnLabelUrl(existingReturnShipment);
+    const nextReturnLabelUrl = existingReturnLabelUrl ?? labelUrl;
     const nextReturnShipment = {
       ...existingReturnShipment,
       provider: 'try_oto',
@@ -2223,7 +2239,7 @@ export async function ingestTryOtoWebhook(
         identifiers.providerOrderId ??
         identifiers.shipmentId,
       trackingNumber: nextReturnTrackingNumber,
-      trackingUrl: readString(existingReturnShipment, ['trackingUrl', 'returnTrackingUrl']) ?? trackingUrl,
+      trackingUrl: readTryOtoReturnTrackingUrl(existingReturnShipment) ?? trackingUrl,
       labelUrl: nextReturnLabelUrl,
       barcode: readString(existingReturnShipment, ['barcode', 'returnBarcode']) ?? readTryOtoWebhookBarcode(data) ?? nextReturnTrackingNumber,
       status: providerStatus ?? readString(existingReturnShipment, ['status', 'returnStatus']),
@@ -2239,7 +2255,11 @@ export async function ingestTryOtoWebhook(
         ...(isRecord(existingReturnShipment.diagnostics) ? existingReturnShipment.diagnostics : {}),
         webhookReverseShipment: true,
         webhookReverseShipmentPrintAwbUrlPresent: Boolean(labelUrl),
-        returnLabelSourceChecked: 'reverseShipmentWebhook',
+        rawPrintReturnAwbUrlPresent: Boolean(readString(data, ['printReturnAWBURL', 'printReturnAWBUrl', 'printReturnAwbURL', 'printReturnAwbUrl'])),
+        normalizedReturnLabelUrlPresent: Boolean(nextReturnLabelUrl),
+        returnLabelPersistenceStage: labelUrl ? 'reverse_shipment_webhook' : 'existing_return_snapshot',
+        returnLabelOverwrittenByStaleSnapshot: false,
+        returnLabelSourceChecked: labelUrl ? 'reverseShipmentWebhook' : existingReturnLabelUrl ? 'existingReturnShipment' : 'reverseShipmentWebhook',
         printEndpointImplemented: false,
         statusValue: providerStatus,
         responseKeys,
@@ -3072,6 +3092,10 @@ export async function createTryOtoReturnShipmentLabel(
       returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'createReturnShipment',
       returnTrackingSourceChecked: readString(result.responseSnapshot, ['returnTrackingSourceChecked']) ?? 'createReturnShipment',
       createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
+      rawPrintReturnAwbUrlPresent: readBoolean(result.responseSnapshot, ['rawPrintReturnAwbUrlPresent']),
+      normalizedReturnLabelUrlPresent: Boolean(result.returnLabelUrl) || readBoolean(result.responseSnapshot, ['normalizedReturnLabelUrlPresent']),
+      returnLabelPersistenceStage: readString(result.responseSnapshot, ['returnLabelPersistenceStage']) ?? 'createReturnShipment',
+      returnLabelOverwrittenByStaleSnapshot: readBoolean(result.responseSnapshot, ['returnLabelOverwrittenByStaleSnapshot']),
       webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
       printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
       returnFinalized,
@@ -3164,7 +3188,8 @@ async function persistTryOtoReturnDetailsProbe(
       : probeKey === 'linkProbe'
         ? 'getReturnLink'
         : 'getReturnDetails';
-  const labelUrl = updates.labelUrl ?? readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']);
+  const existingReturnLabelUrl = readTryOtoReturnLabelUrl(existingReturnShipment);
+  const labelUrl = updates.labelUrl ?? existingReturnLabelUrl;
   const trackingNumber = updates.trackingNumber ?? readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber']);
   const barcode = updates.barcode ?? readString(existingReturnShipment, ['barcode', 'returnBarcode']);
   const mergedSnapshot = appendTimelineEvent(
@@ -3185,6 +3210,18 @@ async function persistTryOtoReturnDetailsProbe(
             ? 'Return AWB print did not return a label URL yet.'
             : `Return label is not available from ${source} yet.`,
         providerStatusSource: source,
+        diagnostics: {
+          ...(isRecord(existingReturnShipment.diagnostics) ? existingReturnShipment.diagnostics : {}),
+          rawPrintReturnAwbUrlPresent: Boolean(readString(existingReturnShipment, [
+            'printReturnAWBURL',
+            'printReturnAWBUrl',
+            'printReturnAwbURL',
+            'printReturnAwbUrl',
+          ])),
+          normalizedReturnLabelUrlPresent: Boolean(labelUrl),
+          returnLabelPersistenceStage: updates.labelUrl ? source : existingReturnLabelUrl ? 'existing_return_snapshot' : source,
+          returnLabelOverwrittenByStaleSnapshot: false,
+        },
         [probeKey]: probe,
       },
       lastProviderResponseAt: probe.attemptedAt,

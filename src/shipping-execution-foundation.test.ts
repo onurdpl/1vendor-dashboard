@@ -2938,6 +2938,10 @@ describe('shipping execution foundation', () => {
         returnCarrierName: 'Sürat Kargo',
         returnTrackingSourceChecked: 'createReturnShipment.trackingNumber',
         returnLabelSourceChecked: 'createReturnShipment.printReturnAWBURL',
+        rawPrintReturnAwbUrlPresent: true,
+        normalizedReturnLabelUrlPresent: true,
+        returnLabelPersistenceStage: 'createReturnShipment',
+        returnLabelOverwrittenByStaleSnapshot: false,
         createReturnShipmentLabelFieldPresent: true,
         reverseCreateShipmentCalled: false,
       },
@@ -3116,6 +3120,75 @@ describe('shipping execution foundation', () => {
         status: 'no_label',
         labelLikeFieldsPresent: false,
         labelUrlPresent: false,
+      },
+    });
+  });
+
+  it('does not let stale no-label probes remove a persisted printReturnAWBURL return label', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          trackingNumber: 'RET-TRACK-1',
+          brandedTrackingURL: 'https://tracking.example/RET-TRACK-1',
+          printReturnAWBURL: 'https://labels.example/return-awb.pdf',
+          labelRetrievable: false,
+          labelRetrievalConfirmed: false,
+          diagnostics: {
+            returnLabelRetrievable: false,
+            labelFieldPresent: false,
+          },
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      probeReturnDetails: vi.fn().mockResolvedValue({
+        returnLabelUrl: null,
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnBarcode: null,
+        returnStatus: 'new_return',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['data'],
+          nestedKeys: ['data.status', 'data.trackingNumber'],
+          labelLikeFieldsPresent: false,
+          awbLikeFieldsPresent: false,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: false,
+          trackingPresent: true,
+          barcodePresent: false,
+          providerStatus: 'new_return',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnDetails(existing.id, {
+      env,
+      adapter,
+    });
+
+    expect(result.returnShipment).toMatchObject({
+      labelUrl: 'https://labels.example/return-awb.pdf',
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelRetrievalConfirmed: true,
+      labelRetrievable: true,
+      detailsProbe: {
+        status: 'no_label',
+        labelUrlPresent: false,
+      },
+      diagnostics: {
+        rawPrintReturnAwbUrlPresent: true,
+        normalizedReturnLabelUrlPresent: true,
+        returnLabelPersistenceStage: 'existing_return_snapshot',
+        returnLabelOverwrittenByStaleSnapshot: false,
       },
     });
   });
