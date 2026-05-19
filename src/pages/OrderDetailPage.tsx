@@ -121,6 +121,26 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function isInternalShipmentReference(value?: string | null) {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
+}
+
+function formatShipmentReference(value?: string | null) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return 'Pending';
+  }
+  if (!isInternalShipmentReference(trimmed) || trimmed.length <= 36) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 24)}...${trimmed.slice(-10)}`;
+}
+
+function getShipmentReferenceLabel(shipment?: ShipmentExecution | null) {
+  return isInternalShipmentReference(shipment?.providerShipmentId) ? 'Internal reference' : 'Provider ID';
+}
+
 function getShopifyFulfillmentSyncSummary(order: OrderDetail, shipment?: ShipmentExecution | null) {
   const sync = order.shopifyFulfillmentSync;
   const trackingPresent = Boolean(
@@ -175,7 +195,8 @@ function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fa
     if (providerCarrierName && /s[üu]rat/i.test(providerCarrierName)) {
       return 'Sürat Kargo';
     }
-    return providerCarrierName || 'Try OTO';
+    const fallback = fallbackCarrier?.trim();
+    return providerCarrierName || (fallback && fallback.toLowerCase() !== 'try_oto' ? formatShippingProviderName(fallback) : 'Try OTO');
   }
 
   return fallbackCarrier?.trim() || (shipment ? formatShippingProviderName(shipment.provider) : '');
@@ -1967,9 +1988,9 @@ export function OrderDetailPage() {
                               </div>
                             ) : null}
                             <div className="summary-row">
-                              <span>Provider id</span>
+                              <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
                               <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
-                                {visibleShipmentExecution.providerShipmentId ?? 'Pending'}
+                                {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
                               </strong>
                             </div>
                             <div className="summary-row">
@@ -1992,7 +2013,7 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>Carrier</span>
-                          <strong className={order.carrier ? '' : 'muted'}>{formatShippingProviderName(order.carrier) || 'Not available'}</strong>
+                          <strong className={shipmentShopifyCarrier ? '' : 'muted'}>{shipmentShopifyCarrier || 'Not available'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Tracking link</span>

@@ -1655,8 +1655,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         ...orderWithShipmentSummary.shipmentExecution!,
         id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
         provider: 'try_oto',
+        providerCarrierName: 'Sürat Marketplace',
         shipmentStatus: 'created',
-        providerShipmentId: 'OTO-SHIP-1028',
+        providerShipmentId: 'shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961',
         trackingNumber: 'OTO-TRACK-1028',
         trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
         barcode: null,
@@ -1678,6 +1679,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect((await screen.findAllByText('Try OTO')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
+    expect(screen.getByText('Internal reference')).toBeInTheDocument();
+    expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
+    expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();
+    expect(screen.getByText('shopify-cmpce0fbh0003cf3...1783322961')).toBeInTheDocument();
+    expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('Same as tracking')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open tracking' })).toHaveAttribute('href', 'https://tracking.tryoto.example/OTO-TRACK-1028');
     expect(screen.getByRole('link', { name: 'Open label PDF' })).toHaveAttribute('href', 'https://app.tryoto.example/label-1028.pdf');
