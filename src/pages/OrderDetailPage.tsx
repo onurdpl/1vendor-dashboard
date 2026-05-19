@@ -403,6 +403,30 @@ function readTryOtoOriginCity(config?: VendorShippingConfig | null) {
   return typeof raw === 'string' ? raw : '';
 }
 
+function buildSupportCorrelationId(orderId: string, shipmentId?: string | null) {
+  return ['support', orderId, shipmentId].filter(Boolean).join(':');
+}
+
+function compactDiagnosticsValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'yes' : 'no';
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.join(', ') : '—';
+  }
+  return String(value);
+}
+
+function buildDiagnosticsCopyText(title: string, entries: Array<[string, unknown]>) {
+  return [
+    title,
+    ...entries.map(([label, value]) => `${label}: ${compactDiagnosticsValue(value)}`),
+  ].join('\n');
+}
+
 function buildShippingConfigDraft(config?: VendorShippingConfig | null): ShippingConfigDraft {
   return {
     preferredProvider: config?.preferredProvider ?? 'kargo_entegrator',
@@ -650,6 +674,7 @@ export function OrderDetailPage() {
   const [trackingUrl, setTrackingUrl] = useState('');
   const [notifyCustomer, setNotifyCustomer] = useState(false);
   const [supportOpen, setSupportOpen] = useState(false);
+  const [copiedDiagnostics, setCopiedDiagnostics] = useState<string | null>(null);
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
@@ -1695,6 +1720,10 @@ export function OrderDetailPage() {
     );
   }
 
+  const supportCorrelationId = order ? buildSupportCorrelationId(order.id, visibleShipmentExecution?.id) : null;
+  const supportContextType = visibleShipmentExecution ? 'shipment' : 'order';
+  const supportContextId = visibleShipmentExecution?.id ?? order?.id ?? null;
+  const supportDefaultCategory = visibleShipmentExecution?.returnShipment ? 'RETURN' : visibleShipmentExecution ? 'SHIPMENT' : 'OTHER';
   const supportSnapshot = order
     ? {
         route: location.pathname,
@@ -1702,9 +1731,52 @@ export function OrderDetailPage() {
         allocationStatus: order.allocationStatus,
         fulfillmentStatus: order.fulfillmentStatus,
         shippingStatus: order.shippingStatus,
-        trackingPresent: Boolean(order.trackingNumber || order.trackingUrl),
-        shipmentExecutionId: shipmentExecution?.id ?? null,
-        shipmentStatus: shipmentExecution?.shipmentStatus ?? null,
+        shipmentProvider: visibleShipmentExecution?.provider ? formatShippingProviderName(visibleShipmentExecution.provider) : null,
+        carrier: visibleShipmentExecution?.providerCarrierName ?? visibleShipmentExecution?.returnShipment?.carrierName ?? order.carrier ?? null,
+        trackingNumber: getShipmentTrackingNumber(order, visibleShipmentExecution),
+        returnOrderId: visibleShipmentExecution?.returnShipment?.returnOrderId ?? null,
+        shipmentStatus: visibleShipmentExecution?.shipmentStatus ?? null,
+        returnStatus: visibleShipmentExecution?.returnShipment ? getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment) : null,
+        shopifyFulfillmentSyncState: shopifyFulfillmentSyncSummary?.label ?? null,
+        timestamp: new Date().toISOString(),
+        vendorId: order.assignedVendorId,
+        vendorStore: currentVendor.vendorName ?? order.assignedVendorId,
+        supportCorrelationId,
+        flags: {
+          trackingPresent: Boolean(getShipmentTrackingNumber(order, visibleShipmentExecution) || getShipmentTrackingUrl(order, visibleShipmentExecution)),
+          returnTrackingPresent: Boolean(visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode),
+          returnLabelPresent: Boolean(visibleShipmentExecution?.returnShipment?.labelUrl),
+          shopifyFulfillmentIdPresent: Boolean(order.shopifyFulfillmentSync?.fulfillmentIdPresent),
+          shopifyReverseDeliveryIdPresent: Boolean(visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.reverseDeliveryIdPresent),
+        },
+        ...(isAdmin
+          ? {
+              adminDiagnostics: {
+                providerHttpStatus: shipmentProviderSummary?.httpStatus ?? null,
+                providerMessage: shipmentProviderSummary?.providerError ?? null,
+                providerResponseKeys: shipmentProviderSummary?.responseKeys ?? [],
+                webhookReceived: visibleShipmentExecution?.webhookReceived ?? false,
+                providerStatus: visibleShipmentExecution?.providerStatus ?? null,
+                tryOtoReturnDiagnostics: visibleShipmentExecution?.returnShipment?.diagnostics
+                  ? {
+                      httpStatus: visibleShipmentExecution.returnShipment.diagnostics.httpStatus,
+                      responseKeys: visibleShipmentExecution.returnShipment.diagnostics.responseKeys,
+                      returnFinalized: visibleShipmentExecution.returnShipment.diagnostics.returnFinalized,
+                      providerMessage: visibleShipmentExecution.returnShipment.diagnostics.providerMessage,
+                    }
+                  : null,
+                shopifyReverseDeliveryDiagnostics: visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe
+                  ? {
+                      status: visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status,
+                      trackingAccepted: visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.trackingAccepted,
+                      labelAccepted: visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted,
+                      reverseDeliveryIdPresent: visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseDeliveryIdPresent,
+                      skippedReason: visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason,
+                    }
+                  : null,
+              },
+            }
+          : {}),
       }
     : null;
   const relatedReturns = useMemo(
@@ -1746,6 +1818,57 @@ export function OrderDetailPage() {
     }
 
     void updateShippingConfigMutation(buildShippingConfigUpdate(shippingConfigDraft, vendorShippingConfig));
+  };
+
+  const handleCopyDiagnostics = (kind: 'shipment' | 'return' | 'shopify') => {
+    if (!order) {
+      return;
+    }
+
+    const text =
+      kind === 'shipment'
+        ? buildDiagnosticsCopyText('Shipment diagnostics', [
+            ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
+            ['Support correlation id', supportCorrelationId],
+            ['Shipment provider', visibleShipmentExecution?.provider ? formatShippingProviderName(visibleShipmentExecution.provider) : null],
+            ['Carrier', visibleShipmentExecution?.providerCarrierName ?? order.carrier ?? null],
+            ['Shipment status', visibleShipmentExecution?.shipmentStatus ?? order.shippingStatus],
+            ['Tracking present', Boolean(getShipmentTrackingNumber(order, visibleShipmentExecution))],
+            ['Tracking link present', Boolean(getShipmentTrackingUrl(order, visibleShipmentExecution))],
+            ['Provider HTTP', shipmentProviderSummary?.httpStatus ?? null],
+            ['Provider message', shipmentProviderSummary?.providerError ?? null],
+            ['Webhook received', visibleShipmentExecution?.webhookReceived ?? false],
+            ['Provider status', visibleShipmentExecution?.providerStatus ?? null],
+          ])
+        : kind === 'return'
+          ? buildDiagnosticsCopyText('Return diagnostics', [
+              ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
+              ['Support correlation id', supportCorrelationId],
+              ['Return order id present', Boolean(visibleShipmentExecution?.returnShipment?.returnOrderId)],
+              ['Return status', visibleShipmentExecution?.returnShipment ? getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment) : null],
+              ['Return tracking present', Boolean(visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode)],
+              ['Return tracking link present', Boolean(visibleShipmentExecution?.returnShipment?.trackingUrl)],
+              ['Return label present', Boolean(visibleShipmentExecution?.returnShipment?.labelUrl)],
+              ['Return finalized', visibleShipmentExecution?.returnShipment?.finalized ?? null],
+              ['Provider message', visibleShipmentExecution?.returnShipment?.diagnostics?.providerMessage ?? null],
+              ['Shopify return tracking accepted', visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.trackingAccepted ?? null],
+            ])
+          : buildDiagnosticsCopyText('Shopify diagnostics', [
+              ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
+              ['Support correlation id', supportCorrelationId],
+              ['Fulfillment sync status', shopifyFulfillmentSyncSummary?.label ?? null],
+              ['Fulfillment order id present', order.shopifyFulfillmentSync?.fulfillmentOrderIdPresent ?? null],
+              ['Fulfillment id present', order.shopifyFulfillmentSync?.fulfillmentIdPresent ?? null],
+              ['Sync skipped reason', order.shopifyFulfillmentSync?.skippedReason ?? null],
+              ['Sync error', order.shopifyFulfillmentSync?.errorMessage ?? null],
+              ['Last sync attempted', order.shopifyFulfillmentSync?.lastAttemptedAt ?? null],
+              ['Shopify return id present', hasShopifyReturnIdForLabelProbe],
+              ['Reverse delivery id present', visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.reverseDeliveryIdPresent ?? null],
+            ]);
+
+    void navigator.clipboard?.writeText(text);
+    setCopiedDiagnostics(kind);
+    window.setTimeout(() => setCopiedDiagnostics(null), 2500);
   };
 
   const handleRetryShipment = () => {
@@ -1912,6 +2035,17 @@ export function OrderDetailPage() {
         at: ticket.lastReplyAt,
         status: ticket.lastReplyByRole ?? 'Reply',
         tone: 'neutral' as const,
+        href: `${supportBasePath}/${ticket.id}`,
+      })),
+    ...relatedSupportTickets
+      .filter((ticket) => ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')
+      .map((ticket) => ({
+        id: `support-status-${ticket.id}`,
+        title: ticket.status === 'RESOLVED' ? 'Support ticket resolved' : 'Support ticket closed',
+        description: ticket.subject,
+        at: ticket.resolvedAt ?? ticket.closedAt ?? ticket.updatedAt,
+        status: ticket.status.replace(/_/g, ' '),
+        tone: 'success' as const,
         href: `${supportBasePath}/${ticket.id}`,
       })),
   );
@@ -2339,6 +2473,90 @@ export function OrderDetailPage() {
             audience={audience}
             emptyMessage="No records available."
           />
+
+          <article className="order-detail-card-v2" aria-label="Shipment and return support">
+            <div className="order-card-heading">
+              <div>
+                <h2>Support</h2>
+                <p>
+                  {isAdmin
+                    ? 'Operational support context and safe diagnostics for this order.'
+                    : 'Contact support with the shipment and return context already attached.'}
+                </p>
+              </div>
+            </div>
+            <div className="shipment-recovery-actions">
+              {isVendorAssignedOwner ? (
+                <>
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    onClick={() => setSupportOpen(true)}
+                    disabled={!canReportIssue}
+                  >
+                    Contact support
+                  </button>
+                  {!canReportIssue ? (
+                    <span className="muted">Support is available for active or fulfilled assigned orders.</span>
+                  ) : (
+                    <span className="muted">Order, shipment, return, tracking, and Shopify sync context will be attached.</span>
+                  )}
+                </>
+              ) : null}
+
+              {relatedSupportTickets.length ? (
+                <div className="provider-response-summary" aria-label="Support ticket summary">
+                  <div className="provider-response-heading">
+                    <strong>Support tickets</strong>
+                    <span>{relatedSupportTickets.length}</span>
+                  </div>
+                  {relatedSupportTickets.slice(0, 3).map((ticket) => (
+                    <div className="summary-row" key={ticket.id}>
+                      <span>{ticket.status.replace(/_/g, ' ')}</span>
+                      <Link className="inline-link" to={`${supportBasePath}/${ticket.id}`}>
+                        {ticket.subject}
+                      </Link>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <span className="muted">No support tickets linked to this order yet.</span>
+              )}
+
+              {isAdmin ? (
+                <div className="provider-response-summary" aria-label="Admin support diagnostics">
+                  <div className="provider-response-heading">
+                    <strong>Admin support context</strong>
+                    <span>Safe copy</span>
+                  </div>
+                  {relatedSupportTickets[0] ? (
+                    <>
+                      <div className="summary-row">
+                        <span>Latest vendor note</span>
+                        <strong>{relatedSupportTickets[0].message || '—'}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Latest status</span>
+                        <strong>{relatedSupportTickets[0].status.replace(/_/g, ' ')}</strong>
+                      </div>
+                    </>
+                  ) : null}
+                  <div className="order-inline-actions">
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment')}>
+                      Copy shipment diagnostics
+                    </button>
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return')}>
+                      Copy return diagnostics
+                    </button>
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shopify')}>
+                      Copy Shopify diagnostics
+                    </button>
+                  </div>
+                  {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics} diagnostics.</span> : null}
+                </div>
+              ) : null}
+            </div>
+          </article>
 
           <article className="order-detail-card-v2 order-primary-action-card">
             <div className="order-card-heading">
@@ -4306,18 +4524,6 @@ export function OrderDetailPage() {
                   Shipping actions are currently unavailable.
                   {order.cancellationReason ? ` Reason: ${order.cancellationReason.replace(/_/g, ' ')}.` : ''}
                 </p>
-                {isVendorAssignedOwner ? (
-                  <div className="detail-actions">
-                    <button
-                      type="button"
-                      className="button button-secondary"
-                      onClick={() => setSupportOpen(true)}
-                      disabled={!canReportIssue}
-                    >
-                      Contact support
-                    </button>
-                  </div>
-                ) : null}
               </div>
             )}
           </article>
@@ -4328,9 +4534,10 @@ export function OrderDetailPage() {
       {order ? (
         <SupportTicketModal
           open={supportOpen}
-          contextType="order"
-          contextId={order.id}
+          contextType={supportContextType}
+          contextId={supportContextId}
           contextSnapshot={supportSnapshot}
+          defaultCategory={supportDefaultCategory}
           defaultSubject={`Help with order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}`}
           onClose={() => setSupportOpen(false)}
           onCreated={() => showFeedback('Support ticket created.', 'success')}

@@ -26,6 +26,7 @@ const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
+const createSupportTicketMock = vi.fn();
 
 vi.mock('../config/runtime', () => ({
   runtimeConfig: {
@@ -84,6 +85,7 @@ vi.mock('../features/support/api', async () => {
   const actual = await vi.importActual<typeof import('../features/support/api')>('../features/support/api');
   return {
     ...actual,
+    createSupportTicket: (input: unknown) => createSupportTicketMock(input),
     listAdminSupportTickets: () => listAdminSupportTicketsMock(),
     listVendorSupportTickets: () => listVendorSupportTicketsMock(),
   };
@@ -578,6 +580,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     listAdminSupportTicketsMock.mockResolvedValue([]);
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);
+    createSupportTicketMock.mockReset();
+    createSupportTicketMock.mockResolvedValue({
+      id: 'support-ticket-1',
+      subject: 'Help with order #1028',
+      status: 'OPEN',
+    });
   });
 
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {
@@ -612,6 +620,175 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Receiver address and phone requirements are unknown.')).not.toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
+  });
+
+  it('lets vendors open shipment support tickets with safe operational context', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: 'OTO-TRACK-1028',
+      trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+      shopifyFulfillmentSync: {
+        status: 'synced',
+        fulfillmentOrderIdPresent: true,
+        fulfillmentIdPresent: true,
+        syncStatus: 'fulfilled',
+        skippedReason: null,
+        errorMessage: null,
+        lastAttemptedAt: '2026-05-15T19:47:00.000Z',
+      },
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        providerCarrierName: 'Sürat Kargo',
+        providerShipmentId: 'SPJ-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
+        shipmentStatus: 'delivered',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'SPJ-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: 'https://tracking.tryoto.example/RET-TRACK-1028',
+          labelUrl: null,
+          barcode: 'RET-TRACK-1028',
+          carrierName: 'Sürat Kargo',
+          status: 'reverseReturned',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['orderId', 'deliveryOptionId', 'items'],
+          responseKeys: ['returnOrderId', 'trackingNumber'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: null,
+          finalized: true,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Contact support' }));
+    await user.selectOptions(screen.getByLabelText('Category'), 'TRACKING');
+    await user.type(screen.getByLabelText('Message'), 'Customer is asking for a delivery update.');
+    await user.click(screen.getByRole('button', { name: 'Create ticket' }));
+
+    await waitFor(() =>
+      expect(createSupportTicketMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          category: 'TRACKING',
+          contextType: 'shipment',
+          contextId: 'shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
+          contextSnapshot: expect.objectContaining({
+            orderNumber: '#1028',
+            shipmentProvider: 'Try OTO',
+            carrier: 'Sürat Kargo',
+            trackingNumber: 'OTO-TRACK-1028',
+            returnOrderId: 'SPJ-1028-R1',
+            vendorId: 'sporjinal',
+            supportCorrelationId: 'support:alloc-sporjinal-7621783322961:shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
+            flags: expect.objectContaining({
+              trackingPresent: true,
+              returnTrackingPresent: true,
+              shopifyFulfillmentIdPresent: true,
+            }),
+          }),
+        }),
+      ),
+    );
+    expect(createSupportTicketMock.mock.calls[0][0].contextSnapshot).not.toHaveProperty('adminDiagnostics');
+  });
+
+  it('shows admin support diagnostics copy tooling without exposing it to vendors', async () => {
+    const writeText = vi.fn();
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText },
+    });
+    const supportTicket = {
+      id: 'ticket-shipment-1',
+      createdAt: '2026-05-15T20:00:00.000Z',
+      updatedAt: '2026-05-15T20:05:00.000Z',
+      createdByUserId: 'vendor-user',
+      createdByRole: 'VENDOR',
+      vendorId: 'sporjinal',
+      vendorName: 'Sporjinal',
+      subject: 'Tracking help',
+      message: 'Tracking has not updated.',
+      priority: 'normal',
+      status: 'OPEN',
+      category: 'TRACKING',
+      assigneeUserId: null,
+      assigneeName: null,
+      vendorUnreadCount: 0,
+      adminUnreadCount: 1,
+      lastReplyAt: null,
+      lastReplyByRole: null,
+      firstResponseDueAt: null,
+      nextResponseDueAt: null,
+      escalatedAt: null,
+      escalationReason: null,
+      sla: null,
+      contextType: 'shipment',
+      contextId: orderWithShipmentSummary.shipmentExecution!.id,
+      contextSummary: { orderNumber: '#1028' },
+      resolvedAt: null,
+      closedAt: null,
+    };
+
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    listAdminSupportTicketsMock.mockResolvedValueOnce([supportTicket]);
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Admin support diagnostics')).toBeInTheDocument();
+    expect(screen.getByText('Tracking has not updated.')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Copy shipment diagnostics' }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Shipment diagnostics'));
+    expect(writeText).toHaveBeenCalledWith(expect.not.stringMatching(/token|secret|authorization|payload/i));
+    expect(await screen.findByText('Copied shipment diagnostics.')).toBeInTheDocument();
+
+    cleanup();
+    window.localStorage.clear();
+    setToken('test-token');
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+    listVendorSupportTicketsMock.mockResolvedValueOnce([supportTicket]);
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Contact support')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Admin support diagnostics')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy shipment diagnostics' })).not.toBeInTheDocument();
   });
 
   it('lets admins update vendor shipping provider configuration and refresh diagnostics', async () => {

@@ -1,5 +1,10 @@
 import { useEffect, useState } from 'react';
-import { createSupportTicket, type SupportTicketContextType, type SupportTicketPriority } from '../features/support/api';
+import {
+  createSupportTicket,
+  type SupportTicketCategory,
+  type SupportTicketContextType,
+  type SupportTicketPriority,
+} from '../features/support/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { getCurrentVendorContext } from '../lib/auth';
 import { queryClient } from '../lib/api/queryClient';
@@ -11,9 +16,19 @@ type SupportTicketModalProps = {
   contextId?: string | null;
   contextSnapshot?: Record<string, unknown> | null;
   defaultSubject?: string;
+  defaultCategory?: SupportTicketCategory;
   onClose: () => void;
   onCreated?: () => void;
 };
+
+const SUPPORT_CATEGORIES: Array<{ value: SupportTicketCategory; label: string }> = [
+  { value: 'SHIPMENT', label: 'Shipment issue' },
+  { value: 'RETURN', label: 'Return issue' },
+  { value: 'TRACKING', label: 'Tracking issue' },
+  { value: 'SHIPMENT', label: 'Label issue' },
+  { value: 'SHIPMENT', label: 'Delivery issue' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 function getErrorMessage(error: unknown) {
   if (error instanceof Error) {
@@ -29,10 +44,12 @@ export function SupportTicketModal({
   contextId,
   contextSnapshot,
   defaultSubject = '',
+  defaultCategory,
   onClose,
   onCreated,
 }: SupportTicketModalProps) {
   const [subject, setSubject] = useState(defaultSubject);
+  const [category, setCategory] = useState<SupportTicketCategory>(defaultCategory ?? 'SHIPMENT');
   const [message, setMessage] = useState('');
   const [priority, setPriority] = useState<SupportTicketPriority>('normal');
   const [successMessage, setSuccessMessage] = useState('');
@@ -40,11 +57,12 @@ export function SupportTicketModal({
   useEffect(() => {
     if (open) {
       setSubject(defaultSubject);
+      setCategory(defaultCategory ?? (contextType === 'return' ? 'RETURN' : contextType === 'shipment' ? 'SHIPMENT' : 'OTHER'));
       setMessage('');
       setPriority('normal');
       setSuccessMessage('');
     }
-  }, [defaultSubject, open]);
+  }, [contextType, defaultCategory, defaultSubject, open]);
 
   const mutation = useMutationAction(createSupportTicket, {
     onSuccess: () => {
@@ -60,7 +78,7 @@ export function SupportTicketModal({
     return null;
   }
 
-  const canSubmit = subject.trim().length > 0 && message.trim().length > 0 && !mutation.isPending;
+  const canSubmit = subject.trim().length > 0 && !mutation.isPending;
 
   return (
     <div className="support-modal-backdrop" role="presentation">
@@ -86,8 +104,9 @@ export function SupportTicketModal({
 
             void mutation.mutateAsync({
               subject,
-              message,
+              message: message.trim() || 'No additional note provided.',
               priority,
+              category,
               contextType,
               contextId: contextId ?? null,
               contextSnapshot: contextSnapshot ?? null,
@@ -97,6 +116,17 @@ export function SupportTicketModal({
           <label>
             <span>Subject</span>
             <input value={subject} onChange={(event) => setSubject(event.target.value)} maxLength={160} />
+          </label>
+
+          <label>
+            <span>Category</span>
+            <select value={category} onChange={(event) => setCategory(event.target.value as SupportTicketCategory)}>
+              {SUPPORT_CATEGORIES.map((option, index) => (
+                <option key={`${option.value}-${index}`} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
           </label>
 
           <label>
