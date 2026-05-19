@@ -71,16 +71,6 @@ export async function createReturnShipmentLabel(
   );
 }
 
-export async function finalizeReturnShipment(
-  shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
-) {
-  return runtimeServices.orders.finalizeReturnShipment(
-    shipmentExecutionId,
-    options.vendorId ?? undefined,
-  );
-}
-
 export async function probeShopifyReturnLabelUpload(shipmentExecutionId: string) {
   return runtimeServices.orders.probeShopifyReturnLabelUpload(shipmentExecutionId);
 }

@@ -7,7 +7,6 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import {
   createReturnShipmentLabel,
   createShipmentExecution,
-  finalizeReturnShipment,
   getOrder,
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
@@ -127,7 +126,7 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
 
 function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
   if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
-    return 'Return request created / awaiting provider shipment';
+    return 'Return request created; waiting for Try OTO return shipment details.';
   }
 
   const normalizedStatus = returnShipment.status?.trim().toLowerCase() ?? '';
@@ -147,39 +146,8 @@ function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecuti
     returnShipment.labelRetrievalNote ??
     (returnShipment.finalized
       ? 'Return shipment created. Label PDF is not available yet.'
-      : 'Return request created. Provider shipment and label finalization are pending or unconfirmed.')
+      : 'Return request created; waiting for Try OTO return shipment details.')
   );
-}
-
-function hasTryOtoReturnProviderReference(shipment: ShipmentExecution | null | undefined) {
-  return Boolean(
-    shipment?.provider === 'try_oto' &&
-      (shipment.returnShipment?.returnOrderId || shipment.returnShipment?.diagnostics?.returnProviderIdPresent),
-  );
-}
-
-function isTryOtoReturnFinalizationPending(shipment: ShipmentExecution | null | undefined) {
-  return Boolean(
-    hasTryOtoReturnProviderReference(shipment) &&
-      shipment?.returnShipment?.finalized !== true &&
-      shipment?.returnShipment?.labelRetrievable !== true,
-  );
-}
-
-function getTryOtoReturnFinalizationDisabledReason(shipment: ShipmentExecution | null | undefined) {
-  if (shipment?.provider !== 'try_oto') {
-    return 'unsupported provider';
-  }
-  if (!shipment.returnShipment) {
-    return 'missing return request';
-  }
-  if (!hasTryOtoReturnProviderReference(shipment)) {
-    return 'missing return provider id';
-  }
-  if (shipment.returnShipment.finalized || shipment.returnShipment.labelRetrievable) {
-    return 'already finalized';
-  }
-  return null;
 }
 
 function isInternalShipmentReference(value?: string | null) {
@@ -704,15 +672,6 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
-  const { mutateAsync: finalizeReturnShipmentMutation, isPending: isFinalizingReturnShipment } = useMutationAction(
-    async (shipmentExecutionId: string) =>
-      finalizeReturnShipment(shipmentExecutionId, {
-        vendorId: currentVendor.vendorId,
-      }),
-    {
-      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
-    },
-  );
   const { mutateAsync: probeShopifyReturnLabelUploadMutation, isPending: isProbingShopifyReturnLabelUpload } = useMutationAction(
     async (shipmentExecutionId: string) => probeShopifyReturnLabelUpload(shipmentExecutionId),
     {
@@ -864,12 +823,6 @@ export function OrderDetailPage() {
     Boolean(shipmentShopifyTrackingNumber) &&
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;
-  const hasUnfinalizedTryOtoReturnRequest =
-    isTryOtoReturnFinalizationPending(visibleShipmentExecution);
-  const canFinalizeTryOtoReturnShipment =
-    (isAdmin || canUseFulfillmentActions) &&
-    Boolean(hasUnfinalizedTryOtoReturnRequest);
-  const tryOtoReturnFinalizationDisabledReason = getTryOtoReturnFinalizationDisabledReason(visibleShipmentExecution);
   const canCreateTryOtoReturnLabel =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'try_oto' &&
@@ -1064,7 +1017,7 @@ export function OrderDetailPage() {
             ? 'Try OTO return label created.'
             : returnFinalized
               ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
-              : 'Try OTO return request created. Provider shipment and label finalization are still pending or unconfirmed.',
+              : 'Try OTO return request created; waiting for Try OTO return shipment details.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
@@ -1073,7 +1026,7 @@ export function OrderDetailPage() {
             ? 'Try OTO return label created.'
             : returnFinalized
               ? 'Try OTO return shipment created. Return label retrieval is still pending or unconfirmed.'
-              : 'Try OTO return request created. Provider shipment and label finalization are still pending or unconfirmed.',
+              : 'Try OTO return request created; waiting for Try OTO return shipment details.',
           hasReturnLabel ? 'success' : 'info',
         );
         void refetch();
@@ -1086,48 +1039,6 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/create-return`,
-        });
-        showFeedback(errorMessage, 'error');
-      });
-  }
-
-  function handleFinalizeReturnShipment() {
-    if (!visibleShipmentExecution) {
-      return;
-    }
-
-    setShipmentActionState({
-      tone: 'info',
-      message: 'Finalizing Try OTO return shipment...',
-      endpoint: `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
-    });
-
-    void finalizeReturnShipmentMutation(visibleShipmentExecution.id)
-      .then((shipment) => {
-        const returnFinalized = Boolean(shipment.returnShipment?.finalized);
-        const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
-        const message = returnFinalized
-          ? hasReturnLabel
-            ? 'Try OTO return shipment finalized.'
-            : 'Try OTO return shipment finalized. Return label retrieval is still pending or unconfirmed.'
-          : 'Try OTO return finalization completed with diagnostics.';
-        setShipmentActionState({
-          tone: returnFinalized ? 'success' : 'info',
-          message,
-          shipment,
-          endpoint: `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
-        });
-        showFeedback(message, returnFinalized ? 'success' : 'info');
-        void refetch();
-      })
-      .catch((mutationError) => {
-        const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return shipment could not be finalized.';
-        setShipmentActionState({
-          tone: 'error',
-          message: errorMessage,
-          diagnostics,
-          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/finalize-return`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2388,24 +2299,6 @@ export function OrderDetailPage() {
                                 ) : (
                                   <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                                 )}
-                                {visibleShipmentExecution.returnShipment ? (
-                                  <div className="shipment-recovery-actions" aria-label="Try OTO return finalization action">
-                                    <strong>Return shipment finalization</strong>
-                                    <span className="muted">
-                                      {tryOtoReturnFinalizationDisabledReason
-                                        ? `Unavailable: ${tryOtoReturnFinalizationDisabledReason}.`
-                                        : 'Ready to finalize the Try OTO reverse shipment.'}
-                                    </span>
-                                    <button
-                                      type="button"
-                                      className="secondary-action-button"
-                                      onClick={handleFinalizeReturnShipment}
-                                      disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
-                                    >
-                                      {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
-                                    </button>
-                                  </div>
-                                ) : null}
                                 {isAdmin ? (
                                   <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                                     <strong>Return label discovery</strong>
@@ -2470,9 +2363,9 @@ export function OrderDetailPage() {
                                   </div>
                                 ) : null}
                                 {isAdmin && visibleShipmentExecution.returnShipment.diagnostics ? (
-                                  <div className="provider-response-summary" aria-label="Try OTO return finalization diagnostics">
+                                  <div className="provider-response-summary" aria-label="Try OTO return diagnostics">
                                     <div className="provider-response-heading">
-                                      <strong>Try OTO return finalization</strong>
+                                      <strong>Try OTO return diagnostics</strong>
                                       <span>Admin only</span>
                                     </div>
                                     <div className="summary-row">
@@ -2545,9 +2438,7 @@ export function OrderDetailPage() {
                                       <strong>
                                         {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
                                           ? 'implemented'
-                                          : visibleShipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
-                                            ? 'not implemented'
-                                            : 'unknown'}
+                                          : 'disabled / unconfirmed'}
                                       </strong>
                                     </div>
                                     <div className="summary-row">
@@ -3268,24 +3159,6 @@ export function OrderDetailPage() {
                         ) : (
                           <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
                         )}
-                        {shipmentExecution.returnShipment ? (
-                          <div className="shipment-recovery-actions" aria-label="Try OTO return finalization action">
-                            <strong>Return shipment finalization</strong>
-                            <span className="muted">
-                              {tryOtoReturnFinalizationDisabledReason
-                                ? `Unavailable: ${tryOtoReturnFinalizationDisabledReason}.`
-                                : 'Ready to finalize the Try OTO reverse shipment.'}
-                            </span>
-                            <button
-                              type="button"
-                              className="secondary-action-button"
-                              onClick={handleFinalizeReturnShipment}
-                              disabled={!canFinalizeTryOtoReturnShipment || isFinalizingReturnShipment}
-                            >
-                              {isFinalizingReturnShipment ? 'Finalizing return shipment...' : 'Finalize Try OTO return shipment'}
-                            </button>
-                          </div>
-                        ) : null}
                         {isAdmin ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                             <strong>Return label discovery</strong>
@@ -3352,9 +3225,9 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment?.diagnostics ? (
-                      <div className="provider-response-summary" aria-label="Try OTO return finalization diagnostics">
+                      <div className="provider-response-summary" aria-label="Try OTO return diagnostics">
                         <div className="provider-response-heading">
-                          <strong>Try OTO return finalization</strong>
+                          <strong>Try OTO return diagnostics</strong>
                           <span>Admin only</span>
                         </div>
                         <div className="summary-row">
@@ -3412,9 +3285,7 @@ export function OrderDetailPage() {
                           <strong>
                             {shipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
                               ? 'implemented'
-                              : shipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
-                                ? 'not implemented'
-                                : 'unknown'}
+                              : 'disabled / unconfirmed'}
                           </strong>
                         </div>
                         <div className="summary-row">

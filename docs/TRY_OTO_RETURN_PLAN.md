@@ -53,7 +53,8 @@ Confirmed from manual panel PoC:
 
 Interpretation:
 - The initial modal print failure appears to be a UI/print timing issue in the Try OTO panel, not a confirmed API blocker.
-- Runtime return request creation and reverse shipment finalization may use the sandbox-confirmed `createReturnShipment` -> `getPriceList` -> reverse `createShipment` sequence. Return label retrieval still remains partially unknown when the reverse shipment response does not include a clear label/PDF URL.
+- A panel Network trace showed a `getPriceList` -> reverse `createShipment` sequence with `reverseShipment=true` and `manualShipment=true`, but Try OTO support/validation later indicated this return path is unnecessary or incorrect for the API integration.
+- Runtime must not call reverse `createShipment` for Try OTO return finalization until Try OTO confirms that contract explicitly. Return label retrieval remains partially unknown and should continue through `createReturnShipment`, `getReturnDetails`, `getReturnLink`, and reverse-shipment webhook discovery.
 
 ## Endpoint Candidates
 
@@ -62,7 +63,8 @@ Interpretation:
 Most recent runtime/API comparison:
 - The raw Postman collection contains `POST /rest/v2/createReturnShipment`.
 - The raw Postman collection does **not** expose a return-specific delivery-option lookup endpoint.
-- The raw Postman collection does **not** expose a separate return shipment finalize/purchase endpoint, but a Try OTO panel Network trace confirmed the panel uses generic `getPriceList` and `createShipment` endpoints for return cargo finalization.
+- The raw Postman collection does **not** expose a separate return shipment finalize/purchase endpoint.
+- A Try OTO panel Network trace showed generic `getPriceList` and `createShipment` endpoints for return cargo finalization, but that path is now considered unconfirmed and disabled for runtime use.
 - The raw Postman collection does include generic forward delivery option endpoints:
   - `POST /rest/v2/checkOTODeliveryFee`
   - `POST /rest/v2/checkDeliveryFee`
@@ -70,20 +72,19 @@ Most recent runtime/API comparison:
 - The `createReturnShipment` example includes optional `deliveryOptionId`, which may correspond to the manual panel carrier-selection step, but this is **not confirmed**.
 - The manual Try OTO panel flow shows return details, cargo options, and create cargo before Kargo Ref No/Barkod No generation.
 - Runtime should pass a documented `deliveryOptionId` to `createReturnShipment` only when it is already configured/stored from a confirmed source.
-- Runtime may call the panel-confirmed reverse finalization sequence after `createReturnShipment`: `getPriceList` with `isReverseShipment: true`, select a returned price option, then `createShipment` with `reverseShipment: true`.
+- Runtime must not call the panel-traced reverse finalization sequence after `createReturnShipment` because `createShipment` with `reverseShipment: true` / `manualShipment: true` is unconfirmed for this integration path.
 
-Confirmed from Try OTO panel Network trace:
+Observed but disabled from Try OTO panel Network trace:
 - Return price lookup endpoint: `POST /rest/v2/getPriceList`.
 - Lookup payload includes `otoId`, `isReverseShipment: true`, `calculationData.boxes[]`, and `includeEstimationDates: true`.
 - Reverse finalization endpoint: `POST /rest/v2/createShipment`.
 - Reverse finalization payload includes `reverseShipment: true` and `items[]` with `ID`, `orderID`, `manualShipment`, `dcSettingsID`, `packageWeight`, `boxes[]`, `price`, `pickingType`, `deliveryType`, `priceOptionId`, and `pickupDropoff`.
-- Runtime may use the stored return `otoId` / return provider id from `createReturnShipment` as `otoId`, `item.ID`, `item.orderID`, and `boxes[0].otoID`.
-- Default package dimensions observed in the panel trace were `10 x 10 x 10`; weight should come from the shipment/default desi fallback.
+- This path was tested from panel traces but later determined unnecessary/incorrect by Try OTO support/validation, so runtime finalization through reverse `createShipment` is disabled.
 
 Current runtime safety stance:
-- `createReturnShipment` without successful reverse `createShipment` finalization is treated as return request/reference creation.
-- UI wording should say “Return request created / awaiting provider shipment” when finalization is unconfirmed.
-- Admin diagnostics should show whether `deliveryOptionId` was sent, whether return option lookup was called, and whether a return finalization endpoint is implemented/confirmed.
+- `createReturnShipment` is the current confirmed runtime action for creating a Try OTO return request/reference.
+- UI wording should say “Return request created; waiting for Try OTO return shipment details.” while label/shipment details are still pending.
+- Admin diagnostics should show whether `deliveryOptionId` was sent and mark reverse `createShipment` finalization as disabled/unconfirmed.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnDetails` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes return label/AWB/PDF URL fields after request creation.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnLink` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes a return finalization link, label/AWB/PDF URL, or next-action URL.
 - `getReturnLink` exact response semantics for label/PDF retrieval are still **Unknown**. Runtime may store a clear label/print URL if a label/AWB/PDF-like field is returned, but generic action/customer/return links must remain diagnostic-only until Try OTO confirms they are API-safe label URLs.

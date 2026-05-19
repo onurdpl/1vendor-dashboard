@@ -17,7 +17,6 @@ const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
-const finalizeReturnShipmentMock = vi.fn();
 const probeShopifyReturnLabelUploadMock = vi.fn();
 const probeTryOtoReturnDetailsMock = vi.fn();
 const probeTryOtoReturnLinkMock = vi.fn();
@@ -53,8 +52,6 @@ vi.mock('../features/orders/api', async () => {
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
     createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
-    finalizeReturnShipment: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
-      finalizeReturnShipmentMock(shipmentExecutionId, options),
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
     probeTryOtoReturnDetails: (shipmentExecutionId: string) => probeTryOtoReturnDetailsMock(shipmentExecutionId),
     probeTryOtoReturnLink: (shipmentExecutionId: string) => probeTryOtoReturnLinkMock(shipmentExecutionId),
@@ -360,35 +357,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         labelPresent: true,
         labelRetrievalConfirmed: true,
         labelRetrievalNote: null,
-      },
-      updatedAt: '2026-05-15T19:46:00.000Z',
-    });
-    finalizeReturnShipmentMock.mockReset();
-    finalizeReturnShipmentMock.mockResolvedValue({
-      ...orderWithShipmentSummary.shipmentExecution,
-      provider: 'try_oto',
-      shipmentStatus: 'delivered',
-      providerShipmentId: 'OTO-SHIP-1028',
-      trackingNumber: 'OTO-TRACK-1028',
-      returnShipment: {
-        provider: 'try_oto',
-        returnOrderId: 'OTO-ORDER-1028-R1',
-        trackingNumber: 'RET-TRACK-1028',
-        trackingUrl: null,
-        labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
-        barcode: 'RET-BARCODE-1028',
-        status: 'created',
-        createdAt: '2026-05-15T19:46:00.000Z',
-        requestKeys: ['items', 'orderId'],
-        responseKeys: ['printAWBURL', 'returnOrderId'],
-        trackingPresent: true,
-        labelPresent: true,
-        labelRetrievalConfirmed: true,
-        labelRetrievalNote: null,
-        finalized: true,
-        labelRetrievable: true,
-        providerStatusSource: 'reverseCreateShipment',
-        diagnostics: null,
       },
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
@@ -1906,8 +1874,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
     );
-    expect(screen.getByRole('button', { name: 'Finalize Try OTO return shipment' })).toBeDisabled();
-    expect(screen.getByText('Unavailable: already finalized.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shopify return label upload probe')).not.toBeInTheDocument();
   });
 
@@ -2201,7 +2168,6 @@ describe('OrderDetailPage shipment provider response visibility', () => {
   });
 
   it('does not describe unfinalized Try OTO return requests as created return shipments', async () => {
-    const user = userEvent.setup();
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2235,7 +2201,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: true,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2247,21 +2213,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText(/Return request created \/ awaiting provider shipment/)).toBeInTheDocument();
-    expect(screen.getByText('Return request created. Provider shipment and label finalization are pending or unconfirmed.')).toBeInTheDocument();
+    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
-    expect(screen.getByText('Ready to finalize the Try OTO reverse shipment.')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: 'Finalize Try OTO return shipment' }));
-    expect(finalizeReturnShipmentMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-    });
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
-    expect((await screen.findAllByText('Try OTO return shipment finalized.')).length).toBeGreaterThan(0);
   });
 
-  it('renders return finalization button from diagnostics provider id when returnOrderId is missing', async () => {
-    const user = userEvent.setup();
+  it('hides return finalization even when diagnostics provider id is present', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2295,7 +2254,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: false,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2312,7 +2271,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             providerMessage: null,
             returnDeliveryOptionIdPresent: false,
             returnDeliveryOptionLookupCalled: false,
-            returnDeliveryOptionLookupImplemented: true,
+            returnDeliveryOptionLookupImplemented: false,
             returnPriceLookupCalled: false,
             returnPriceLookupSuccess: false,
             returnPriceLookupOptionCount: 0,
@@ -2324,8 +2283,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             reverseCreateShipmentBarcodePresent: false,
             reverseCreateShipmentLabelPresent: false,
             returnFinalized: false,
-            returnFinalizationEndpointConfirmed: true,
-            returnFinalizeEndpointImplemented: true,
+            returnFinalizationEndpointConfirmed: false,
+            returnFinalizeEndpointImplemented: false,
             returnLabelRetrievable: false,
             providerStatusSource: 'createReturnShipment',
           },
@@ -2336,15 +2295,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Ready to finalize the Try OTO reverse shipment.')).toBeInTheDocument();
-    await user.click(await screen.findByRole('button', { name: 'Finalize Try OTO return shipment' }));
-    expect(finalizeReturnShipmentMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
-      vendorId: 'sporjinal',
-    });
+    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
   });
 
-  it('shows disabled return finalization reason when provider id is missing', async () => {
+  it('shows return request waiting state when provider id is missing', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -2378,7 +2334,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           trackingPresent: false,
           labelPresent: false,
           labelRetrievalConfirmed: false,
-          labelRetrievalNote: 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
+          labelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
           finalized: false,
           labelRetrievable: false,
           providerStatusSource: 'createReturnShipment',
@@ -2395,7 +2351,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             providerMessage: null,
             returnDeliveryOptionIdPresent: false,
             returnDeliveryOptionLookupCalled: false,
-            returnDeliveryOptionLookupImplemented: true,
+            returnDeliveryOptionLookupImplemented: false,
             returnPriceLookupCalled: false,
             returnPriceLookupSuccess: false,
             returnPriceLookupOptionCount: 0,
@@ -2407,8 +2363,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             reverseCreateShipmentBarcodePresent: false,
             reverseCreateShipmentLabelPresent: false,
             returnFinalized: false,
-            returnFinalizationEndpointConfirmed: true,
-            returnFinalizeEndpointImplemented: true,
+            returnFinalizationEndpointConfirmed: false,
+            returnFinalizeEndpointImplemented: false,
             returnLabelRetrievable: false,
             providerStatusSource: 'createReturnShipment',
           },
@@ -2419,9 +2375,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Unavailable: missing return provider id.')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Finalize Try OTO return shipment' })).toBeDisabled();
-    expect(finalizeReturnShipmentMock).not.toHaveBeenCalled();
+    expect((await screen.findAllByText('Return request created; waiting for Try OTO return shipment details.')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
   });
 
   it('shows confirmed Shopify fulfillment when a fulfillment id exists', async () => {

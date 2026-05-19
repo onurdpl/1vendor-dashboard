@@ -6,7 +6,6 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import {
   createShipmentExecution,
   createTryOtoReturnShipmentLabel,
-  finalizeTryOtoReturnShipment,
   getShipmentExecutionById,
   getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
@@ -223,29 +222,6 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Try OTO return label could not be created.';
-        return reply.code(400).send({ message });
-      }
-    },
-  );
-
-  app.post<{ Params: { id: string } }>(
-    '/shipments/:id/finalize-return',
-    {
-      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
-    },
-    async (request, reply) => {
-      const vendorId = request.vendorContext?.vendorId;
-      if (!vendorId) {
-        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
-      }
-
-      try {
-        return await finalizeTryOtoReturnShipment(request.params.id, {
-          env,
-          vendorId,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Try OTO return shipment could not be finalized.';
         return reply.code(400).send({ message });
       }
     },
