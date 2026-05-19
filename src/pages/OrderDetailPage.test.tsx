@@ -1938,11 +1938,89 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const probeSection = await screen.findByLabelText('Try OTO return details probe');
+    const probeSection = await screen.findByLabelText('Try OTO return details action');
     await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' }));
 
     expect(probeTryOtoReturnDetailsMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Try OTO return label found in return details.')).length).toBeGreaterThan(0);
+  });
+
+  it('hides Try OTO return details probe action from vendors', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return label is not available from getReturnDetails yet.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+          detailsProbe: null,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Try OTO return shipment')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO return details action')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Probe Try OTO return details' })).not.toBeInTheDocument();
+  });
+
+  it('hides Try OTO return details probe action when no return exists', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        returnShipment: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: /Order #1028/ })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO return details action')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Probe Try OTO return details' })).not.toBeInTheDocument();
   });
 
   it('creates Try OTO return labels from delivered shipments', async () => {

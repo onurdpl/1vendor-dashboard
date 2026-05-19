@@ -2247,6 +2247,45 @@ export function OrderDetailPage() {
                                 ) : (
                                   <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                                 )}
+                                {isAdmin ? (
+                                  <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
+                                    <strong>Return label discovery</strong>
+                                    <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
+                                    <div className="order-inline-actions">
+                                      <button
+                                        type="button"
+                                        className="button button-secondary"
+                                        onClick={handleProbeTryOtoReturnDetails}
+                                        disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
+                                      >
+                                        {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
+                                      </button>
+                                    </div>
+                                    {!canProbeTryOtoReturnDetails ? (
+                                      <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                                    ) : null}
+                                    {visibleShipmentExecution.returnShipment.detailsProbe ? (
+                                      <span>
+                                        Last probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
+                                        {' · '}
+                                        status {visibleShipmentExecution.returnShipment.detailsProbe.providerStatus ?? '—'}
+                                        {' · '}
+                                        label/pdf/url{' '}
+                                        {visibleShipmentExecution.returnShipment.detailsProbe.labelUrlPresent ||
+                                        visibleShipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ||
+                                        visibleShipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent
+                                          ? 'present'
+                                          : 'missing'}
+                                        {' · '}
+                                        tracking/barcode{' '}
+                                        {visibleShipmentExecution.returnShipment.detailsProbe.trackingPresent ||
+                                        visibleShipmentExecution.returnShipment.detailsProbe.barcodePresent
+                                          ? 'present'
+                                          : 'missing'}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                ) : null}
                                 {isAdmin && visibleShipmentExecution.returnShipment.diagnostics ? (
                                   <div className="provider-response-summary" aria-label="Try OTO return finalization diagnostics">
                                     <div className="provider-response-heading">
@@ -2332,17 +2371,6 @@ export function OrderDetailPage() {
                                       <strong>Try OTO return details probe</strong>
                                       <span>Admin only</span>
                                     </div>
-                                    <button
-                                      type="button"
-                                      className="secondary-action-button"
-                                      onClick={handleProbeTryOtoReturnDetails}
-                                      disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
-                                    >
-                                      {isProbingTryOtoReturnDetails ? 'Probing Try OTO...' : 'Probe Try OTO return details'}
-                                    </button>
-                                    {!canProbeTryOtoReturnDetails ? (
-                                      <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
-                                    ) : null}
                                     {visibleShipmentExecution.returnShipment.detailsProbe ? (
                                       <>
                                         <div className="summary-row">
@@ -3023,6 +3051,45 @@ export function OrderDetailPage() {
                         ) : (
                           <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
                         )}
+                        {isAdmin ? (
+                          <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
+                            <strong>Return label discovery</strong>
+                            <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={handleProbeTryOtoReturnDetails}
+                                disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
+                              >
+                                {isProbingTryOtoReturnDetails ? 'Probing...' : 'Probe Try OTO return details'}
+                              </button>
+                            </div>
+                            {!canProbeTryOtoReturnDetails ? (
+                              <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                            ) : null}
+                            {shipmentExecution.returnShipment.detailsProbe ? (
+                              <span>
+                                Last probe: {formatOptionalDate(shipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
+                                {' · '}
+                                status {shipmentExecution.returnShipment.detailsProbe.providerStatus ?? '—'}
+                                {' · '}
+                                label/pdf/url{' '}
+                                {shipmentExecution.returnShipment.detailsProbe.labelUrlPresent ||
+                                shipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ||
+                                shipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent
+                                  ? 'present'
+                                  : 'missing'}
+                                {' · '}
+                                tracking/barcode{' '}
+                                {shipmentExecution.returnShipment.detailsProbe.trackingPresent ||
+                                shipmentExecution.returnShipment.detailsProbe.barcodePresent
+                                  ? 'present'
+                                  : 'missing'}
+                              </span>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment?.diagnostics ? (
@@ -3099,17 +3166,6 @@ export function OrderDetailPage() {
                           <strong>Try OTO return details probe</strong>
                           <span>Admin only</span>
                         </div>
-                        <button
-                          type="button"
-                          className="secondary-action-button"
-                          onClick={handleProbeTryOtoReturnDetails}
-                          disabled={!canProbeTryOtoReturnDetails || isProbingTryOtoReturnDetails}
-                        >
-                          {isProbingTryOtoReturnDetails ? 'Probing Try OTO...' : 'Probe Try OTO return details'}
-                        </button>
-                        {!canProbeTryOtoReturnDetails ? (
-                          <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
-                        ) : null}
                         {shipmentExecution.returnShipment.detailsProbe ? (
                           <>
                             <div className="summary-row">
