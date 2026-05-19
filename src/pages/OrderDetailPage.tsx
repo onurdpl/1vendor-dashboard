@@ -2575,8 +2575,20 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookMatchStatus || '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Try OTO webhook matched by</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookMatchedByField || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO webhook content type</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookContentType || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Try OTO webhook status</span>
                               <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusField || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO webhook parse error</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookParseError || '—'}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Try OTO signature verification</span>
@@ -2747,6 +2759,46 @@ export function OrderDetailPage() {
                       <span>Webhook ingest enabled</span>
                       <strong>{shippingProviderDiagnostics.webhookIngestEnabled ? 'yes' : 'no'}</strong>
                     </div>
+                    {shippingProviderDiagnostics.provider === 'try_oto' ? (
+                      <>
+                        <div className="summary-row">
+                          <span>Last webhook received</span>
+                          <strong>
+                            {shippingProviderDiagnostics.lastWebhookReceived
+                              ? formatOptionalDate(shippingProviderDiagnostics.lastWebhookReceivedAt ?? undefined)
+                              : 'no'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook payload keys</span>
+                          <strong>
+                            {shippingProviderDiagnostics.lastWebhookPayloadKeys?.length
+                              ? shippingProviderDiagnostics.lastWebhookPayloadKeys.join(', ')
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook match</span>
+                          <strong>{shippingProviderDiagnostics.lastWebhookMatchStatus || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook matched by</span>
+                          <strong>{shippingProviderDiagnostics.lastWebhookMatchedByField || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook status value</span>
+                          <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook parse error</span>
+                          <strong>{shippingProviderDiagnostics.lastWebhookParseError || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Webhook signature verification</span>
+                          <strong>{shippingProviderDiagnostics.webhookSignatureVerificationImplemented ? 'implemented' : 'not implemented'}</strong>
+                        </div>
+                      </>
+                    ) : null}
                     <div className="summary-row">
                       <span>Base URL configured</span>
                       <strong>{shippingProviderDiagnostics.baseUrlConfigured ? 'yes' : 'no'}</strong>
@@ -2755,10 +2807,46 @@ export function OrderDetailPage() {
                       <span>API key configured</span>
                       <strong>{shippingProviderDiagnostics.apiKeyConfigured ? 'yes' : 'no'}</strong>
                     </div>
-                    {shippingProviderDiagnostics.provider === 'try_oto' ? (
-                      <>
-                        <div className="summary-row">
-                          <span>Try OTO pickup location</span>
+                        {shippingProviderDiagnostics.provider === 'try_oto' ? (
+                          <>
+                            <div className="summary-row">
+                              <span>Last webhook received</span>
+                              <strong>
+                                {shippingProviderDiagnostics.lastWebhookReceived
+                                  ? formatOptionalDate(shippingProviderDiagnostics.lastWebhookReceivedAt ?? undefined)
+                                  : 'no'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook payload keys</span>
+                              <strong>
+                                {shippingProviderDiagnostics.lastWebhookPayloadKeys?.length
+                                  ? shippingProviderDiagnostics.lastWebhookPayloadKeys.join(', ')
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook match</span>
+                              <strong>{shippingProviderDiagnostics.lastWebhookMatchStatus || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook matched by</span>
+                              <strong>{shippingProviderDiagnostics.lastWebhookMatchedByField || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook status value</span>
+                              <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook parse error</span>
+                              <strong>{shippingProviderDiagnostics.lastWebhookParseError || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Webhook signature verification</span>
+                              <strong>{shippingProviderDiagnostics.webhookSignatureVerificationImplemented ? 'implemented' : 'not implemented'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO pickup location</span>
                           <strong>{tryOtoPickupLocationCode || '—'}</strong>
                         </div>
                         <div className="summary-row">

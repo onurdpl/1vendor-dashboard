@@ -44,7 +44,11 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   });
 
   app.post('/webhooks/try-oto', async (request, reply) => {
-    const result = await ingestTryOtoWebhook(request.body, { env });
+    const result = await ingestTryOtoWebhook(request.body, {
+      env,
+      httpMethod: request.method,
+      contentType: typeof request.headers['content-type'] === 'string' ? request.headers['content-type'] : null,
+    });
     if (!result.ok) {
       return reply.code(result.code ?? 501).send({
         message: result.message,

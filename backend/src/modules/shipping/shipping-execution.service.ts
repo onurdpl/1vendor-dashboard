@@ -34,6 +34,47 @@ type StoredShippingConfig = VendorShippingConfig & {
   warehouses?: VendorShippingWarehouse[];
 };
 
+type TryOtoWebhookReceiveDiagnostics = {
+  received: boolean;
+  receivedAt: string | null;
+  httpMethod: string | null;
+  contentType: string | null;
+  payloadKeys: string[];
+  matchedShipment: boolean | null;
+  matchStatus: 'matched' | 'unmatched' | 'disabled' | 'parse_error' | null;
+  matchedByField: string | null;
+  statusValue: string | null;
+  parseError: string | null;
+  signatureVerificationImplemented: false;
+};
+
+const TRY_OTO_WEBHOOK_SIGNATURE_WARNING = 'Try OTO webhook signature verification is unknown/not implemented.';
+
+let lastTryOtoWebhookReceiveDiagnostics: TryOtoWebhookReceiveDiagnostics = {
+  received: false,
+  receivedAt: null,
+  httpMethod: null,
+  contentType: null,
+  payloadKeys: [],
+  matchedShipment: null,
+  matchStatus: null,
+  matchedByField: null,
+  statusValue: null,
+  parseError: null,
+  signatureVerificationImplemented: false,
+};
+
+function updateTryOtoWebhookReceiveDiagnostics(update: Partial<TryOtoWebhookReceiveDiagnostics>) {
+  lastTryOtoWebhookReceiveDiagnostics = {
+    ...lastTryOtoWebhookReceiveDiagnostics,
+    ...update,
+  };
+}
+
+export function getTryOtoWebhookReceiveDiagnostics() {
+  return lastTryOtoWebhookReceiveDiagnostics;
+}
+
 function toNumber(value: unknown) {
   const numeric = Number(value ?? 0);
   return Number.isFinite(numeric) ? numeric : 0;
@@ -1037,6 +1078,7 @@ export function getShippingProviderGateDiagnostics(
   const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : isTryOto ? Boolean(env.TRY_OTO_BASE_URL) : false;
   const apiKeyConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_API_KEY) : isTryOto ? Boolean(env.TRY_OTO_REFRESH_TOKEN) : false;
   const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
+  const tryOtoWebhookDiagnostics = isTryOto ? getTryOtoWebhookReceiveDiagnostics() : null;
   const packageTypeUsed = DEFAULT_KARGO_PACKAGE_TYPE;
   const missing = [
     !env.SHIPPING_EXECUTION_ENABLED ? 'SHIPPING_EXECUTION_ENABLED' : null,
@@ -1067,6 +1109,17 @@ export function getShippingProviderGateDiagnostics(
       : isTryOto
         ? env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
         : false,
+    lastWebhookReceived: tryOtoWebhookDiagnostics?.received ?? false,
+    lastWebhookReceivedAt: tryOtoWebhookDiagnostics?.receivedAt ?? null,
+    lastWebhookHttpMethod: tryOtoWebhookDiagnostics?.httpMethod ?? null,
+    lastWebhookContentType: tryOtoWebhookDiagnostics?.contentType ?? null,
+    lastWebhookPayloadKeys: tryOtoWebhookDiagnostics?.payloadKeys ?? [],
+    lastWebhookMatchedShipment: tryOtoWebhookDiagnostics?.matchedShipment ?? null,
+    lastWebhookMatchStatus: tryOtoWebhookDiagnostics?.matchStatus ?? null,
+    lastWebhookMatchedByField: tryOtoWebhookDiagnostics?.matchedByField ?? null,
+    lastWebhookStatusValue: tryOtoWebhookDiagnostics?.statusValue ?? null,
+    lastWebhookParseError: tryOtoWebhookDiagnostics?.parseError ?? null,
+    webhookSignatureVerificationImplemented: tryOtoWebhookDiagnostics?.signatureVerificationImplemented ?? false,
     baseUrlConfigured,
     apiKeyConfigured,
     cargoIntegrationIdConfigured,
@@ -1093,7 +1146,7 @@ export function getShippingProviderGateDiagnostics(
       : isTryOto
         ? [
             'Try OTO is sandbox-only in this phase.',
-            'Try OTO webhook signature verification is unknown/not implemented.',
+            TRY_OTO_WEBHOOK_SIGNATURE_WARNING,
             'Try OTO returns and production rollout are not implemented.',
           ]
         : [],
@@ -1337,6 +1390,63 @@ function readTryOtoWebhookIdentifiers(data: Record<string, unknown>) {
   };
 }
 
+function getTryOtoWebhookPayloadKeys(payload: unknown, data: Record<string, unknown>) {
+  if (isRecord(payload)) {
+    return Object.keys(payload).sort();
+  }
+
+  return Object.keys(data).sort();
+}
+
+function resolveTryOtoWebhookMatchedByField(
+  execution: ShipmentExecution,
+  identifiers: ReturnType<typeof readTryOtoWebhookIdentifiers>,
+) {
+  const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
+  const responseSnapshot = readSnapshot(execution);
+  if (identifiers.shipmentId && execution.providerShipmentId === identifiers.shipmentId) return 'shipmentId';
+  if (identifiers.providerOrderId && execution.providerShipmentId === identifiers.providerOrderId) return 'providerOrderId';
+  if (identifiers.orderId && execution.providerShipmentId === identifiers.orderId) return 'orderId';
+  if (identifiers.trackingNumber && execution.trackingNumber === identifiers.trackingNumber) return 'trackingNumber';
+  if (identifiers.dcTrackingNumber && execution.trackingNumber === identifiers.dcTrackingNumber) return 'dcTrackingNumber';
+  if (
+    identifiers.orderId &&
+    (resolveTryOtoStatusOrderId(execution) === identifiers.orderId ||
+      readString(requestSnapshot, ['orderId']) === identifiers.orderId ||
+      readString(responseSnapshot, ['orderId']) === identifiers.orderId)
+  ) {
+    return 'orderId';
+  }
+  if (
+    identifiers.providerOrderId &&
+    (readString(requestSnapshot, ['providerOrderId', 'otoId']) === identifiers.providerOrderId ||
+      readString(responseSnapshot, ['providerOrderId', 'otoId']) === identifiers.providerOrderId)
+  ) {
+    return 'providerOrderId';
+  }
+  if (
+    identifiers.shipmentId &&
+    (readString(requestSnapshot, ['shipmentId']) === identifiers.shipmentId ||
+      readString(responseSnapshot, ['shipmentId']) === identifiers.shipmentId)
+  ) {
+    return 'shipmentId';
+  }
+
+  return 'snapshot';
+}
+
+function getTryOtoWebhookParseError(payload: unknown, data: Record<string, unknown>) {
+  if (!isRecord(payload)) {
+    return 'Webhook payload body was not an object.';
+  }
+
+  if (!Object.keys(data).length) {
+    return 'Webhook payload did not include parseable object fields.';
+  }
+
+  return null;
+}
+
 function buildTryOtoWebhookFingerprint(input: {
   identifiers: ReturnType<typeof readTryOtoWebhookIdentifiers>;
   providerStatus: string | null;
@@ -1459,6 +1569,8 @@ export async function ingestTryOtoWebhook(
   payload: unknown,
   options: {
     env: AppEnv;
+    httpMethod?: string | null;
+    contentType?: string | null;
   },
 ): Promise<
   | {
@@ -1472,7 +1584,29 @@ export async function ingestTryOtoWebhook(
     }
   | { ok: false; code: number; message: string }
 > {
+  const data = getWebhookData(payload);
+  const payloadKeys = getTryOtoWebhookPayloadKeys(payload, data);
+  const parseError = getTryOtoWebhookParseError(payload, data);
+  const providerStatus = readString(data, ['status', 'orderStatus', 'shipmentStatus', 'state', 'statusField']);
+  updateTryOtoWebhookReceiveDiagnostics({
+    received: true,
+    receivedAt: new Date().toISOString(),
+    httpMethod: options.httpMethod ?? null,
+    contentType: options.contentType ?? null,
+    payloadKeys,
+    matchedShipment: null,
+    matchStatus: parseError ? 'parse_error' : null,
+    matchedByField: null,
+    statusValue: providerStatus,
+    parseError,
+    signatureVerificationImplemented: false,
+  });
+
   if (!options.env.TRY_OTO_ENABLED || !options.env.TRY_OTO_WEBHOOK_INGEST_ENABLED) {
+    updateTryOtoWebhookReceiveDiagnostics({
+      matchedShipment: false,
+      matchStatus: 'disabled',
+    });
     return {
       ok: false,
       code: 501,
@@ -1480,17 +1614,22 @@ export async function ingestTryOtoWebhook(
     };
   }
 
-  const data = getWebhookData(payload);
   const responseKeys = Object.keys(data).sort();
   const identifiers = readTryOtoWebhookIdentifiers(data);
-  const providerStatus = readString(data, ['status', 'orderStatus', 'shipmentStatus', 'state', 'statusField']);
   const normalizedStatus = normalizeTryOtoWebhookStatus(providerStatus);
   const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link']);
   const labelUrl = readString(data, ['printLabelURL', 'printAWBURL', 'labelUrl', 'label_url', 'awbUrl', 'awbURL']);
   const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'carrier', 'carrierName']);
-  const signatureWarning = 'Try OTO webhook signature verification is unknown/not implemented.';
+  const signatureWarning = TRY_OTO_WEBHOOK_SIGNATURE_WARNING;
 
   if (!identifiers.candidates.length) {
+    updateTryOtoWebhookReceiveDiagnostics({
+      matchedShipment: false,
+      matchStatus: parseError ? 'parse_error' : 'unmatched',
+      matchedByField: null,
+      statusValue: providerStatus,
+      parseError,
+    });
     return {
       ok: true,
       matched: false,
@@ -1529,6 +1668,13 @@ export async function ingestTryOtoWebhook(
   }
 
   if (!execution) {
+    updateTryOtoWebhookReceiveDiagnostics({
+      matchedShipment: false,
+      matchStatus: 'unmatched',
+      matchedByField: null,
+      statusValue: providerStatus,
+      parseError,
+    });
     return {
       ok: true,
       matched: false,
@@ -1547,6 +1693,7 @@ export async function ingestTryOtoWebhook(
     labelUrl,
   });
   const existingSnapshot = readSnapshot(execution);
+  const matchedByField = resolveTryOtoWebhookMatchedByField(execution, identifiers);
   const duplicateFingerprints = Array.isArray(existingSnapshot.timelineEventFingerprints)
     ? existingSnapshot.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
     : [];
@@ -1561,7 +1708,11 @@ export async function ingestTryOtoWebhook(
     tryOtoWebhookReceived: true,
     lastTryOtoWebhookReceivedAt: new Date().toISOString(),
     lastTryOtoWebhookMatchStatus: 'matched',
+    lastTryOtoWebhookMatchedByField: matchedByField,
+    lastTryOtoWebhookHttpMethod: options.httpMethod ?? null,
+    lastTryOtoWebhookContentType: options.contentType ?? null,
     lastTryOtoWebhookStatusField: providerStatus,
+    lastTryOtoWebhookParseError: parseError,
     tryOtoWebhookSignatureVerificationImplemented: false,
     tryOtoWebhookWarning: signatureWarning,
     tryOtoWebhookResponseKeys: responseKeys,
@@ -1599,6 +1750,14 @@ export async function ingestTryOtoWebhook(
       shipmentStatus: nextStatus,
       responseSnapshot: finalSnapshot as Prisma.InputJsonValue,
     },
+  });
+
+  updateTryOtoWebhookReceiveDiagnostics({
+    matchedShipment: true,
+    matchStatus: 'matched',
+    matchedByField,
+    statusValue: providerStatus,
+    parseError,
   });
 
   return {

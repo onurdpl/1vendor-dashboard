@@ -264,7 +264,11 @@ function buildShipmentProviderResponseSummary(
         deliveryOptionLookupWeightType: readString(deliveryOptionLookupRequest, ['weightType']),
         lastWebhookReceivedAt: readString(snapshot, ['lastTryOtoWebhookReceivedAt']),
         lastWebhookMatchStatus: readString(snapshot, ['lastTryOtoWebhookMatchStatus']),
+        lastWebhookMatchedByField: readString(snapshot, ['lastTryOtoWebhookMatchedByField']),
+        lastWebhookHttpMethod: readString(snapshot, ['lastTryOtoWebhookHttpMethod']),
+        lastWebhookContentType: readString(snapshot, ['lastTryOtoWebhookContentType']),
         lastWebhookStatusField: readString(snapshot, ['lastTryOtoWebhookStatusField']),
+        lastWebhookParseError: readString(snapshot, ['lastTryOtoWebhookParseError']),
         webhookSignatureVerificationImplemented:
           typeof snapshot?.tryOtoWebhookSignatureVerificationImplemented === 'boolean'
             ? snapshot.tryOtoWebhookSignatureVerificationImplemented

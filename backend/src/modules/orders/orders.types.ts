@@ -183,7 +183,11 @@ export type OrderShipmentExecutionDto = {
       deliveryOptionLookupWeightType?: string | null;
       lastWebhookReceivedAt?: string | null;
       lastWebhookMatchStatus?: string | null;
+      lastWebhookMatchedByField?: string | null;
+      lastWebhookHttpMethod?: string | null;
+      lastWebhookContentType?: string | null;
       lastWebhookStatusField?: string | null;
+      lastWebhookParseError?: string | null;
       webhookSignatureVerificationImplemented?: boolean | null;
       webhookWarning?: string | null;
     };

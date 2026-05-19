@@ -2261,12 +2261,21 @@ describe('shipping execution foundation', () => {
   });
 
   it('registers a Try OTO webhook route that is disabled by default', async () => {
-    const posts = new Map<string, (request: { body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const posts = new Map<
+      string,
+      (
+        request: { body?: unknown; method?: string; headers?: Record<string, string> },
+        reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      ) => unknown
+    >();
     const app = {
       get: vi.fn(),
       put: vi.fn(),
       post: vi.fn((path: string, ...args: unknown[]) => {
-        const handler = args.at(-1) as (request: { body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown;
+        const handler = args.at(-1) as (
+          request: { body?: unknown; method?: string; headers?: Record<string, string> },
+          reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+        ) => unknown;
         posts.set(path, handler);
       }),
     };
@@ -2277,7 +2286,10 @@ describe('shipping execution foundation', () => {
     };
 
     registerShippingExecutionRoutes(app as never, env);
-    const result = await posts.get('/webhooks/try-oto')?.({ body: {} }, reply);
+    const result = await posts.get('/webhooks/try-oto')?.(
+      { body: {}, method: 'POST', headers: { 'content-type': 'application/json' } },
+      reply,
+    );
 
     expect(result).toEqual({
       status: 501,
@@ -2285,6 +2297,22 @@ describe('shipping execution foundation', () => {
         message: 'Try OTO webhook ingestion is disabled.',
         signatureVerificationImplemented: false,
       },
+    });
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookReceived: true,
+      lastWebhookHttpMethod: 'POST',
+      lastWebhookContentType: 'application/json',
+      lastWebhookMatchStatus: 'disabled',
+      lastWebhookMatchedShipment: false,
+      webhookSignatureVerificationImplemented: false,
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
@@ -2308,6 +2336,57 @@ describe('shipping execution foundation', () => {
       shipmentExecutionId: null,
       signatureVerificationImplemented: false,
     });
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookReceived: true,
+      lastWebhookPayloadKeys: ['unknown'],
+      lastWebhookMatchStatus: 'unmatched',
+      lastWebhookMatchedShipment: false,
+      lastWebhookParseError: null,
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
+  it('records Try OTO webhook parse diagnostics safely', async () => {
+    const result = await ingestTryOtoWebhook(null, {
+      env: {
+        ...env,
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      httpMethod: 'POST',
+      contentType: 'application/json',
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: false,
+      matchStatus: 'unmatched',
+    });
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookReceived: true,
+      lastWebhookMatchStatus: 'parse_error',
+      lastWebhookParseError: 'Webhook payload body was not an object.',
+      lastWebhookPayloadKeys: [],
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('Authorization');
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
@@ -2362,7 +2441,10 @@ describe('shipping execution foundation', () => {
             webhookReceived: true,
             tryOtoWebhookReceived: true,
             lastTryOtoWebhookMatchStatus: 'matched',
+            lastTryOtoWebhookMatchedByField: 'orderId',
+            lastTryOtoWebhookContentType: null,
             lastTryOtoWebhookStatusField: 'in_transit',
+            lastTryOtoWebhookParseError: null,
             tryOtoWebhookSignatureVerificationImplemented: false,
             tryOtoWebhookResponseKeys: expect.arrayContaining(['orderId', 'printLabelURL', 'status', 'trackingNumber', 'trackingUrl']),
             timeline: expect.arrayContaining([
@@ -2374,6 +2456,23 @@ describe('shipping execution foundation', () => {
       }),
     );
     expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookReceived: true,
+      lastWebhookMatchedShipment: true,
+      lastWebhookMatchStatus: 'matched',
+      lastWebhookMatchedByField: 'orderId',
+      lastWebhookStatusValue: 'in_transit',
+      lastWebhookPayloadKeys: ['data'],
+    });
   });
 
   it('keeps duplicate Try OTO webhooks idempotent in the shipment timeline', async () => {
@@ -2447,6 +2546,21 @@ describe('shipping execution foundation', () => {
       matched: false,
       matchStatus: 'unmatched',
       shipmentExecutionId: null,
+    });
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookReceived: true,
+      lastWebhookMatchedShipment: false,
+      lastWebhookMatchStatus: 'unmatched',
+      lastWebhookStatusValue: 'created',
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });

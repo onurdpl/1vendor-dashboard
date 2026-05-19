@@ -42,6 +42,17 @@ export type ShippingProviderGateDiagnosticsDto = {
   providerSelected: boolean;
   providerEnabled: boolean;
   webhookIngestEnabled: boolean;
+  lastWebhookReceived: boolean;
+  lastWebhookReceivedAt: string | null;
+  lastWebhookHttpMethod: string | null;
+  lastWebhookContentType: string | null;
+  lastWebhookPayloadKeys: string[];
+  lastWebhookMatchedShipment: boolean | null;
+  lastWebhookMatchStatus: 'matched' | 'unmatched' | 'disabled' | 'parse_error' | null;
+  lastWebhookMatchedByField: string | null;
+  lastWebhookStatusValue: string | null;
+  lastWebhookParseError: string | null;
+  webhookSignatureVerificationImplemented: boolean;
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   cargoIntegrationIdConfigured: boolean;
