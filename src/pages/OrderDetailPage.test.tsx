@@ -2431,8 +2431,105 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const probeSection = await screen.findByLabelText('Try OTO return details action');
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' })).toBeDisabled();
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return link' })).toBeDisabled();
     expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeDisabled();
-    expect(screen.getByText('Return AWB print probe requires Try OTO return order id.')).toBeInTheDocument();
+    expect(screen.getByText('Return probes require returnOrderId.')).toBeInTheDocument();
+  });
+
+  it('explains why Try OTO return probes are blocked when return creation was skipped', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: null,
+          trackingNumber: null,
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: null,
+          status: 'skipped',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: [],
+          responseKeys: [],
+          trackingPresent: false,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Try OTO return shipment was not created because deliveryOptionId is missing.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment:blocked',
+          diagnostics: {
+            endpoint: '/rest/v2/createReturnShipment',
+            httpStatus: null,
+            requestKeys: [],
+            responseKeys: [],
+            returnProviderIdPresent: false,
+            returnTrackingPresent: false,
+            returnBarcodePresent: false,
+            returnStatus: 'skipped',
+            labelFieldPresent: false,
+            providerMessage: 'Try OTO return shipment was not created because deliveryOptionId is missing.',
+            returnSkippedReason: 'missing_delivery_option_id',
+            forwardDeliveryOptionIdPresent: false,
+            forwardDeliveryOptionIdSource: null,
+            forwardDeliveryOptionPersistedAt: null,
+            forwardDeliveryOptionRetainedAfterWebhook: false,
+            forwardDeliveryOptionRetainedAfterStatusRefresh: false,
+            returnDeliveryOptionIdPresent: false,
+            returnDeliveryOptionIdSource: null,
+            pickupLocationCodePresent: true,
+            returnItemSkuPresent: true,
+            returnItemQuantityPresent: true,
+            returnDeliveryOptionLookupCalled: false,
+            returnDeliveryOptionLookupImplemented: false,
+            returnPriceLookupCalled: false,
+            returnPriceLookupSuccess: false,
+            returnPriceLookupOptionCount: null,
+            selectedReturnPriceOptionIdPresent: false,
+            reverseCreateShipmentCalled: false,
+            reverseCreateShipmentSuccess: false,
+            reverseCreateShipmentResponseKeys: [],
+            reverseCreateShipmentTrackingPresent: false,
+            reverseCreateShipmentBarcodePresent: false,
+            reverseCreateShipmentLabelPresent: false,
+            returnFinalized: false,
+            returnFinalizationEndpointConfirmed: false,
+            returnFinalizeEndpointImplemented: false,
+            returnLabelRetrievable: false,
+            providerStatusSource: 'createReturnShipment:blocked',
+          },
+          detailsProbe: null,
+          linkProbe: null,
+          awbPrintProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Try OTO return details action');
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return details' })).toBeDisabled();
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return link' })).toBeDisabled();
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeDisabled();
+    expect(
+      screen.getByText('Return probes require returnOrderId. Return shipment was not created because deliveryOptionId is missing.'),
+    ).toBeInTheDocument();
   });
 
   it('hides Try OTO return details probe action from vendors', async () => {

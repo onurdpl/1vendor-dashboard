@@ -34,9 +34,12 @@ The uploaded collection does not show `getReturnDetails` or `getReturnLink` as l
 Therefore, the most likely missing integration step, based strictly on the collection, is not reverse `createShipment`; it is calling the documented print/status paths with the generated `returnOrderId`.
 
 Runtime mitigation added after this finding:
-- Forward Try OTO shipment creation persists the selected forward `deliveryOptionId` as shipment metadata.
+- Forward Try OTO shipment creation persists the selected forward `deliveryOptionId` as shipment metadata at the delivery-option-selected stage.
+- Async forward recovery previously lost the actual id because the recoverable createShipment failure snapshot only carried `deliveryOptionIdPresent: true`; the pending-provider-finalization snapshot now preserves the selected id and its source.
+- Webhook and status refresh updates preserve the forward delivery option metadata and record whether it was retained after those lifecycle stages.
 - Return creation resolves `deliveryOptionId` from that persisted forward shipment metadata.
 - If `deliveryOptionId`, `pickupLocationCode`, `sku`, or `quantity` is missing, runtime blocks before calling `createReturnShipment` and stores a precise skipped reason.
+- Return probes require `returnOrderId`; blocked return creation disables getReturnDetails/getReturnLink/AWB print probes because there is no Try OTO return order to query.
 - Runtime does not guess a delivery option id and does not restore reverse `createShipment`.
 
 ## Confirmed Return Endpoints
@@ -437,6 +440,7 @@ Current runtime behavior that is not a confirmed bug:
 4. `deliveryOptionId` is documented as optional in the Postman table, but runtime evidence shows missing `deliveryOptionId` produced only a `newReturn` / `Yeni Iade` request with no barcode/tracking/label.
    - Collection evidence: the `createReturnShipment` example includes `deliveryOptionId`.
    - Runtime stance: treat `deliveryOptionId` as required for Turkey sandbox return shipment creation and source it only from persisted forward shipment metadata.
+   - Async recovery note: forward shipments that enter pending provider finalization must still persist the actual selected delivery option id, not only a boolean presence diagnostic.
 
 4. Webhook field shape differs between collection and observed runtime.
    - Collection: documents `returnStatus`, `returnOrderId`, and label/tracking fields.

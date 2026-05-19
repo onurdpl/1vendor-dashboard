@@ -2391,7 +2391,10 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
-        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
+        forwardDeliveryOptionRetainedAfterWebhook: true,
       },
     });
     const adapter = buildAdapter({
@@ -2460,7 +2463,10 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
-        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'async_recovery',
+        forwardDeliveryOptionPersistedAt: 'async_recovery',
+        forwardDeliveryOptionRetainedAfterWebhook: true,
       },
     });
     const adapter = buildAdapter({
@@ -2503,6 +2509,11 @@ describe('shipping execution foundation', () => {
     });
     expect(result.returnShipment?.diagnostics).toMatchObject({
       returnDeliveryOptionIdPresent: true,
+      returnDeliveryOptionIdSource: 'request_snapshot',
+      forwardDeliveryOptionIdPresent: true,
+      forwardDeliveryOptionIdSource: 'async_recovery',
+      forwardDeliveryOptionPersistedAt: 'async_recovery',
+      forwardDeliveryOptionRetainedAfterWebhook: true,
       returnDeliveryOptionLookupCalled: false,
       returnDeliveryOptionLookupImplemented: false,
       returnFinalizationEndpointConfirmed: false,
@@ -2569,7 +2580,10 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
-        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'async_recovery',
+        forwardDeliveryOptionPersistedAt: 'async_recovery',
+        forwardDeliveryOptionRetainedAfterWebhook: true,
       },
     });
     const adapter = buildAdapter({
@@ -2631,7 +2645,10 @@ describe('shipping execution foundation', () => {
       },
       responseSnapshot: {
         provider: 'try_oto',
-        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'async_recovery',
+        forwardDeliveryOptionPersistedAt: 'async_recovery',
+        forwardDeliveryOptionRetainedAfterWebhook: true,
       },
     });
     const adapter = buildAdapter({
@@ -2709,6 +2726,11 @@ describe('shipping execution foundation', () => {
     });
     expect(result.returnShipment?.diagnostics).toMatchObject({
       returnDeliveryOptionIdPresent: true,
+      returnDeliveryOptionIdSource: 'async_recovery',
+      forwardDeliveryOptionIdPresent: true,
+      forwardDeliveryOptionIdSource: 'async_recovery',
+      forwardDeliveryOptionPersistedAt: 'async_recovery',
+      forwardDeliveryOptionRetainedAfterWebhook: true,
       returnItemSkuPresent: true,
       returnItemQuantityPresent: true,
       createReturnShipmentFinalized: true,
@@ -3831,6 +3853,9 @@ describe('shipping execution foundation', () => {
       responseSnapshot: {
         provider: 'try_oto',
         orderId: 'OTO-ORDER-1039',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'async_recovery',
         providerError: 'there is a shipment in progress',
         timeline: [{ label: 'Shipment failed', at: '2026-05-15T10:00:00.000Z', status: 'failed' }],
       },
@@ -3871,6 +3896,10 @@ describe('shipping execution foundation', () => {
           shipmentStatus: 'IN_TRANSIT',
           responseSnapshot: expect.objectContaining({
             providerError: 'there is a shipment in progress',
+            forwardDeliveryOptionId: 'surat-kargo-marketplace',
+            forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+            forwardDeliveryOptionPersistedAt: 'async_recovery',
+            forwardDeliveryOptionRetainedAfterWebhook: true,
             providerStatus: 'searchingDriver',
             lastTryOtoWebhookStatusMapped: true,
             lastTryOtoWebhookMappedShipmentStatus: 'in_transit',
@@ -5320,12 +5349,16 @@ describe('shipping execution foundation', () => {
           providerError: 'delivery option is not available',
           providerErrorCode: 'OTO1010',
         }),
-        createShipmentRequestDiagnostics: {
+        createShipmentRequestDiagnostics: expect.objectContaining({
           endpoint: '/rest/v2/createShipment',
           topLevelKeys: ['deliveryOptionId', 'orderId'],
           orderIdPresent: true,
           deliveryOptionIdPresent: true,
-        },
+          deliveryOptionId: '7109',
+        }),
+        forwardDeliveryOptionId: '7109',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
       }),
     });
 
@@ -5422,6 +5455,10 @@ describe('shipping execution foundation', () => {
         createShipmentRecovered: true,
         createShipmentRecoveryReason: 'existing shipment in progress',
         orderStatusCalledAfterRecovery: true,
+        forwardDeliveryOptionId: '7109',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
+        selectedDeliveryOptionId: '7109',
         barcode: 'OTO-BARCODE-1001',
         createShipment: expect.objectContaining({
           ok: true,
@@ -5765,6 +5802,11 @@ describe('shipping execution foundation', () => {
           providerError: 'Shipment is still being prepared.',
         },
         providerError: 'Shipment is still being prepared.',
+        deliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
       }),
     );
 
@@ -5798,6 +5840,10 @@ describe('shipping execution foundation', () => {
           providerShipmentId: 'SPORJINAL-1027',
           responseSnapshot: expect.objectContaining({
             tryOtoAsyncPending: true,
+            forwardDeliveryOptionId: 'surat-kargo-marketplace',
+            forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+            forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
+            selectedDeliveryOptionId: 'surat-kargo-marketplace',
             providerMessage: 'Shipment was created. Tracking or label may still be processing.',
             error: 'Try OTO createShipment failed with HTTP 400.',
           }),
@@ -6303,6 +6349,9 @@ describe('shipping execution foundation', () => {
       shipmentStatus: 'FAILED',
       responseSnapshot: {
         orderId: 'OTO-ORDER-1001',
+        forwardDeliveryOptionId: 'surat-kargo-marketplace',
+        forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+        forwardDeliveryOptionPersistedAt: 'async_recovery',
         providerError: 'Previous createShipment error',
       },
       requestSnapshot: {
@@ -6350,6 +6399,10 @@ describe('shipping execution foundation', () => {
             barcode: 'OTO-BARCODE-1001',
             providerStatus: 'shipmentCreated',
             providerError: 'Previous createShipment error',
+            forwardDeliveryOptionId: 'surat-kargo-marketplace',
+            forwardDeliveryOptionIdSource: 'delivery_option_lookup',
+            forwardDeliveryOptionPersistedAt: 'async_recovery',
+            forwardDeliveryOptionRetainedAfterStatusRefresh: true,
           }),
         }),
       }),

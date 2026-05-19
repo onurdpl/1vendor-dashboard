@@ -136,6 +136,9 @@ export type ShipmentExecutionDto = {
       returnSkippedReason: string | null;
       forwardDeliveryOptionIdPresent: boolean;
       forwardDeliveryOptionIdSource: string | null;
+      forwardDeliveryOptionPersistedAt: string | null;
+      forwardDeliveryOptionRetainedAfterWebhook: boolean;
+      forwardDeliveryOptionRetainedAfterStatusRefresh: boolean;
       returnDeliveryOptionIdPresent: boolean;
       returnDeliveryOptionIdSource: string | null;
       pickupLocationCodePresent: boolean;

@@ -1291,6 +1291,14 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     }
 
     const deliveryOptionIdSource = configuredDeliveryOptionId ? 'provider_metadata' : 'delivery_option_lookup';
+    const deliveryOptionPersistenceDiagnostics = {
+      deliveryOptionId: selectedDeliveryOptionId,
+      forwardDeliveryOptionId: selectedDeliveryOptionId,
+      forwardDeliveryOptionIdSource: deliveryOptionIdSource,
+      forwardDeliveryOptionPersistedAt: 'delivery_option_selected',
+      selectedDeliveryOptionId,
+      selectedDeliveryOptionIdPresent: Boolean(selectedDeliveryOptionId),
+    };
     const deliveryOptionLookupDiagnostics = {
       called: !configuredDeliveryOptionId,
       success: configuredDeliveryOptionId ? null : Boolean(deliveryOptionLookup?.snapshot.ok),
@@ -1329,6 +1337,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
       topLevelKeys: Object.keys(createShipmentRequest).sort(),
       orderIdPresent: hasValue(createShipmentRequest.orderId),
       deliveryOptionIdPresent: hasValue(createShipmentRequest.deliveryOptionId),
+      deliveryOptionId: selectedDeliveryOptionId,
     };
     let createShipment!: { snapshot: Record<string, unknown>; body: Record<string, unknown> };
     let createShipmentRecovered = false;
@@ -1359,6 +1368,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
               recoveryReason: createShipmentRecoveryReason,
               orderId,
               providerMessage: 'Try OTO shipment is already in progress; tracking/label pending.',
+              ...deliveryOptionPersistenceDiagnostics,
             },
             body: {
               message: 'Try OTO shipment is already in progress; tracking/label pending.',
@@ -1369,6 +1379,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
             ...error.responseSnapshot,
             provider: 'try_oto',
             operation: 'createShipment',
+            ...deliveryOptionPersistenceDiagnostics,
             deliveryOptionLookup: deliveryOptionLookupDiagnostics,
             createOrder: createOrder.snapshot,
             createShipment: error.responseSnapshot,
@@ -1431,10 +1442,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         labelUrl,
         deliveryCompany: readString(statusBody, ['deliveryCompany']),
         providerStatus: readString(statusBody, ['status']),
-        deliveryOptionId: selectedDeliveryOptionId,
-        forwardDeliveryOptionId: selectedDeliveryOptionId,
-        forwardDeliveryOptionIdSource: deliveryOptionIdSource,
-        selectedDeliveryOptionId,
+        ...deliveryOptionPersistenceDiagnostics,
         deliveryOptionLookup: {
           ...deliveryOptionLookupDiagnostics,
           lookup: deliveryOptionLookup?.snapshot,

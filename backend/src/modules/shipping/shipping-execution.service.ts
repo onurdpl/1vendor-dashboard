@@ -247,6 +247,9 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnSkippedReason: readString(diagnostics, ['returnSkippedReason', 'skippedReason']),
     forwardDeliveryOptionIdPresent: readBoolean(diagnostics, ['forwardDeliveryOptionIdPresent']),
     forwardDeliveryOptionIdSource: readString(diagnostics, ['forwardDeliveryOptionIdSource']),
+    forwardDeliveryOptionPersistedAt: readString(diagnostics, ['forwardDeliveryOptionPersistedAt']),
+    forwardDeliveryOptionRetainedAfterWebhook: readBoolean(diagnostics, ['forwardDeliveryOptionRetainedAfterWebhook']),
+    forwardDeliveryOptionRetainedAfterStatusRefresh: readBoolean(diagnostics, ['forwardDeliveryOptionRetainedAfterStatusRefresh']),
     returnDeliveryOptionIdPresent: readBoolean(diagnostics, ['returnDeliveryOptionIdPresent']),
     returnDeliveryOptionIdSource: readString(diagnostics, ['returnDeliveryOptionIdSource']),
     pickupLocationCodePresent: readBoolean(diagnostics, ['pickupLocationCodePresent']),
@@ -1562,6 +1565,21 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
   });
 }
 
+function readTryOtoForwardDeliveryOptionMetadata(snapshot: Record<string, unknown>) {
+  const deliveryOptionId = readString(snapshot, [
+    'forwardDeliveryOptionId',
+    'selectedDeliveryOptionId',
+    'deliveryOptionId',
+  ]);
+  return {
+    deliveryOptionId,
+    source: readString(snapshot, ['forwardDeliveryOptionIdSource']),
+    persistedAt: readString(snapshot, ['forwardDeliveryOptionPersistedAt']),
+    retainedAfterWebhook: readBoolean(snapshot, ['forwardDeliveryOptionRetainedAfterWebhook']),
+    retainedAfterStatusRefresh: readBoolean(snapshot, ['forwardDeliveryOptionRetainedAfterStatusRefresh']),
+  };
+}
+
 function getTryOtoAsyncContextFromError(error: unknown, requestSnapshot: unknown) {
   if (!(error instanceof ShippingProviderExecutionError)) {
     return null;
@@ -1623,12 +1641,23 @@ async function persistTryOtoAsyncShipmentContext(input: {
   }
 
   const failureSnapshot = buildProviderFailureSnapshot(input.error, ShippingProvider.TRY_OTO, input.baseSnapshot);
+  const forwardDeliveryOption = readTryOtoForwardDeliveryOptionMetadata(failureSnapshot);
   const responseSnapshot = appendTimelineEvent(
     {
       ...failureSnapshot,
       provider: 'try_oto',
       providerOrderId: context.orderId,
       orderId: context.orderId,
+      ...(forwardDeliveryOption.deliveryOptionId
+        ? {
+            deliveryOptionId: forwardDeliveryOption.deliveryOptionId,
+            forwardDeliveryOptionId: forwardDeliveryOption.deliveryOptionId,
+            selectedDeliveryOptionId: forwardDeliveryOption.deliveryOptionId,
+            forwardDeliveryOptionIdSource: forwardDeliveryOption.source ?? 'delivery_option_lookup',
+            forwardDeliveryOptionPersistedAt: forwardDeliveryOption.persistedAt ?? 'async_recovery',
+            selectedDeliveryOptionIdPresent: true,
+          }
+        : {}),
       tryOtoAsyncPending: true,
       effectiveShipmentStatus: 'created',
       providerMessage: 'Shipment was created. Tracking or label may still be processing.',
@@ -2138,6 +2167,7 @@ export async function ingestTryOtoWebhook(
     labelUrl,
   });
   const existingSnapshot = readSnapshot(execution);
+  const existingForwardDeliveryOption = readTryOtoForwardDeliveryOptionMetadata(existingSnapshot);
   const matchedByField = resolveTryOtoWebhookMatchedByField(execution, identifiers);
   const duplicateFingerprints = Array.isArray(existingSnapshot.timelineEventFingerprints)
     ? existingSnapshot.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
@@ -2200,6 +2230,7 @@ export async function ingestTryOtoWebhook(
       tryOtoWebhookWarning: signatureWarning,
       tryOtoWebhookResponseKeys: responseKeys,
       tryOtoWebhookReverseShipment: true,
+      forwardDeliveryOptionRetainedAfterWebhook: Boolean(existingForwardDeliveryOption.deliveryOptionId),
       returnShipment: nextReturnShipment,
       lastProviderResponseAt: new Date().toISOString(),
     };
@@ -2274,6 +2305,7 @@ export async function ingestTryOtoWebhook(
     tryOtoWebhookResponseKeys: responseKeys,
     providerStatus: providerStatus ?? readString(existingSnapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
     selectedDeliveryCompanyName: carrierName ?? readString(existingSnapshot, ['selectedDeliveryCompanyName', 'deliveryCompanyName']),
+    forwardDeliveryOptionRetainedAfterWebhook: Boolean(existingForwardDeliveryOption.deliveryOptionId),
     lastProviderResponseAt: new Date().toISOString(),
   };
   const receivedSnapshot = appendTimelineEventOnce(
@@ -2575,26 +2607,29 @@ function resolveTryOtoReturnDeliveryOption(
   const createShipmentRequestDiagnostics = isRecord(responseSnapshot.createShipmentRequestDiagnostics)
     ? responseSnapshot.createShipmentRequestDiagnostics
     : {};
+  const forwardMetadata = readTryOtoForwardDeliveryOptionMetadata(responseSnapshot);
 
   const fromRequest = readString(requestSnapshot, ['deliveryOptionId']);
   if (fromRequest) {
     return {
       deliveryOptionId: fromRequest,
       source: 'request_snapshot',
-      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'request_snapshot',
+      forwardSource: forwardMetadata.source ?? 'request_snapshot',
+      persistedAt: forwardMetadata.persistedAt ?? 'request_snapshot',
+      retainedAfterWebhook: forwardMetadata.retainedAfterWebhook,
+      retainedAfterStatusRefresh: forwardMetadata.retainedAfterStatusRefresh,
     };
   }
 
-  const fromForwardSnapshot = readString(responseSnapshot, [
-    'forwardDeliveryOptionId',
-    'selectedDeliveryOptionId',
-    'deliveryOptionId',
-  ]);
+  const fromForwardSnapshot = forwardMetadata.deliveryOptionId;
   if (fromForwardSnapshot) {
     return {
       deliveryOptionId: fromForwardSnapshot,
-      source: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'forward_shipment_metadata',
-      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'forward_shipment_metadata',
+      source: forwardMetadata.source ?? 'forward_shipment_metadata',
+      forwardSource: forwardMetadata.source ?? 'forward_shipment_metadata',
+      persistedAt: forwardMetadata.persistedAt ?? 'forward_shipment_metadata',
+      retainedAfterWebhook: forwardMetadata.retainedAfterWebhook,
+      retainedAfterStatusRefresh: forwardMetadata.retainedAfterStatusRefresh,
     };
   }
 
@@ -2603,14 +2638,20 @@ function resolveTryOtoReturnDeliveryOption(
     return {
       deliveryOptionId: fromCreateShipmentRequest,
       source: 'create_shipment_request_diagnostics',
-      forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']) ?? 'create_shipment_request_diagnostics',
+      forwardSource: forwardMetadata.source ?? 'create_shipment_request_diagnostics',
+      persistedAt: forwardMetadata.persistedAt ?? 'create_shipment_request',
+      retainedAfterWebhook: forwardMetadata.retainedAfterWebhook,
+      retainedAfterStatusRefresh: forwardMetadata.retainedAfterStatusRefresh,
     };
   }
 
   return {
     deliveryOptionId: null,
     source: null,
-    forwardSource: readString(responseSnapshot, ['forwardDeliveryOptionIdSource']),
+    forwardSource: forwardMetadata.source,
+    persistedAt: forwardMetadata.persistedAt,
+    retainedAfterWebhook: forwardMetadata.retainedAfterWebhook,
+    retainedAfterStatusRefresh: forwardMetadata.retainedAfterStatusRefresh,
   };
 }
 
@@ -2684,6 +2725,9 @@ async function persistTryOtoReturnCreationSkipped(
       returnSkippedReason: input.skippedReason,
       forwardDeliveryOptionIdPresent: Boolean(forwardDeliveryOptionId),
       forwardDeliveryOptionIdSource: input.deliveryOption.forwardSource,
+      forwardDeliveryOptionPersistedAt: input.deliveryOption.persistedAt,
+      forwardDeliveryOptionRetainedAfterWebhook: input.deliveryOption.retainedAfterWebhook,
+      forwardDeliveryOptionRetainedAfterStatusRefresh: input.deliveryOption.retainedAfterStatusRefresh,
       returnDeliveryOptionIdPresent: Boolean(forwardDeliveryOptionId),
       returnDeliveryOptionIdSource: input.deliveryOption.source,
       pickupLocationCodePresent: Boolean(input.pickupLocationCode),
@@ -2959,6 +3003,9 @@ export async function createTryOtoReturnShipmentLabel(
       returnSkippedReason: null,
       forwardDeliveryOptionIdPresent: Boolean(deliveryOption.deliveryOptionId),
       forwardDeliveryOptionIdSource: deliveryOption.forwardSource,
+      forwardDeliveryOptionPersistedAt: deliveryOption.persistedAt,
+      forwardDeliveryOptionRetainedAfterWebhook: deliveryOption.retainedAfterWebhook,
+      forwardDeliveryOptionRetainedAfterStatusRefresh: deliveryOption.retainedAfterStatusRefresh,
       returnDeliveryOptionIdPresent: readBoolean(result.responseSnapshot, ['returnDeliveryOptionIdPresent']),
       returnDeliveryOptionIdSource: deliveryOption.source,
       pickupLocationCodePresent: Boolean(pickupLocationCode),
@@ -3555,10 +3602,22 @@ export async function refreshTryOtoShipmentStatus(
 
   const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
   const result = await adapter.getShipmentStatus(orderId);
+  const existingSnapshot = readSnapshot(existing);
+  const existingForwardDeliveryOption = readTryOtoForwardDeliveryOptionMetadata(existingSnapshot);
   const mergedSnapshot = appendTimelineEvent(
     {
-      ...readSnapshot(existing),
+      ...existingSnapshot,
       ...result.responseSnapshot,
+      ...(existingForwardDeliveryOption.deliveryOptionId && !readTryOtoForwardDeliveryOptionMetadata(result.responseSnapshot).deliveryOptionId
+        ? {
+            deliveryOptionId: existingForwardDeliveryOption.deliveryOptionId,
+            forwardDeliveryOptionId: existingForwardDeliveryOption.deliveryOptionId,
+            selectedDeliveryOptionId: existingForwardDeliveryOption.deliveryOptionId,
+            forwardDeliveryOptionIdSource: existingForwardDeliveryOption.source,
+            forwardDeliveryOptionPersistedAt: existingForwardDeliveryOption.persistedAt,
+          }
+        : {}),
+      forwardDeliveryOptionRetainedAfterStatusRefresh: Boolean(existingForwardDeliveryOption.deliveryOptionId),
       statusField: readString(result.responseSnapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
       lastProviderResponseAt: new Date().toISOString(),
     },

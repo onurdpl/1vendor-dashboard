@@ -917,18 +917,20 @@ export function OrderDetailPage() {
     Boolean(order?.shopifyReturnSignal?.returnIdPresent) &&
     Boolean(visibleShipmentExecution.returnShipment?.labelUrl) &&
     Boolean(visibleShipmentExecution.returnShipment?.trackingNumber || visibleShipmentExecution.returnShipment?.barcode);
+  const tryOtoReturnOrderId = visibleShipmentExecution?.returnShipment?.returnOrderId?.trim() ?? '';
   const canProbeTryOtoReturnDetails =
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(
-      visibleShipmentExecution.returnShipment?.returnOrderId ||
-        visibleShipmentExecution.returnShipment?.trackingNumber ||
-        visibleShipmentExecution.returnShipment?.barcode,
-    );
+    Boolean(tryOtoReturnOrderId);
   const canProbeTryOtoReturnAwbPrint =
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(visibleShipmentExecution.returnShipment?.returnOrderId);
+    Boolean(tryOtoReturnOrderId);
+  const tryOtoReturnProbeBlockedReason = visibleShipmentExecution?.returnShipment && !tryOtoReturnOrderId
+    ? visibleShipmentExecution.returnShipment.diagnostics?.returnSkippedReason === 'missing_delivery_option_id'
+      ? 'Return probes require returnOrderId. Return shipment was not created because deliveryOptionId is missing.'
+      : 'Return probes require returnOrderId.'
+    : null;
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -2455,10 +2457,10 @@ export function OrderDetailPage() {
                                         {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
                                       </button>
                                     </div>
-                                    {!canProbeTryOtoReturnDetails ? (
-                                      <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                                    {tryOtoReturnProbeBlockedReason ? (
+                                      <span className="muted">{tryOtoReturnProbeBlockedReason}</span>
                                     ) : null}
-                                    {!canProbeTryOtoReturnAwbPrint ? (
+                                    {!canProbeTryOtoReturnAwbPrint && !tryOtoReturnProbeBlockedReason ? (
                                       <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
                                     ) : null}
                                     {visibleShipmentExecution.returnShipment.detailsProbe ? (
@@ -2555,6 +2557,18 @@ export function OrderDetailPage() {
                                         {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource
                                           ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource}`
                                           : ''}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Forward option lifecycle</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionPersistedAt ?? '—'}
+                                        {' · webhook '}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionRetainedAfterWebhook ? 'retained' : 'not seen'}
+                                        {' · refresh '}
+                                        {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionRetainedAfterStatusRefresh
+                                          ? 'retained'
+                                          : 'not seen'}
                                       </strong>
                                     </div>
                                     <div className="summary-row">
@@ -3353,10 +3367,10 @@ export function OrderDetailPage() {
                                 {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
                               </button>
                             </div>
-                            {!canProbeTryOtoReturnDetails ? (
-                              <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                            {tryOtoReturnProbeBlockedReason ? (
+                              <span className="muted">{tryOtoReturnProbeBlockedReason}</span>
                             ) : null}
-                            {!canProbeTryOtoReturnAwbPrint ? (
+                            {!canProbeTryOtoReturnAwbPrint && !tryOtoReturnProbeBlockedReason ? (
                               <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
                             ) : null}
                             {visibleShipmentExecution.returnShipment.detailsProbe ? (
@@ -3446,6 +3460,18 @@ export function OrderDetailPage() {
                             {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource
                               ? ` · ${visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionIdSource}`
                               : ''}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Forward option lifecycle</span>
+                          <strong>
+                            {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionPersistedAt ?? '—'}
+                            {' · webhook '}
+                            {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionRetainedAfterWebhook ? 'retained' : 'not seen'}
+                            {' · refresh '}
+                            {visibleShipmentExecution.returnShipment.diagnostics.forwardDeliveryOptionRetainedAfterStatusRefresh
+                              ? 'retained'
+                              : 'not seen'}
                           </strong>
                         </div>
                         <div className="summary-row">
