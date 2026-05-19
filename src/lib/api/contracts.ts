@@ -151,6 +151,9 @@ export type ShipmentExecution = {
       lastWebhookHttpMethod?: string | null;
       lastWebhookContentType?: string | null;
       lastWebhookStatusField?: string | null;
+      lastWebhookStatusMapped?: boolean | null;
+      lastWebhookMappedShipmentStatus?: string | null;
+      latestProviderStatusSource?: string | null;
       lastWebhookParseError?: string | null;
       webhookSignatureVerificationImplemented?: boolean | null;
       webhookWarning?: string | null;
@@ -189,6 +192,8 @@ export type ShippingProviderDiagnostics = {
   lastWebhookMatchStatus?: 'matched' | 'unmatched' | 'disabled' | 'parse_error' | null;
   lastWebhookMatchedByField?: string | null;
   lastWebhookStatusValue?: string | null;
+  lastWebhookStatusMapped?: boolean | null;
+  lastWebhookMappedLocalStatus?: string | null;
   lastWebhookParseError?: string | null;
   webhookSignatureVerificationImplemented?: boolean;
   baseUrlConfigured: boolean;

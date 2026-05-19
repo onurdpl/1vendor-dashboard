@@ -2475,6 +2475,129 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('maps observed Try OTO searchingDriver webhook status to an in-progress local shipment status', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+        providerError: 'there is a shipment in progress',
+        timeline: [{ label: 'Shipment failed', at: '2026-05-15T10:00:00.000Z', status: 'failed' }],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          otoId: 'OTO-ORDER-1039',
+          dcTrackingNumber: 'OTO-TRACK-1039',
+          brandedTrackingURL: 'https://track.example/OTO-TRACK-1039',
+          printAWBURL: 'https://labels.example/OTO-TRACK-1039.pdf',
+          status: 'searchingDriver',
+          deliveryCompany: 'Sürat Kargo',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentStatus: 'in_transit',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          trackingNumber: 'OTO-TRACK-1039',
+          labelUrl: 'https://labels.example/OTO-TRACK-1039.pdf',
+          shipmentStatus: 'IN_TRANSIT',
+          responseSnapshot: expect.objectContaining({
+            providerError: 'there is a shipment in progress',
+            providerStatus: 'searchingDriver',
+            lastTryOtoWebhookStatusMapped: true,
+            lastTryOtoWebhookMappedShipmentStatus: 'in_transit',
+            latestProviderStatusSource: 'webhook',
+          }),
+        }),
+      }),
+    );
+    const diagnostics = getShippingProviderGateDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'try_oto',
+        TRY_OTO_ENABLED: true,
+        TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      },
+      'try_oto',
+    );
+    expect(diagnostics).toMatchObject({
+      lastWebhookStatusValue: 'searchingDriver',
+      lastWebhookStatusMapped: true,
+      lastWebhookMappedLocalStatus: 'in_transit',
+    });
+  });
+
+  it('keeps unknown Try OTO webhook statuses diagnostic-only', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'OTO-ORDER-1039',
+          status: 'mysteryProviderStatus',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentStatus: 'failed',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shipmentStatus: 'FAILED',
+          responseSnapshot: expect.objectContaining({
+            providerStatus: 'mysteryProviderStatus',
+            lastTryOtoWebhookStatusMapped: false,
+            lastTryOtoWebhookMappedShipmentStatus: null,
+            latestProviderStatusSource: 'webhook',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('keeps duplicate Try OTO webhooks idempotent in the shipment timeline', async () => {
     const fingerprint = 'try_oto_webhook|OTO-ORDER-1039|||OTO-TRACK-1039||created||';
     const existing = buildShipmentExecution({

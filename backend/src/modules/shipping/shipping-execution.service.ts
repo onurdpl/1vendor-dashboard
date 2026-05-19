@@ -44,6 +44,8 @@ type TryOtoWebhookReceiveDiagnostics = {
   matchStatus: 'matched' | 'unmatched' | 'disabled' | 'parse_error' | null;
   matchedByField: string | null;
   statusValue: string | null;
+  statusMapped: boolean | null;
+  mappedLocalStatus: string | null;
   parseError: string | null;
   signatureVerificationImplemented: false;
 };
@@ -60,6 +62,8 @@ let lastTryOtoWebhookReceiveDiagnostics: TryOtoWebhookReceiveDiagnostics = {
   matchStatus: null,
   matchedByField: null,
   statusValue: null,
+  statusMapped: null,
+  mappedLocalStatus: null,
   parseError: null,
   signatureVerificationImplemented: false,
 };
@@ -1118,6 +1122,8 @@ export function getShippingProviderGateDiagnostics(
     lastWebhookMatchStatus: tryOtoWebhookDiagnostics?.matchStatus ?? null,
     lastWebhookMatchedByField: tryOtoWebhookDiagnostics?.matchedByField ?? null,
     lastWebhookStatusValue: tryOtoWebhookDiagnostics?.statusValue ?? null,
+    lastWebhookStatusMapped: tryOtoWebhookDiagnostics?.statusMapped ?? null,
+    lastWebhookMappedLocalStatus: tryOtoWebhookDiagnostics?.mappedLocalStatus ?? null,
     lastWebhookParseError: tryOtoWebhookDiagnostics?.parseError ?? null,
     webhookSignatureVerificationImplemented: tryOtoWebhookDiagnostics?.signatureVerificationImplemented ?? false,
     baseUrlConfigured,
@@ -1334,6 +1340,9 @@ function normalizeTryOtoWebhookStatus(status: string | null) {
     return ShipmentExecutionStatus.PENDING;
   }
   if (normalized === 'in_transit') {
+    return ShipmentExecutionStatus.IN_TRANSIT;
+  }
+  if (normalized === 'searchingdriver') {
     return ShipmentExecutionStatus.IN_TRANSIT;
   }
   if (normalized === 'delivered') {
@@ -1587,7 +1596,7 @@ export async function ingestTryOtoWebhook(
   const data = getWebhookData(payload);
   const payloadKeys = getTryOtoWebhookPayloadKeys(payload, data);
   const parseError = getTryOtoWebhookParseError(payload, data);
-  const providerStatus = readString(data, ['status', 'orderStatus', 'shipmentStatus', 'state', 'statusField']);
+  const providerStatus = readString(data, ['status', 'dcStatus', 'orderStatus', 'shipmentStatus', 'state', 'statusField']);
   updateTryOtoWebhookReceiveDiagnostics({
     received: true,
     receivedAt: new Date().toISOString(),
@@ -1598,6 +1607,8 @@ export async function ingestTryOtoWebhook(
     matchStatus: parseError ? 'parse_error' : null,
     matchedByField: null,
     statusValue: providerStatus,
+    statusMapped: null,
+    mappedLocalStatus: null,
     parseError,
     signatureVerificationImplemented: false,
   });
@@ -1606,6 +1617,8 @@ export async function ingestTryOtoWebhook(
     updateTryOtoWebhookReceiveDiagnostics({
       matchedShipment: false,
       matchStatus: 'disabled',
+      statusMapped: null,
+      mappedLocalStatus: null,
     });
     return {
       ok: false,
@@ -1617,9 +1630,9 @@ export async function ingestTryOtoWebhook(
   const responseKeys = Object.keys(data).sort();
   const identifiers = readTryOtoWebhookIdentifiers(data);
   const normalizedStatus = normalizeTryOtoWebhookStatus(providerStatus);
-  const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link']);
+  const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link', 'brandedTrackingURL']);
   const labelUrl = readString(data, ['printLabelURL', 'printAWBURL', 'labelUrl', 'label_url', 'awbUrl', 'awbURL']);
-  const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'carrier', 'carrierName']);
+  const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'deliveryOptionName', 'carrier', 'carrierName']);
   const signatureWarning = TRY_OTO_WEBHOOK_SIGNATURE_WARNING;
 
   if (!identifiers.candidates.length) {
@@ -1628,6 +1641,8 @@ export async function ingestTryOtoWebhook(
       matchStatus: parseError ? 'parse_error' : 'unmatched',
       matchedByField: null,
       statusValue: providerStatus,
+      statusMapped: Boolean(normalizedStatus),
+      mappedLocalStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
       parseError,
     });
     return {
@@ -1673,6 +1688,8 @@ export async function ingestTryOtoWebhook(
       matchStatus: 'unmatched',
       matchedByField: null,
       statusValue: providerStatus,
+      statusMapped: Boolean(normalizedStatus),
+      mappedLocalStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
       parseError,
     });
     return {
@@ -1712,6 +1729,9 @@ export async function ingestTryOtoWebhook(
     lastTryOtoWebhookHttpMethod: options.httpMethod ?? null,
     lastTryOtoWebhookContentType: options.contentType ?? null,
     lastTryOtoWebhookStatusField: providerStatus,
+    lastTryOtoWebhookStatusMapped: Boolean(normalizedStatus),
+    lastTryOtoWebhookMappedShipmentStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
+    latestProviderStatusSource: 'webhook',
     lastTryOtoWebhookParseError: parseError,
     tryOtoWebhookSignatureVerificationImplemented: false,
     tryOtoWebhookWarning: signatureWarning,
@@ -1757,6 +1777,8 @@ export async function ingestTryOtoWebhook(
     matchStatus: 'matched',
     matchedByField,
     statusValue: providerStatus,
+    statusMapped: Boolean(normalizedStatus),
+    mappedLocalStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
     parseError,
   });
 

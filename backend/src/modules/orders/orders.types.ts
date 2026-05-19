@@ -187,6 +187,9 @@ export type OrderShipmentExecutionDto = {
       lastWebhookHttpMethod?: string | null;
       lastWebhookContentType?: string | null;
       lastWebhookStatusField?: string | null;
+      lastWebhookStatusMapped?: boolean | null;
+      lastWebhookMappedShipmentStatus?: string | null;
+      latestProviderStatusSource?: string | null;
       lastWebhookParseError?: string | null;
       webhookSignatureVerificationImplemented?: boolean | null;
       webhookWarning?: string | null;

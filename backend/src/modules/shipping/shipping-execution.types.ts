@@ -51,6 +51,8 @@ export type ShippingProviderGateDiagnosticsDto = {
   lastWebhookMatchStatus: 'matched' | 'unmatched' | 'disabled' | 'parse_error' | null;
   lastWebhookMatchedByField: string | null;
   lastWebhookStatusValue: string | null;
+  lastWebhookStatusMapped: boolean | null;
+  lastWebhookMappedLocalStatus: string | null;
   lastWebhookParseError: string | null;
   webhookSignatureVerificationImplemented: boolean;
   baseUrlConfigured: boolean;

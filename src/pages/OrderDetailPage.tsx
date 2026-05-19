@@ -2587,6 +2587,25 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusField || '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Try OTO webhook status mapped</span>
+                              <strong>
+                                {shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusMapped === null ||
+                                shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusMapped === undefined
+                                  ? '—'
+                                  : shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusMapped
+                                    ? 'yes'
+                                    : 'no'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO local status</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookMappedShipmentStatus || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Latest provider status source</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.latestProviderStatusSource || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Try OTO webhook parse error</span>
                               <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookParseError || '—'}</strong>
                             </div>
@@ -2790,6 +2809,21 @@ export function OrderDetailPage() {
                           <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
                         </div>
                         <div className="summary-row">
+                          <span>Last webhook status mapped</span>
+                          <strong>
+                            {shippingProviderDiagnostics.lastWebhookStatusMapped === null ||
+                            shippingProviderDiagnostics.lastWebhookStatusMapped === undefined
+                              ? '—'
+                              : shippingProviderDiagnostics.lastWebhookStatusMapped
+                                ? 'yes'
+                                : 'no'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Last webhook local status</span>
+                          <strong>{shippingProviderDiagnostics.lastWebhookMappedLocalStatus || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
                           <span>Last webhook parse error</span>
                           <strong>{shippingProviderDiagnostics.lastWebhookParseError || '—'}</strong>
                         </div>
@@ -2836,6 +2870,21 @@ export function OrderDetailPage() {
                             <div className="summary-row">
                               <span>Last webhook status value</span>
                               <strong>{shippingProviderDiagnostics.lastWebhookStatusValue || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook status mapped</span>
+                              <strong>
+                                {shippingProviderDiagnostics.lastWebhookStatusMapped === null ||
+                                shippingProviderDiagnostics.lastWebhookStatusMapped === undefined
+                                  ? '—'
+                                  : shippingProviderDiagnostics.lastWebhookStatusMapped
+                                    ? 'yes'
+                                    : 'no'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Last webhook local status</span>
+                              <strong>{shippingProviderDiagnostics.lastWebhookMappedLocalStatus || '—'}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Last webhook parse error</span>

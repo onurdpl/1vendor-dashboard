@@ -268,6 +268,10 @@ function buildShipmentProviderResponseSummary(
         lastWebhookHttpMethod: readString(snapshot, ['lastTryOtoWebhookHttpMethod']),
         lastWebhookContentType: readString(snapshot, ['lastTryOtoWebhookContentType']),
         lastWebhookStatusField: readString(snapshot, ['lastTryOtoWebhookStatusField']),
+        lastWebhookStatusMapped:
+          typeof snapshot?.lastTryOtoWebhookStatusMapped === 'boolean' ? snapshot.lastTryOtoWebhookStatusMapped : null,
+        lastWebhookMappedShipmentStatus: readString(snapshot, ['lastTryOtoWebhookMappedShipmentStatus']),
+        latestProviderStatusSource: readString(snapshot, ['latestProviderStatusSource']),
         lastWebhookParseError: readString(snapshot, ['lastTryOtoWebhookParseError']),
         webhookSignatureVerificationImplemented:
           typeof snapshot?.tryOtoWebhookSignatureVerificationImplemented === 'boolean'
