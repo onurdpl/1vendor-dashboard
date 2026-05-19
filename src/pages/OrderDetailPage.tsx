@@ -129,6 +129,11 @@ function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecutio
     return 'Return request created / awaiting provider shipment';
   }
 
+  const normalizedStatus = returnShipment.status?.trim().toLowerCase() ?? '';
+  if (returnShipment.finalized && (!normalizedStatus || normalizedStatus === 'created' || normalizedStatus === 'finalized')) {
+    return 'Return shipment finalized';
+  }
+
   if (returnShipment.status) {
     return toTitleCaseLabel(returnShipment.status);
   }
@@ -2413,6 +2418,22 @@ export function OrderDetailPage() {
                                       </strong>
                                     </div>
                                     <div className="summary-row">
+                                      <span>Return price options</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
+                                          ? `${visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
+                                          : 'not called'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Selected price option</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent
+                                          ? 'present'
+                                          : 'missing'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
                                       <span>Return finalization endpoint</span>
                                       <strong>
                                         {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
@@ -2420,6 +2441,24 @@ export function OrderDetailPage() {
                                           : visibleShipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
                                             ? 'not implemented'
                                             : 'unknown'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Reverse createShipment</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
+                                          ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
+                                            ? 'succeeded'
+                                            : 'failed'
+                                          : 'not called'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Reverse response keys</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
+                                          ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
+                                          : '—'}
                                       </strong>
                                     </div>
                                     <div className="summary-row">
@@ -3232,6 +3271,18 @@ export function OrderDetailPage() {
                           </strong>
                         </div>
                         <div className="summary-row">
+                          <span>Return price options</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
+                              ? `${shipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
+                              : 'not called'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Selected price option</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
                           <span>Return finalization endpoint</span>
                           <strong>
                             {shipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
@@ -3239,6 +3290,24 @@ export function OrderDetailPage() {
                               : shipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
                                 ? 'not implemented'
                                 : 'unknown'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Reverse createShipment</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
+                              ? shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
+                                ? 'succeeded'
+                                : 'failed'
+                              : 'not called'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Reverse response keys</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
+                              ? shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
+                              : '—'}
                           </strong>
                         </div>
                         <div className="summary-row">

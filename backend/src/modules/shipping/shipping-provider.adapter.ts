@@ -34,6 +34,7 @@ export type ShippingProviderReturnCreateInput = {
   }>;
   pickupLocationCode?: string | null;
   deliveryOptionId?: string | null;
+  packageWeight?: number | null;
 };
 
 export type ShippingProviderReturnCreateResult = {
@@ -503,6 +504,70 @@ function hasNestedKeyPattern(value: unknown, pattern: RegExp) {
 
 function readTryOtoDeliveryCompanyName(value: Record<string, unknown>) {
   return readString(value, ['deliveryCompanyName', 'deliveryOptionName', 'companyName', 'name']);
+}
+
+function readTryOtoReturnPriceOptionId(value: Record<string, unknown>) {
+  return readString(value, ['priceOptionId', 'price_option_id']);
+}
+
+function readTryOtoReturnDcSettingsId(value: Record<string, unknown>) {
+  return readNumber(value, ['dcSettingsID', 'dcSettingsId', 'dc_settings_id']);
+}
+
+function getTryOtoReturnPriceOptions(value: Record<string, unknown>) {
+  const candidates = [
+    value.priceOptions,
+    value.options,
+    value.deliveryOptions,
+    value.deliveryCompany,
+    value.deliveryCompanies,
+    value.items,
+  ];
+  const fromArrays = candidates.find((candidate): candidate is unknown[] => Array.isArray(candidate))?.filter(isRecord) ?? [];
+  if (fromArrays.length > 0) {
+    return fromArrays;
+  }
+
+  if (readTryOtoReturnPriceOptionId(value) || readTryOtoReturnDcSettingsId(value) !== null) {
+    return [value];
+  }
+
+  return [];
+}
+
+function buildTryOtoReturnPriceLookupDiagnostics(
+  snapshot: Record<string, unknown> | null,
+  body: Record<string, unknown> | null,
+) {
+  const options = getTryOtoReturnPriceOptions(body ?? {});
+  return {
+    status: typeof snapshot?.status === 'number' ? snapshot.status : null,
+    bodyKeys: Array.isArray(snapshot?.bodyKeys)
+      ? snapshot.bodyKeys.filter((key): key is string => typeof key === 'string')
+      : body
+        ? Object.keys(body).sort()
+        : [],
+    optionCount: options.length,
+    selectedPriceOptionIdPresent: options.some((option) => Boolean(readTryOtoReturnPriceOptionId(option))),
+    selectedDcSettingsIdPresent: options.some((option) => readTryOtoReturnDcSettingsId(option) !== null),
+    providerError: readSafeProviderError(snapshot ?? body ?? {}),
+  };
+}
+
+function buildTryOtoReverseShipmentRequestDiagnostics(payload: Record<string, unknown>) {
+  const items = Array.isArray(payload.items) ? payload.items.filter(isRecord) : [];
+  const firstItem = items[0] ?? {};
+  return {
+    endpoint: '/rest/v2/createShipment',
+    topLevelKeys: Object.keys(payload).sort(),
+    itemKeys: Object.keys(firstItem).sort(),
+    reverseShipmentPresent: payload.reverseShipment === true,
+    itemCount: items.length,
+    priceOptionIdPresent: hasValue(firstItem.priceOptionId),
+    dcSettingsIdPresent: hasValue(firstItem.dcSettingsID),
+    packageWeightPresent: hasValue(firstItem.packageWeight),
+    boxCount: Array.isArray(firstItem.boxes) ? firstItem.boxes.length : 0,
+  };
 }
 
 function getTryOtoDeliveryOptions(value: Record<string, unknown>) {
@@ -1561,12 +1626,126 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const accessToken = await this.refreshAccessToken();
     const result = await this.postJson('/rest/v2/createReturnShipment', payload, accessToken, 'createReturnShipment');
     const body = result.body;
-    const returnLabelUrl = readTryOtoLabelUrl(body);
-    const returnTrackingNumber = readTryOtoTrackingNumber(body);
-    const returnBarcode = readTryOtoBarcode(body);
+    let returnLabelUrl = readTryOtoLabelUrl(body);
+    let returnTrackingNumber = readTryOtoTrackingNumber(body);
+    let returnBarcode = readTryOtoBarcode(body);
     const returnOrderId = readTryOtoReturnOrderId(body);
-    const returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
-    const returnFinalized = Boolean(returnLabelUrl);
+    const returnOtoId = readNumber(body, ['otoId', 'returnOtoId', 'returnOrderId', 'orderId']);
+    let returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
+    let returnFinalized = Boolean(returnLabelUrl);
+    const packageWeight = Number.isFinite(input.packageWeight) && Number(input.packageWeight) > 0 ? Number(input.packageWeight) : 1;
+    let returnPriceLookup: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
+    let returnPriceLookupDiagnostics: Record<string, unknown> = {
+      called: false,
+      success: false,
+      optionCount: 0,
+      selectedPriceOptionIdPresent: false,
+      providerError: null,
+    };
+    let selectedPriceOption: Record<string, unknown> | null = null;
+    let reverseCreateShipment: { snapshot: Record<string, unknown>; body: Record<string, unknown> } | null = null;
+    let reverseCreateShipmentRequestDiagnostics: Record<string, unknown> | null = null;
+
+    if (returnOtoId !== null) {
+      const box = {
+        width: 10,
+        height: 10,
+        length: 10,
+        weight: packageWeight,
+      };
+      const priceLookupPayload = {
+        otoId: returnOtoId,
+        isReverseShipment: true,
+        calculationData: {
+          boxes: [box],
+          skipSlaCalculation: true,
+          skipNearestBranchCalculation: true,
+          skipSuccessInstructionList: true,
+          skipLockerList: true,
+        },
+        includeEstimationDates: true,
+      };
+
+      try {
+        returnPriceLookup = await this.postJson('/rest/v2/getPriceList', priceLookupPayload, accessToken, 'getPriceList');
+        const options = getTryOtoReturnPriceOptions(returnPriceLookup.body);
+        selectedPriceOption =
+          options.find((option) => readTryOtoReturnPriceOptionId(option) && readTryOtoReturnDcSettingsId(option) !== null) ??
+          null;
+        returnPriceLookupDiagnostics = {
+          called: true,
+          success: Boolean(returnPriceLookup.snapshot.ok),
+          ...buildTryOtoReturnPriceLookupDiagnostics(returnPriceLookup.snapshot, returnPriceLookup.body),
+        };
+      } catch (error) {
+        if (error instanceof ShippingProviderExecutionError) {
+          returnPriceLookupDiagnostics = {
+            called: true,
+            success: false,
+            ...buildTryOtoReturnPriceLookupDiagnostics(error.responseSnapshot, null),
+          };
+        } else {
+          throw error;
+        }
+      }
+
+      if (selectedPriceOption) {
+        const reverseShipmentPayload = {
+          items: [
+            {
+              ID: returnOtoId,
+              orderID: returnOtoId,
+              manualShipment: true,
+              dcSettingsID: readTryOtoReturnDcSettingsId(selectedPriceOption),
+              packageWeight,
+              totalDue: 0,
+              boxes: [
+                {
+                  otoID: returnOtoId,
+                  width: 10,
+                  length: 10,
+                  weight: packageWeight,
+                  height: 10,
+                },
+              ],
+              price: readNumber(selectedPriceOption, ['price']),
+              pickingType: readString(selectedPriceOption, ['pickingType']) ?? 'PICKUP_BY_DC',
+              deliveryType: readString(selectedPriceOption, ['deliveryType']) ?? 'TO_CUSTOMER_DOORSTEP_OR_PICKUP_BY_CUSTOMER',
+              zeroDcReason: null,
+              priceOptionId: Number(readTryOtoReturnPriceOptionId(selectedPriceOption)) || readTryOtoReturnPriceOptionId(selectedPriceOption),
+              notice: null,
+              needToVerifyCrDocStatus: null,
+              priceLoading: false,
+              pickupDropoff: readString(selectedPriceOption, ['pickupDropoff']) ?? 'PICKUP_BY_DC',
+            },
+          ],
+          reverseShipment: true,
+        };
+        reverseCreateShipmentRequestDiagnostics = buildTryOtoReverseShipmentRequestDiagnostics(reverseShipmentPayload);
+
+        try {
+          reverseCreateShipment = await this.postJson('/rest/v2/createShipment', reverseShipmentPayload, accessToken, 'createShipment');
+          const reverseBody = reverseCreateShipment.body;
+          returnTrackingNumber = readTryOtoTrackingNumber(reverseBody) ?? returnTrackingNumber;
+          returnBarcode = readTryOtoBarcode(reverseBody) ?? returnBarcode;
+          returnLabelUrl = readTryOtoLabelUrl(reverseBody) ?? returnLabelUrl;
+          returnStatus = readString(reverseBody, ['status', 'shipmentStatus', 'dcStatus']) ?? returnStatus ?? 'finalized';
+          returnFinalized = true;
+        } catch (error) {
+          if (error instanceof ShippingProviderExecutionError) {
+            reverseCreateShipment = {
+              snapshot: error.responseSnapshot,
+              body: {},
+            };
+          } else {
+            throw error;
+          }
+        }
+      }
+    }
+
+    const reverseCreateShipmentSuccess = Boolean(reverseCreateShipment?.snapshot.ok);
+    const returnLabelRetrievable = Boolean(returnLabelUrl);
 
     return {
       returnOrderId,
@@ -1585,8 +1764,17 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         orderIdPresent: true,
         pickupLocationCodePresent: Boolean(input.pickupLocationCode),
         returnDeliveryOptionIdPresent: Boolean(input.deliveryOptionId),
-        returnDeliveryOptionLookupCalled: false,
-        returnDeliveryOptionLookupImplemented: false,
+        returnDeliveryOptionLookupCalled: Boolean(returnPriceLookupDiagnostics.called),
+        returnDeliveryOptionLookupImplemented: true,
+        returnPriceLookupCalled: Boolean(returnPriceLookupDiagnostics.called),
+        returnPriceLookupSuccess: Boolean(returnPriceLookupDiagnostics.success),
+        returnPriceLookupOptionCount:
+          typeof returnPriceLookupDiagnostics.optionCount === 'number' ? returnPriceLookupDiagnostics.optionCount : 0,
+        returnPriceLookupResponseKeys: Array.isArray(returnPriceLookupDiagnostics.bodyKeys)
+          ? returnPriceLookupDiagnostics.bodyKeys
+          : [],
+        selectedReturnPriceOptionIdPresent: Boolean(selectedPriceOption && readTryOtoReturnPriceOptionId(selectedPriceOption)),
+        selectedReturnDcSettingsIdPresent: Boolean(selectedPriceOption && readTryOtoReturnDcSettingsId(selectedPriceOption) !== null),
         returnProviderIdPresent: Boolean(returnOrderId),
         returnOrderIdPresent: Boolean(returnOrderId),
         returnTrackingPresent: Boolean(returnTrackingNumber),
@@ -1594,18 +1782,34 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnLabelPresent: Boolean(returnLabelUrl),
         returnStatus,
         returnFinalized,
-        returnFinalizationEndpointConfirmed: false,
-        returnFinalizeEndpointImplemented: false,
-        returnLabelRetrievable: Boolean(returnLabelUrl),
-        returnProviderStatusSource: 'createReturnShipment',
-        returnLabelRetrievalConfirmed: Boolean(returnLabelUrl),
-        returnLabelSourceChecked: 'createReturnShipment',
+        returnFinalizationEndpointConfirmed: true,
+        returnFinalizeEndpointImplemented: true,
+        reverseCreateShipmentCalled: Boolean(reverseCreateShipmentRequestDiagnostics),
+        reverseCreateShipmentSuccess,
+        reverseCreateShipmentResponseKeys: Array.isArray(reverseCreateShipment?.snapshot.bodyKeys)
+          ? reverseCreateShipment.snapshot.bodyKeys
+          : [],
+        reverseCreateShipmentRequestKeys: Array.isArray(reverseCreateShipmentRequestDiagnostics?.topLevelKeys)
+          ? reverseCreateShipmentRequestDiagnostics.topLevelKeys
+          : [],
+        reverseCreateShipmentTrackingPresent: Boolean(returnTrackingNumber),
+        reverseCreateShipmentBarcodePresent: Boolean(returnBarcode),
+        reverseCreateShipmentLabelPresent: Boolean(returnLabelUrl),
+        reverseCreateShipmentHttpStatus:
+          typeof reverseCreateShipment?.snapshot.status === 'number' ? reverseCreateShipment.snapshot.status : null,
+        reverseCreateShipmentProviderMessage: readSafeProviderError(reverseCreateShipment?.snapshot ?? reverseCreateShipment?.body ?? {}),
+        returnLabelRetrievable,
+        returnProviderStatusSource: reverseCreateShipmentSuccess ? 'reverseCreateShipment' : 'createReturnShipment',
+        returnLabelRetrievalConfirmed: returnLabelRetrievable,
+        returnLabelSourceChecked: reverseCreateShipmentSuccess ? 'reverseCreateShipment' : 'createReturnShipment',
         createReturnShipmentLabelFieldPresent: Boolean(returnLabelUrl),
         webhookReverseShipmentPrintAwbUrlPresent: false,
         printEndpointImplemented: false,
         returnLabelRetrievalNote: returnLabelUrl
           ? null
-          : 'Return label is processing or not returned by Try OTO yet.',
+          : returnFinalized
+            ? 'Return shipment finalized. Label PDF is not available yet.'
+            : 'Return request created. Provider shipment and label finalization are pending or unconfirmed.',
       },
     };
   }

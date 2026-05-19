@@ -136,6 +136,16 @@ export type ShipmentExecutionDto = {
       returnDeliveryOptionIdPresent: boolean;
       returnDeliveryOptionLookupCalled: boolean;
       returnDeliveryOptionLookupImplemented: boolean;
+      returnPriceLookupCalled: boolean;
+      returnPriceLookupSuccess: boolean;
+      returnPriceLookupOptionCount: number | null;
+      selectedReturnPriceOptionIdPresent: boolean;
+      reverseCreateShipmentCalled: boolean;
+      reverseCreateShipmentSuccess: boolean;
+      reverseCreateShipmentResponseKeys: string[];
+      reverseCreateShipmentTrackingPresent: boolean;
+      reverseCreateShipmentBarcodePresent: boolean;
+      reverseCreateShipmentLabelPresent: boolean;
       returnFinalized: boolean;
       returnFinalizationEndpointConfirmed: boolean;
       returnFinalizeEndpointImplemented: boolean;
