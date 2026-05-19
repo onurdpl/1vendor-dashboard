@@ -2507,6 +2507,108 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('uses approved Shopify return line items and stored forward delivery option for Try OTO returns', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+        lines: [
+          { sku: 'SKU-ORIGINAL-1', quantity: 2 },
+          { sku: 'SKU-ORIGINAL-2', quantity: 1 },
+        ],
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+        selectedDeliveryOptionId: 'surat-kargo-marketplace',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'OTO-ORDER-1-R1',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnTrackingUrl: null,
+        returnLabelUrl: null,
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: 'created',
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['barcode', 'returnOrderId', 'trackingNumber'],
+          requestKeys: ['deliveryOptionId', 'items', 'orderId', 'pickupLocationCode'],
+          returnDeliveryOptionIdPresent: true,
+          returnItemSkuPresent: true,
+          returnItemQuantityPresent: true,
+          createReturnShipmentFinalized: true,
+          returnFinalized: true,
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        fulfillmentStatus: 'Fulfilled',
+        returnRecords: [
+          {
+            status: 'approved',
+            returnLifecycleStatus: 'approved',
+            sourceShopifyLineItemId: 'line-2',
+          },
+        ],
+        lineItems: [
+          {
+            quantity: 2,
+            lineAmount: 200,
+            shopifyOrderLineItem: {
+              sourceLineItemId: 'line-1',
+              sku: 'SKU-ORIGINAL-1',
+            },
+          },
+          {
+            quantity: 1,
+            lineAmount: 100,
+            shopifyOrderLineItem: {
+              sourceLineItemId: 'line-2',
+              sku: 'SKU-RETURNED-2',
+            },
+          },
+        ],
+      }),
+    );
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).toHaveBeenCalledWith({
+      orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
+      packageWeight: 3,
+      items: [{ sku: 'SKU-RETURNED-2', quantity: '1' }],
+    });
+    expect(result.returnShipment).toMatchObject({
+      trackingNumber: 'RET-TRACK-1',
+      barcode: 'RET-BARCODE-1',
+      status: 'created',
+      finalized: true,
+    });
+    expect(result.returnShipment?.diagnostics).toMatchObject({
+      returnDeliveryOptionIdPresent: true,
+      returnItemSkuPresent: true,
+      returnItemQuantityPresent: true,
+      createReturnShipmentFinalized: true,
+      returnFinalized: true,
+    });
+  });
+
   it('marks Try OTO return creation without label as request created and unfinalized', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',
@@ -2626,6 +2728,70 @@ describe('shipping execution foundation', () => {
         reverseCreateShipmentResponseKeys: [],
         returnProviderStatusSource: 'createReturnShipment',
         returnLabelRetrievalNote: 'Return request created; waiting for Try OTO return shipment details.',
+      },
+    });
+  });
+
+  it('sends confirmed Try OTO createReturnShipment payload and finalizes when barcode or tracking is returned', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(mockProviderResponse(JSON.stringify({ access_token: 'oto-access-token', expires_in: 3600 })))
+      .mockResolvedValueOnce(
+        mockProviderResponse(
+          JSON.stringify({
+            success: true,
+            returnOrderId: 'OTO-ORDER-1-R1',
+            trackingNumber: 'RET-TRACK-1',
+            barcode: 'RET-BARCODE-1',
+          }),
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const adapter = new TryOtoAdapter({
+      ...env,
+      SHIPPING_PROVIDER: 'try_oto',
+      SHIPPING_EXECUTION_ENABLED: true,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_SANDBOX_MODE: true,
+      TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
+      TRY_OTO_REFRESH_TOKEN: 'refresh-secret',
+    });
+
+    const result = await adapter.createReturnShipment({
+      orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
+      items: [{ sku: 'SKU-1', quantity: '1' }],
+      packageWeight: 3,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://staging-api.tryoto.com/rest/v2/createReturnShipment',
+      expect.objectContaining({ method: 'POST' }),
+    );
+    expect(JSON.parse((fetchMock.mock.calls[1][1] as RequestInit).body as string)).toEqual({
+      orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
+      items: [{ sku: 'SKU-1', quantity: '1' }],
+    });
+    expect(result).toMatchObject({
+      returnOrderId: 'OTO-ORDER-1-R1',
+      returnTrackingNumber: 'RET-TRACK-1',
+      returnBarcode: 'RET-BARCODE-1',
+      responseSnapshot: {
+        requestKeys: ['deliveryOptionId', 'items', 'orderId', 'pickupLocationCode'],
+        returnDeliveryOptionIdPresent: true,
+        returnItemSkuPresent: true,
+        returnItemQuantityPresent: true,
+        createReturnShipmentFinalized: true,
+        returnFinalized: true,
+        returnTrackingPresent: true,
+        returnBarcodePresent: true,
+        reverseCreateShipmentCalled: false,
       },
     });
   });

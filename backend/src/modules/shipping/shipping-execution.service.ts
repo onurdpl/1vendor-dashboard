@@ -245,6 +245,9 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
     providerMessage: readString(diagnostics, ['providerMessage']),
     returnDeliveryOptionIdPresent: readBoolean(diagnostics, ['returnDeliveryOptionIdPresent']),
+    returnItemSkuPresent: readBoolean(diagnostics, ['returnItemSkuPresent']),
+    returnItemQuantityPresent: readBoolean(diagnostics, ['returnItemQuantityPresent']),
+    createReturnShipmentFinalized: readBoolean(diagnostics, ['createReturnShipmentFinalized']),
     returnDeliveryOptionLookupCalled: readBoolean(diagnostics, ['returnDeliveryOptionLookupCalled']),
     returnDeliveryOptionLookupImplemented: readBoolean(diagnostics, ['returnDeliveryOptionLookupImplemented']),
     returnPriceLookupCalled: readBoolean(diagnostics, ['returnPriceLookupCalled']),
@@ -2468,6 +2471,7 @@ function buildTryOtoReturnItemsFromAllocation(allocation: {
   lineItems?: Array<{
     quantity?: number | null;
     shopifyOrderLineItem?: {
+      sourceLineItemId?: string | null;
       sku?: string | null;
     } | null;
   }>;
@@ -2484,6 +2488,64 @@ function buildTryOtoReturnItemsFromAllocation(allocation: {
       };
     })
     .filter((item): item is { sku: string; quantity: string } => Boolean(item && Number(item.quantity) > 0));
+}
+
+function buildTryOtoReturnItemsFromApprovedReturns(allocation: {
+  returnRecords?: Array<{
+    status?: string | null;
+    returnLifecycleStatus?: string | null;
+    sourceShopifyLineItemId?: string | null;
+  }>;
+  lineItems?: Array<{
+    quantity?: number | null;
+    shopifyOrderLineItem?: {
+      sourceLineItemId?: string | null;
+      sku?: string | null;
+    } | null;
+  }>;
+}) {
+  const approvedLineItemIds = new Set(
+    (allocation.returnRecords ?? [])
+      .filter((record) => {
+        const status = (record.returnLifecycleStatus ?? record.status ?? '').trim().toLowerCase();
+        return status === 'approved';
+      })
+      .map((record) => record.sourceShopifyLineItemId?.trim())
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  if (approvedLineItemIds.size === 0) {
+    return [];
+  }
+
+  return (allocation.lineItems ?? [])
+    .filter((lineItem) => {
+      const sourceLineItemId = lineItem.shopifyOrderLineItem?.sourceLineItemId?.trim();
+      return Boolean(sourceLineItemId && approvedLineItemIds.has(sourceLineItemId));
+    })
+    .map((lineItem) => {
+      const sku = lineItem.shopifyOrderLineItem?.sku?.trim();
+      if (!sku) {
+        return null;
+      }
+      return {
+        sku,
+        quantity: String(lineItem.quantity ?? 1),
+      };
+    })
+    .filter((item): item is { sku: string; quantity: string } => Boolean(item && Number(item.quantity) > 0));
+}
+
+function resolveTryOtoReturnDeliveryOptionId(requestSnapshot: Record<string, unknown>, responseSnapshot: Record<string, unknown>) {
+  const createShipmentRequestDiagnostics = isRecord(responseSnapshot.createShipmentRequestDiagnostics)
+    ? responseSnapshot.createShipmentRequestDiagnostics
+    : {};
+
+  return (
+    readString(requestSnapshot, ['deliveryOptionId']) ??
+    readString(responseSnapshot, ['selectedDeliveryOptionId', 'deliveryOptionId']) ??
+    readString(createShipmentRequestDiagnostics, ['deliveryOptionId'])
+  );
 }
 
 function isTryOtoReturnAllowedByState(execution: ShipmentExecution, allocation: { fulfillmentStatus?: string | null }) {
@@ -2599,6 +2661,7 @@ export async function createTryOtoReturnShipmentLabel(
           shopifyOrderLineItem: true,
         },
       },
+      returnRecords: true,
     },
   });
 
@@ -2616,8 +2679,14 @@ export async function createTryOtoReturnShipmentLabel(
   }
 
   const requestSnapshot = isRecord(existing.requestSnapshot) ? existing.requestSnapshot : {};
+  const responseSnapshot = readSnapshot(existing);
   const items = buildTryOtoReturnItemsFromSnapshot(requestSnapshot);
-  const fallbackItems = items.length > 0 ? items : buildTryOtoReturnItemsFromAllocation(allocation);
+  const approvedReturnItems = buildTryOtoReturnItemsFromApprovedReturns(allocation);
+  const fallbackItems = approvedReturnItems.length > 0
+    ? approvedReturnItems
+    : items.length > 0
+      ? items
+      : buildTryOtoReturnItemsFromAllocation(allocation);
   if (fallbackItems.length === 0) {
     throw new Error('Try OTO return shipment requires returned item SKU and quantity; API contract is not confirmed for itemless returns.');
   }
@@ -2631,10 +2700,12 @@ export async function createTryOtoReturnShipmentLabel(
     orderId,
     items: fallbackItems,
     pickupLocationCode: readString(requestSnapshot, ['pickupLocationCode']),
-    deliveryOptionId: readString(requestSnapshot, ['deliveryOptionId']),
+    deliveryOptionId: resolveTryOtoReturnDeliveryOptionId(requestSnapshot, responseSnapshot),
     packageWeight: toNumber(existing.desi) ?? readNumber(requestSnapshot, ['packageWeight']) ?? 1,
   });
-  const returnFinalized = readBoolean(result.responseSnapshot, ['returnFinalized']) || Boolean(result.returnLabelUrl);
+  const returnFinalized =
+    readBoolean(result.responseSnapshot, ['returnFinalized', 'createReturnShipmentFinalized']) ||
+    Boolean(result.returnLabelUrl);
   const returnLabelRetrievable = readBoolean(result.responseSnapshot, ['returnLabelRetrievable']) || Boolean(result.returnLabelUrl);
   const returnProviderStatusSource = readString(result.responseSnapshot, ['returnProviderStatusSource']) ?? 'createReturnShipment';
   const returnStatus = result.returnStatus ?? (returnFinalized ? 'created' : 'request_created');
@@ -2669,6 +2740,9 @@ export async function createTryOtoReturnShipmentLabel(
       returnBarcodePresent: Boolean(result.returnBarcode),
       returnStatus,
       returnLabelPresent: Boolean(result.returnLabelUrl),
+      returnItemSkuPresent: readBoolean(result.responseSnapshot, ['returnItemSkuPresent']),
+      returnItemQuantityPresent: readBoolean(result.responseSnapshot, ['returnItemQuantityPresent']),
+      createReturnShipmentFinalized: readBoolean(result.responseSnapshot, ['createReturnShipmentFinalized']) ?? returnFinalized,
       labelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       providerMessage: readString(result.responseSnapshot, ['providerError']),
       returnDeliveryOptionIdPresent: readBoolean(result.responseSnapshot, ['returnDeliveryOptionIdPresent']),

@@ -30,10 +30,10 @@ Confirmed webhook observation from forward shipment sandbox:
 - Observed payload key `reverseShipment` exists.
 - Observed forward statuses include `searchingDriver` and `delivered`.
 
-Important conflict:
-- Try OTO support reportedly said the return label endpoint is `createShipment`.
-- The Postman collection documents `createReturnShipment` and `returnOrderId`.
-- Until sandbox confirms the exact sequence, prefer the Postman evidence for planning and do not implement runtime return creation.
+Confirmed runtime contract:
+- Try OTO return shipments should use `POST /rest/v2/createReturnShipment`.
+- The payload must include the original Try OTO `orderId`, the selected/stored `deliveryOptionId`, the vendor/store `pickupLocationCode`, and item rows with `sku` and `quantity`.
+- The unconfirmed reverse `createShipment` / `manualShipment` path remains disabled.
 
 ## Manual Sandbox PoC Observations
 
@@ -82,9 +82,9 @@ Observed but disabled from Try OTO panel Network trace:
 - This path was tested from panel traces but later determined unnecessary/incorrect by Try OTO support/validation, so runtime finalization through reverse `createShipment` is disabled.
 
 Current runtime safety stance:
-- `createReturnShipment` is the current confirmed runtime action for creating a Try OTO return request/reference.
-- UI wording should say “Return request created; waiting for Try OTO return shipment details.” while label/shipment details are still pending.
-- Admin diagnostics should show whether `deliveryOptionId` was sent and mark reverse `createShipment` finalization as disabled/unconfirmed.
+- `createReturnShipment` is the current confirmed runtime action for creating/finalizing a Try OTO return shipment when the confirmed payload fields are present.
+- UI wording should show finalized return shipment state when `createReturnShipment` returns tracking, barcode, or label evidence. It should only say “Return request created; waiting for Try OTO return shipment details.” while those fields are still pending.
+- Admin diagnostics should show whether `deliveryOptionId`, `sku`, and `quantity` were sent and mark reverse `createShipment` finalization as disabled/unconfirmed.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnDetails` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes return label/AWB/PDF URL fields after request creation.
 - Admin-only diagnostics may call documented `POST /rest/v2/getReturnLink` with the stored `returnOrderId` / return tracking reference to discover whether Try OTO exposes a return finalization link, label/AWB/PDF URL, or next-action URL.
 - `getReturnLink` exact response semantics for label/PDF retrieval are still **Unknown**. Runtime may store a clear label/print URL if a label/AWB/PDF-like field is returned, but generic action/customer/return links must remain diagnostic-only until Try OTO confirms they are API-safe label URLs.

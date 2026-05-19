@@ -119,6 +119,9 @@ export type OrderShipmentExecutionDto = {
       labelFieldPresent: boolean;
       providerMessage: string | null;
       returnDeliveryOptionIdPresent: boolean;
+      returnItemSkuPresent: boolean;
+      returnItemQuantityPresent: boolean;
+      createReturnShipmentFinalized: boolean;
       returnDeliveryOptionLookupCalled: boolean;
       returnDeliveryOptionLookupImplemented: boolean;
       returnPriceLookupCalled: boolean;

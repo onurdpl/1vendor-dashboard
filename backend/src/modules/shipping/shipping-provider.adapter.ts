@@ -1382,6 +1382,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         labelUrl,
         deliveryCompany: readString(statusBody, ['deliveryCompany']),
         providerStatus: readString(statusBody, ['status']),
+        selectedDeliveryOptionId,
         deliveryOptionLookup: {
           ...deliveryOptionLookupDiagnostics,
           lookup: deliveryOptionLookup?.snapshot,
@@ -1562,12 +1563,12 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const accessToken = await this.refreshAccessToken();
     const result = await this.postJson('/rest/v2/createReturnShipment', payload, accessToken, 'createReturnShipment');
     const body = result.body;
-    let returnLabelUrl = readTryOtoLabelUrl(body);
-    let returnTrackingNumber = readTryOtoTrackingNumber(body);
-    let returnBarcode = readTryOtoBarcode(body);
+    const returnLabelUrl = readTryOtoLabelUrl(body);
+    const returnTrackingNumber = readTryOtoTrackingNumber(body);
+    const returnBarcode = readTryOtoBarcode(body);
     const returnOrderId = readTryOtoReturnOrderId(body);
-    let returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
-    let returnFinalized = Boolean(returnLabelUrl);
+    const returnStatus = readString(body, ['status', 'shipmentStatus', 'dcStatus']);
+    const returnFinalized = Boolean(returnLabelUrl || returnTrackingNumber || returnBarcode);
     const returnLabelRetrievable = Boolean(returnLabelUrl);
 
     return {
@@ -1584,9 +1585,12 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         endpoint: '/rest/v2/createReturnShipment',
         requestKeys: Object.keys(payload).sort(),
         itemCount: items.length,
+        returnItemSkuPresent: items.every((item) => Boolean(item.sku)),
+        returnItemQuantityPresent: items.every((item) => Boolean(item.quantity)),
         orderIdPresent: true,
         pickupLocationCodePresent: Boolean(input.pickupLocationCode),
         returnDeliveryOptionIdPresent: Boolean(input.deliveryOptionId),
+        createReturnShipmentFinalized: returnFinalized,
         returnDeliveryOptionLookupCalled: false,
         returnDeliveryOptionLookupImplemented: false,
         returnPriceLookupCalled: false,
