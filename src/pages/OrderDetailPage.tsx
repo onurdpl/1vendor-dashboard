@@ -124,6 +124,40 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function getReturnShipmentEvidenceSummary(shipment: ShipmentExecution) {
+  const returnShipment = shipment.returnShipment;
+  if (!returnShipment) {
+    return getShipmentEvidenceSummary(shipment);
+  }
+
+  return [
+    `Return provider id: ${returnShipment.returnOrderId ? 'yes' : 'pending'}`,
+    `Return barcode: ${returnShipment.barcode ? 'yes' : returnShipment.trackingNumber ? 'same as tracking' : 'pending'}`,
+    `Return tracking: ${returnShipment.trackingNumber ? 'yes' : 'pending'}`,
+    `Return label: ${returnShipment.labelUrl ? 'yes' : 'pending'}`,
+  ].join(' · ');
+}
+
+function isReturnShipmentActionEndpoint(endpoint?: string | null) {
+  return Boolean(
+    endpoint &&
+      (endpoint.includes('/create-return') ||
+        endpoint.includes('/probe-try-oto-return-details') ||
+        endpoint.includes('/probe-try-oto-return-link') ||
+        endpoint.includes('/probe-shopify-return-label')),
+  );
+}
+
+function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
+  if (!actionState.shipment) {
+    return null;
+  }
+
+  return isReturnShipmentActionEndpoint(actionState.endpoint)
+    ? getReturnShipmentEvidenceSummary(actionState.shipment)
+    : getShipmentEvidenceSummary(actionState.shipment);
+}
+
 function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
   if (!returnShipment.finalized && !returnShipment.labelRetrievable) {
     return 'Return request created; waiting for Try OTO return shipment details.';
@@ -752,7 +786,7 @@ export function OrderDetailPage() {
   );
   const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
   const shipmentExecution = order?.shipmentExecution ?? null;
-  const visibleShipmentExecution = shipmentExecution ?? shipmentActionState?.shipment ?? null;
+  const visibleShipmentExecution = shipmentActionState?.shipment ?? shipmentExecution ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
   const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
@@ -2915,7 +2949,7 @@ export function OrderDetailPage() {
                           </span>
                         ) : null}
                         {shipmentActionState.shipment ? (
-                          <span>{getShipmentEvidenceSummary(shipmentActionState.shipment)}</span>
+                          <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>
@@ -3133,31 +3167,31 @@ export function OrderDetailPage() {
                         </a>
                       </div>
                     ) : null}
-                    {shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                    {visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
                       <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
                         <strong>Try OTO return label</strong>
                         <span>
-                          {getTryOtoReturnStatusLabel(shipmentExecution.returnShipment)}
-                          {shipmentExecution.returnShipment.returnOrderId ? ` · ${shipmentExecution.returnShipment.returnOrderId}` : ''}
+                          {getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}
+                          {visibleShipmentExecution.returnShipment.returnOrderId ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}` : ''}
                         </span>
-                        {shipmentExecution.returnShipment.trackingNumber ? (
+                        {visibleShipmentExecution.returnShipment.trackingNumber ? (
                           <div className="summary-row">
                             <span>Return tracking</span>
-                            <strong>{shipmentExecution.returnShipment.trackingNumber}</strong>
+                            <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
                           </div>
                         ) : null}
-                        {shipmentExecution.returnShipment.barcode ? (
+                        {visibleShipmentExecution.returnShipment.barcode ? (
                           <div className="summary-row">
                             <span>Return barcode</span>
-                            <strong>{shipmentExecution.returnShipment.barcode}</strong>
+                            <strong>{visibleShipmentExecution.returnShipment.barcode}</strong>
                           </div>
                         ) : null}
-                        {shipmentExecution.returnShipment.labelUrl ? (
-                          <a className="inline-link" href={shipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
+                        {visibleShipmentExecution.returnShipment.labelUrl ? (
+                          <a className="inline-link" href={visibleShipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
                             Open return label PDF
                           </a>
                         ) : (
-                          <span className="muted">{getTryOtoReturnPendingLabel(shipmentExecution.returnShipment)}</span>
+                          <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
                         )}
                         {isAdmin ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
@@ -3184,47 +3218,47 @@ export function OrderDetailPage() {
                             {!canProbeTryOtoReturnDetails ? (
                               <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
                             ) : null}
-                            {shipmentExecution.returnShipment.detailsProbe ? (
+                            {visibleShipmentExecution.returnShipment.detailsProbe ? (
                               <span>
-                                Last probe: {formatOptionalDate(shipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
+                                Last probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.detailsProbe.attemptedAt ?? undefined)}
                                 {' · '}
-                                status {shipmentExecution.returnShipment.detailsProbe.providerStatus ?? '—'}
+                                status {visibleShipmentExecution.returnShipment.detailsProbe.providerStatus ?? '—'}
                                 {' · '}
                                 label/pdf/url{' '}
-                                {shipmentExecution.returnShipment.detailsProbe.labelUrlPresent ||
-                                shipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ||
-                                shipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent
+                                {visibleShipmentExecution.returnShipment.detailsProbe.labelUrlPresent ||
+                                visibleShipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ||
+                                visibleShipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent
                                   ? 'present'
                                   : 'missing'}
                                 {' · '}
                                 tracking/barcode{' '}
-                                {shipmentExecution.returnShipment.detailsProbe.trackingPresent ||
-                                shipmentExecution.returnShipment.detailsProbe.barcodePresent
+                                {visibleShipmentExecution.returnShipment.detailsProbe.trackingPresent ||
+                                visibleShipmentExecution.returnShipment.detailsProbe.barcodePresent
                                   ? 'present'
                                   : 'missing'}
                               </span>
                             ) : null}
-                            {shipmentExecution.returnShipment.linkProbe ? (
+                            {visibleShipmentExecution.returnShipment.linkProbe ? (
                               <span>
-                                Last link probe: {formatOptionalDate(shipmentExecution.returnShipment.linkProbe.attemptedAt ?? undefined)}
+                                Last link probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.linkProbe.attemptedAt ?? undefined)}
                                 {' · '}
-                                status {shipmentExecution.returnShipment.linkProbe.providerStatus ?? '—'}
+                                status {visibleShipmentExecution.returnShipment.linkProbe.providerStatus ?? '—'}
                                 {' · '}
                                 label/pdf/url{' '}
-                                {shipmentExecution.returnShipment.linkProbe.labelUrlPresent ||
-                                shipmentExecution.returnShipment.linkProbe.pdfLikeFieldsPresent ||
-                                shipmentExecution.returnShipment.linkProbe.urlLikeFieldsPresent
+                                {visibleShipmentExecution.returnShipment.linkProbe.labelUrlPresent ||
+                                visibleShipmentExecution.returnShipment.linkProbe.pdfLikeFieldsPresent ||
+                                visibleShipmentExecution.returnShipment.linkProbe.urlLikeFieldsPresent
                                   ? 'present'
                                   : 'missing'}
                                 {' · '}
-                                action URL {shipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
+                                action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
                               </span>
                             ) : null}
                           </div>
                         ) : null}
                       </div>
                     ) : null}
-                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment?.diagnostics ? (
+                    {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment?.diagnostics ? (
                       <div className="provider-response-summary" aria-label="Try OTO return diagnostics">
                         <div className="provider-response-heading">
                           <strong>Try OTO return diagnostics</strong>
@@ -3232,38 +3266,38 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>Endpoint</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>HTTP</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.httpStatus ?? '—'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.httpStatus ?? '—'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Response keys</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.responseKeys.length
-                              ? shipmentExecution.returnShipment.diagnostics.responseKeys.join(', ')
+                            {visibleShipmentExecution.returnShipment.diagnostics.responseKeys.length
+                              ? visibleShipmentExecution.returnShipment.diagnostics.responseKeys.join(', ')
                               : '—'}
                           </strong>
                         </div>
                         <div className="summary-row">
                           <span>Return provider id</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.returnProviderIdPresent ? 'present' : 'missing'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnProviderIdPresent ? 'present' : 'missing'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Return finalized</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>deliveryOptionId</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Return option lookup</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
                               ? 'called'
-                              : shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
+                              : visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
                                 ? 'not called'
                                 : 'not implemented'}
                           </strong>
@@ -3271,19 +3305,19 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Return price options</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
-                              ? `${shipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupCalled
+                              ? `${visibleShipmentExecution.returnShipment.diagnostics.returnPriceLookupOptionCount ?? 0} option(s)`
                               : 'not called'}
                           </strong>
                         </div>
                         <div className="summary-row">
                           <span>Selected price option</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent ? 'present' : 'missing'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.selectedReturnPriceOptionIdPresent ? 'present' : 'missing'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Return finalization endpoint</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
+                            {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
                               ? 'implemented'
                               : 'disabled / unconfirmed'}
                           </strong>
@@ -3291,8 +3325,8 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Reverse createShipment</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
-                              ? shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
+                            {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentCalled
+                              ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentSuccess
                                 ? 'succeeded'
                                 : 'failed'
                               : 'not called'}
@@ -3301,54 +3335,54 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Reverse response keys</span>
                           <strong>
-                            {shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
-                              ? shipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
+                            {visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.length
+                              ? visibleShipmentExecution.returnShipment.diagnostics.reverseCreateShipmentResponseKeys.join(', ')
                               : '—'}
                           </strong>
                         </div>
                         <div className="summary-row">
                           <span>Label retrievable</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Status source</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.providerStatusSource ?? '—'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerStatusSource ?? '—'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Provider message</span>
-                          <strong>{shipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
+                          <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
                         </div>
                       </div>
                     ) : null}
-                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                    {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
                       <div className="provider-response-summary" aria-label="Try OTO return details probe">
                         <div className="provider-response-heading">
                           <strong>Try OTO return details probe</strong>
                           <span>Admin only</span>
                         </div>
-                        {shipmentExecution.returnShipment.detailsProbe ? (
+                        {visibleShipmentExecution.returnShipment.detailsProbe ? (
                           <>
                             <div className="summary-row">
                               <span>Status</span>
-                              <strong>{toTitleCaseLabel(shipmentExecution.returnShipment.detailsProbe.status)}</strong>
+                              <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.detailsProbe.status)}</strong>
                             </div>
                             <div className="summary-row">
                               <span>HTTP</span>
-                              <strong>{shipmentExecution.returnShipment.detailsProbe.httpStatus ?? '—'}</strong>
+                              <strong>{visibleShipmentExecution.returnShipment.detailsProbe.httpStatus ?? '—'}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Response keys</span>
                               <strong>
-                                {shipmentExecution.returnShipment.detailsProbe.responseKeys.length
-                                  ? shipmentExecution.returnShipment.detailsProbe.responseKeys.join(', ')
+                                {visibleShipmentExecution.returnShipment.detailsProbe.responseKeys.length
+                                  ? visibleShipmentExecution.returnShipment.detailsProbe.responseKeys.join(', ')
                                   : '—'}
                               </strong>
                             </div>
                             <div className="summary-row">
                               <span>Nested keys</span>
                               <strong>
-                                {shipmentExecution.returnShipment.detailsProbe.nestedKeys.length
-                                  ? shipmentExecution.returnShipment.detailsProbe.nestedKeys.slice(0, 12).join(', ')
+                                {visibleShipmentExecution.returnShipment.detailsProbe.nestedKeys.length
+                                  ? visibleShipmentExecution.returnShipment.detailsProbe.nestedKeys.slice(0, 12).join(', ')
                                   : '—'}
                               </strong>
                             </div>
@@ -3356,28 +3390,28 @@ export function OrderDetailPage() {
                               <span>Label/AWB/PDF/URL fields</span>
                               <strong>
                                 {[
-                                  shipmentExecution.returnShipment.detailsProbe.labelLikeFieldsPresent ? 'label' : null,
-                                  shipmentExecution.returnShipment.detailsProbe.awbLikeFieldsPresent ? 'awb' : null,
-                                  shipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ? 'pdf' : null,
-                                  shipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent ? 'url' : null,
+                                  visibleShipmentExecution.returnShipment.detailsProbe.labelLikeFieldsPresent ? 'label' : null,
+                                  visibleShipmentExecution.returnShipment.detailsProbe.awbLikeFieldsPresent ? 'awb' : null,
+                                  visibleShipmentExecution.returnShipment.detailsProbe.pdfLikeFieldsPresent ? 'pdf' : null,
+                                  visibleShipmentExecution.returnShipment.detailsProbe.urlLikeFieldsPresent ? 'url' : null,
                                 ].filter(Boolean).join(', ') || 'missing'}
                               </strong>
                             </div>
                             <div className="summary-row">
                               <span>Label URL</span>
-                              <strong>{shipmentExecution.returnShipment.detailsProbe.labelUrlPresent ? 'present' : 'missing'}</strong>
+                              <strong>{visibleShipmentExecution.returnShipment.detailsProbe.labelUrlPresent ? 'present' : 'missing'}</strong>
                             </div>
-                            {shipmentExecution.returnShipment.detailsProbe.errorMessage ? (
+                            {visibleShipmentExecution.returnShipment.detailsProbe.errorMessage ? (
                               <div className="summary-row">
                                 <span>Message</span>
-                                <strong>{shipmentExecution.returnShipment.detailsProbe.errorMessage}</strong>
+                                <strong>{visibleShipmentExecution.returnShipment.detailsProbe.errorMessage}</strong>
                               </div>
                             ) : null}
                           </>
                         ) : null}
                       </div>
                     ) : null}
-                    {isAdmin && shipmentExecution?.provider === 'try_oto' && shipmentExecution.returnShipment ? (
+                    {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
                       <div className="provider-response-summary" aria-label="Shopify return label upload probe">
                         <div className="provider-response-heading">
                           <strong>Shopify return label upload probe</strong>
@@ -3396,55 +3430,55 @@ export function OrderDetailPage() {
                             Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
                           </span>
                         ) : null}
-                        {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
+                        {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
                           <>
                             <div className="summary-row">
                               <span>Status</span>
-                              <strong>{toTitleCaseLabel(shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
+                              <strong>{toTitleCaseLabel(visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.status)}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Mutation</span>
-                              <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.mutationUsed ?? '—'}</strong>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.mutationUsed ?? '—'}</strong>
                             </div>
                             <div className="summary-row">
                               <span>Reverse fulfillment order</span>
                               <strong>
-                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseFulfillmentOrderIdPresent ? 'present' : 'missing'}
+                                {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseFulfillmentOrderIdPresent ? 'present' : 'missing'}
                               </strong>
                             </div>
                             <div className="summary-row">
                               <span>Reverse line items</span>
                               <strong>
-                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseLineItemIdsPresent ? 'present' : 'missing'}
+                                {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseLineItemIdsPresent ? 'present' : 'missing'}
                               </strong>
                             </div>
                             <div className="summary-row">
                               <span>Reverse delivery id</span>
                               <strong>
-                                {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseDeliveryIdPresent ? 'present' : 'missing'}
+                                {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.reverseDeliveryIdPresent ? 'present' : 'missing'}
                               </strong>
                             </div>
                             <div className="summary-row">
                               <span>Label accepted</span>
-                              <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
+                              <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? 'yes' : 'no'}</strong>
                             </div>
-                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
+                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason ? (
                               <div className="summary-row">
                                 <span>Skipped reason</span>
-                                <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason}</strong>
+                                <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.skippedReason}</strong>
                               </div>
                             ) : null}
-                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage ? (
+                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage ? (
                               <div className="summary-row">
                                 <span>Message</span>
-                                <strong>{shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage}</strong>
+                                <strong>{visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.errorMessage}</strong>
                               </div>
                             ) : null}
-                            {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors.length ? (
+                            {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors.length ? (
                               <div className="summary-row">
                                 <span>Shopify user errors</span>
                                 <strong>
-                                  {shipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors
+                                  {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.shopifyUserErrors
                                     .map((error) => [error.field.join('.'), error.message].filter(Boolean).join(': '))
                                     .join('; ')}
                                 </strong>
@@ -3744,7 +3778,7 @@ export function OrderDetailPage() {
                           </span>
                         ) : null}
                         {shipmentActionState.shipment ? (
-                          <span>{getShipmentEvidenceSummary(shipmentActionState.shipment)}</span>
+                          <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>
