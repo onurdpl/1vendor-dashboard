@@ -5,6 +5,20 @@ This document is planning-only. It defines how customer-initiated Shopify return
 Sources reviewed:
 - `docs/SHOPIFY_DISCOVERIES.md`
 - `docs/TRY_OTO_RETURN_PLAN.md`
+- Shopify Admin GraphQL docs, reviewed 2026-05-19:
+  - `reverseDeliveryCreateWithShipping`
+  - `reverseDeliveryShippingUpdate`
+  - `ReverseDelivery`
+  - `ReverseFulfillmentOrder`
+  - `ReverseDeliveryLineItemInput`
+  - `ReverseDeliveryTrackingInput`
+  - `ReverseDeliveryLabelInput`
+  - `ReverseDeliveryShippingDeliverable`
+  - `ReverseDeliveryLabelV2`
+  - `ReverseDeliveryTrackingV2`
+  - `stagedUploadsCreate`
+  - `StagedUploadInput`
+  - `StagedUploadTargetGenerateUploadResource.RETURN_LABEL`
 
 Hard boundaries:
 - Do not implement runtime code from this document alone.
@@ -312,6 +326,325 @@ Open channel decision:
 - If Shopify email is used, confirm whether return label URL/tracking can be attached to the Shopify return/customer notification.
 - If our email provider is used, confirm sender identity, templates, unsubscribe/legal requirements, and customer email source.
 
+## 6.1 Shopify Return Tracking And Label Upload Plan
+
+This section documents the Shopify-side return tracking and printable label attachment flow. It is planning-only and must not be treated as runtime authorization until tested against the live store/sandbox return object.
+
+### Confirmed Local Observation
+
+Observed behavior:
+- Adding only return tracking number and tracking URL to Shopify return data makes the Shopify customer order page show carrier tracking number/link.
+- Tracking-only data does not produce a printable return label button on the customer order page.
+
+Operational conclusion:
+- Return tracking sync is still required.
+- Printable label visibility requires attaching/uploading the return label PDF through Shopify reverse delivery label fields, not only storing carrier tracking.
+
+### Official Shopify API Findings
+
+Official Admin GraphQL findings:
+- `ReverseDelivery` represents a buyer sending a package back to a merchant.
+- `ReverseDelivery.deliverable` can be a `ReverseDeliveryShippingDeliverable`.
+- `ReverseDeliveryShippingDeliverable.tracking` exposes `carrierName`, `number`, and `url`.
+- `ReverseDeliveryShippingDeliverable.label` exposes `publicFileUrl`.
+- `reverseDeliveryCreateWithShipping` creates a reverse delivery with external shipping information.
+- `reverseDeliveryShippingUpdate` updates an existing reverse delivery with external shipping information.
+- Both mutations accept:
+  - `trackingInput`
+  - `labelInput`
+  - `notifyCustomer`
+- `ReverseDeliveryTrackingInput` supports:
+  - `number`
+  - `url`
+- `ReverseDeliveryLabelInput` supports:
+  - `fileUrl`
+- `ReverseDeliveryLabelInput.fileUrl` is the URL of the label file. Shopify docs also state that if the label file was uploaded to be attached to the delivery, the temporary staged URL should be provided.
+- `stagedUploadsCreate` can generate upload targets.
+- `StagedUploadTargetGenerateUploadResource.RETURN_LABEL` represents a label associated with a return and can be used to create a `ReverseDelivery`.
+
+Important constraint:
+- `ReverseDeliveryTrackingInput` does not expose a carrier-name input field in the reviewed docs. Carrier name display may be derived by Shopify from tracking data, URL, or supported-carrier behavior. Exact Sürat Kargo carrier-name display behavior remains unknown until tested.
+
+### Tracking-Only Sync Behavior
+
+Required tracking mapping:
+- Try OTO return barcode/tracking -> `trackingInput.number`
+- Try OTO return tracking URL -> `trackingInput.url`
+- Carrier target display -> `Sürat Kargo`, but Shopify reverse delivery tracking input has no explicit carrier-name field in the reviewed docs.
+
+Tracking-only mutation candidates:
+
+If no reverse delivery exists yet:
+
+```graphql
+mutation CreateReverseDeliveryWithTracking(
+  $reverseFulfillmentOrderId: ID!
+  $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+  $trackingInput: ReverseDeliveryTrackingInput
+  $notifyCustomer: Boolean
+) {
+  reverseDeliveryCreateWithShipping(
+    reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+    reverseDeliveryLineItems: $reverseDeliveryLineItems
+    trackingInput: $trackingInput
+    notifyCustomer: $notifyCustomer
+  ) {
+    reverseDelivery {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+If a reverse delivery already exists:
+
+```graphql
+mutation UpdateReverseDeliveryTracking(
+  $reverseDeliveryId: ID!
+  $trackingInput: ReverseDeliveryTrackingInput
+  $notifyCustomer: Boolean
+) {
+  reverseDeliveryShippingUpdate(
+    reverseDeliveryId: $reverseDeliveryId
+    trackingInput: $trackingInput
+    notifyCustomer: $notifyCustomer
+  ) {
+    reverseDelivery {
+      id
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+Recommended operational default:
+- Use `notifyCustomer: true` only after the customer-facing notification copy and timing are approved.
+- Use `notifyCustomer: false` during sandbox/internal validation to avoid accidental customer communication.
+
+### PDF Label Attachment Behavior
+
+Required label mapping:
+- Try OTO return label PDF URL -> `labelInput.fileUrl`, if Shopify accepts the external Try OTO PDF URL.
+- If Shopify requires uploaded label files or the Try OTO PDF URL is not stable/public enough, download the PDF server-side and use `stagedUploadsCreate` with resource `RETURN_LABEL`, then pass the staged label URL to `labelInput.fileUrl`.
+
+PDF label mutation candidates:
+
+Create reverse delivery with tracking and label together:
+
+```graphql
+mutation CreateReverseDeliveryWithTrackingAndLabel(
+  $reverseFulfillmentOrderId: ID!
+  $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+  $trackingInput: ReverseDeliveryTrackingInput
+  $labelInput: ReverseDeliveryLabelInput
+  $notifyCustomer: Boolean
+) {
+  reverseDeliveryCreateWithShipping(
+    reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+    reverseDeliveryLineItems: $reverseDeliveryLineItems
+    trackingInput: $trackingInput
+    labelInput: $labelInput
+    notifyCustomer: $notifyCustomer
+  ) {
+    reverseDelivery {
+      id
+      deliverable {
+        ... on ReverseDeliveryShippingDeliverable {
+          label {
+            publicFileUrl
+          }
+          tracking {
+            carrierName
+            number
+            url
+          }
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+Update existing reverse delivery with label:
+
+```graphql
+mutation UpdateReverseDeliveryLabel(
+  $reverseDeliveryId: ID!
+  $trackingInput: ReverseDeliveryTrackingInput
+  $labelInput: ReverseDeliveryLabelInput
+  $notifyCustomer: Boolean
+) {
+  reverseDeliveryShippingUpdate(
+    reverseDeliveryId: $reverseDeliveryId
+    trackingInput: $trackingInput
+    labelInput: $labelInput
+    notifyCustomer: $notifyCustomer
+  ) {
+    reverseDelivery {
+      id
+      deliverable {
+        ... on ReverseDeliveryShippingDeliverable {
+          label {
+            publicFileUrl
+          }
+          tracking {
+            carrierName
+            number
+            url
+          }
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+```
+
+Staged upload fallback plan:
+1. Fetch Try OTO return label PDF server-side.
+2. Call `stagedUploadsCreate` with:
+   - `filename`: a safe generated PDF filename.
+   - `mimeType`: `application/pdf`.
+   - `resource`: `RETURN_LABEL`.
+   - `httpMethod`: use Shopify-provided/default method.
+3. Upload the PDF binary to the returned staged target using Shopify-provided URL/parameters.
+4. Pass the resulting staged URL/resource URL as `ReverseDeliveryLabelInput.fileUrl`.
+5. Create or update the reverse delivery.
+
+Unknowns:
+- Whether Shopify accepts the Try OTO external PDF URL directly as `labelInput.fileUrl` for our store.
+- Whether staged upload is mandatory for customer-page printable label behavior.
+- Exact staged target URL/resource URL field that should be passed into `labelInput.fileUrl` must be verified in sandbox before implementation.
+- Whether the customer page shows the printable label immediately after `reverseDeliveryShippingUpdate`, or only after notification/customer-account refresh.
+
+### Required Shopify IDs
+
+Required IDs for create/update:
+- Shopify Return GID.
+- Reverse fulfillment order ID from `Return.reverseFulfillmentOrders`.
+- Reverse fulfillment order line item IDs from `ReverseFulfillmentOrder.lineItems`.
+- Quantities to attach to each reverse delivery line item.
+- Existing reverse delivery ID, if updating an already-created reverse delivery.
+
+Line-item input:
+- `reverseFulfillmentOrderLineItemId`
+- `quantity`
+
+When `reverseDeliveryLineItems` is an empty array, official docs say Shopify creates a reverse delivery line item for each reverse fulfillment order line item using total quantity. For vendor-scoped and partial return safety, this platform should prefer explicit line-item IDs and quantities once verified.
+
+### Shopify Query Needed Before Mutation
+
+Candidate canonical query:
+
+```graphql
+query GetReturnReverseDeliveryInputs($id: ID!) {
+  return(id: $id) {
+    id
+    reverseFulfillmentOrders(first: 20) {
+      nodes {
+        id
+        status
+        lineItems(first: 50) {
+          nodes {
+            id
+            totalQuantity
+            fulfillmentLineItem {
+              id
+              lineItem {
+                id
+                sku
+              }
+            }
+          }
+        }
+        reverseDeliveries(first: 20) {
+          nodes {
+            id
+            deliverable {
+              ... on ReverseDeliveryShippingDeliverable {
+                label {
+                  publicFileUrl
+                }
+                tracking {
+                  carrierName
+                  number
+                  url
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+Use this query to decide:
+- Create new reverse delivery if no matching reverse delivery exists.
+- Update existing reverse delivery if the return already has one.
+- Avoid duplicate reverse deliveries for the same return line items.
+
+### Planned Mutation Sequence
+
+Preferred sequence for first implementation:
+1. Receive and canonical-fetch Shopify return.
+2. Resolve vendor-scoped return line items using Shopify line item IDs/SKUs and local allocation mapping.
+3. Create Try OTO return shipment and obtain:
+   - return tracking/barcode
+   - return tracking URL
+   - return label PDF URL
+4. Fetch Shopify return reverse fulfillment order data.
+5. Determine whether a matching reverse delivery already exists.
+6. If no reverse delivery exists:
+   - call `reverseDeliveryCreateWithShipping` with explicit reverse fulfillment order line item IDs/quantities, `trackingInput`, and `labelInput`.
+7. If a matching reverse delivery exists:
+   - call `reverseDeliveryShippingUpdate` with `trackingInput` and `labelInput`.
+8. Query the return again and confirm:
+   - reverse delivery ID exists.
+   - tracking number/url are visible.
+   - label `publicFileUrl` is visible.
+9. Store Shopify reverse delivery sync diagnostics locally.
+
+Idempotency rules:
+- Never create another reverse delivery if the existing reverse delivery already has the same tracking number or matching return line items.
+- If tracking exists but label is missing, update the existing reverse delivery rather than creating a new one.
+- If label exists but tracking is missing, update tracking on the existing reverse delivery.
+
+### Stop Conditions
+
+Stop before runtime implementation if:
+- The Shopify Return GID cannot be resolved.
+- Reverse fulfillment order ID cannot be fetched.
+- Reverse fulfillment order line item IDs cannot be mapped to local vendor-scoped return lines.
+- Try OTO return label PDF URL is missing or unavailable.
+- Sandbox cannot confirm whether direct external PDF URL works as `labelInput.fileUrl`.
+- Sandbox cannot confirm the staged upload URL/resource URL to pass to `labelInput.fileUrl`.
+- Shopify userErrors indicate the mutation cannot attach a label for the tested return state.
+- The tested store lacks required `write_returns` scope.
+
+Implementation must not:
+- Create refunds.
+- Close/process returns.
+- Deduct payouts.
+- Modify outbound fulfillment state.
+- Create duplicate reverse deliveries.
+- Notify customers before the notification behavior is approved.
+
 ## 7. Risks
 
 ### Duplicate Return Labels
@@ -374,6 +707,17 @@ Mitigation:
 - Accept `reverseShipment=true` webhook `printAWBURL` when present.
 - Do not guess standalone print endpoint until confirmed.
 
+### Shopify Label Attachment Uncertainty
+
+Risk:
+- Tracking can be visible while printable label remains unavailable unless `labelInput.fileUrl` is attached through Shopify reverse delivery APIs.
+
+Mitigation:
+- Treat tracking sync and label attachment as separate confirmation points.
+- Verify direct Try OTO PDF URL attachment first in sandbox.
+- If direct URL fails or does not produce customer printable label behavior, use `stagedUploadsCreate` with `RETURN_LABEL`.
+- Query `ReverseDeliveryShippingDeliverable.label.publicFileUrl` after mutation before marking Shopify label upload confirmed.
+
 ## 8. Questions For Shopify / Implementation
 
 1. Which webhook fires when a customer requests a return in the active Shopify customer-account flow?
@@ -391,6 +735,12 @@ Mitigation:
 13. Which return lifecycle event represents customer cancellation of a return request?
 14. Are `RETURNS_APPROVE`, `RETURNS_DECLINE`, and `RETURNS_CLOSE` useful when admin approval is not required before label creation?
 15. What Shopify state should be written, if any, when a Try OTO return label is created externally?
+16. Does `reverseDeliveryCreateWithShipping` with `labelInput.fileUrl` make the customer order page show a printable return label button for this store?
+17. Can `labelInput.fileUrl` point directly to a Try OTO PDF URL, or must the PDF be uploaded with `stagedUploadsCreate` using `RETURN_LABEL`?
+18. If staged upload is required, should `ReverseDeliveryLabelInput.fileUrl` receive the staged target `resourceUrl`, upload URL, or another returned URL field?
+19. Does `reverseDeliveryShippingUpdate` notify the customer with printable label instructions when `notifyCustomer: true`?
+20. How does Shopify derive/display `carrierName` for reverse delivery tracking when `ReverseDeliveryTrackingInput` only accepts `number` and `url`?
+21. Should we create a reverse delivery when Shopify already created one during the customer return request, or only update the existing reverse delivery?
 
 ## 9. Stop Conditions
 
