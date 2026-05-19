@@ -186,6 +186,42 @@ function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecuti
   );
 }
 
+function TryOtoReturnAwbPrintProbeSummary({
+  returnShipment,
+}: {
+  returnShipment: NonNullable<ShipmentExecution['returnShipment']>;
+}) {
+  const probe = returnShipment.awbPrintProbe;
+  if (!probe) {
+    return null;
+  }
+
+  return (
+    <div className="provider-response-summary" aria-label="Try OTO return AWB print probe">
+      <div className="provider-response-heading">
+        <strong>Try OTO return AWB print probe</strong>
+        <span>Admin only</span>
+      </div>
+      <div className="summary-row">
+        <span>HTTP</span>
+        <strong>{probe.httpStatus ?? '—'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Label/PDF/URL</span>
+        <strong>{probe.labelUrlPresent || probe.pdfLikeFieldsPresent || probe.urlLikeFieldsPresent ? 'present' : 'missing'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Tracking/barcode</span>
+        <strong>{probe.trackingPresent || probe.barcodePresent ? 'present' : 'missing'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Provider message</span>
+        <strong>{probe.providerMessage ?? probe.errorMessage ?? '—'}</strong>
+      </div>
+    </div>
+  );
+}
+
 function isInternalShipmentReference(value?: string | null) {
   const normalized = value?.trim().toLowerCase() ?? '';
   return Boolean(normalized && normalized.startsWith('shopify-') && normalized.includes('-allocation-'));
@@ -2457,27 +2493,7 @@ export function OrderDetailPage() {
                                         action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
                                       </span>
                                     ) : null}
-                                    {visibleShipmentExecution.returnShipment.awbPrintProbe ? (
-                                      <span>
-                                        Last AWB print probe:{' '}
-                                        {formatOptionalDate(visibleShipmentExecution.returnShipment.awbPrintProbe.attemptedAt ?? undefined)}
-                                        {' · '}
-                                        status {visibleShipmentExecution.returnShipment.awbPrintProbe.providerStatus ?? '—'}
-                                        {' · '}
-                                        label/pdf/url{' '}
-                                        {visibleShipmentExecution.returnShipment.awbPrintProbe.labelUrlPresent ||
-                                        visibleShipmentExecution.returnShipment.awbPrintProbe.pdfLikeFieldsPresent ||
-                                        visibleShipmentExecution.returnShipment.awbPrintProbe.urlLikeFieldsPresent
-                                          ? 'present'
-                                          : 'missing'}
-                                        {' · '}
-                                        tracking/barcode{' '}
-                                        {visibleShipmentExecution.returnShipment.awbPrintProbe.trackingPresent ||
-                                        visibleShipmentExecution.returnShipment.awbPrintProbe.barcodePresent
-                                          ? 'present'
-                                          : 'missing'}
-                                      </span>
-                                    ) : null}
+                                    <TryOtoReturnAwbPrintProbeSummary returnShipment={visibleShipmentExecution.returnShipment} />
                                   </div>
                                 ) : null}
                                 {isAdmin && visibleShipmentExecution.returnShipment.diagnostics ? (
@@ -3349,26 +3365,7 @@ export function OrderDetailPage() {
                                 action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
                               </span>
                             ) : null}
-                            {visibleShipmentExecution.returnShipment.awbPrintProbe ? (
-                              <span>
-                                Last AWB print probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.awbPrintProbe.attemptedAt ?? undefined)}
-                                {' · '}
-                                status {visibleShipmentExecution.returnShipment.awbPrintProbe.providerStatus ?? '—'}
-                                {' · '}
-                                label/pdf/url{' '}
-                                {visibleShipmentExecution.returnShipment.awbPrintProbe.labelUrlPresent ||
-                                visibleShipmentExecution.returnShipment.awbPrintProbe.pdfLikeFieldsPresent ||
-                                visibleShipmentExecution.returnShipment.awbPrintProbe.urlLikeFieldsPresent
-                                  ? 'present'
-                                  : 'missing'}
-                                {' · '}
-                                tracking/barcode{' '}
-                                {visibleShipmentExecution.returnShipment.awbPrintProbe.trackingPresent ||
-                                visibleShipmentExecution.returnShipment.awbPrintProbe.barcodePresent
-                                  ? 'present'
-                                  : 'missing'}
-                              </span>
-                            ) : null}
+                            <TryOtoReturnAwbPrintProbeSummary returnShipment={visibleShipmentExecution.returnShipment} />
                           </div>
                         ) : null}
                       </div>

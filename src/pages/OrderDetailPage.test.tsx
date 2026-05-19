@@ -2260,11 +2260,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const probeSection = await screen.findByLabelText('Try OTO return details action');
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
 
     expect(probeTryOtoReturnAwbPrintMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Try OTO return label found in AWB print response.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
+    const summary = await screen.findByLabelText('Try OTO return AWB print probe');
+    expect(within(summary).getByText('200')).toBeInTheDocument();
+    expect(within(summary).getByText('Label/PDF/URL')).toBeInTheDocument();
+    expect(within(summary).getByText('Tracking/barcode')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
@@ -2371,6 +2377,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
 
     expect((await screen.findAllByText('Return AWB print did not return a label URL yet.')).length).toBeGreaterThan(0);
+    const summary = await screen.findByLabelText('Try OTO return AWB print probe');
+    expect(within(summary).getByText('No print data yet')).toBeInTheDocument();
     expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: pending/)).toBeInTheDocument();
   });
 
