@@ -109,6 +109,7 @@ describe('backend env shipping provider gates', () => {
       TRY_OTO_BASE_URL: 'https://staging-api.tryoto.com',
       TRY_OTO_REFRESH_TOKEN: 'configured-refresh-token',
       TRY_OTO_SANDBOX_MODE: 'true',
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
     });
 
     const env = loadEnv();
@@ -119,5 +120,6 @@ describe('backend env shipping provider gates', () => {
     expect(env.TRY_OTO_BASE_URL).toBe('https://staging-api.tryoto.com');
     expect(env.TRY_OTO_REFRESH_TOKEN).toBe('configured-refresh-token');
     expect(env.TRY_OTO_SANDBOX_MODE).toBe(true);
+    expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(true);
   });
 });

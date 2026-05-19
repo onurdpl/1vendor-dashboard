@@ -32,6 +32,7 @@ const env: AppEnv = {
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: false,
   TRY_OTO_ENABLED: false,
   TRY_OTO_SANDBOX_MODE: false,
+  TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
 };
 
 describe('Shopify fulfillment order lookup', () => {

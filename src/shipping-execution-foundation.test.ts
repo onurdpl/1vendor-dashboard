@@ -35,6 +35,7 @@ const {
   getShippingProviderGateDiagnostics,
   getShippingProviderReadinessDiagnostics,
   ingestKargoEntegratorWebhook,
+  ingestTryOtoWebhook,
   inferShipmentDesi,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
@@ -78,6 +79,7 @@ const env = {
   TRY_OTO_BASE_URL: undefined,
   TRY_OTO_REFRESH_TOKEN: undefined,
   TRY_OTO_SANDBOX_MODE: false,
+  TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
 };
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
@@ -2256,6 +2258,197 @@ describe('shipping execution foundation', () => {
     );
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('registers a Try OTO webhook route that is disabled by default', async () => {
+    const posts = new Map<string, (request: { body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (request: { body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(app as never, env);
+    const result = await posts.get('/webhooks/try-oto')?.({ body: {} }, reply);
+
+    expect(result).toEqual({
+      status: 501,
+      body: {
+        message: 'Try OTO webhook ingestion is disabled.',
+        signatureVerificationImplemented: false,
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
+  it('handles unknown Try OTO webhook payloads without crashing or mutating data', async () => {
+    const result = await ingestTryOtoWebhook(
+      { unknown: true },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: false,
+      matchStatus: 'unmatched',
+      shipmentExecutionId: null,
+      signatureVerificationImplemented: false,
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
+  it('ingests Try OTO webhook tracking updates into the matched shipment execution', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+        timeline: [{ label: 'Shipment created', at: '2026-05-15T10:00:00.000Z', status: 'created' }],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'OTO-ORDER-1039',
+          trackingNumber: 'OTO-TRACK-1039',
+          trackingUrl: 'https://track.example/OTO-TRACK-1039',
+          printLabelURL: 'https://labels.example/OTO-TRACK-1039.pdf',
+          status: 'in_transit',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: true,
+      shipmentExecutionId: 'shipment-try_oto-alloc-1',
+      shipmentStatus: 'in_transit',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-try_oto-alloc-1' },
+        data: expect.objectContaining({
+          trackingNumber: 'OTO-TRACK-1039',
+          trackingUrl: 'https://track.example/OTO-TRACK-1039',
+          labelUrl: 'https://labels.example/OTO-TRACK-1039.pdf',
+          shipmentStatus: 'IN_TRANSIT',
+          responseSnapshot: expect.objectContaining({
+            webhookReceived: true,
+            tryOtoWebhookReceived: true,
+            lastTryOtoWebhookMatchStatus: 'matched',
+            lastTryOtoWebhookStatusField: 'in_transit',
+            tryOtoWebhookSignatureVerificationImplemented: false,
+            tryOtoWebhookResponseKeys: expect.arrayContaining(['orderId', 'printLabelURL', 'status', 'trackingNumber', 'trackingUrl']),
+            timeline: expect.arrayContaining([
+              expect.objectContaining({ label: 'Try OTO webhook received', status: 'in_transit' }),
+              expect.objectContaining({ label: 'Try OTO status updated', status: 'in_transit' }),
+            ]),
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.fulfillment.upsert).not.toHaveBeenCalled();
+  });
+
+  it('keeps duplicate Try OTO webhooks idempotent in the shipment timeline', async () => {
+    const fingerprint = 'try_oto_webhook|OTO-ORDER-1039|||OTO-TRACK-1039||created||';
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      providerShipmentId: 'OTO-ORDER-1039',
+      trackingNumber: 'OTO-TRACK-1039',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        orderId: 'OTO-ORDER-1039',
+        timelineEventFingerprints: [fingerprint, `${fingerprint}|status_updated`],
+        timeline: [
+          { label: 'Try OTO webhook received', at: '2026-05-15T10:00:00.000Z', status: 'created' },
+          { label: 'Try OTO status updated', at: '2026-05-15T10:00:01.000Z', status: 'created' },
+        ],
+      },
+    });
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'OTO-ORDER-1039',
+          trackingNumber: 'OTO-TRACK-1039',
+          status: 'created',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    const updatePayload = prismaMock.shipmentExecution.update.mock.calls.at(-1)?.[0].data.responseSnapshot as {
+      timeline?: Array<{ label: string }>;
+    };
+    expect(updatePayload.timeline?.filter((event) => event.label === 'Try OTO webhook received')).toHaveLength(1);
+    expect(updatePayload.timeline?.filter((event) => event.label === 'Try OTO status updated')).toHaveLength(1);
+  });
+
+  it('records unmatched Try OTO webhooks safely without mutating shipments', async () => {
+    prismaMock.shipmentExecution.findFirst.mockResolvedValue(null);
+    prismaMock.shipmentExecution.findMany.mockResolvedValue([]);
+
+    const result = await ingestTryOtoWebhook(
+      {
+        data: {
+          orderId: 'OTO-ORDER-MISSING',
+          trackingNumber: 'OTO-TRACK-MISSING',
+          status: 'created',
+        },
+      },
+      {
+        env: {
+          ...env,
+          TRY_OTO_ENABLED: true,
+          TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+        },
+      },
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: false,
+      matchStatus: 'unmatched',
+      shipmentExecutionId: null,
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
   it('diagnoses deprecated Kargo cargo integration env fallback without exposing values', () => {

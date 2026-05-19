@@ -181,6 +181,11 @@ export type OrderShipmentExecutionDto = {
       deliveryOptionLookupWeightFieldNames?: string[];
       deliveryOptionLookupNumericWeightPresent?: boolean | null;
       deliveryOptionLookupWeightType?: string | null;
+      lastWebhookReceivedAt?: string | null;
+      lastWebhookMatchStatus?: string | null;
+      lastWebhookStatusField?: string | null;
+      webhookSignatureVerificationImplemented?: boolean | null;
+      webhookWarning?: string | null;
     };
   };
 };

@@ -259,6 +259,22 @@ function appendTimelineEvent(snapshot: unknown, event: { label: string; status?:
   };
 }
 
+function appendTimelineEventOnce(snapshot: unknown, event: { label: string; status?: string | null }, fingerprint: string) {
+  const base = isRecord(snapshot) ? snapshot : {};
+  const fingerprints = Array.isArray(base.timelineEventFingerprints)
+    ? base.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
+    : [];
+
+  if (fingerprints.includes(fingerprint)) {
+    return base;
+  }
+
+  return {
+    ...appendTimelineEvent(base, event),
+    timelineEventFingerprints: [...fingerprints, fingerprint],
+  };
+}
+
 function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) {
   void env;
   return input.carrierId === DUMMY_KARGO_CARRIER_ID;
@@ -1046,7 +1062,11 @@ export function getShippingProviderGateDiagnostics(
     shippingExecutionEnabled: env.SHIPPING_EXECUTION_ENABLED,
     providerSelected,
     providerEnabled,
-    webhookIngestEnabled: isKargo ? env.SHIPPING_SANDBOX_MODE && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED : false,
+    webhookIngestEnabled: isKargo
+      ? env.SHIPPING_SANDBOX_MODE && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED
+      : isTryOto
+        ? env.TRY_OTO_ENABLED && env.TRY_OTO_WEBHOOK_INGEST_ENABLED
+        : false,
     baseUrlConfigured,
     apiKeyConfigured,
     cargoIntegrationIdConfigured,
@@ -1073,7 +1093,8 @@ export function getShippingProviderGateDiagnostics(
       : isTryOto
         ? [
             'Try OTO is sandbox-only in this phase.',
-            'Try OTO webhooks, returns, and production rollout are not implemented.',
+            'Try OTO webhook signature verification is unknown/not implemented.',
+            'Try OTO returns and production rollout are not implemented.',
           ]
         : [],
   };
@@ -1247,6 +1268,112 @@ function normalizeProviderWebhookStatus(status: string | null) {
   return null;
 }
 
+function normalizeTryOtoWebhookStatus(status: string | null) {
+  const normalized = status?.trim().toLowerCase().replace(/\s+/g, '_') ?? '';
+  if (!normalized) {
+    return null;
+  }
+
+  if (['assignedtowarehouse', 'assigned_to_warehouse', 'created', 'shipment_created'].includes(normalized)) {
+    return ShipmentExecutionStatus.CREATED;
+  }
+  if (normalized === 'pending') {
+    return ShipmentExecutionStatus.PENDING;
+  }
+  if (normalized === 'in_transit') {
+    return ShipmentExecutionStatus.IN_TRANSIT;
+  }
+  if (normalized === 'delivered') {
+    return ShipmentExecutionStatus.DELIVERED;
+  }
+  if (['cancelled', 'canceled'].includes(normalized)) {
+    return ShipmentExecutionStatus.CANCELLED;
+  }
+  if (['returned', 'return'].includes(normalized)) {
+    return ShipmentExecutionStatus.RETURNED;
+  }
+
+  return null;
+}
+
+function shipmentStatusRank(status: ShipmentExecutionStatus) {
+  if (status === ShipmentExecutionStatus.PENDING) return 0;
+  if (status === ShipmentExecutionStatus.CREATED) return 1;
+  if (status === ShipmentExecutionStatus.IN_TRANSIT) return 2;
+  if (status === ShipmentExecutionStatus.DELIVERED) return 3;
+  if (
+    status === ShipmentExecutionStatus.CANCELLED ||
+    status === ShipmentExecutionStatus.RETURNED
+  ) {
+    return 4;
+  }
+  return 0;
+}
+
+function chooseWebhookStatus(existing: ShipmentExecutionStatus, incoming: ShipmentExecutionStatus | null) {
+  if (!incoming) {
+    return existing;
+  }
+
+  return shipmentStatusRank(incoming) >= shipmentStatusRank(existing) ? incoming : existing;
+}
+
+function readTryOtoWebhookIdentifiers(data: Record<string, unknown>) {
+  const orderId = readString(data, ['orderId', 'order_id']);
+  const providerOrderId = readString(data, ['providerOrderId', 'otoId', 'oto_id']);
+  const shipmentId = readString(data, ['shipmentId', 'shipment_id', 'id']);
+  const trackingNumber = readString(data, ['trackingNumber', 'tracking_number', 'trackingNo']);
+  const dcTrackingNumber = readString(data, ['dcTrackingNumber', 'dc_tracking_number']);
+
+  return {
+    orderId,
+    providerOrderId,
+    shipmentId,
+    trackingNumber,
+    dcTrackingNumber,
+    candidates: Array.from(
+      new Set([orderId, providerOrderId, shipmentId, trackingNumber, dcTrackingNumber].filter((value): value is string => Boolean(value))),
+    ),
+  };
+}
+
+function buildTryOtoWebhookFingerprint(input: {
+  identifiers: ReturnType<typeof readTryOtoWebhookIdentifiers>;
+  providerStatus: string | null;
+  trackingUrl: string | null;
+  labelUrl: string | null;
+}) {
+  return [
+    'try_oto_webhook',
+    input.identifiers.orderId ?? '',
+    input.identifiers.providerOrderId ?? '',
+    input.identifiers.shipmentId ?? '',
+    input.identifiers.trackingNumber ?? '',
+    input.identifiers.dcTrackingNumber ?? '',
+    input.providerStatus ?? '',
+    input.trackingUrl ?? '',
+    input.labelUrl ?? '',
+  ].join('|');
+}
+
+function matchesTryOtoExecution(execution: ShipmentExecution, candidates: string[]) {
+  if (!candidates.length) {
+    return false;
+  }
+
+  const requestSnapshot = isRecord(execution.requestSnapshot) ? execution.requestSnapshot : {};
+  const responseSnapshot = readSnapshot(execution);
+  const executionCandidates = [
+    execution.providerShipmentId,
+    execution.trackingNumber,
+    resolveTryOtoStatusOrderId(execution),
+    readString(requestSnapshot, ['orderId', 'providerOrderId', 'otoId', 'shipmentId']),
+    readString(responseSnapshot, ['orderId', 'providerOrderId', 'otoId', 'shipmentId']),
+  ].filter((value): value is string => Boolean(value));
+
+  return executionCandidates.some((value) => candidates.includes(value));
+}
+
 export async function ingestKargoEntegratorWebhook(
   payload: unknown,
   options: {
@@ -1325,6 +1452,163 @@ export async function ingestKargoEntegratorWebhook(
     ok: true,
     shipmentExecutionId: updated.id,
     shipmentStatus: mapStatus(updated.shipmentStatus),
+  };
+}
+
+export async function ingestTryOtoWebhook(
+  payload: unknown,
+  options: {
+    env: AppEnv;
+  },
+): Promise<
+  | {
+      ok: true;
+      matched: boolean;
+      matchStatus: 'matched' | 'unmatched';
+      shipmentExecutionId: string | null;
+      shipmentStatus: ShipmentExecutionDto['shipmentStatus'] | null;
+      signatureVerificationImplemented: false;
+      warning: string;
+    }
+  | { ok: false; code: number; message: string }
+> {
+  if (!options.env.TRY_OTO_ENABLED || !options.env.TRY_OTO_WEBHOOK_INGEST_ENABLED) {
+    return {
+      ok: false,
+      code: 501,
+      message: 'Try OTO webhook ingestion is disabled.',
+    };
+  }
+
+  const data = getWebhookData(payload);
+  const responseKeys = Object.keys(data).sort();
+  const identifiers = readTryOtoWebhookIdentifiers(data);
+  const providerStatus = readString(data, ['status', 'orderStatus', 'shipmentStatus', 'state', 'statusField']);
+  const normalizedStatus = normalizeTryOtoWebhookStatus(providerStatus);
+  const trackingUrl = readString(data, ['trackingUrl', 'tracking_url', 'trackingLink', 'tracking_link']);
+  const labelUrl = readString(data, ['printLabelURL', 'printAWBURL', 'labelUrl', 'label_url', 'awbUrl', 'awbURL']);
+  const carrierName = readString(data, ['deliveryCompany', 'deliveryCompanyName', 'carrier', 'carrierName']);
+  const signatureWarning = 'Try OTO webhook signature verification is unknown/not implemented.';
+
+  if (!identifiers.candidates.length) {
+    return {
+      ok: true,
+      matched: false,
+      matchStatus: 'unmatched',
+      shipmentExecutionId: null,
+      shipmentStatus: null,
+      signatureVerificationImplemented: false,
+      warning: signatureWarning,
+    };
+  }
+
+  let execution = await prisma.shipmentExecution.findFirst({
+    where: {
+      provider: ShippingProvider.TRY_OTO,
+      OR: [
+        identifiers.shipmentId ? { providerShipmentId: identifiers.shipmentId } : undefined,
+        identifiers.providerOrderId ? { providerShipmentId: identifiers.providerOrderId } : undefined,
+        identifiers.orderId ? { providerShipmentId: identifiers.orderId } : undefined,
+        identifiers.trackingNumber ? { trackingNumber: identifiers.trackingNumber } : undefined,
+        identifiers.dcTrackingNumber ? { trackingNumber: identifiers.dcTrackingNumber } : undefined,
+      ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+    },
+  });
+
+  if (!execution) {
+    const recentTryOtoExecutions = await prisma.shipmentExecution.findMany({
+      where: {
+        provider: ShippingProvider.TRY_OTO,
+      },
+      orderBy: {
+        updatedAt: 'desc',
+      },
+      take: 200,
+    });
+    execution = recentTryOtoExecutions.find((candidate) => matchesTryOtoExecution(candidate, identifiers.candidates)) ?? null;
+  }
+
+  if (!execution) {
+    return {
+      ok: true,
+      matched: false,
+      matchStatus: 'unmatched',
+      shipmentExecutionId: null,
+      shipmentStatus: null,
+      signatureVerificationImplemented: false,
+      warning: signatureWarning,
+    };
+  }
+
+  const fingerprint = buildTryOtoWebhookFingerprint({
+    identifiers,
+    providerStatus,
+    trackingUrl,
+    labelUrl,
+  });
+  const existingSnapshot = readSnapshot(execution);
+  const duplicateFingerprints = Array.isArray(existingSnapshot.timelineEventFingerprints)
+    ? existingSnapshot.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
+    : [];
+  const isDuplicate = duplicateFingerprints.includes(fingerprint);
+  const nextStatus = chooseWebhookStatus(execution.shipmentStatus, normalizedStatus);
+  const nextTrackingNumber = execution.trackingNumber ?? identifiers.trackingNumber ?? identifiers.dcTrackingNumber;
+  const nextProviderShipmentId = execution.providerShipmentId ?? identifiers.shipmentId ?? identifiers.providerOrderId ?? identifiers.orderId;
+  const webhookSnapshotBase = {
+    ...existingSnapshot,
+    provider: 'try_oto',
+    webhookReceived: true,
+    tryOtoWebhookReceived: true,
+    lastTryOtoWebhookReceivedAt: new Date().toISOString(),
+    lastTryOtoWebhookMatchStatus: 'matched',
+    lastTryOtoWebhookStatusField: providerStatus,
+    tryOtoWebhookSignatureVerificationImplemented: false,
+    tryOtoWebhookWarning: signatureWarning,
+    tryOtoWebhookResponseKeys: responseKeys,
+    providerStatus: providerStatus ?? readString(existingSnapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
+    selectedDeliveryCompanyName: carrierName ?? readString(existingSnapshot, ['selectedDeliveryCompanyName', 'deliveryCompanyName']),
+    lastProviderResponseAt: new Date().toISOString(),
+  };
+  const receivedSnapshot = appendTimelineEventOnce(
+    webhookSnapshotBase,
+    { label: 'Try OTO webhook received', status: providerStatus },
+    fingerprint,
+  );
+  const finalSnapshot = isDuplicate
+    ? receivedSnapshot
+    : appendTimelineEventOnce(
+        {
+          ...receivedSnapshot,
+          timelineEventFingerprints: Array.isArray(receivedSnapshot.timelineEventFingerprints)
+            ? receivedSnapshot.timelineEventFingerprints
+            : duplicateFingerprints,
+        },
+        { label: 'Try OTO status updated', status: providerStatus },
+        `${fingerprint}|status_updated`,
+      );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: execution.id,
+    },
+    data: {
+      providerShipmentId: nextProviderShipmentId,
+      trackingNumber: nextTrackingNumber,
+      trackingUrl: execution.trackingUrl ?? trackingUrl,
+      labelUrl: execution.labelUrl ?? labelUrl,
+      shipmentStatus: nextStatus,
+      responseSnapshot: finalSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return {
+    ok: true,
+    matched: true,
+    matchStatus: 'matched',
+    shipmentExecutionId: updated.id,
+    shipmentStatus: mapStatus(updated.shipmentStatus),
+    signatureVerificationImplemented: false,
+    warning: signatureWarning,
   };
 }
 

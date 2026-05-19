@@ -49,6 +49,7 @@ export type AppEnv = {
   TRY_OTO_BASE_URL?: string;
   TRY_OTO_REFRESH_TOKEN?: string;
   TRY_OTO_SANDBOX_MODE: boolean;
+  TRY_OTO_WEBHOOK_INGEST_ENABLED: boolean;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -264,5 +265,6 @@ export function loadEnv(): AppEnv {
     TRY_OTO_BASE_URL: process.env.TRY_OTO_BASE_URL || undefined,
     TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
     TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
+    TRY_OTO_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false),
   };
 }

@@ -9,6 +9,7 @@ import {
   getShippingProviderReadinessDiagnostics,
   getVendorShippingConfig,
   ingestKargoEntegratorWebhook,
+  ingestTryOtoWebhook,
   listShipmentExecutions,
   previewShipmentExecution,
   refreshTryOtoShipmentStatus,
@@ -36,6 +37,18 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
     if (!result.ok) {
       return reply.code(501).send({
         message: result.message,
+      });
+    }
+
+    return result;
+  });
+
+  app.post('/webhooks/try-oto', async (request, reply) => {
+    const result = await ingestTryOtoWebhook(request.body, { env });
+    if (!result.ok) {
+      return reply.code(result.code ?? 501).send({
+        message: result.message,
+        signatureVerificationImplemented: false,
       });
     }
 

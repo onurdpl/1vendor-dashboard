@@ -262,6 +262,14 @@ function buildShipmentProviderResponseSummary(
             ? deliveryOptionLookupRequest.numericWeightPresent
             : null,
         deliveryOptionLookupWeightType: readString(deliveryOptionLookupRequest, ['weightType']),
+        lastWebhookReceivedAt: readString(snapshot, ['lastTryOtoWebhookReceivedAt']),
+        lastWebhookMatchStatus: readString(snapshot, ['lastTryOtoWebhookMatchStatus']),
+        lastWebhookStatusField: readString(snapshot, ['lastTryOtoWebhookStatusField']),
+        webhookSignatureVerificationImplemented:
+          typeof snapshot?.tryOtoWebhookSignatureVerificationImplemented === 'boolean'
+            ? snapshot.tryOtoWebhookSignatureVerificationImplemented
+            : null,
+        webhookWarning: readString(snapshot, ['tryOtoWebhookWarning']),
       }
     : undefined;
 

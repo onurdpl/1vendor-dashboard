@@ -2562,6 +2562,39 @@ export function OrderDetailPage() {
                         </div>
                         {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
                         {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
+                        {shipmentProviderSummary.tryOtoFinalization?.lastWebhookReceivedAt ||
+                        shipmentProviderSummary.tryOtoFinalization?.lastWebhookMatchStatus ||
+                        shipmentProviderSummary.tryOtoFinalization?.webhookWarning ? (
+                          <>
+                            <div className="summary-row">
+                              <span>Try OTO webhook received</span>
+                              <strong>{formatOptionalDate(shipmentProviderSummary.tryOtoFinalization.lastWebhookReceivedAt ?? undefined)}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO webhook match</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookMatchStatus || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO webhook status</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.lastWebhookStatusField || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO signature verification</span>
+                              <strong>
+                                {shipmentProviderSummary.tryOtoFinalization.webhookSignatureVerificationImplemented === null ||
+                                shipmentProviderSummary.tryOtoFinalization.webhookSignatureVerificationImplemented === undefined
+                                  ? '—'
+                                  : shipmentProviderSummary.tryOtoFinalization.webhookSignatureVerificationImplemented
+                                    ? 'implemented'
+                                    : 'not implemented'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Try OTO webhook warning</span>
+                              <strong>{shipmentProviderSummary.tryOtoFinalization.webhookWarning || '—'}</strong>
+                            </div>
+                          </>
+                        ) : null}
                         <div className="summary-row">
                           <span>Status field</span>
                           <strong>{shipmentProviderSummary.statusField || '—'}</strong>
