@@ -2232,6 +2232,32 @@ export function OrderDetailPage() {
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
                                     </div>
                                     <div className="summary-row">
+                                      <span>deliveryOptionId</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return option lookup</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
+                                          ? 'called'
+                                          : visibleShipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
+                                            ? 'not called'
+                                            : 'not implemented'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return finalization endpoint</span>
+                                      <strong>
+                                        {visibleShipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
+                                          ? 'implemented'
+                                          : visibleShipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
+                                            ? 'not implemented'
+                                            : 'unknown'}
+                                      </strong>
+                                    </div>
+                                    <div className="summary-row">
                                       <span>Label retrievable</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.returnLabelRetrievable ? 'yes' : 'no'}</strong>
                                     </div>
@@ -2896,6 +2922,30 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Return finalized</span>
                           <strong>{shipmentExecution.returnShipment.diagnostics.returnFinalized ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>deliveryOptionId</span>
+                          <strong>{shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionIdPresent ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return option lookup</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupCalled
+                              ? 'called'
+                              : shipmentExecution.returnShipment.diagnostics.returnDeliveryOptionLookupImplemented
+                                ? 'not called'
+                                : 'not implemented'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return finalization endpoint</span>
+                          <strong>
+                            {shipmentExecution.returnShipment.diagnostics.returnFinalizeEndpointImplemented
+                              ? 'implemented'
+                              : shipmentExecution.returnShipment.diagnostics.returnFinalizationEndpointConfirmed
+                                ? 'not implemented'
+                                : 'unknown'}
+                          </strong>
                         </div>
                         <div className="summary-row">
                           <span>Label retrievable</span>

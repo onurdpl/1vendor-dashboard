@@ -68,7 +68,12 @@ export type ShipmentExecution = {
       returnStatus: string | null;
       labelFieldPresent: boolean;
       providerMessage: string | null;
+      returnDeliveryOptionIdPresent: boolean;
+      returnDeliveryOptionLookupCalled: boolean;
+      returnDeliveryOptionLookupImplemented: boolean;
       returnFinalized: boolean;
+      returnFinalizationEndpointConfirmed: boolean;
+      returnFinalizeEndpointImplemented: boolean;
       returnLabelRetrievable: boolean;
       providerStatusSource: string | null;
     } | null;

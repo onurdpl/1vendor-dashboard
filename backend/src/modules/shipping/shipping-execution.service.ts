@@ -244,7 +244,12 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnStatus: readString(diagnostics, ['returnStatus']),
     labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
     providerMessage: readString(diagnostics, ['providerMessage']),
+    returnDeliveryOptionIdPresent: readBoolean(diagnostics, ['returnDeliveryOptionIdPresent']),
+    returnDeliveryOptionLookupCalled: readBoolean(diagnostics, ['returnDeliveryOptionLookupCalled']),
+    returnDeliveryOptionLookupImplemented: readBoolean(diagnostics, ['returnDeliveryOptionLookupImplemented']),
     returnFinalized: readBoolean(diagnostics, ['returnFinalized']),
+    returnFinalizationEndpointConfirmed: readBoolean(diagnostics, ['returnFinalizationEndpointConfirmed']),
+    returnFinalizeEndpointImplemented: readBoolean(diagnostics, ['returnFinalizeEndpointImplemented']),
     returnLabelRetrievable: readBoolean(diagnostics, ['returnLabelRetrievable']),
     providerStatusSource: readString(diagnostics, ['providerStatusSource']),
   };
@@ -2562,6 +2567,7 @@ export async function createTryOtoReturnShipmentLabel(
     orderId,
     items: fallbackItems,
     pickupLocationCode: readString(requestSnapshot, ['pickupLocationCode']),
+    deliveryOptionId: readString(requestSnapshot, ['deliveryOptionId']),
   });
   const returnFinalized = readBoolean(result.responseSnapshot, ['returnFinalized']) || Boolean(result.returnLabelUrl);
   const returnLabelRetrievable = readBoolean(result.responseSnapshot, ['returnLabelRetrievable']) || Boolean(result.returnLabelUrl);
@@ -2600,11 +2606,16 @@ export async function createTryOtoReturnShipmentLabel(
       returnLabelPresent: Boolean(result.returnLabelUrl),
       labelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       providerMessage: readString(result.responseSnapshot, ['providerError']),
+      returnDeliveryOptionIdPresent: readBoolean(result.responseSnapshot, ['returnDeliveryOptionIdPresent']),
+      returnDeliveryOptionLookupCalled: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupCalled']),
+      returnDeliveryOptionLookupImplemented: readBoolean(result.responseSnapshot, ['returnDeliveryOptionLookupImplemented']),
       returnLabelSourceChecked: readString(result.responseSnapshot, ['returnLabelSourceChecked']) ?? 'createReturnShipment',
       createReturnShipmentLabelFieldPresent: readBoolean(result.responseSnapshot, ['createReturnShipmentLabelFieldPresent']),
       webhookReverseShipmentPrintAwbUrlPresent: readBoolean(result.responseSnapshot, ['webhookReverseShipmentPrintAwbUrlPresent']),
       printEndpointImplemented: readBoolean(result.responseSnapshot, ['printEndpointImplemented']),
       returnFinalized,
+      returnFinalizationEndpointConfirmed: readBoolean(result.responseSnapshot, ['returnFinalizationEndpointConfirmed']),
+      returnFinalizeEndpointImplemented: readBoolean(result.responseSnapshot, ['returnFinalizeEndpointImplemented']),
       returnLabelRetrievable,
       providerStatusSource: returnProviderStatusSource,
     },

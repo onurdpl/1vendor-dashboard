@@ -2336,6 +2336,7 @@ describe('shipping execution foundation', () => {
       requestSnapshot: {
         orderId: 'OTO-ORDER-1',
         pickupLocationCode: 'PICKUP-1',
+        deliveryOptionId: 'surat-kargo-marketplace',
         lines: [{ sku: 'SKU-1', quantity: 1 }],
       },
       responseSnapshot: {
@@ -2371,6 +2372,7 @@ describe('shipping execution foundation', () => {
     expect(adapter.createReturnShipment).toHaveBeenCalledWith({
       orderId: 'OTO-ORDER-1',
       pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
       items: [{ sku: 'SKU-1', quantity: '1' }],
     });
     expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
@@ -2389,6 +2391,69 @@ describe('shipping execution foundation', () => {
       }),
     );
     expect(result.returnShipment?.labelUrl).toBe('https://labels.example/return.pdf');
+  });
+
+  it('passes documented Try OTO return deliveryOptionId when already stored', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'oto-1',
+      trackingNumber: 'OTO-TRACK-1',
+      requestSnapshot: {
+        orderId: 'OTO-ORDER-1',
+        pickupLocationCode: 'PICKUP-1',
+        deliveryOptionId: 'surat-kargo-marketplace',
+        lines: [{ sku: 'SKU-1', quantity: 1 }],
+      },
+      responseSnapshot: {
+        provider: 'try_oto',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'OTO-ORDER-1-R1',
+        returnTrackingNumber: null,
+        returnTrackingUrl: null,
+        returnLabelUrl: null,
+        returnBarcode: null,
+        returnStatus: null,
+        responseSnapshot: {
+          status: 200,
+          bodyKeys: ['returnOrderId'],
+          requestKeys: ['deliveryOptionId', 'items', 'orderId', 'pickupLocationCode'],
+          returnDeliveryOptionIdPresent: true,
+          returnDeliveryOptionLookupCalled: false,
+          returnDeliveryOptionLookupImplemented: false,
+          returnFinalizationEndpointConfirmed: false,
+          returnFinalizeEndpointImplemented: false,
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({ fulfillmentStatus: 'Fulfilled' }));
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).toHaveBeenCalledWith({
+      orderId: 'OTO-ORDER-1',
+      pickupLocationCode: 'PICKUP-1',
+      deliveryOptionId: 'surat-kargo-marketplace',
+      items: [{ sku: 'SKU-1', quantity: '1' }],
+    });
+    expect(result.returnShipment?.diagnostics).toMatchObject({
+      returnDeliveryOptionIdPresent: true,
+      returnDeliveryOptionLookupCalled: false,
+      returnDeliveryOptionLookupImplemented: false,
+      returnFinalizationEndpointConfirmed: false,
+      returnFinalizeEndpointImplemented: false,
+    });
   });
 
   it('marks Try OTO return creation without label as request created and unfinalized', async () => {

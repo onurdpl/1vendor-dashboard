@@ -33,6 +33,7 @@ export type ShippingProviderReturnCreateInput = {
     quantity: string;
   }>;
   pickupLocationCode?: string | null;
+  deliveryOptionId?: string | null;
 };
 
 export type ShippingProviderReturnCreateResult = {
@@ -1440,6 +1441,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         orderId: input.orderId,
         items: input.items,
         ...(input.pickupLocationCode ? { pickupLocationCode: input.pickupLocationCode } : {}),
+        ...(input.deliveryOptionId ? { deliveryOptionId: input.deliveryOptionId } : {}),
       },
     });
     if (disabled) {
@@ -1487,6 +1489,7 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     const payload = {
       orderId,
       ...(input.pickupLocationCode ? { pickupLocationCode: input.pickupLocationCode } : {}),
+      ...(input.deliveryOptionId ? { deliveryOptionId: input.deliveryOptionId } : {}),
       items,
     };
     const accessToken = await this.refreshAccessToken();
@@ -1515,6 +1518,9 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         itemCount: items.length,
         orderIdPresent: true,
         pickupLocationCodePresent: Boolean(input.pickupLocationCode),
+        returnDeliveryOptionIdPresent: Boolean(input.deliveryOptionId),
+        returnDeliveryOptionLookupCalled: false,
+        returnDeliveryOptionLookupImplemented: false,
         returnProviderIdPresent: Boolean(returnOrderId),
         returnOrderIdPresent: Boolean(returnOrderId),
         returnTrackingPresent: Boolean(returnTrackingNumber),
@@ -1522,6 +1528,8 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         returnLabelPresent: Boolean(returnLabelUrl),
         returnStatus,
         returnFinalized,
+        returnFinalizationEndpointConfirmed: false,
+        returnFinalizeEndpointImplemented: false,
         returnLabelRetrievable: Boolean(returnLabelUrl),
         returnProviderStatusSource: 'createReturnShipment',
         returnLabelRetrievalConfirmed: Boolean(returnLabelUrl),

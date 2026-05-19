@@ -202,7 +202,12 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnStatus: readString(diagnostics, ['returnStatus']),
     labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
     providerMessage: readString(diagnostics, ['providerMessage']),
+    returnDeliveryOptionIdPresent: readBoolean(diagnostics, ['returnDeliveryOptionIdPresent']),
+    returnDeliveryOptionLookupCalled: readBoolean(diagnostics, ['returnDeliveryOptionLookupCalled']),
+    returnDeliveryOptionLookupImplemented: readBoolean(diagnostics, ['returnDeliveryOptionLookupImplemented']),
     returnFinalized: readBoolean(diagnostics, ['returnFinalized']),
+    returnFinalizationEndpointConfirmed: readBoolean(diagnostics, ['returnFinalizationEndpointConfirmed']),
+    returnFinalizeEndpointImplemented: readBoolean(diagnostics, ['returnFinalizeEndpointImplemented']),
     returnLabelRetrievable: readBoolean(diagnostics, ['returnLabelRetrievable']),
     providerStatusSource: readString(diagnostics, ['providerStatusSource']),
   };

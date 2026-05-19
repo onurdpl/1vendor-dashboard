@@ -57,6 +57,26 @@ Interpretation:
 
 ## Endpoint Candidates
 
+## Runtime Comparison Findings
+
+Most recent runtime/API comparison:
+- The raw Postman collection contains `POST /rest/v2/createReturnShipment`.
+- The raw Postman collection does **not** expose a return-specific delivery-option lookup endpoint.
+- The raw Postman collection does **not** expose a separate return shipment finalize/purchase endpoint.
+- The raw Postman collection does include generic forward delivery option endpoints:
+  - `POST /rest/v2/checkOTODeliveryFee`
+  - `POST /rest/v2/checkDeliveryFee`
+  - `GET /rest/v2/getDeliveryOptions`
+- The `createReturnShipment` example includes optional `deliveryOptionId`, which may correspond to the manual panel carrier-selection step, but this is **not confirmed**.
+- The manual Try OTO panel flow shows return details, cargo options, and create cargo before Kargo Ref No/Barkod No generation. The API endpoint mapping for that panel sequence remains **Unknown**.
+- Runtime should pass a documented `deliveryOptionId` to `createReturnShipment` only when it is already configured/stored from a confirmed source.
+- Runtime must not call a guessed return option lookup or guessed return finalize endpoint until Try OTO confirms the endpoint/parameters or sandbox API testing proves the flow.
+
+Current runtime safety stance:
+- `createReturnShipment` without a confirmed return label/finalized shipment is treated as return request/reference creation.
+- UI wording should say “Return request created / awaiting provider shipment” when finalization is unconfirmed.
+- Admin diagnostics should show whether `deliveryOptionId` was sent, whether return option lookup was called, and whether a return finalization endpoint is implemented/confirmed.
+
 ### Create Return Shipment
 
 Candidate:
