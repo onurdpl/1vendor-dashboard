@@ -30,6 +30,20 @@ export type ShopifyFulfillmentSyncDto = {
   lastAttemptedAt: string | null;
 };
 
+export type ShopifyReturnSignalDiscoveryDto = {
+  topic: string;
+  receivedAt: string;
+  topLevelPayloadKeys: string[];
+  orderIdPresent: boolean;
+  returnIdPresent: boolean;
+  lineItemIdsPresent: boolean;
+  refundIdPresent: boolean;
+  financialStatus: string | null;
+  fulfillmentStatus: string | null;
+  matchedOrderId: string | null;
+  matchedByField: string | null;
+};
+
 export type OrderDetailLineItemDto = {
   id: string;
   sourceLineItemId: string;
@@ -217,6 +231,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
+  shopifyReturnSignal: ShopifyReturnSignalDiscoveryDto | null;
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
   shipmentExecution: OrderShipmentExecutionDto | null;

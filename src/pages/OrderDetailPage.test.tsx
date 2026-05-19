@@ -1820,6 +1820,43 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(fulfillmentStatus).getByText('Synced · Shopify fulfillment is confirmed.')).toBeInTheDocument();
   });
 
+  it('shows admin-only Shopify return signal diagnostics when available', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shopifyReturnSignal: {
+        topic: 'returns/update',
+        receivedAt: '2026-05-19T08:00:00.000Z',
+        topLevelPayloadKeys: ['admin_graphql_api_id', 'id', 'order_id', 'return_line_items'],
+        orderIdPresent: true,
+        returnIdPresent: true,
+        lineItemIdsPresent: true,
+        refundIdPresent: false,
+        financialStatus: null,
+        fulfillmentStatus: null,
+        matchedOrderId: 'shopify-order-db-1029',
+        matchedByField: 'order_id',
+      },
+    });
+
+    renderOrderDetail();
+
+    const diagnostics = await screen.findByLabelText('Shopify return signal diagnostics');
+    expect(within(diagnostics).getByText('Shopify return signal discovery')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('returns/update')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('order_id')).toBeInTheDocument();
+    expect(within(diagnostics).getAllByText('yes').length).toBeGreaterThanOrEqual(2);
+    expect(within(diagnostics).getByText('admin_graphql_api_id, id, order_id, return_line_items')).toBeInTheDocument();
+  });
+
   it('warns when tracking is stored locally but Shopify fulfillment is unconfirmed', async () => {
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,

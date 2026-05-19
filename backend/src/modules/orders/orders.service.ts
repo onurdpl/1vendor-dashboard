@@ -5,7 +5,12 @@ import type {
   OrderShipmentExecutionDto,
   OrderSummaryDto,
   ShopifyFulfillmentSyncDto,
+  ShopifyReturnSignalDiscoveryDto,
 } from './orders.types.js';
+import {
+  isShopifyReturnSignalTopic,
+  mapWebhookEventToReturnSignalDiscovery,
+} from '../shopify/return-signal-discovery.service.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -439,6 +444,44 @@ function mapShipmentExecution(execution: {
   };
 }
 
+async function getLatestShopifyReturnSignalForOrder(shopifyOrderDbId: string): Promise<ShopifyReturnSignalDiscoveryDto | null> {
+  const events = await prisma.webhookEvent.findMany({
+    where: {
+      shopifyOrderId: shopifyOrderDbId,
+      topic: {
+        in: [
+          'returns/create',
+          'returns/request',
+          'returns/update',
+          'returns/approve',
+          'returns/decline',
+          'returns/close',
+          'returns/cancel',
+          'refunds/create',
+          'orders/updated',
+          'fulfillment_orders/updated',
+        ],
+      },
+    },
+    orderBy: {
+      receivedAt: 'desc',
+    },
+    take: 10,
+  });
+
+  for (const event of events) {
+    if (!isShopifyReturnSignalTopic(event.topic)) {
+      continue;
+    }
+    const summary = mapWebhookEventToReturnSignalDiscovery(event);
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return null;
+}
+
 export async function listVendorOrders(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
@@ -518,6 +561,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
   }
 
   const totalAmount = computeTotalAmount(allocation.lineItems);
+  const shopifyReturnSignal = await getLatestShopifyReturnSignalForOrder(allocation.order.id);
 
   return {
     id: allocation.id,
@@ -544,6 +588,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
       carrier: allocation.carrier,
       trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
     }),
+    shopifyReturnSignal,
     shipmentExecution: mapShipmentExecution(allocation.shipmentExecutions?.[0]),
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,

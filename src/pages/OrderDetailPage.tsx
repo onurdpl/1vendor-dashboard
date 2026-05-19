@@ -189,6 +189,46 @@ function getShopifyFulfillmentSyncSummary(order: OrderDetail, shipment?: Shipmen
   };
 }
 
+function ShopifyReturnSignalDiagnostics({ order, isAdmin }: { order: OrderDetail; isAdmin: boolean }) {
+  const signal = order.shopifyReturnSignal;
+  if (!isAdmin || !signal) {
+    return null;
+  }
+
+  return (
+    <div className="provider-response-summary" aria-label="Shopify return signal diagnostics">
+      <div className="provider-response-heading">
+        <strong>Shopify return signal discovery</strong>
+        <span>Admin only</span>
+      </div>
+      <div className="summary-row">
+        <span>Topic</span>
+        <strong>{signal.topic}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Received</span>
+        <strong>{formatOptionalDate(signal.receivedAt)}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Matched by</span>
+        <strong>{signal.matchedByField || '—'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Return id present</span>
+        <strong>{signal.returnIdPresent ? 'yes' : 'no'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Line item ids present</span>
+        <strong>{signal.lineItemIdsPresent ? 'yes' : 'no'}</strong>
+      </div>
+      <div className="summary-row">
+        <span>Payload keys</span>
+        <strong>{signal.topLevelPayloadKeys.length ? signal.topLevelPayloadKeys.join(', ') : '—'}</strong>
+      </div>
+    </div>
+  );
+}
+
 function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fallbackCarrier?: string | null) {
   const providerCarrierName = shipment?.providerCarrierName?.trim();
   if (shipment?.provider === 'try_oto') {
@@ -2155,6 +2195,7 @@ export function OrderDetailPage() {
                             ) : null}
                           </div>
                         ) : null}
+                        <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
                         {canRefreshTryOtoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                             <strong>Try OTO status refresh</strong>
@@ -2636,6 +2677,7 @@ export function OrderDetailPage() {
                         ) : null}
                       </div>
                     ) : null}
+                    <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
                     {canRefreshTryOtoShipmentStatus ? (
                       <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                         <strong>Try OTO status refresh</strong>

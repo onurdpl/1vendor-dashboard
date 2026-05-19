@@ -361,6 +361,19 @@ export type OrderDetail = OrderSummary & {
     errorMessage: string | null;
     lastAttemptedAt: string | null;
   };
+  shopifyReturnSignal?: {
+    topic: string;
+    receivedAt: string;
+    topLevelPayloadKeys: string[];
+    orderIdPresent: boolean;
+    returnIdPresent: boolean;
+    lineItemIdsPresent: boolean;
+    refundIdPresent: boolean;
+    financialStatus: string | null;
+    fulfillmentStatus: string | null;
+    matchedOrderId: string | null;
+    matchedByField: string | null;
+  } | null;
 };
 
 export type VendorAllocationSummary = {

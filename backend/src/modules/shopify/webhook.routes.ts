@@ -14,6 +14,7 @@ import {
   applyReturnLifecycleStatusWebhook,
   ingestReturnRequestWebhook,
 } from './return-lifecycle-ingestion.service.js';
+import { recordShopifyReturnSignalDiscovery } from './return-signal-discovery.service.js';
 import type {
   ReturnLifecycleTopic,
   ReturnLifecycleWebhookPayload,
@@ -200,6 +201,11 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         payloadRef: idempotencyResult.event.payloadHash,
       });
       const payload = (request.body ?? {}) as ReturnLifecycleWebhookPayload;
+      await recordShopifyReturnSignalDiscovery({
+        event: idempotencyResult.event,
+        payload,
+        topic,
+      });
       let ingestionResult;
       try {
         await markJobProcessing(operationalJob?.id);
@@ -249,6 +255,91 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         shopifyReturnGid: ingestionResult.shopifyReturnGid,
         affectedRecordCount: ingestionResult.affectedRecordCount,
         topic,
+      });
+    });
+  };
+
+  const registerReturnSignalDiscoveryRoute = (
+    path: string,
+    topic: string,
+  ) => {
+    app.post(path, async (request, reply) => {
+      const rawBodyBuffer = getRawBodyBuffer(request.rawBodyBuffer, request.rawBody);
+      const rawBody = rawBodyBuffer.toString('utf8');
+      const headers = getShopifyWebhookHeaders(request);
+      const isValid = verifyShopifyWebhookHmac(
+        rawBodyBuffer,
+        headers.hmac,
+        resolveWebhookSecret(topic),
+      );
+
+      if (!isValid) {
+        logWebhookVerificationFailure({
+          path,
+          topic,
+          contentType: request.headers['content-type'] as string | undefined,
+          rawBodyBuffer,
+          hasHmacHeader: !!headers.hmac,
+        });
+
+        return reply.code(401).send({ message: 'Invalid Shopify webhook signature.' });
+      }
+
+      if (!env.DATABASE_URL) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: false,
+          action: 'return_signal_discovery_deferred',
+          topic,
+        });
+      }
+
+      const idempotencyResult = await getOrCreateWebhookEvent({
+        topic,
+        shopDomain: headers.shopDomain,
+        webhookId: headers.webhookId,
+        rawBody,
+      });
+
+      if (idempotencyResult.isDuplicate) {
+        return reply.code(202).send({
+          ok: true,
+          duplicate: true,
+          action: 'duplicate_ignored',
+          topic,
+        });
+      }
+
+      const payload = request.body ?? {};
+      const summary = await recordShopifyReturnSignalDiscovery({
+        event: idempotencyResult.event,
+        payload,
+        topic,
+        markProcessed: true,
+      });
+      app.log.info(
+        {
+          topic,
+          webhookEventId: idempotencyResult.event.id,
+          payloadKeys: summary.topLevelPayloadKeys,
+          orderIdPresent: summary.orderIdPresent,
+          returnIdPresent: summary.returnIdPresent,
+          lineItemIdsPresent: summary.lineItemIdsPresent,
+          refundIdPresent: summary.refundIdPresent,
+          matchedOrder: Boolean(summary.matchedOrderId),
+          matchedByField: summary.matchedByField,
+        },
+        'Shopify return signal discovery webhook received.',
+      );
+
+      return reply.code(202).send({
+        ok: true,
+        duplicate: false,
+        action: 'return_signal_discovery_recorded',
+        processingStatus: 'processed',
+        topic,
+        matchedOrder: Boolean(summary.matchedOrderId),
+        matchedByField: summary.matchedByField,
       });
     });
   };
@@ -544,6 +635,11 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
       sourceShopifyOrderId:
         payload.order_id !== undefined && payload.order_id !== null ? String(payload.order_id) : null,
     });
+    await recordShopifyReturnSignalDiscovery({
+      event: idempotencyResult.event,
+      payload,
+      topic: headers.topic,
+    });
     let ingestionResult;
     try {
       await markJobProcessing(operationalJob?.id);
@@ -588,6 +684,10 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
   });
 
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-request', 'returns/request');
+  registerReturnSignalDiscoveryRoute('/webhooks/shopify/returns-create', 'returns/create');
+  registerReturnSignalDiscoveryRoute('/webhooks/shopify/returns-update', 'returns/update');
+  registerReturnSignalDiscoveryRoute('/webhooks/shopify/orders-updated', 'orders/updated');
+  registerReturnSignalDiscoveryRoute('/webhooks/shopify/fulfillment-orders-updated', 'fulfillment_orders/updated');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-approve', 'returns/approve');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-decline', 'returns/decline');
   registerSkeletonReturnLifecycleRoute('/webhooks/shopify/returns-close', 'returns/close');

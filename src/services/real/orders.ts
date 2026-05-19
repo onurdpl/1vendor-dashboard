@@ -88,6 +88,7 @@ type OrderDetailDto = OrderSummaryDto & {
     errorMessage: string | null;
     lastAttemptedAt: string | null;
   };
+  shopifyReturnSignal?: OrderDetail['shopifyReturnSignal'];
   lineItems: Array<{
     id: string;
     sourceLineItemId: string;
@@ -341,6 +342,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shipmentUpdatedAt: dto.shipmentUpdatedAt ?? undefined,
     shipmentExecution: dto.shipmentExecution ?? null,
     shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
+    shopifyReturnSignal: dto.shopifyReturnSignal ?? null,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
