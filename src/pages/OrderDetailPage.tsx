@@ -11,6 +11,7 @@ import {
   getShippingProviderDiagnostics,
   getVendorShippingConfig,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   refreshShipmentExecutionStatus,
@@ -142,6 +143,7 @@ function isReturnShipmentActionEndpoint(endpoint?: string | null) {
   return Boolean(
     endpoint &&
       (endpoint.includes('/create-return') ||
+        endpoint.includes('/probe-try-oto-return-awb-print') ||
         endpoint.includes('/probe-try-oto-return-details') ||
         endpoint.includes('/probe-try-oto-return-link') ||
         endpoint.includes('/probe-shopify-return-label')),
@@ -724,6 +726,12 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: probeTryOtoReturnAwbPrintMutation, isPending: isProbingTryOtoReturnAwbPrint } = useMutationAction(
+    async (shipmentExecutionId: string) => probeTryOtoReturnAwbPrint(shipmentExecutionId),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: submitTrackingMutation, isPending: isSubmittingTracking } = useMutationAction(
     async (payload: { allocationId: string; trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer: boolean }) => {
       return submitFulfillmentTracking(payload.allocationId, {
@@ -877,6 +885,10 @@ export function OrderDetailPage() {
         visibleShipmentExecution.returnShipment?.trackingNumber ||
         visibleShipmentExecution.returnShipment?.barcode,
     );
+  const canProbeTryOtoReturnAwbPrint =
+    isAdmin &&
+    visibleShipmentExecution?.provider === 'try_oto' &&
+    Boolean(visibleShipmentExecution.returnShipment?.returnOrderId);
 
   useEffect(() => {
     setShipmentCustomerOverrides({});
@@ -1193,6 +1205,46 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-link`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleProbeTryOtoReturnAwbPrint() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Probing Try OTO return AWB print...',
+      endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
+    });
+
+    void probeTryOtoReturnAwbPrintMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const probe = shipment.returnShipment?.awbPrintProbe;
+        const foundLabel = Boolean(shipment.returnShipment?.labelUrl || probe?.labelUrlPresent);
+        const message = foundLabel
+          ? 'Try OTO return label found in AWB print response.'
+          : probe?.errorMessage || 'Return AWB print did not return a label URL yet.';
+        setShipmentActionState({
+          tone: foundLabel ? 'success' : 'info',
+          message,
+          shipment,
+          endpoint: `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
+        });
+        showFeedback(message, foundLabel ? 'success' : 'info');
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return AWB print probe could not be run.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /admin/shipments/${visibleShipmentExecution.id}/probe-try-oto-return-awb-print`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2354,9 +2406,20 @@ export function OrderDetailPage() {
                                       >
                                         {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
                                       </button>
+                                      <button
+                                        type="button"
+                                        className="button button-secondary"
+                                        onClick={handleProbeTryOtoReturnAwbPrint}
+                                        disabled={!canProbeTryOtoReturnAwbPrint || isProbingTryOtoReturnAwbPrint}
+                                      >
+                                        {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
+                                      </button>
                                     </div>
                                     {!canProbeTryOtoReturnDetails ? (
                                       <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                                    ) : null}
+                                    {!canProbeTryOtoReturnAwbPrint ? (
+                                      <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
                                     ) : null}
                                     {visibleShipmentExecution.returnShipment.detailsProbe ? (
                                       <span>
@@ -2392,6 +2455,27 @@ export function OrderDetailPage() {
                                           : 'missing'}
                                         {' · '}
                                         action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
+                                      </span>
+                                    ) : null}
+                                    {visibleShipmentExecution.returnShipment.awbPrintProbe ? (
+                                      <span>
+                                        Last AWB print probe:{' '}
+                                        {formatOptionalDate(visibleShipmentExecution.returnShipment.awbPrintProbe.attemptedAt ?? undefined)}
+                                        {' · '}
+                                        status {visibleShipmentExecution.returnShipment.awbPrintProbe.providerStatus ?? '—'}
+                                        {' · '}
+                                        label/pdf/url{' '}
+                                        {visibleShipmentExecution.returnShipment.awbPrintProbe.labelUrlPresent ||
+                                        visibleShipmentExecution.returnShipment.awbPrintProbe.pdfLikeFieldsPresent ||
+                                        visibleShipmentExecution.returnShipment.awbPrintProbe.urlLikeFieldsPresent
+                                          ? 'present'
+                                          : 'missing'}
+                                        {' · '}
+                                        tracking/barcode{' '}
+                                        {visibleShipmentExecution.returnShipment.awbPrintProbe.trackingPresent ||
+                                        visibleShipmentExecution.returnShipment.awbPrintProbe.barcodePresent
+                                          ? 'present'
+                                          : 'missing'}
                                       </span>
                                     ) : null}
                                   </div>
@@ -3214,9 +3298,20 @@ export function OrderDetailPage() {
                               >
                                 {isProbingTryOtoReturnLink ? 'Probing...' : 'Probe Try OTO return link'}
                               </button>
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                onClick={handleProbeTryOtoReturnAwbPrint}
+                                disabled={!canProbeTryOtoReturnAwbPrint || isProbingTryOtoReturnAwbPrint}
+                              >
+                                {isProbingTryOtoReturnAwbPrint ? 'Probing...' : 'Probe Try OTO return AWB print'}
+                              </button>
                             </div>
                             {!canProbeTryOtoReturnDetails ? (
                               <span className="muted">Requires Try OTO return order id, tracking number, or barcode.</span>
+                            ) : null}
+                            {!canProbeTryOtoReturnAwbPrint ? (
+                              <span className="muted">Return AWB print probe requires Try OTO return order id.</span>
                             ) : null}
                             {visibleShipmentExecution.returnShipment.detailsProbe ? (
                               <span>
@@ -3252,6 +3347,26 @@ export function OrderDetailPage() {
                                   : 'missing'}
                                 {' · '}
                                 action URL {visibleShipmentExecution.returnShipment.linkProbe.actionUrlPresent ? 'present' : 'missing'}
+                              </span>
+                            ) : null}
+                            {visibleShipmentExecution.returnShipment.awbPrintProbe ? (
+                              <span>
+                                Last AWB print probe: {formatOptionalDate(visibleShipmentExecution.returnShipment.awbPrintProbe.attemptedAt ?? undefined)}
+                                {' · '}
+                                status {visibleShipmentExecution.returnShipment.awbPrintProbe.providerStatus ?? '—'}
+                                {' · '}
+                                label/pdf/url{' '}
+                                {visibleShipmentExecution.returnShipment.awbPrintProbe.labelUrlPresent ||
+                                visibleShipmentExecution.returnShipment.awbPrintProbe.pdfLikeFieldsPresent ||
+                                visibleShipmentExecution.returnShipment.awbPrintProbe.urlLikeFieldsPresent
+                                  ? 'present'
+                                  : 'missing'}
+                                {' · '}
+                                tracking/barcode{' '}
+                                {visibleShipmentExecution.returnShipment.awbPrintProbe.trackingPresent ||
+                                visibleShipmentExecution.returnShipment.awbPrintProbe.barcodePresent
+                                  ? 'present'
+                                  : 'missing'}
                               </span>
                             ) : null}
                           </div>

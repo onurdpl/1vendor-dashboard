@@ -20,6 +20,7 @@ const createReturnShipmentLabelMock = vi.fn();
 const probeShopifyReturnLabelUploadMock = vi.fn();
 const probeTryOtoReturnDetailsMock = vi.fn();
 const probeTryOtoReturnLinkMock = vi.fn();
+const probeTryOtoReturnAwbPrintMock = vi.fn();
 const submitFulfillmentTrackingMock = vi.fn();
 const listReturnsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
@@ -55,6 +56,7 @@ vi.mock('../features/orders/api', async () => {
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
     probeTryOtoReturnDetails: (shipmentExecutionId: string) => probeTryOtoReturnDetailsMock(shipmentExecutionId),
     probeTryOtoReturnLink: (shipmentExecutionId: string) => probeTryOtoReturnLinkMock(shipmentExecutionId),
+    probeTryOtoReturnAwbPrint: (shipmentExecutionId: string) => probeTryOtoReturnAwbPrintMock(shipmentExecutionId),
     submitFulfillmentTracking: (
       allocationId: string,
       payload: { trackingNumber: string; carrier: string; trackingUrl?: string; notifyCustomer?: boolean },
@@ -488,6 +490,52 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         },
       },
       updatedAt: '2026-05-15T19:50:00.000Z',
+    });
+    probeTryOtoReturnAwbPrintMock.mockReset();
+    probeTryOtoReturnAwbPrintMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: null,
+        labelUrl: 'https://app.tryoto.example/return-label-1028.pdf',
+        barcode: 'RET-BARCODE-1028',
+        status: 'created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['returnOrderId', 'printReverseShipment'],
+        responseKeys: ['printAWBURL', 'returnOrderId'],
+        trackingPresent: true,
+        labelPresent: true,
+        labelRetrievalConfirmed: true,
+        labelRetrievalNote: null,
+        finalized: true,
+        labelRetrievable: true,
+        providerStatusSource: 'return AWB print',
+        awbPrintProbe: {
+          status: 'success',
+          attemptedAt: '2026-05-15T19:51:00.000Z',
+          endpoint: '/rest/v2/print/OTO-ORDER-1028-R1?printReverseShipment=true',
+          httpStatus: 200,
+          responseKeys: ['printAWBURL', 'trackingNumber'],
+          nestedKeys: ['printAWBURL', 'trackingNumber'],
+          labelLikeFieldsPresent: true,
+          awbLikeFieldsPresent: true,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: true,
+          trackingPresent: true,
+          barcodePresent: true,
+          providerStatus: 'created',
+          labelUrlPresent: true,
+          providerMessage: null,
+          errorMessage: null,
+        },
+      },
+      updatedAt: '2026-05-15T19:51:00.000Z',
     });
     submitFulfillmentTrackingMock.mockReset();
     submitFulfillmentTrackingMock.mockResolvedValue({
@@ -2159,6 +2207,224 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(probeTryOtoReturnLinkMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
     expect((await screen.findAllByText('Try OTO return label found in return link response.')).length).toBeGreaterThan(0);
     expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
+  });
+
+  it('lets admins probe Try OTO return AWB print and persist the return label URL', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+          detailsProbe: null,
+          linkProbe: null,
+          awbPrintProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Try OTO return details action');
+    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
+
+    expect(probeTryOtoReturnAwbPrintMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
+    expect((await screen.findAllByText('Try OTO return label found in AWB print response.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: yes/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open return label PDF' })).toHaveAttribute(
+      'href',
+      'https://app.tryoto.example/return-label-1028.pdf',
+    );
+  });
+
+  it('keeps AWB print fallback when the probe returns no label URL', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1028-R1',
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+          detailsProbe: null,
+          linkProbe: null,
+          awbPrintProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+    probeTryOtoReturnAwbPrintMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'try_oto',
+      shipmentStatus: 'delivered',
+      providerShipmentId: 'OTO-SHIP-1028',
+      trackingNumber: 'OTO-TRACK-1028',
+      labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+      returnShipment: {
+        provider: 'try_oto',
+        returnOrderId: 'OTO-ORDER-1028-R1',
+        trackingNumber: 'RET-TRACK-1028',
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: 'RET-BARCODE-1028',
+        status: 'request_created',
+        createdAt: '2026-05-15T19:46:00.000Z',
+        requestKeys: ['returnOrderId', 'printReverseShipment'],
+        responseKeys: ['message'],
+        trackingPresent: true,
+        labelPresent: false,
+        labelRetrievalConfirmed: false,
+        labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
+        finalized: false,
+        labelRetrievable: false,
+        providerStatusSource: 'return AWB print',
+        awbPrintProbe: {
+          status: 'no_label',
+          attemptedAt: '2026-05-15T19:51:00.000Z',
+          endpoint: '/rest/v2/print/OTO-ORDER-1028-R1?printReverseShipment=true',
+          httpStatus: 200,
+          responseKeys: ['message'],
+          nestedKeys: ['message'],
+          labelLikeFieldsPresent: false,
+          awbLikeFieldsPresent: false,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: false,
+          trackingPresent: false,
+          barcodePresent: false,
+          providerStatus: null,
+          labelUrlPresent: false,
+          providerMessage: 'No print data yet',
+          errorMessage: 'Return AWB print did not return a label URL yet.',
+        },
+      },
+      updatedAt: '2026-05-15T19:51:00.000Z',
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Try OTO return details action');
+    await user.click(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' }));
+
+    expect((await screen.findAllByText('Return AWB print did not return a label URL yet.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Return provider id: yes · Return barcode: yes · Return tracking: yes · Return label: pending/)).toBeInTheDocument();
+  });
+
+  it('blocks Try OTO return AWB print probe when returnOrderId is missing', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
+        provider: 'try_oto',
+        shipmentStatus: 'delivered',
+        providerShipmentId: 'OTO-SHIP-1028',
+        trackingNumber: 'OTO-TRACK-1028',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: null,
+          trackingNumber: 'RET-TRACK-1028',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-BARCODE-1028',
+          status: 'request_created',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: ['items', 'orderId'],
+          responseKeys: ['returnOrderId'],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
+          finalized: false,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+          detailsProbe: null,
+          linkProbe: null,
+          awbPrintProbe: null,
+        },
+        providerResponseSummary: null,
+      },
+    });
+
+    renderOrderDetail();
+
+    const probeSection = await screen.findByLabelText('Try OTO return details action');
+    expect(within(probeSection).getByRole('button', { name: 'Probe Try OTO return AWB print' })).toBeDisabled();
+    expect(screen.getByText('Return AWB print probe requires Try OTO return order id.')).toBeInTheDocument();
   });
 
   it('hides Try OTO return details probe action from vendors', async () => {

@@ -191,6 +191,24 @@ export type ShipmentExecutionDto = {
       providerMessage: string | null;
       errorMessage: string | null;
     } | null;
+    awbPrintProbe: {
+      status: string;
+      attemptedAt: string | null;
+      endpoint: string | null;
+      httpStatus: number | null;
+      responseKeys: string[];
+      nestedKeys: string[];
+      labelLikeFieldsPresent: boolean;
+      awbLikeFieldsPresent: boolean;
+      pdfLikeFieldsPresent: boolean;
+      urlLikeFieldsPresent: boolean;
+      trackingPresent: boolean;
+      barcodePresent: boolean;
+      providerStatus: string | null;
+      labelUrlPresent: boolean;
+      providerMessage: string | null;
+      errorMessage: string | null;
+    } | null;
     shopifyReturnLabelUploadProbe: {
       status: string;
       attemptedAt: string | null;

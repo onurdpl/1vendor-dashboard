@@ -71,6 +71,7 @@ export interface ShippingProviderAdapter {
   createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
   probeReturnDetails?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
   probeReturnLink?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
+  probeReturnAwbPrint?(returnOrderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
@@ -1034,6 +1035,53 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
     };
   }
 
+  private async getJson(path: string, accessToken: string, operation: string) {
+    const target = getTryOtoRequestTarget(this.env.TRY_OTO_BASE_URL, path);
+    const response = await fetch(this.requestUrl(path), {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+      },
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const providerRequestId =
+      response.headers.get('x-request-id') ??
+      response.headers.get('x-correlation-id') ??
+      response.headers.get('request-id');
+    const responseText = await response.text();
+    const parsedBody = parseResponseBody(contentType, responseText);
+    const record = getProviderResponseRecord(parsedBody);
+    const snapshot = {
+      status: response.status,
+      ok: response.ok,
+      contentType,
+      parsedBodyType: Array.isArray(parsedBody) ? 'array' : typeof parsedBody,
+      bodyKeys: Object.keys(record).sort(),
+      topLevelKeys: isRecord(parsedBody) ? Object.keys(parsedBody).sort() : [],
+      provider: 'try_oto',
+      operation,
+      requestId: providerRequestId ?? readString(record, ['request_id', 'requestId', 'traceId', 'trace_id']),
+      requestPath: target.requestPath,
+      requestTargetHostname: target.requestTargetHostname,
+      selectedEnvironment: 'sandbox',
+      detectedResponseFormat: getDetectedResponseFormat(contentType, parsedBody),
+      responseSnippet: sanitizeResponseSnippet(responseText),
+      providerError: readSafeProviderError(record),
+      providerErrorCode: readSafeProviderErrorCode(record),
+      providerValidationErrors: readSafeValidationErrors(record),
+    };
+
+    if (!response.ok) {
+      throw new ShippingProviderExecutionError(`Try OTO ${operation} failed with HTTP ${response.status}.`, snapshot);
+    }
+
+    return {
+      snapshot,
+      body: record,
+    };
+  }
+
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
     const disabled = this.requireReady(input);
     if (disabled) {
@@ -1717,6 +1765,54 @@ export class TryOtoAdapter implements ShippingProviderAdapter {
         pdfLikeFieldsPresent: hasNestedKeyPattern(body, /pdf/i),
         urlLikeFieldsPresent: hasNestedKeyPattern(body, /url|link/i),
         actionUrlPresent: hasNestedKeyPattern(body, /url|link/i) && !Boolean(labelUrl),
+        trackingPresent: Boolean(trackingNumber),
+        barcodePresent: Boolean(barcode),
+        labelUrlPresent: Boolean(labelUrl),
+        providerStatus,
+        providerMessage: readSafeProviderError(body),
+      },
+    };
+  }
+
+  async probeReturnAwbPrint(returnOrderId: string): Promise<ShippingProviderReturnDetailsProbeResult> {
+    const trimmedReturnOrderId = returnOrderId.trim();
+    if (!trimmedReturnOrderId) {
+      throw new ShippingProviderExecutionError('Try OTO return AWB print probe requires a return order id.', {
+        provider: 'try_oto',
+        operation: 'printReturnAwb',
+        endpoint: '/rest/v2/print/{returnOrderId}?printReverseShipment=true',
+        returnOrderIdPresent: false,
+      });
+    }
+
+    const endpoint = `/rest/v2/print/${encodeURIComponent(trimmedReturnOrderId)}?printReverseShipment=true`;
+    const accessToken = await this.refreshAccessToken();
+    const result = await this.getJson(endpoint, accessToken, 'printReturnAwb');
+    const body = result.body;
+    const nestedKeys = collectNestedKeys(body);
+    const labelUrl =
+      findNestedStringByKeyPattern(body, /(?:print.*(?:awb|label)|(?:awb|label).*url|pdf|fileUrl|file_url)/i) ??
+      readTryOtoLabelUrl(body);
+    const trackingNumber = findNestedStringByKeyPattern(body, /^(?:trackingNumber|dcTrackingNumber|tracking_number|dc_tracking_number)$/i);
+    const barcode = findNestedStringByKeyPattern(body, /(?:barcode|barCode|awbNumber|awb_number)/i);
+    const providerStatus = findNestedStringByKeyPattern(body, /^(?:status|shipmentStatus|dcStatus|returnStatus)$/i);
+
+    return {
+      returnLabelUrl: labelUrl,
+      returnTrackingNumber: trackingNumber,
+      returnBarcode: barcode,
+      returnStatus: providerStatus,
+      responseSnapshot: {
+        ...result.snapshot,
+        provider: 'try_oto',
+        operation: 'printReturnAwb',
+        endpoint,
+        requestKeys: ['returnOrderId', 'printReverseShipment'],
+        nestedKeys,
+        labelLikeFieldsPresent: hasNestedKeyPattern(body, /(?:label|printLabel|printAWB|fileUrl|file_url)/i),
+        awbLikeFieldsPresent: hasNestedKeyPattern(body, /awb/i),
+        pdfLikeFieldsPresent: hasNestedKeyPattern(body, /pdf/i),
+        urlLikeFieldsPresent: hasNestedKeyPattern(body, /url/i),
         trackingPresent: Boolean(trackingNumber),
         barcodePresent: Boolean(barcode),
         labelUrlPresent: Boolean(labelUrl),

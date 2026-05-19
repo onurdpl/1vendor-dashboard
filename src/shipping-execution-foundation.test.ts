@@ -42,6 +42,7 @@ const {
   ingestTryOtoWebhook,
   inferShipmentDesi,
   probeShopifyReturnLabelUpload,
+  probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   previewShipmentExecution,
@@ -3107,6 +3108,150 @@ describe('shipping execution foundation', () => {
         status: 'no_label',
         actionUrlPresent: true,
         labelUrlPresent: false,
+      },
+    });
+  });
+
+  it('blocks Try OTO return AWB print probe without returnOrderId', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          trackingNumber: 'RET-TRACK-1',
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnAwbPrint(existing.id, {
+      env,
+      adapter: buildAdapter({ provider: 'TRY_OTO' as const }),
+    });
+
+    expect(result.returnShipment?.awbPrintProbe).toMatchObject({
+      status: 'blocked',
+      endpoint: '/rest/v2/print/{returnOrderId}?printReverseShipment=true',
+      errorMessage: 'Try OTO return AWB print probe requires a return order id.',
+    });
+  });
+
+  it('persists Try OTO return label URL found by AWB print probe', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+          labelUrl: null,
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      probeReturnAwbPrint: vi.fn().mockResolvedValue({
+        returnLabelUrl: 'https://labels.example/return-awb.pdf',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnBarcode: 'RET-BARCODE-1',
+        returnStatus: 'created',
+        responseSnapshot: {
+          status: 200,
+          endpoint: '/rest/v2/print/OTO-ORDER-1-R1?printReverseShipment=true',
+          bodyKeys: ['printAWBURL', 'trackingNumber'],
+          nestedKeys: ['printAWBURL', 'trackingNumber'],
+          labelLikeFieldsPresent: true,
+          awbLikeFieldsPresent: true,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: true,
+          trackingPresent: true,
+          barcodePresent: true,
+          providerStatus: 'created',
+          providerMessage: null,
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnAwbPrint(existing.id, {
+      env,
+      adapter,
+    });
+
+    expect(adapter.probeReturnAwbPrint).toHaveBeenCalledWith('OTO-ORDER-1-R1');
+    expect(result.returnShipment).toMatchObject({
+      labelUrl: 'https://labels.example/return-awb.pdf',
+      labelRetrievalConfirmed: true,
+      labelRetrievable: true,
+      providerStatusSource: 'return AWB print',
+      awbPrintProbe: {
+        status: 'success',
+        endpoint: '/rest/v2/print/OTO-ORDER-1-R1?printReverseShipment=true',
+        labelUrlPresent: true,
+      },
+    });
+  });
+
+  it('keeps safe fallback when AWB print returns no label URL', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-try_oto-alloc-1',
+      provider: 'TRY_OTO',
+      shipmentStatus: 'DELIVERED',
+      responseSnapshot: {
+        provider: 'try_oto',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'OTO-ORDER-1-R1',
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'TRY_OTO' as const,
+      probeReturnAwbPrint: vi.fn().mockResolvedValue({
+        returnLabelUrl: null,
+        returnTrackingNumber: null,
+        returnBarcode: null,
+        returnStatus: null,
+        responseSnapshot: {
+          status: 200,
+          endpoint: '/rest/v2/print/OTO-ORDER-1-R1?printReverseShipment=true',
+          bodyKeys: ['message'],
+          nestedKeys: ['message'],
+          labelLikeFieldsPresent: false,
+          awbLikeFieldsPresent: false,
+          pdfLikeFieldsPresent: false,
+          urlLikeFieldsPresent: false,
+          trackingPresent: false,
+          barcodePresent: false,
+          providerStatus: null,
+          providerMessage: 'No print data yet',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing;
+
+    const result = await probeTryOtoReturnAwbPrint(existing.id, {
+      env,
+      adapter,
+    });
+
+    expect(result.returnShipment).toMatchObject({
+      labelUrl: null,
+      labelRetrievalConfirmed: false,
+      labelRetrievable: false,
+      labelRetrievalNote: 'Return AWB print did not return a label URL yet.',
+      awbPrintProbe: {
+        status: 'no_label',
+        labelUrlPresent: false,
+        providerMessage: 'No print data yet',
       },
     });
   });

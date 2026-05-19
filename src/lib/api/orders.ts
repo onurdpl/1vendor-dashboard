@@ -83,6 +83,10 @@ export async function probeTryOtoReturnLink(shipmentExecutionId: string) {
   return runtimeServices.orders.probeTryOtoReturnLink(shipmentExecutionId);
 }
 
+export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
+  return runtimeServices.orders.probeTryOtoReturnAwbPrint(shipmentExecutionId);
+}
+
 export async function getShippingProviderDiagnostics(
   options: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null } = {},
 ) {

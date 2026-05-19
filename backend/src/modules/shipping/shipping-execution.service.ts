@@ -320,6 +320,32 @@ function mapTryOtoReturnLinkProbe(returnShipment: Record<string, unknown>) {
   };
 }
 
+function mapTryOtoReturnAwbPrintProbe(returnShipment: Record<string, unknown>) {
+  const probe = isRecord(returnShipment.awbPrintProbe) ? returnShipment.awbPrintProbe : null;
+  if (!probe) {
+    return null;
+  }
+
+  return {
+    status: readString(probe, ['status']) ?? 'not_started',
+    attemptedAt: readString(probe, ['attemptedAt']),
+    endpoint: readString(probe, ['endpoint']),
+    httpStatus: readNumber(probe, ['httpStatus']),
+    responseKeys: readStringArray(probe.responseKeys),
+    nestedKeys: readStringArray(probe.nestedKeys),
+    labelLikeFieldsPresent: readBoolean(probe, ['labelLikeFieldsPresent']),
+    awbLikeFieldsPresent: readBoolean(probe, ['awbLikeFieldsPresent']),
+    pdfLikeFieldsPresent: readBoolean(probe, ['pdfLikeFieldsPresent']),
+    urlLikeFieldsPresent: readBoolean(probe, ['urlLikeFieldsPresent']),
+    trackingPresent: readBoolean(probe, ['trackingPresent']),
+    barcodePresent: readBoolean(probe, ['barcodePresent']),
+    providerStatus: readString(probe, ['providerStatus']),
+    labelUrlPresent: readBoolean(probe, ['labelUrlPresent']),
+    providerMessage: readString(probe, ['providerMessage']),
+    errorMessage: readString(probe, ['errorMessage']),
+  };
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecutionDto['returnShipment'] {
   const returnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
   if (!returnShipment) {
@@ -349,6 +375,7 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
     diagnostics: mapTryOtoReturnDiagnostics(returnShipment),
     detailsProbe: mapTryOtoReturnDetailsProbe(returnShipment),
     linkProbe: mapTryOtoReturnLinkProbe(returnShipment),
+    awbPrintProbe: mapTryOtoReturnAwbPrintProbe(returnShipment),
     shopifyReturnLabelUploadProbe: mapShopifyReturnLabelUploadProbe(returnShipment),
   };
 }
@@ -2836,7 +2863,7 @@ function buildTryOtoReturnDetailsProbeSnapshot(input: {
 async function persistTryOtoReturnDetailsProbe(
   execution: ShipmentExecution,
   probe: ReturnType<typeof buildTryOtoReturnDetailsProbeSnapshot>,
-  probeKey: 'detailsProbe' | 'linkProbe',
+  probeKey: 'detailsProbe' | 'linkProbe' | 'awbPrintProbe',
   updates: {
     labelUrl?: string | null;
     trackingNumber?: string | null;
@@ -2846,7 +2873,12 @@ async function persistTryOtoReturnDetailsProbe(
 ) {
   const snapshot = readSnapshot(execution);
   const existingReturnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : {};
-  const source = probeKey === 'linkProbe' ? 'getReturnLink' : 'getReturnDetails';
+  const source =
+    probeKey === 'awbPrintProbe'
+      ? 'return AWB print'
+      : probeKey === 'linkProbe'
+        ? 'getReturnLink'
+        : 'getReturnDetails';
   const labelUrl = updates.labelUrl ?? readString(existingReturnShipment, ['labelUrl', 'returnLabelUrl']);
   const trackingNumber = updates.trackingNumber ?? readString(existingReturnShipment, ['trackingNumber', 'returnTrackingNumber']);
   const barcode = updates.barcode ?? readString(existingReturnShipment, ['barcode', 'returnBarcode']);
@@ -2862,7 +2894,11 @@ async function persistTryOtoReturnDetailsProbe(
         labelPresent: Boolean(labelUrl),
         labelRetrievalConfirmed: Boolean(labelUrl),
         labelRetrievable: Boolean(labelUrl),
-        labelRetrievalNote: labelUrl ? null : `Return label is not available from ${source} yet.`,
+        labelRetrievalNote: labelUrl
+          ? null
+          : probeKey === 'awbPrintProbe'
+            ? 'Return AWB print did not return a label URL yet.'
+            : `Return label is not available from ${source} yet.`,
         providerStatusSource: source,
         [probeKey]: probe,
       },
@@ -2870,10 +2906,14 @@ async function persistTryOtoReturnDetailsProbe(
     },
     {
       label: labelUrl
-        ? probeKey === 'linkProbe'
+        ? probeKey === 'awbPrintProbe'
+          ? 'Try OTO return AWB print label discovered'
+          : probeKey === 'linkProbe'
           ? 'Try OTO return link label discovered'
           : 'Try OTO return details label discovered'
-        : probeKey === 'linkProbe'
+        : probeKey === 'awbPrintProbe'
+          ? 'Try OTO return AWB print probed'
+          : probeKey === 'linkProbe'
           ? 'Try OTO return link probed'
           : 'Try OTO return details probed',
       status: updates.status ?? probe.status,
@@ -3085,6 +3125,103 @@ export async function probeTryOtoReturnLink(
         errorMessage: message,
       }),
       'linkProbe',
+    );
+  }
+}
+
+export async function probeTryOtoReturnAwbPrint(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.TRY_OTO) {
+    throw new Error('Try OTO return AWB print probe is only available for Try OTO shipments.');
+  }
+
+  const attemptedAt = new Date().toISOString();
+  const responseSnapshot = readSnapshot(existing);
+  const returnShipment = isRecord(responseSnapshot.returnShipment) ? responseSnapshot.returnShipment : null;
+  const returnOrderId = readString(returnShipment, ['returnOrderId']);
+
+  const blocked = async (errorMessage: string) =>
+    persistTryOtoReturnDetailsProbe(
+      existing,
+      buildTryOtoReturnDetailsProbeSnapshot({
+        status: 'blocked',
+        attemptedAt,
+        endpoint: '/rest/v2/print/{returnOrderId}?printReverseShipment=true',
+        errorMessage,
+      }),
+      'awbPrintProbe',
+    );
+
+  if (!returnOrderId) {
+    return blocked('Try OTO return AWB print probe requires a return order id.');
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'try_oto');
+  if (!adapter.probeReturnAwbPrint) {
+    return blocked('Try OTO return AWB print probe is not implemented for the selected provider adapter.');
+  }
+
+  try {
+    const result = await adapter.probeReturnAwbPrint(returnOrderId);
+    const labelUrl = result.returnLabelUrl;
+    return persistTryOtoReturnDetailsProbe(
+      existing,
+      buildTryOtoReturnDetailsProbeSnapshot({
+        status: labelUrl ? 'success' : 'no_label',
+        attemptedAt,
+        endpoint: readString(result.responseSnapshot, ['endpoint']) ?? '/rest/v2/print/{returnOrderId}?printReverseShipment=true',
+        httpStatus: readNumber(result.responseSnapshot, ['status']),
+        responseKeys: readStringArray(result.responseSnapshot.bodyKeys),
+        nestedKeys: readStringArray(result.responseSnapshot.nestedKeys),
+        labelLikeFieldsPresent: readBoolean(result.responseSnapshot, ['labelLikeFieldsPresent']),
+        awbLikeFieldsPresent: readBoolean(result.responseSnapshot, ['awbLikeFieldsPresent']),
+        pdfLikeFieldsPresent: readBoolean(result.responseSnapshot, ['pdfLikeFieldsPresent']),
+        urlLikeFieldsPresent: readBoolean(result.responseSnapshot, ['urlLikeFieldsPresent']),
+        trackingPresent: readBoolean(result.responseSnapshot, ['trackingPresent']),
+        barcodePresent: readBoolean(result.responseSnapshot, ['barcodePresent']),
+        providerStatus: readString(result.responseSnapshot, ['providerStatus']),
+        providerMessage: readString(result.responseSnapshot, ['providerMessage']),
+        labelUrlPresent: Boolean(labelUrl),
+        errorMessage: labelUrl ? null : 'Return AWB print did not return a label URL yet.',
+      }),
+      'awbPrintProbe',
+      {
+        labelUrl,
+        trackingNumber: result.returnTrackingNumber,
+        barcode: result.returnBarcode,
+        status: result.returnStatus,
+      },
+    );
+  } catch (error) {
+    const snapshot = error instanceof ShippingProviderExecutionError ? error.responseSnapshot : {};
+    const message = error instanceof Error ? error.message : 'Try OTO return AWB print probe failed.';
+    return persistTryOtoReturnDetailsProbe(
+      existing,
+      buildTryOtoReturnDetailsProbeSnapshot({
+        status: 'failed',
+        attemptedAt,
+        endpoint: readString(snapshot, ['endpoint']) ?? '/rest/v2/print/{returnOrderId}?printReverseShipment=true',
+        httpStatus: readNumber(snapshot, ['status']),
+        responseKeys: readStringArray(snapshot.bodyKeys),
+        providerMessage: readString(snapshot, ['providerError']),
+        errorMessage: message,
+      }),
+      'awbPrintProbe',
     );
   }
 }
