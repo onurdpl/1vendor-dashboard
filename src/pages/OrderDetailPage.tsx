@@ -911,12 +911,17 @@ export function OrderDetailPage() {
     ['delivered'].includes(visibleShipmentStatus) &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
     !visibleShipmentExecution.returnShipment;
+  const hasShopifyReturnIdForLabelProbe = Boolean(order?.shopifyReturnSignal?.returnIdPresent);
+  const hasReturnTrackingForLabelProbe = Boolean(
+    visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode,
+  );
+  const hasReturnLabelUrlForLabelProbe = Boolean(visibleShipmentExecution?.returnShipment?.labelUrl);
   const canProbeShopifyReturnLabelUpload =
     isAdmin &&
     visibleShipmentExecution?.provider === 'try_oto' &&
-    Boolean(order?.shopifyReturnSignal?.returnIdPresent) &&
-    Boolean(visibleShipmentExecution.returnShipment?.labelUrl) &&
-    Boolean(visibleShipmentExecution.returnShipment?.trackingNumber || visibleShipmentExecution.returnShipment?.barcode);
+    hasShopifyReturnIdForLabelProbe &&
+    hasReturnLabelUrlForLabelProbe &&
+    hasReturnTrackingForLabelProbe;
   const tryOtoReturnOrderId = visibleShipmentExecution?.returnShipment?.returnOrderId?.trim() ?? '';
   const canProbeTryOtoReturnDetails =
     isAdmin &&
@@ -2760,6 +2765,18 @@ export function OrderDetailPage() {
                                         Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
                                       </span>
                                     ) : null}
+                                    <div className="summary-row">
+                                      <span>Shopify return id</span>
+                                      <strong>{hasShopifyReturnIdForLabelProbe ? 'present' : 'missing'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return tracking/barcode</span>
+                                      <strong>{hasReturnTrackingForLabelProbe ? 'present' : 'missing'}</strong>
+                                    </div>
+                                    <div className="summary-row">
+                                      <span>Return label URL</span>
+                                      <strong>{hasReturnLabelUrlForLabelProbe ? 'present' : 'missing'}</strong>
+                                    </div>
                                     {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
                                       <>
                                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (
@@ -3688,6 +3705,18 @@ export function OrderDetailPage() {
                             Requires Shopify return id, Try OTO return tracking or barcode, and return label PDF URL.
                           </span>
                         ) : null}
+                        <div className="summary-row">
+                          <span>Shopify return id</span>
+                          <strong>{hasShopifyReturnIdForLabelProbe ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return tracking/barcode</span>
+                          <strong>{hasReturnTrackingForLabelProbe ? 'present' : 'missing'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Return label URL</span>
+                          <strong>{hasReturnLabelUrlForLabelProbe ? 'present' : 'missing'}</strong>
+                        </div>
                         {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe ? (
                           <>
                             {visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.labelAccepted ? (

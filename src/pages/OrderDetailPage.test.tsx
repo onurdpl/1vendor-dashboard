@@ -1996,6 +1996,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const probeSection = await screen.findByLabelText('Shopify return label upload probe');
     const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
     expect(probeButton).toBeEnabled();
+    expect(within(probeSection).getByText('Shopify return id').nextElementSibling).toHaveTextContent('present');
+    expect(within(probeSection).getByText('Return tracking/barcode').nextElementSibling).toHaveTextContent('present');
+    expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('present');
     await user.click(probeButton);
 
     expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');

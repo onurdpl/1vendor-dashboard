@@ -3495,9 +3495,15 @@ describe('shipping execution foundation', () => {
           provider: 'try_oto',
           returnOrderId: 'OTO-ORDER-1-R1',
           trackingNumber: 'RET-TRACK-1',
-          trackingUrl: 'https://tracking.example/RET-TRACK-1',
-          labelUrl: 'https://labels.example/return.pdf',
+          brandedTrackingURL: 'https://tracking.example/RET-TRACK-1',
+          printReturnAWBURL: 'https://labels.example/return.pdf',
           carrierName: 'Sürat Kargo',
+          labelRetrievable: false,
+          labelRetrievalConfirmed: false,
+          diagnostics: {
+            returnLabelRetrievable: false,
+            labelFieldPresent: false,
+          },
         },
       },
     });
@@ -3531,6 +3537,17 @@ describe('shipping execution foundation', () => {
       trackingUrl: 'https://tracking.example/RET-TRACK-1',
       labelUrl: 'https://labels.example/return.pdf',
       carrierName: 'Sürat Kargo',
+    });
+    expect(result.returnShipment).toMatchObject({
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelUrl: 'https://labels.example/return.pdf',
+      labelRetrievable: true,
+      labelRetrievalConfirmed: true,
+      diagnostics: {
+        labelFieldPresent: true,
+        returnLabelRetrievable: true,
+        returnLabelSourceChecked: 'returnShipment.printReturnAWBURL',
+      },
     });
     expect(result.returnShipment?.shopifyReturnLabelUploadProbe).toMatchObject({
       status: 'success',

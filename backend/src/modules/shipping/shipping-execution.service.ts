@@ -236,6 +236,17 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
   if (!diagnostics) {
     return null;
   }
+  const normalizedReturnLabelUrl = readTryOtoReturnLabelUrl(returnShipment);
+  const normalizedReturnLabelSource = readString(returnShipment, [
+    'printReturnAWBURL',
+    'printReturnAWBUrl',
+    'printReturnAwbURL',
+    'printReturnAwbUrl',
+  ])
+    ? 'returnShipment.printReturnAWBURL'
+    : normalizedReturnLabelUrl
+      ? 'returnShipment.labelUrl'
+      : null;
 
   return {
     endpoint: readString(diagnostics, ['endpoint']),
@@ -247,8 +258,8 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnBarcodePresent: readBoolean(diagnostics, ['returnBarcodePresent']),
     returnStatus: readString(diagnostics, ['returnStatus']),
     returnCarrierName: readString(diagnostics, ['returnCarrierName']),
-    labelFieldPresent: readBoolean(diagnostics, ['labelFieldPresent']),
-    returnLabelSourceChecked: readString(diagnostics, ['returnLabelSourceChecked']),
+    labelFieldPresent: Boolean(normalizedReturnLabelUrl) || readBoolean(diagnostics, ['labelFieldPresent']),
+    returnLabelSourceChecked: readString(diagnostics, ['returnLabelSourceChecked']) ?? normalizedReturnLabelSource,
     returnTrackingSourceChecked: readString(diagnostics, ['returnTrackingSourceChecked']),
     providerMessage: readString(diagnostics, ['providerMessage']),
     returnSkippedReason: readString(diagnostics, ['returnSkippedReason', 'skippedReason']),
@@ -278,7 +289,7 @@ function mapTryOtoReturnDiagnostics(returnShipment: Record<string, unknown>) {
     returnFinalized: readBoolean(diagnostics, ['returnFinalized']),
     returnFinalizationEndpointConfirmed: readBoolean(diagnostics, ['returnFinalizationEndpointConfirmed']),
     returnFinalizeEndpointImplemented: readBoolean(diagnostics, ['returnFinalizeEndpointImplemented']),
-    returnLabelRetrievable: readBoolean(diagnostics, ['returnLabelRetrievable']),
+    returnLabelRetrievable: Boolean(normalizedReturnLabelUrl) || readBoolean(diagnostics, ['returnLabelRetrievable']),
     providerStatusSource: readString(diagnostics, ['providerStatusSource']),
   };
 }
@@ -361,19 +372,34 @@ function mapTryOtoReturnAwbPrintProbe(returnShipment: Record<string, unknown>) {
   };
 }
 
+function readTryOtoReturnLabelUrl(returnShipment: Record<string, unknown>) {
+  return readString(returnShipment, [
+    'labelUrl',
+    'returnLabelUrl',
+    'printReturnAWBURL',
+    'printReturnAWBUrl',
+    'printReturnAwbURL',
+    'printReturnAwbUrl',
+  ]);
+}
+
+function readTryOtoReturnTrackingUrl(returnShipment: Record<string, unknown>) {
+  return readString(returnShipment, ['trackingUrl', 'returnTrackingUrl', 'brandedTrackingURL', 'brandedTrackingUrl']);
+}
+
 function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecutionDto['returnShipment'] {
   const returnShipment = isRecord(snapshot.returnShipment) ? snapshot.returnShipment : null;
   if (!returnShipment) {
     return null;
   }
 
-  const labelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+  const labelUrl = readTryOtoReturnLabelUrl(returnShipment);
   const trackingNumber = readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']);
   return {
     provider: 'try_oto',
     returnOrderId: readString(returnShipment, ['returnOrderId', 'returnProviderId', 'providerReturnId', 'returnOtoId']),
     trackingNumber,
-    trackingUrl: readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']),
+    trackingUrl: readTryOtoReturnTrackingUrl(returnShipment),
     labelUrl,
     barcode: readString(returnShipment, ['barcode', 'returnBarcode']),
     carrierName: readString(returnShipment, ['carrierName', 'returnCarrierName']),
@@ -383,10 +409,10 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
     responseKeys: readStringArray(returnShipment.responseKeys),
     trackingPresent: Boolean(trackingNumber),
     labelPresent: Boolean(labelUrl),
-    labelRetrievalConfirmed: readBoolean(returnShipment, ['labelRetrievalConfirmed']),
+    labelRetrievalConfirmed: Boolean(labelUrl) || readBoolean(returnShipment, ['labelRetrievalConfirmed']),
     labelRetrievalNote: readString(returnShipment, ['labelRetrievalNote']),
     finalized: readBoolean(returnShipment, ['finalized']),
-    labelRetrievable: readBoolean(returnShipment, ['labelRetrievable']),
+    labelRetrievable: Boolean(labelUrl) || readBoolean(returnShipment, ['labelRetrievable']),
     providerStatusSource: readString(returnShipment, ['providerStatusSource']),
     diagnostics: mapTryOtoReturnDiagnostics(returnShipment),
     detailsProbe: mapTryOtoReturnDetailsProbe(returnShipment),
@@ -3512,8 +3538,8 @@ export async function probeShopifyReturnLabelUpload(
   const returnTrackingNumber =
     readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']) ??
     readString(returnShipment, ['barcode', 'returnBarcode']);
-  const returnTrackingUrl = readString(returnShipment, ['trackingUrl', 'returnTrackingUrl']);
-  const returnLabelUrl = readString(returnShipment, ['labelUrl', 'returnLabelUrl']);
+  const returnTrackingUrl = returnShipment ? readTryOtoReturnTrackingUrl(returnShipment) : null;
+  const returnLabelUrl = returnShipment ? readTryOtoReturnLabelUrl(returnShipment) : null;
   const returnCarrierName = readString(returnShipment, ['carrierName', 'returnCarrierName']);
 
   const blocked = async (skippedReason: string, errorMessage: string) =>
