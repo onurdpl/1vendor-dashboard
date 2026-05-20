@@ -4671,6 +4671,7 @@ h3 {
 .order-detail-main-grid {
   display: grid;
   grid-template-columns: minmax(0, 2.55fr) minmax(300px, 0.95fr);
+  grid-template-rows: auto auto auto auto auto;
   gap: 12px;
   align-items: start;
 }
@@ -4689,26 +4690,31 @@ h3 {
 
 .order-primary-action-card {
   grid-column: 1;
+  grid-row: 2;
   order: 2;
 }
 
 .order-line-items-card {
   grid-column: 1;
+  grid-row: 1;
   order: 1;
 }
 
 .order-financial-summary-card {
   grid-column: 1;
+  grid-row: 3;
   order: 3;
 }
 
 .order-finance-ledger-card {
   grid-column: 1;
+  grid-row: 4;
   order: 4;
 }
 
 .order-linked-records-panel {
   grid-column: 1;
+  grid-row: 5;
   order: 5;
 }
 
@@ -4718,6 +4724,7 @@ h3 {
 
 .operational-timeline-card {
   grid-column: 2;
+  grid-row: 1 / span 3;
   order: 1;
   position: sticky;
   top: 84px;
@@ -4726,11 +4733,13 @@ h3 {
 
 .order-support-card {
   grid-column: 2;
+  grid-row: 4;
   order: 2;
 }
 
 .admin-collab-card {
   grid-column: 2;
+  grid-row: 5;
   order: 3;
 }
 
@@ -5256,6 +5265,7 @@ summary.provider-response-heading::-webkit-details-marker {
   .order-support-card,
   .admin-collab-card {
     grid-column: 1;
+    grid-row: auto;
   }
 
   .operational-timeline-card {
