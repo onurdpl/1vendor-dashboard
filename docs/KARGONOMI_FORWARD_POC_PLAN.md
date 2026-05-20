@@ -345,6 +345,44 @@ Unknown fields needing provider or PoC confirmation:
 - Barcode response shape remains unknown and is treated as raw provider response data.
 - Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
 
+## Manual Probe Status
+
+- A manual development-only probe script exists for future intentional Kargonomi forward-flow testing.
+- Script command:
+  - `npm run backend:kargonomi:probe`
+- The script is not called automatically.
+- The script is not wired into order/shipment orchestration.
+- The script does not write to the application database.
+- The script does not sync Shopify, create fulfillments, upload labels, or switch providers.
+- The script uses clearly fake/test shipment data only.
+- Console output is sanitized and must not print API tokens or app keys.
+- This probe can create a provider draft shipment when intentionally confirmed.
+
+Required env vars:
+
+```text
+KARGONOMI_PROBE_CONFIRM=YES
+KARGONOMI_API_TOKEN=<Render/local secret value>
+```
+
+Optional env vars:
+
+```text
+KARGONOMI_BASE_URL=https://app.kargonomi.com.tr/api/v1
+KARGONOMI_APP_KEY=<unknown>
+KARGONOMI_PROBE_CONFIRM_PRICE=YES
+KARGONOMI_PROBE_SHIPPING_PROVIDER_ID=<id from price comparison>
+KARGONOMI_PROBE_FETCH_BARCODE=YES
+```
+
+Default behavior:
+
+- Stop after `POST /shipments` and `GET /shipment-price-comparison/{id}`.
+- `POST /confirm-shipping-price` runs only when `KARGONOMI_PROBE_CONFIRM_PRICE=YES` and an explicit `KARGONOMI_PROBE_SHIPPING_PROVIDER_ID` is provided.
+- `GET /shipments/{id}/barcode?format=pdf` runs only when `KARGONOMI_PROBE_FETCH_BARCODE=YES`.
+- Return/reverse shipment remains unsupported.
+- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+
 ## PoC Validation Checklist
 
 1. Confirm account credentials, Bearer token, `X-App-Key`, and webhook `secret_key`.
