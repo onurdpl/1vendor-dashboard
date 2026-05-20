@@ -12,7 +12,7 @@ This is a documentation-only planning note for a future Kargonomi forward shipme
 - `backend/src/modules/shipping/shipping-execution.service.ts`
 - `backend/src/modules/shipping/shipping-execution.types.ts`
 
-`docs/KARGONOMI_DISCOVERY.md` was requested but is not currently present in the repository.
+`docs/KARGONOMI_DISCOVERY.md` now contains the broader Kargonomi contract discovery summary.
 
 ## Confirmed API Basics
 
@@ -20,6 +20,31 @@ This is a documentation-only planning note for a future Kargonomi forward shipme
 - Authentication: `Authorization: Bearer <token>`
 - Partner firms must also send `X-App-Key`.
 - The uploaded Word document does not define token issuance, token lifetime, refresh behavior, sandbox URL, or production-vs-sandbox environment separation. These remain unknown.
+
+## Environment Variables
+
+Required / likely required:
+
+```text
+KARGONOMI_BASE_URL=https://app.kargonomi.com.tr/api/v1
+KARGONOMI_API_TOKEN=<Render secret value>
+```
+
+Possibly required for partner integrations:
+
+```text
+KARGONOMI_APP_KEY=<unknown>
+```
+
+Notes:
+
+- The user currently only has an API token.
+- Kargonomi documentation states partner integrations must also send `X-App-Key`.
+- Whether this integration requires `X-App-Key` is currently unknown.
+- Do not implement runtime auth logic yet.
+- Do not assume OAuth exists.
+- Never hardcode secrets.
+- Render env configuration will likely be required later.
 
 ## Exact Forward Shipment Candidate Flow
 
