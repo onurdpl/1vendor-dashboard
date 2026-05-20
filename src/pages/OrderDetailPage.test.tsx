@@ -1442,6 +1442,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
   });
 
   it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {

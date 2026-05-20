@@ -800,6 +800,7 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       createShipmentDraftCalled: false,
       priceComparisonCalled: false,
       confirmShippingPriceCalled: false,
+      getShipmentAfterConfirmCalled: false,
       barcodeFetchCalled: false,
       shippingProviderId,
       automaticProviderSelection: shippingProviderId === '-1',
@@ -835,6 +836,22 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       throw new Error(`Kargonomi shipping price confirmation failed with HTTP ${confirmResponse.status}.`);
     }
 
+    let responseBodyForNormalization = confirmResponse.body;
+    try {
+      const shipmentResponse = await this.client.getShipment(shipmentId);
+      responseSnapshot.getShipmentAfterConfirmCalled = true;
+      responseSnapshot.getShipmentAfterConfirm = summarizeResponse(shipmentResponse);
+      if (shipmentResponse.ok) {
+        responseBodyForNormalization = shipmentResponse.body;
+      }
+    } catch (error) {
+      responseSnapshot.getShipmentAfterConfirmCalled = true;
+      responseSnapshot.getShipmentAfterConfirm = {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Unknown shipment detail lookup error.',
+      };
+    }
+
     try {
       const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
       const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
@@ -851,7 +868,7 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       };
     }
 
-    return buildKargonomiProviderResult(confirmResponse.body, shipmentId, responseSnapshot);
+    return buildKargonomiProviderResult(responseBodyForNormalization, shipmentId, responseSnapshot);
   }
 
   async getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult> {

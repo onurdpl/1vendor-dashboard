@@ -1088,12 +1088,18 @@ export function OrderDetailPage() {
       order?.shopifyFulfillmentSync?.syncStatus ||
       order?.shopifyFulfillmentSync?.errorMessage,
   );
-  const shouldShowRealTrackingForm = isRealMode && canUseFulfillmentActions && !hasTrackingSync;
   const shipmentExecution = order?.shipmentExecution ?? null;
   const visibleShipmentExecution = shipmentActionState?.shipment ?? shipmentExecution ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
   const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
+  const failedLikeShipmentExecution =
+    Boolean(visibleShipmentExecution) &&
+    (['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
+      shipmentProviderSummary?.ok === false ||
+      Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
+  const shouldShowRealTrackingForm =
+    isRealMode && canUseFulfillmentActions && !hasTrackingSync && (!hasShipmentExecution || failedLikeShipmentExecution);
   const providerMissingShipmentCustomerFields =
     shipmentProviderSummary?.ok === false || ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus)
       ? [

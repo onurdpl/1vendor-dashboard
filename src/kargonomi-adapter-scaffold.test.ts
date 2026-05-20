@@ -114,16 +114,18 @@ describe('Kargonomi forward adapter scaffold', () => {
         : calls.length === 2
           ? { options: [{ id: 5, price: 100 }] }
           : calls.length === 3
-            ? {
-                shipment: {
-                  id: 123,
-                  status: 'webservice_order_created',
-                  shipping_webservice_tracking_code: 'KG-TRACK-1',
-                  shipping_provider_name: 'Test Carrier',
-                  pricing: { real_price: '100' },
-                },
-              }
-            : { barcode_pdf_base64: 'JVBERi0xLjQ=' };
+            ? { ok: true, message: 'confirmed' }
+            : calls.length === 4
+              ? {
+                  shipment: {
+                    id: 123,
+                    status: 'webservice_order_created',
+                    shipping_webservice_tracking_code: 'KG-TRACK-1',
+                    shipping_provider_name: 'Test Carrier',
+                    pricing: { real_price: '100' },
+                  },
+                }
+              : { barcode_pdf_base64: 'JVBERi0xLjQ=' };
 
       return new Response(JSON.stringify(responseBody), {
         status: 200,
@@ -153,6 +155,7 @@ describe('Kargonomi forward adapter scaffold', () => {
       ['POST', 'https://app.kargonomi.com.tr/api/v1/shipments'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipment-price-comparison/123'],
       ['POST', 'https://app.kargonomi.com.tr/api/v1/confirm-shipping-price'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123/barcode?format=pdf'],
     ]);
     expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=-1');
@@ -165,6 +168,7 @@ describe('Kargonomi forward adapter scaffold', () => {
     });
     expect(result.responseSnapshot).toMatchObject({
       automaticProviderSelection: true,
+      getShipmentAfterConfirmCalled: true,
       labelUrlPresent: false,
     });
   });
