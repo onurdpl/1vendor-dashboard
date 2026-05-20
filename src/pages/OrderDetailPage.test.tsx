@@ -1411,6 +1411,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         trackingUrl: null,
         labelUrl: null,
         shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          providerApiCallAttempted: true,
+          lastProviderStage: 'create_shipment',
+          providerError: 'Kargonomi shipment draft creation failed before provider response: fetch failed.',
+        },
         returnShipment: {
           provider: 'try_oto',
           returnOrderId: 'should-not-render',
@@ -1443,6 +1449,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+    expect(screen.getByText('Provider API call attempted')).toBeInTheDocument();
+    expect(screen.getAllByText('Create shipment').length).toBeGreaterThan(0);
+    expect(screen.getByText('Kargonomi shipment draft creation failed before provider response: fetch failed.')).toBeInTheDocument();
   });
 
   it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {
@@ -4013,6 +4022,51 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('ke-created-1028')).toBeInTheDocument();
     expect(screen.getByText('barcode-1028')).toBeInTheDocument();
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+  });
+
+  it('does not show a successful completion message for Kargonomi needs-review shipment without provider evidence', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-kargonomi-pending',
+      provider: 'kargonomi',
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      barcode: null,
+      shipmentStatus: 'pending',
+      warehouseId: '112668',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        ok: false,
+        providerError: 'Kargonomi shipment draft creation failed before provider response: fetch failed.',
+        providerApiCallAttempted: true,
+        lastProviderStage: 'create_shipment',
+        createShipmentCalled: true,
+        priceComparisonCalled: false,
+        confirmShippingPriceCalled: false,
+        getShipmentCalled: false,
+        barcodeFetchCalled: false,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect((await screen.findAllByText('Shipment needs review. Provider did not return a shipment id or tracking yet.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Shipment action completed.')).not.toBeInTheDocument();
   });
 
   it('shows visible create shipment API diagnostics when the request fails', async () => {

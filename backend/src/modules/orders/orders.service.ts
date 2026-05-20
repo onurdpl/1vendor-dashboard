@@ -575,6 +575,27 @@ function buildShipmentProviderResponseSummary(
     selectedEnvironment: readString(snapshot, ['selectedEnvironment']),
     requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
     providerMode: readString(snapshot, ['providerMode']),
+    providerApiCallAttempted:
+      typeof snapshot?.providerApiCallAttempted === 'boolean' ? snapshot.providerApiCallAttempted : null,
+    lastProviderStage: readString(snapshot, ['lastProviderStage']),
+    createShipmentCalled:
+      typeof snapshot?.createShipmentCalled === 'boolean'
+        ? snapshot.createShipmentCalled
+        : typeof snapshot?.createShipmentDraftCalled === 'boolean'
+          ? snapshot.createShipmentDraftCalled
+          : null,
+    priceComparisonCalled:
+      typeof snapshot?.priceComparisonCalled === 'boolean' ? snapshot.priceComparisonCalled : null,
+    confirmShippingPriceCalled:
+      typeof snapshot?.confirmShippingPriceCalled === 'boolean' ? snapshot.confirmShippingPriceCalled : null,
+    getShipmentCalled:
+      typeof snapshot?.getShipmentCalled === 'boolean'
+        ? snapshot.getShipmentCalled
+        : typeof snapshot?.getShipmentAfterConfirmCalled === 'boolean'
+          ? snapshot.getShipmentAfterConfirmCalled
+          : null,
+    barcodeFetchCalled:
+      typeof snapshot?.barcodeFetchCalled === 'boolean' ? snapshot.barcodeFetchCalled : null,
     payloadDiagnostics: payloadDiagnostics
       ? {
           topLevelKeys: Array.isArray(payloadDiagnostics.topLevelKeys)

@@ -1,9 +1,10 @@
 import type { AppEnv } from '../../config/env.js';
 import type { ShipmentExecutionStatusDto } from './shipping-execution.types.js';
-import type {
-  ShippingProviderAdapter,
-  ShippingProviderCreateInput,
-  ShippingProviderCreateResult,
+import {
+  ShippingProviderExecutionError,
+  type ShippingProviderAdapter,
+  type ShippingProviderCreateInput,
+  type ShippingProviderCreateResult,
 } from './shipping-provider.adapter.js';
 
 export const KARGONOMI_PROVIDER_KEY = 'kargonomi' as const;
@@ -510,6 +511,47 @@ function summarizeResponse(response: KargonomiRawHttpResponse) {
   };
 }
 
+function mergePrimaryResponseSummary(responseSnapshot: Record<string, unknown>, response: KargonomiRawHttpResponse) {
+  const summary = summarizeResponse(response);
+  responseSnapshot.ok = summary.ok;
+  responseSnapshot.status = summary.httpStatus;
+  responseSnapshot.contentType = summary.contentType;
+  responseSnapshot.bodyKeys = summary.bodyKeys;
+}
+
+function summarizeKargonomiError(error: unknown) {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      cause: error.cause instanceof Error ? `${error.cause.name}: ${error.cause.message}` : null,
+    };
+  }
+
+  return {
+    name: 'UnknownError',
+    message: 'Unknown Kargonomi provider error.',
+    cause: null,
+  };
+}
+
+function throwKargonomiExecutionError(
+  stage: string,
+  responseSnapshot: Record<string, unknown>,
+  message: string,
+  error?: unknown,
+): never {
+  const safeError = error === undefined ? null : summarizeKargonomiError(error);
+  throw new ShippingProviderExecutionError(message, {
+    ...responseSnapshot,
+    provider: KARGONOMI_PROVIDER_KEY,
+    flow: 'forward',
+    lastProviderStage: stage,
+    providerError: message,
+    ...(safeError ? { fetchError: safeError } : {}),
+  });
+}
+
 function extractShipmentBody(body: unknown): unknown {
   if (!isRecord(body)) {
     return body;
@@ -812,54 +854,132 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
   }
 
   async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
-    const payload = ensureKargonomiPayload(input.requestSnapshot);
     const shippingProviderId =
       readString(input.requestSnapshot, ['shippingProviderId', 'shipping_provider_id', 'preferredShippingProviderId']) ??
       '-1';
     const responseSnapshot: Record<string, unknown> = {
       provider: KARGONOMI_PROVIDER_KEY,
       flow: 'forward',
+      providerApiCallAttempted: false,
+      lastProviderStage: 'destination_resolution',
       createShipmentDraftCalled: false,
+      createShipmentCalled: false,
       priceComparisonCalled: false,
       confirmShippingPriceCalled: false,
       getShipmentAfterConfirmCalled: false,
+      getShipmentCalled: false,
       barcodeFetchCalled: false,
       shippingProviderId,
       automaticProviderSelection: shippingProviderId === '-1',
     };
 
-    const createResponse = await this.client.createShipmentDraft(payload);
+    let payload: KargonomiShipmentCreatePayloadInput;
+    try {
+      payload = ensureKargonomiPayload(input.requestSnapshot);
+    } catch (error) {
+      throwKargonomiExecutionError(
+        'destination_resolution',
+        responseSnapshot,
+        error instanceof Error ? error.message : 'Kargonomi shipment payload is incomplete.',
+        error,
+      );
+    }
+
+    responseSnapshot.lastProviderStage = 'create_shipment';
+    responseSnapshot.providerApiCallAttempted = true;
+    responseSnapshot.createShipmentDraftCalled = true;
+    responseSnapshot.createShipmentCalled = true;
+    let createResponse: KargonomiRawHttpResponse;
+    try {
+      createResponse = await this.client.createShipmentDraft(payload);
+    } catch (error) {
+      throwKargonomiExecutionError(
+        'create_shipment',
+        responseSnapshot,
+        error instanceof Error
+          ? `Kargonomi shipment draft creation failed before provider response: ${error.message}.`
+          : 'Kargonomi shipment draft creation failed before provider response.',
+        error,
+      );
+    }
     responseSnapshot.createShipmentDraftCalled = true;
     responseSnapshot.createShipmentDraft = summarizeResponse(createResponse);
     if (!createResponse.ok) {
-      throw new Error(`Kargonomi shipment draft creation failed with HTTP ${createResponse.status}.`);
+      mergePrimaryResponseSummary(responseSnapshot, createResponse);
+      throwKargonomiExecutionError(
+        'create_shipment',
+        responseSnapshot,
+        `Kargonomi shipment draft creation failed with HTTP ${createResponse.status}.`,
+      );
     }
 
     const shipmentId = extractShipmentId(createResponse.body);
     if (!shipmentId) {
-      throw new Error('Kargonomi shipment draft creation did not return a shipment id.');
+      throwKargonomiExecutionError(
+        'create_shipment',
+        responseSnapshot,
+        'Kargonomi shipment draft creation did not return a shipment id.',
+      );
     }
     responseSnapshot.shipmentId = shipmentId;
 
-    const priceResponse = await this.client.getShipmentPriceComparison(shipmentId);
     responseSnapshot.priceComparisonCalled = true;
+    responseSnapshot.lastProviderStage = 'price_comparison';
+    let priceResponse: KargonomiRawHttpResponse;
+    try {
+      priceResponse = await this.client.getShipmentPriceComparison(shipmentId);
+    } catch (error) {
+      throwKargonomiExecutionError(
+        'price_comparison',
+        responseSnapshot,
+        error instanceof Error
+          ? `Kargonomi price comparison failed before provider response: ${error.message}.`
+          : 'Kargonomi price comparison failed before provider response.',
+        error,
+      );
+    }
     responseSnapshot.priceComparison = summarizeResponse(priceResponse);
     if (!priceResponse.ok) {
-      throw new Error(`Kargonomi price comparison failed with HTTP ${priceResponse.status}.`);
+      mergePrimaryResponseSummary(responseSnapshot, priceResponse);
+      throwKargonomiExecutionError(
+        'price_comparison',
+        responseSnapshot,
+        `Kargonomi price comparison failed with HTTP ${priceResponse.status}.`,
+      );
     }
 
-    const confirmResponse = await this.client.confirmShippingPrice({
-      shipmentId,
-      shippingProviderId,
-    });
     responseSnapshot.confirmShippingPriceCalled = true;
+    responseSnapshot.lastProviderStage = 'confirm_price';
+    let confirmResponse: KargonomiRawHttpResponse;
+    try {
+      confirmResponse = await this.client.confirmShippingPrice({
+        shipmentId,
+        shippingProviderId,
+      });
+    } catch (error) {
+      throwKargonomiExecutionError(
+        'confirm_price',
+        responseSnapshot,
+        error instanceof Error
+          ? `Kargonomi shipping price confirmation failed before provider response: ${error.message}.`
+          : 'Kargonomi shipping price confirmation failed before provider response.',
+        error,
+      );
+    }
     responseSnapshot.confirmShippingPrice = summarizeResponse(confirmResponse);
     if (!confirmResponse.ok) {
-      throw new Error(`Kargonomi shipping price confirmation failed with HTTP ${confirmResponse.status}.`);
+      mergePrimaryResponseSummary(responseSnapshot, confirmResponse);
+      throwKargonomiExecutionError(
+        'confirm_price',
+        responseSnapshot,
+        `Kargonomi shipping price confirmation failed with HTTP ${confirmResponse.status}.`,
+      );
     }
 
     let responseBodyForNormalization = confirmResponse.body;
     try {
+      responseSnapshot.lastProviderStage = 'get_shipment';
+      responseSnapshot.getShipmentCalled = true;
       const shipmentResponse = await this.client.getShipment(shipmentId);
       responseSnapshot.getShipmentAfterConfirmCalled = true;
       responseSnapshot.getShipmentAfterConfirm = summarizeResponse(shipmentResponse);
@@ -875,6 +995,7 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
     }
 
     try {
+      responseSnapshot.lastProviderStage = 'barcode_fetch';
       const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
       const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
       responseSnapshot.barcodeFetchCalled = true;
@@ -890,6 +1011,7 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       };
     }
 
+    responseSnapshot.lastProviderStage = 'completed';
     return buildKargonomiProviderResult(responseBodyForNormalization, shipmentId, responseSnapshot);
   }
 

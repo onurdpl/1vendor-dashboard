@@ -266,6 +266,13 @@ export type OrderShipmentExecutionDto = {
     selectedEnvironment?: string | null;
     requestTargetHostname?: string | null;
     providerMode?: string | null;
+    providerApiCallAttempted?: boolean | null;
+    lastProviderStage?: string | null;
+    createShipmentCalled?: boolean | null;
+    priceComparisonCalled?: boolean | null;
+    confirmShippingPriceCalled?: boolean | null;
+    getShipmentCalled?: boolean | null;
+    barcodeFetchCalled?: boolean | null;
     payloadDiagnostics?: {
       topLevelKeys: string[];
       customerKeys: string[];

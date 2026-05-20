@@ -160,6 +160,45 @@ function getShipmentEvidenceSummary(shipment: ShipmentExecution) {
   ].join(' · ');
 }
 
+function hasShipmentProviderEvidence(shipment?: ShipmentExecution | null) {
+  return Boolean(shipment?.providerShipmentId || shipment?.trackingNumber || shipment?.labelUrl || shipment?.barcode);
+}
+
+function isShipmentExecutionNeedsReview(shipment?: ShipmentExecution | null) {
+  if (!shipment || hasShipmentProviderEvidence(shipment)) {
+    return false;
+  }
+
+  return ['pending', 'failed'].includes(shipment.shipmentStatus);
+}
+
+function getShipmentActionResultState(
+  shipment: ShipmentExecution,
+  mode: 'create' | 'retry',
+): Pick<ShipmentActionState, 'tone' | 'message'> {
+  if (isShipmentExecutionNeedsReview(shipment)) {
+    return {
+      tone: 'error',
+      message: 'Shipment needs review. Provider did not return a shipment id or tracking yet.',
+    };
+  }
+
+  if (shipment.shipmentStatus === 'pending') {
+    return {
+      tone: 'info',
+      message:
+        mode === 'retry'
+          ? 'Shipment retry recorded. Carrier execution is pending.'
+          : 'Shipment request recorded. Carrier execution is pending.',
+    };
+  }
+
+  return {
+    tone: 'success',
+    message: `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+  };
+}
+
 function getReturnShipmentEvidenceSummary(shipment: ShipmentExecution) {
   const returnShipment = shipment.returnShipment;
   if (!returnShipment) {
@@ -196,6 +235,10 @@ function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
 }
 
 function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
+  if (!isReturnShipmentActionEndpoint(actionState.endpoint) && isShipmentExecutionNeedsReview(actionState.shipment)) {
+    return 'Shipment needs review. Provider did not return a shipment id or tracking yet.';
+  }
+
   if (actionState.tone === 'success') {
     return isReturnShipmentActionEndpoint(actionState.endpoint)
       ? 'Return shipment action completed.'
@@ -474,6 +517,35 @@ function ShopifyReturnSignalDiagnostics({ order, isAdmin }: { order: OrderDetail
       </div>
     </details>
   );
+}
+
+function formatDiagnosticPresence(value: boolean | null | undefined) {
+  if (value === null || value === undefined) {
+    return '—';
+  }
+
+  return value ? 'yes' : 'no';
+}
+
+function formatKargonomiProviderStage(value?: string | null) {
+  switch (value) {
+    case 'destination_resolution':
+      return 'Destination resolution';
+    case 'create_shipment':
+      return 'Create shipment';
+    case 'price_comparison':
+      return 'Price comparison';
+    case 'confirm_price':
+      return 'Confirm price';
+    case 'get_shipment':
+      return 'Get shipment';
+    case 'barcode_fetch':
+      return 'Barcode fetch';
+    case 'completed':
+      return 'Completed';
+    default:
+      return value ? toTitleCaseLabel(value.replace(/_/g, ' ')) : '—';
+  }
 }
 
 function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fallbackCarrier?: string | null) {
@@ -1258,22 +1330,14 @@ export function OrderDetailPage() {
 
     void createShipmentMutation({ allocationId: order.id, customerOverrides })
       .then((shipment) => {
+        const resultState = getShipmentActionResultState(shipment, 'create');
         setShipmentActionState({
-          tone: 'success',
-          message:
-            shipment.shipmentStatus === 'pending'
-              ? 'Shipment request recorded. Carrier execution is pending.'
-              : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          ...resultState,
           shipment,
           endpoint: 'POST /shipments/create',
         });
         setShipmentCustomerOverrides({});
-        showFeedback(
-          shipment.shipmentStatus === 'pending'
-            ? 'Shipment request recorded. Carrier execution is pending.'
-            : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
-          'success',
-        );
+        showFeedback(resultState.message, resultState.tone);
         void refetch();
       })
       .catch((mutationError) => {
@@ -1303,22 +1367,14 @@ export function OrderDetailPage() {
 
     void retryFailedShipmentMutation({ shipmentExecutionId: visibleShipmentExecution.id, customerOverrides })
       .then((shipment) => {
+        const resultState = getShipmentActionResultState(shipment, 'retry');
         setShipmentActionState({
-          tone: 'success',
-          message:
-            shipment.shipmentStatus === 'pending'
-              ? 'Shipment retry recorded. Carrier execution is pending.'
-              : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
+          ...resultState,
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
         });
         setShipmentCustomerOverrides({});
-        showFeedback(
-          shipment.shipmentStatus === 'pending'
-            ? 'Shipment retry recorded. Carrier execution is pending.'
-            : `Shipment ${shipment.providerShipmentId ?? shipment.id} recorded.`,
-          'success',
-        );
+        showFeedback(resultState.message, resultState.tone);
         void refetch();
       })
       .catch((mutationError) => {
@@ -1820,6 +1876,39 @@ export function OrderDetailPage() {
             address {diagnostics.addressFieldPresence.customerAddress ? 'yes' : 'no'} · postcode{' '}
             {diagnostics.addressFieldPresence.customerPostcode ? 'yes' : 'no'} · country{' '}
             {diagnostics.addressFieldPresence.customerCountry ? 'yes' : 'no'}
+          </strong>
+        </div>
+      </details>
+    );
+  }
+
+  function renderKargonomiExecutionDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
+    if (visibleShipmentExecution?.provider !== 'kargonomi') {
+      return null;
+    }
+
+    return (
+      <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Kargonomi execution diagnostics">
+        <summary className="provider-response-heading">
+          <strong>Kargonomi execution diagnostics</strong>
+          <span>Provider stage trace</span>
+        </summary>
+        <div className="summary-row">
+          <span>Provider API call attempted</span>
+          <strong>{formatDiagnosticPresence(summary.providerApiCallAttempted)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Last provider stage</span>
+          <strong>{formatKargonomiProviderStage(summary.lastProviderStage)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Stage calls</span>
+          <strong>
+            create {formatDiagnosticPresence(summary.createShipmentCalled)} · price{' '}
+            {formatDiagnosticPresence(summary.priceComparisonCalled)} · confirm{' '}
+            {formatDiagnosticPresence(summary.confirmShippingPriceCalled)} · get{' '}
+            {formatDiagnosticPresence(summary.getShipmentCalled)} · barcode{' '}
+            {formatDiagnosticPresence(summary.barcodeFetchCalled)}
           </strong>
         </div>
       </details>
@@ -3129,6 +3218,22 @@ export function OrderDetailPage() {
                                   {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
                                 </strong>
                               </div>
+                              {visibleShipmentExecution.provider === 'kargonomi' ? (
+                                <>
+                                  <div className="summary-row">
+                                    <span>Provider API call attempted</span>
+                                    <strong>{formatDiagnosticPresence(shipmentProviderSummary?.providerApiCallAttempted)}</strong>
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Last provider stage</span>
+                                    <strong>{formatKargonomiProviderStage(shipmentProviderSummary?.lastProviderStage)}</strong>
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Provider message</span>
+                                    <strong>{shipmentProviderSummary?.providerError || '—'}</strong>
+                                  </div>
+                                </>
+                              ) : null}
                             </div>
                           </details>
                         ) : null}
@@ -3733,6 +3838,7 @@ export function OrderDetailPage() {
                               <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                             </div>
                             {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
+                            {renderKargonomiExecutionDiagnostics(shipmentProviderSummary)}
                             {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                             <div className="summary-row">
                               <span>Status field</span>
@@ -4656,6 +4762,7 @@ export function OrderDetailPage() {
                           <strong>{shipmentProviderSummary.responseKeys.length ? shipmentProviderSummary.responseKeys.join(', ') : '—'}</strong>
                         </div>
                         {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
+                        {renderKargonomiExecutionDiagnostics(shipmentProviderSummary)}
                         {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                         {shipmentProviderSummary.tryOtoFinalization?.lastWebhookReceivedAt ||
                         shipmentProviderSummary.tryOtoFinalization?.lastWebhookMatchStatus ||

@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
-import { createShippingProviderAdapter } from '../backend/src/modules/shipping/shipping-provider.adapter.js';
+import {
+  createShippingProviderAdapter,
+  ShippingProviderExecutionError,
+} from '../backend/src/modules/shipping/shipping-provider.adapter.js';
 import {
   getKargonomiConfigDiagnostics,
   KargonomiAdapter,
@@ -209,6 +212,47 @@ describe('Kargonomi forward adapter scaffold', () => {
     });
 
     expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=9');
+  });
+
+  it('captures POST /shipments fetch failure as create_shipment diagnostics', async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError('fetch failed');
+    });
+    const fetchImpl = fetchMock as unknown as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'vendor-1',
+        provider: 'kargonomi',
+        requestSnapshot: {
+          warehouseId: '112668',
+          buyer: {
+            buyer_name: 'Test Buyer',
+            buyer_phone: '5551112233',
+            buyer_address: 'Test Buyer Address',
+            buyer_state_id: '34',
+            buyer_city_id: '828',
+          },
+          packages: [{ desi: '3' }],
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'ShippingProviderExecutionError',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        providerApiCallAttempted: true,
+        lastProviderStage: 'create_shipment',
+        createShipmentCalled: true,
+        createShipmentDraftCalled: true,
+        priceComparisonCalled: false,
+        providerError: 'Kargonomi shipment draft creation failed before provider response: fetch failed.',
+      },
+    } satisfies Partial<ShippingProviderExecutionError>);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe('https://app.kargonomi.com.tr/api/v1/shipments');
   });
 
   it('does not expose return or reverse shipment methods', () => {

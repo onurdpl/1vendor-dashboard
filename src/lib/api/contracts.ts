@@ -18,7 +18,7 @@ export type ShipmentExecution = {
   sourceShopifyOrderId?: string | null;
   sourceShopifyOrderNumber?: string | null;
   sourceShopifyFulfillmentId?: string | null;
-  provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
+  provider: ShippingProvider;
   providerShipmentId: string | null;
   providerCarrierName?: string | null;
   trackingNumber: string | null;
@@ -213,6 +213,13 @@ export type ShipmentExecution = {
     selectedEnvironment?: string | null;
     requestTargetHostname?: string | null;
     providerMode?: string | null;
+    providerApiCallAttempted?: boolean | null;
+    lastProviderStage?: string | null;
+    createShipmentCalled?: boolean | null;
+    priceComparisonCalled?: boolean | null;
+    confirmShippingPriceCalled?: boolean | null;
+    getShipmentCalled?: boolean | null;
+    barcodeFetchCalled?: boolean | null;
     payloadDiagnostics?: {
       topLevelKeys: string[];
       customerKeys: string[];
