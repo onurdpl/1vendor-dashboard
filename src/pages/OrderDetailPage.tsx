@@ -193,6 +193,29 @@ function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
     : getShipmentEvidenceSummary(actionState.shipment);
 }
 
+function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
+  if (actionState.tone === 'success') {
+    return isReturnShipmentActionEndpoint(actionState.endpoint)
+      ? 'Return shipment action completed.'
+      : 'Shipment action completed.';
+  }
+
+  if (actionState.tone === 'error') {
+    const missingFields = getMissingShipmentCustomerFields(actionState.message);
+    if (missingFields.length) {
+      return 'Complete the missing shipment fields to continue.';
+    }
+
+    return isReturnShipmentActionEndpoint(actionState.endpoint)
+      ? 'Return shipment action needs attention.'
+      : 'Shipment action needs attention.';
+  }
+
+  return actionState.message.toLowerCase().includes('refresh')
+    ? 'Refreshing shipment status.'
+    : 'Shipment action is in progress.';
+}
+
 function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
   if (returnShipment.status === 'skipped') {
     return returnShipment.labelRetrievalNote ?? 'Try OTO return shipment was not created.';
@@ -2087,14 +2110,13 @@ export function OrderDetailPage() {
   const trackingHelper = getTrackingHelper(order);
   const financePreview = order.financeLedgerPreview;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
-  const estimatedVendorPayable =
-    isAdmin && financePreview
-      ? formatCurrency(financePreview.balance.vendorPayable, financePreview.currency)
-      : 'Unknown';
-  const estimatedMarketplaceCommission =
-    isAdmin && financePreview
-      ? formatCurrency(financePreview.balance.marketplaceCommission, financePreview.currency)
-      : 'Unknown';
+  const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
+  const refundFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Refund');
+  const payoutStatus = payoutFinanceRecord?.status ?? 'Unknown';
+  const hasRefundImpact =
+    Boolean(refundFinanceRecord) ||
+    relatedReturns.length > 0 ||
+    Boolean(financePreview && (financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0));
   const refundImpact =
     isAdmin && financePreview
       ? financePreview.balance.vendorDebt !== '0.00'
@@ -2102,16 +2124,15 @@ export function OrderDetailPage() {
         : financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0
           ? 'Reflected in preview'
           : 'No return/refund impact'
-      : 'Unknown';
-  const shippingCostStatus = isAdmin && financePreview ? financePreview.sourceFields.shippingCost : 'Unknown';
+      : refundFinanceRecord
+        ? `${refundFinanceRecord.amount} · ${refundFinanceRecord.status}`
+        : relatedReturns.length > 0
+          ? 'Return linked'
+          : 'No return/refund impact';
   const financeSummaryCards = [
     { label: 'Order total', value: order.amount },
-    isAdmin && financePreview ? { label: 'Estimated vendor payable', value: estimatedVendorPayable } : null,
-    isAdmin && financePreview ? { label: 'Estimated marketplace commission', value: estimatedMarketplaceCommission } : null,
-    isAdmin && financePreview ? { label: 'Refund impact', value: refundImpact } : null,
-    isAdmin && financePreview && financePreview.sourceFields.shippingCost !== 'unknown'
-      ? { label: 'Shipping cost status', value: shippingCostStatus }
-      : null,
+    { label: 'Payout status', value: payoutStatus },
+    hasRefundImpact ? { label: 'Refund impact', value: refundImpact } : null,
   ].filter(Boolean) as Array<{ label: string; value: string }>;
   const financeUnknownIndicators = isAdmin
     ? [
@@ -2753,13 +2774,15 @@ export function OrderDetailPage() {
             title="Timeline"
             subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
             events={groupOrderDetailTimelineEvents([
-              ...order.timeline.map((entry) => ({
-                id: `order-native-${entry.label}-${entry.at}`,
-                title: getVendorTimelineLabel(entry.label),
-                at: entry.at,
-                tone: 'neutral' as const,
-                visibility: getNativeTimelineVisibility(entry.label),
-              })),
+              ...order.timeline
+                .filter((entry) => !isRawProviderTimelineLabel(entry.label))
+                .map((entry) => ({
+                  id: `order-native-${entry.label}-${entry.at}`,
+                  title: getVendorTimelineLabel(entry.label),
+                  at: entry.at,
+                  tone: 'neutral' as const,
+                  visibility: getNativeTimelineVisibility(entry.label),
+                })),
               ...orderTimelineEvents,
             ])}
             audience={audience}
@@ -3402,7 +3425,7 @@ export function OrderDetailPage() {
                             <strong>{formatCurrency(visibleShipmentExecution.shippingCost, visibleShipmentExecution.currency)}</strong>
                           </div>
                         ) : null}
-                        {visibleShipmentExecution?.timeline?.length ? (
+                        {isAdmin && visibleShipmentExecution?.timeline?.length ? (
                           <div className="shipment-mini-timeline" aria-label="Shipment timeline">
                             {visibleShipmentExecution.timeline.map((event) => (
                               <div className="summary-row" key={`${event.label}-${event.at}`}>
@@ -3633,10 +3656,15 @@ export function OrderDetailPage() {
                         ) : null}
                         {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                           <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
-                            <strong>Shipment recovery</strong>
+                            <strong>{isAdmin ? 'Shipment recovery' : 'Shipment needs attention'}</strong>
                             <span>
-                              Retry eligible: {canRecoverFailedShipment ? 'yes' : 'no'}
-                              {failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''}
+                              {isAdmin
+                                ? `Retry eligible: ${canRecoverFailedShipment ? 'yes' : 'no'}${
+                                    failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''
+                                  }`
+                                : canRecoverFailedShipment
+                                  ? 'Retry shipment after reviewing any required shipment-only fields.'
+                                  : 'Shipment recovery is not available for this shipment.'}
                             </span>
                             {canRecoverFailedShipment ? (
                               <div className="order-inline-actions">
@@ -3648,9 +3676,11 @@ export function OrderDetailPage() {
                                 >
                                   {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
                                 </button>
-                                <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
-                                  View diagnostics
-                                </a>
+                                {isAdmin ? (
+                                  <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
+                                    View diagnostics
+                                  </a>
+                                ) : null}
                               </div>
                             ) : null}
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
@@ -3672,16 +3702,20 @@ export function OrderDetailPage() {
                     ) : null}
                     {shipmentActionState ? (
                       <div className={`shipment-action-feedback action-feedback action-${shipmentActionState.tone}`} aria-live="polite">
-                        <strong>{shipmentActionState.message}</strong>
-                        <span>Endpoint: {shipmentActionState.endpoint ?? shipmentActionState.diagnostics?.endpoint ?? 'POST /shipments/create'}</span>
-                        {shipmentActionState.diagnostics ? (
-                          <span>
-                            HTTP: {shipmentActionState.diagnostics.status ?? '—'}
-                            {shipmentActionState.diagnostics.requestId ? ` · Request: ${shipmentActionState.diagnostics.requestId}` : ''}
-                          </span>
-                        ) : null}
-                        {shipmentActionState.shipment ? (
-                          <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
+                        <strong>{isAdmin ? shipmentActionState.message : getVendorShipmentActionMessage(shipmentActionState)}</strong>
+                        {isAdmin ? (
+                          <>
+                            <span>Endpoint: {shipmentActionState.endpoint ?? shipmentActionState.diagnostics?.endpoint ?? 'POST /shipments/create'}</span>
+                            {shipmentActionState.diagnostics ? (
+                              <span>
+                                HTTP: {shipmentActionState.diagnostics.status ?? '—'}
+                                {shipmentActionState.diagnostics.requestId ? ` · Request: ${shipmentActionState.diagnostics.requestId}` : ''}
+                              </span>
+                            ) : null}
+                            {shipmentActionState.shipment ? (
+                              <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
+                            ) : null}
+                          </>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>
@@ -4565,10 +4599,15 @@ export function OrderDetailPage() {
                     ) : null}
                     {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                       <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
-                        <strong>Shipment recovery</strong>
+                        <strong>{isAdmin ? 'Shipment recovery' : 'Shipment needs attention'}</strong>
                         <span>
-                          Retry eligible: {canRecoverFailedShipment ? 'yes' : 'no'}
-                          {failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''}
+                          {isAdmin
+                            ? `Retry eligible: ${canRecoverFailedShipment ? 'yes' : 'no'}${
+                                failedShipmentRetryBlockedReason ? ` · ${failedShipmentRetryBlockedReason}` : ''
+                              }`
+                            : canRecoverFailedShipment
+                              ? 'Retry shipment after reviewing any required shipment-only fields.'
+                              : 'Shipment recovery is not available for this shipment.'}
                         </span>
                         {canRecoverFailedShipment ? (
                           <div className="order-inline-actions">
@@ -4580,9 +4619,11 @@ export function OrderDetailPage() {
                             >
                               {isRetryingFailedShipment ? 'Retrying...' : 'Retry shipment'}
                             </button>
-                            <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
-                              View diagnostics
-                            </a>
+                            {isAdmin ? (
+                              <a className="button button-secondary button-link" href="#shipment-retry-diagnostics">
+                                View diagnostics
+                              </a>
+                            ) : null}
                           </div>
                         ) : null}
                         {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
@@ -4590,16 +4631,20 @@ export function OrderDetailPage() {
                     ) : null}
                     {shipmentActionState ? (
                       <div className={`shipment-action-feedback action-feedback action-${shipmentActionState.tone}`} aria-live="polite">
-                        <strong>{shipmentActionState.message}</strong>
-                        <span>Endpoint: {shipmentActionState.endpoint ?? shipmentActionState.diagnostics?.endpoint ?? 'POST /shipments/create'}</span>
-                        {shipmentActionState.diagnostics ? (
-                          <span>
-                            HTTP: {shipmentActionState.diagnostics.status ?? '—'}
-                            {shipmentActionState.diagnostics.requestId ? ` · Request: ${shipmentActionState.diagnostics.requestId}` : ''}
-                          </span>
-                        ) : null}
-                        {shipmentActionState.shipment ? (
-                          <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
+                        <strong>{isAdmin ? shipmentActionState.message : getVendorShipmentActionMessage(shipmentActionState)}</strong>
+                        {isAdmin ? (
+                          <>
+                            <span>Endpoint: {shipmentActionState.endpoint ?? shipmentActionState.diagnostics?.endpoint ?? 'POST /shipments/create'}</span>
+                            {shipmentActionState.diagnostics ? (
+                              <span>
+                                HTTP: {shipmentActionState.diagnostics.status ?? '—'}
+                                {shipmentActionState.diagnostics.requestId ? ` · Request: ${shipmentActionState.diagnostics.requestId}` : ''}
+                              </span>
+                            ) : null}
+                            {shipmentActionState.shipment ? (
+                              <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
+                            ) : null}
+                          </>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
                       </div>

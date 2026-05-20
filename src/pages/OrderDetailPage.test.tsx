@@ -687,12 +687,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Line items/ })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Financial summary' })).toBeInTheDocument();
+    expect(screen.getByText('Payout status')).toBeInTheDocument();
+    expect(screen.queryByText('Estimated marketplace commission')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Vendor actions' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Timeline' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Shipment timeline')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider returned no shipment identifiers.')).not.toBeInTheDocument();
+    expect(screen.queryByText('SHIPPING_EXECUTION_ENABLED')).not.toBeInTheDocument();
+    expect(screen.queryByText('Endpoint:')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
   });
 
   it('collapses provider-heavy admin diagnostics by default', async () => {
@@ -2086,7 +2094,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
     expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).toBeInTheDocument();
+    expect(screen.queryByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).not.toBeInTheDocument();
   });
 
   it('automatically refreshes Try OTO created shipments while tracking or label is missing', async () => {
@@ -3828,9 +3836,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       vendorId: 'sporjinal',
       customerOverrides: undefined,
     });
-    expect((await screen.findAllByText('Shipment ke-created-1028 recorded.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
-    expect(screen.getByText(/Provider id: yes · Barcode: yes/)).toBeInTheDocument();
+    expect((await screen.findAllByText('Shipment action completed.')).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Endpoint:\s*POST \/shipments\/create/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Provider id: yes · Barcode: yes/)).not.toBeInTheDocument();
     expect(screen.getByText('ke-created-1028')).toBeInTheDocument();
     expect(screen.getByText('barcode-1028')).toBeInTheDocument();
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
@@ -3868,8 +3876,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
 
     expect((await screen.findAllByText('Vendor shipping warehouse is not configured.')).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Endpoint:\s*\/shipments\/create/)).toBeInTheDocument();
-    expect(screen.getByText(/HTTP:\s*400.*Request:\s*req-shipment-1/)).toBeInTheDocument();
+    expect(screen.getByText('Shipment action needs attention.')).toBeInTheDocument();
+    expect(screen.queryByText(/Endpoint:\s*\/shipments\/create/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/HTTP:\s*400.*Request:\s*req-shipment-1/)).not.toBeInTheDocument();
   });
 
   it('shows validation-blocked create shipment errors next to the button', async () => {
@@ -3895,7 +3904,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect((await screen.findAllByText(/Missing required shipment fields:/)).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/customer\.phone/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Provider request blocked before create call/).length).toBeGreaterThan(0);
-    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/create/)).toBeInTheDocument();
+    expect(screen.getByText('Complete the missing shipment fields to continue.')).toBeInTheDocument();
+    expect(screen.queryByText(/Endpoint:\s*POST \/shipments\/create/)).not.toBeInTheDocument();
   });
 
   it('renders missing shipment field inputs and retries with shipment-only overrides', async () => {
@@ -4018,7 +4028,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText(/Returned trainer/)).length).toBeGreaterThan(0);
-    expect(screen.getByText('Return linked')).toBeInTheDocument();
+    const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
+    expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
+    const financeLink = screen.getByRole('link', { name: /Payout activity/i });
+    expect(financeLink.getAttribute('href')).toContain('/finance');
+    expect(screen.getAllByText('Return linked').length).toBeGreaterThan(0);
     expect(screen.getByText('Payout pending')).toBeInTheDocument();
     expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
   });
@@ -4042,6 +4056,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider configuration editor')).not.toBeInTheDocument();
     expect(screen.queryByText('message, shipment_id')).not.toBeInTheDocument();
+    expect(screen.queryByText('Provider returned no shipment identifiers.')).not.toBeInTheDocument();
+    expect(screen.queryByText('SHIPPING_EXECUTION_ENABLED')).not.toBeInTheDocument();
+    expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Shipment timeline')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Retry live shipment' })).not.toBeInTheDocument();
     expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
     expect(getVendorShippingConfigMock).not.toHaveBeenCalled();

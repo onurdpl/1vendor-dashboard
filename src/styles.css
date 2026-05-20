@@ -4325,9 +4325,9 @@ h3 {
   z-index: 12;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 8px 12px;
+  gap: 7px 12px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 9px 11px;
   border-radius: 14px;
 }
 
@@ -4343,8 +4343,9 @@ h3 {
 .order-detail-title-row {
   display: flex;
   justify-content: space-between;
-  gap: 18px;
+  gap: 12px 16px;
   align-items: flex-start;
+  flex-wrap: wrap;
 }
 
 .order-detail-title-stack {
@@ -4400,14 +4401,14 @@ h3 {
 .order-detail-meta-strip {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px 14px;
+  gap: 6px 12px;
 }
 
 .order-detail-meta-strip div {
   display: grid;
   grid-template-columns: auto;
   gap: 2px;
-  min-width: 104px;
+  min-width: min(108px, 100%);
 }
 
 .order-detail-meta-strip span,
@@ -4453,7 +4454,7 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 7px 9px;
+  padding: 6px 8px;
   border: 1px solid #dbeafe;
   border-radius: 10px;
   background: #eff6ff;
@@ -4486,17 +4487,17 @@ h3 {
 .order-operational-alerts {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 6px;
 }
 
 .order-operational-alert {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  gap: 8px;
+  gap: 6px;
   align-items: baseline;
   min-width: 0;
-  padding: 7px 8px;
+  padding: 6px 7px;
   border: 1px solid #e2e8f0;
   border-left-width: 3px;
   border-radius: 9px;
@@ -4680,8 +4681,8 @@ h3 {
 
 .order-detail-card-v2 {
   display: grid;
-  gap: 8px;
-  padding: 10px;
+  gap: 7px;
+  padding: 9px;
   border-radius: 12px;
 }
 
@@ -4760,7 +4761,7 @@ h3 {
 
 .order-financial-impact-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: 1.15fr 0.9fr 1fr;
   gap: 6px;
 }
 
@@ -4905,11 +4906,13 @@ summary.provider-response-heading::-webkit-details-marker {
 .admin-diagnostics-panel:not([open]) {
   gap: 0;
   background: #f8fafc;
+  box-shadow: none;
 }
 
 .admin-diagnostics-panel {
   border-color: #cbd5e1;
   background: #f8fafc;
+  box-shadow: none;
 }
 
 .diagnostics-nested-panel {
@@ -4926,7 +4929,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .provider-response-heading span {
-  color: #dc2626;
+  color: #64748b;
   font-size: 0.72rem;
   font-weight: 800;
   text-transform: uppercase;
@@ -5212,12 +5215,14 @@ summary.provider-response-heading::-webkit-details-marker {
 
 @media (max-width: 760px) {
   .order-detail-workspace {
-    padding: 16px;
+    gap: 8px;
+    padding: 10px;
   }
 
   .order-detail-topbar {
     position: static;
     grid-template-columns: 1fr;
+    padding: 9px;
   }
 
   .order-detail-title-row,
@@ -5233,6 +5238,19 @@ summary.provider-response-heading::-webkit-details-marker {
   .order-tracking-summary-card,
   .order-tracking-form {
     grid-template-columns: 1fr;
+  }
+
+  .order-detail-card-v2,
+  .operational-card {
+    padding: 8px;
+  }
+
+  .order-operational-alerts {
+    grid-template-columns: 1fr;
+  }
+
+  .order-operational-alert span {
+    white-space: normal;
   }
 
   .order-workspace-panel {
@@ -7310,11 +7328,11 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .operational-card {
   display: grid;
-  gap: 0.65rem;
+  gap: 0.55rem;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   background: #fff;
-  padding: 0.72rem;
+  padding: 0.65rem;
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.045);
 }
 
@@ -7322,7 +7340,7 @@ summary.provider-response-heading::-webkit-details-marker {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 
 .operational-card-heading h3 {
@@ -7335,6 +7353,7 @@ summary.provider-response-heading::-webkit-details-marker {
 .operational-card-heading span {
   color: #64748b;
   font-size: 0.74rem;
+  line-height: 1.35;
 }
 
 .operational-recommendation-list {
@@ -7397,7 +7416,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .unified-operational-timeline {
   display: grid;
-  gap: 0.45rem;
+  gap: 0.35rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -7406,7 +7425,7 @@ summary.provider-response-heading::-webkit-details-marker {
 .unified-operational-timeline li {
   display: grid;
   grid-template-columns: 0.6rem minmax(0, 1fr);
-  gap: 0.5rem;
+  gap: 0.42rem;
   align-items: flex-start;
 }
 
@@ -7456,14 +7475,14 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .unified-operational-timeline p {
-  margin: 0.08rem 0 0;
+  margin: 0.04rem 0 0;
   color: #475569;
   font-size: 0.74rem;
 }
 
 .unified-operational-timeline small {
   display: block;
-  margin-top: 0.12rem;
+  margin-top: 0.08rem;
   color: #64748b;
   font-size: 0.68rem;
 }
@@ -7474,6 +7493,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .operational-link-row {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -7509,8 +7529,9 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .operational-link-row:hover {
   border-color: #93c5fd;
-  background: #eff6ff;
-  box-shadow: inset 3px 0 0 #2563eb;
+  background: #f8fbff;
+  box-shadow: 0 8px 18px rgba(37, 99, 235, 0.08), inset 3px 0 0 #2563eb;
+  transform: translateY(-1px);
 }
 
 .operational-link-row[href]::after {

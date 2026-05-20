@@ -51,6 +51,12 @@ Vendor-first order detail hierarchy:
 6. Clean timeline.
 7. Diagnostics only when the user has admin context.
 
+Phase 6 polish keeps the dense two-column foundation and removes provider noise from the
+vendor working surface. Vendor-facing action areas should show only the shipment provider,
+carrier, tracking, return tracking/status, and support actions. Provider attempts, webhook
+receipts, validation failures, payload keys, and raw Try OTO/Kargo lifecycle wording belong
+inside collapsed admin diagnostics.
+
 ## Dense Operational Dashboard Philosophy
 
 The canonical order detail layout should preserve high information density while improving
@@ -64,9 +70,14 @@ Design rules:
 - Prefer compact strips, grouped rows, and ledger-style summaries over oversized isolated cards.
 - Keep unknown values inline and explicit, but avoid turning every unknown into a large visual
   tile.
+- In finance preview, prioritize order total, payout status, and refund impact; keep commission,
+  shipping cost, and source-field details in the admin preview/diagnostics instead of adding more
+  unknown cards.
 - Put shipment and return operations near the top of the operator flow.
 - Make linked records visibly clickable without making them visually louder than the active
   order state.
+- Treat the entire return, finance, and support linked-record card as the primary click target;
+  the “Open” text is only a secondary affordance.
 - Preserve responsive stacking on mobile, but keep row density and avoid oversized vertical
   gaps.
 
@@ -107,5 +118,7 @@ Vendor timeline policy:
   support ticket created or resolved.
 - Hide raw provider events such as webhook received, provider status updated, payload parsed,
   `searchingDriver`, `reverseShipmentProcessing`, and reverse shipment implementation terms.
+- Group repeated status/tracking/shipment events by title and day so repeated webhook/status
+  updates do not dominate the operational narrative.
 - Keep unknown or provider-specific states visible in admin diagnostics instead of the vendor
   timeline.
