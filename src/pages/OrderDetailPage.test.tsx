@@ -651,7 +651,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).getByText(/Filters planned: operations, returns, finance, support/)).toBeInTheDocument();
   });
 
-  it('renders the dense operational workspace navigation without exposing vendor diagnostics', async () => {
+  it('renders the dense operational foundation without exposing vendor diagnostics', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -665,13 +665,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByLabelText('Primary operational status')).toBeInTheDocument();
-    const workspaceNav = screen.getByRole('navigation', { name: 'Order detail sections' });
-    expect(within(workspaceNav).getByRole('button', { name: /Overview/ })).toBeInTheDocument();
-    expect(within(workspaceNav).getByRole('button', { name: /Shipment/ })).toBeInTheDocument();
-    expect(within(workspaceNav).getByRole('button', { name: /Return/ })).toBeInTheDocument();
-    expect(within(workspaceNav).getByRole('button', { name: /Finance/ })).toBeInTheDocument();
-    expect(within(workspaceNav).getByRole('button', { name: /Support/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Shipment and return operations' })).toBeInTheDocument();
+    expect(screen.queryByRole('navigation', { name: 'Order detail sections' })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Financial summary' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
   });

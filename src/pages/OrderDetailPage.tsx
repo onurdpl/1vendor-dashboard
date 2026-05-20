@@ -754,7 +754,6 @@ export function OrderDetailPage() {
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
-  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'shipment' | 'return' | 'finance' | 'support'>('overview');
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -2260,13 +2259,6 @@ export function OrderDetailPage() {
           helper: 'Shipment and order state are progressing normally.',
           tone: 'healthy',
         };
-  const workspaceTabs: Array<{ id: 'overview' | 'shipment' | 'return' | 'finance' | 'support'; label: string; helper: string }> = [
-    { id: 'overview', label: 'Overview', helper: 'Operational summary' },
-    { id: 'shipment', label: 'Shipment', helper: 'Carrier and fulfillment' },
-    { id: 'return', label: 'Return', helper: hasOperationalReturn ? 'Active return' : 'No active return' },
-    { id: 'finance', label: 'Finance', helper: isAdmin ? 'Ledger preview' : 'Summary' },
-    { id: 'support', label: 'Support', helper: relatedSupportTickets.length ? `${relatedSupportTickets.length} linked` : 'Open support' },
-  ];
 
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
@@ -2427,7 +2419,7 @@ export function OrderDetailPage() {
   ) : null;
 
   return (
-    <section className="order-detail-workspace order-detail-cockpit order-detail-dense" data-active-workspace-tab={activeWorkspaceTab}>
+    <section className="order-detail-workspace order-detail-cockpit order-detail-dense">
       <header className="order-detail-topbar">
         <Link className="order-detail-back" to="/orders">
           Back to orders
@@ -2452,6 +2444,14 @@ export function OrderDetailPage() {
               <div>
                 <span>Customer</span>
                 <strong>{customerLabel}</strong>
+              </div>
+              <div>
+                <span>Shopify ID</span>
+                <strong>{order.sourceShopifyOrderId || '—'}</strong>
+              </div>
+              <div>
+                <span>Ship to</span>
+                <strong>{order.shippingAddress || 'Unknown'}</strong>
               </div>
             </div>
           </div>
@@ -2487,21 +2487,6 @@ export function OrderDetailPage() {
           </article>
         ))}
       </div>
-
-      <nav className="order-workspace-tabs" aria-label="Order detail sections">
-        {workspaceTabs.map((tab) => (
-          <button
-            key={tab.id}
-            type="button"
-            className={activeWorkspaceTab === tab.id ? 'is-active' : ''}
-            aria-pressed={activeWorkspaceTab === tab.id}
-            onClick={() => setActiveWorkspaceTab(tab.id)}
-          >
-            <span>{tab.label}</span>
-            <small>{tab.helper}</small>
-          </button>
-        ))}
-      </nav>
 
       <div className="order-detail-main-grid">
         <div className="order-detail-left-column">
@@ -2652,30 +2637,6 @@ export function OrderDetailPage() {
             </article>
           ) : null}
 
-          <article className="order-detail-card-v2 order-additional-details-card order-context-panel">
-            <div className="order-card-heading">
-              <h2>Context</h2>
-            </div>
-            <div className="order-secondary-detail-grid">
-              <div>
-                <span>Customer</span>
-                <strong>{customerLabel}</strong>
-              </div>
-              <div>
-                <span>Shopify order ID</span>
-                <strong>{order.sourceShopifyOrderId || '—'}</strong>
-              </div>
-              <div>
-                <span>Shipment status</span>
-                <strong>{order.shipmentCreatedAt ? formatOptionalDate(order.shipmentCreatedAt) : order.shippingStatus}</strong>
-              </div>
-              <div>
-                <span>Shipping address</span>
-                <strong>{order.shippingAddress || 'Unknown'}</strong>
-              </div>
-            </div>
-          </article>
-
           <div className="order-context-panel order-linked-records-panel">
             <OperationalLinkCards
               title="Linked records"
@@ -2802,7 +2763,7 @@ export function OrderDetailPage() {
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">
               <div>
-                <h2>Shipment and return operations</h2>
+                <h2>Shipment & delivery</h2>
                 <p>{hasTrackingSync ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
