@@ -754,6 +754,7 @@ export function OrderDetailPage() {
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [activeWorkspaceTab, setActiveWorkspaceTab] = useState<'overview' | 'shipment' | 'return' | 'finance' | 'support'>('overview');
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -2238,6 +2239,34 @@ export function OrderDetailPage() {
       createdAt: waitingSupportTicket.lastReplyAt ?? waitingSupportTicket.updatedAt,
     });
   }
+  const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
+  const needsOperationalAttention = Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
+  const orderHealth = hasOperationalReturn
+    ? {
+        label: 'Return active',
+        helper: 'A return is linked to this order. Review return tracking and Shopify sync before closing the loop.',
+        tone: 'return',
+      }
+    : needsOperationalAttention
+      ? {
+          label: 'Needs attention',
+          helper: waitingSupportTicket
+            ? 'Support is waiting for a vendor update.'
+            : 'Shipment tracking is not fully visible yet.',
+          tone: 'attention',
+        }
+      : {
+          label: 'Healthy',
+          helper: 'Shipment and order state are progressing normally.',
+          tone: 'healthy',
+        };
+  const workspaceTabs: Array<{ id: 'overview' | 'shipment' | 'return' | 'finance' | 'support'; label: string; helper: string }> = [
+    { id: 'overview', label: 'Overview', helper: 'Operational summary' },
+    { id: 'shipment', label: 'Shipment', helper: 'Carrier and fulfillment' },
+    { id: 'return', label: 'Return', helper: hasOperationalReturn ? 'Active return' : 'No active return' },
+    { id: 'finance', label: 'Finance', helper: isAdmin ? 'Ledger preview' : 'Summary' },
+    { id: 'support', label: 'Support', helper: relatedSupportTickets.length ? `${relatedSupportTickets.length} linked` : 'Open support' },
+  ];
 
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
@@ -2398,7 +2427,7 @@ export function OrderDetailPage() {
   ) : null;
 
   return (
-    <section className="order-detail-workspace">
+    <section className="order-detail-workspace order-detail-cockpit" data-active-workspace-tab={activeWorkspaceTab}>
       <header className="order-detail-topbar">
         <Link className="order-detail-back" to="/orders">
           Back to orders
@@ -2409,6 +2438,7 @@ export function OrderDetailPage() {
               <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
               <span className="order-source-pill">{order.channel || 'Unknown'}</span>
               <span className={`status-badge status-${getStatusClass(order.status)}`}>{order.status}</span>
+              {hasOperationalReturn ? <span className="status-badge status-warning">Return active</span> : null}
             </div>
             <div className="order-detail-meta-strip">
               <div>
@@ -2418,10 +2448,6 @@ export function OrderDetailPage() {
               <div>
                 <span>Vendor</span>
                 <strong>{order.assignedVendorId || 'Unknown'}</strong>
-              </div>
-              <div>
-                <span>Customer</span>
-                <strong>{customerLabel}</strong>
               </div>
             </div>
           </div>
@@ -2436,6 +2462,10 @@ export function OrderDetailPage() {
           <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
             {order.shippingStatus}
           </span>
+        </div>
+        <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
+          <strong>{orderHealth.label}</strong>
+          <span>{orderHealth.helper}</span>
         </div>
       </header>
 
@@ -2454,9 +2484,24 @@ export function OrderDetailPage() {
         ))}
       </div>
 
+      <nav className="order-workspace-tabs" aria-label="Order detail sections">
+        {workspaceTabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            className={activeWorkspaceTab === tab.id ? 'is-active' : ''}
+            aria-pressed={activeWorkspaceTab === tab.id}
+            onClick={() => setActiveWorkspaceTab(tab.id)}
+          >
+            <span>{tab.label}</span>
+            <small>{tab.helper}</small>
+          </button>
+        ))}
+      </nav>
+
       <div className="order-detail-main-grid">
         <div className="order-detail-left-column">
-          <article className="order-detail-card-v2 order-line-items-card">
+          <article className="order-detail-card-v2 order-line-items-card order-context-panel">
             <div className="order-card-heading">
               <h2>Line items ({orderItems.length})</h2>
             </div>
@@ -2495,7 +2540,7 @@ export function OrderDetailPage() {
             </div>
           </article>
 
-          <article className="order-detail-card-v2">
+          <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
             <div className="order-card-heading">
               <h2>Financial summary</h2>
               <p>Read-only operational estimate. Unknown values stay explicit.</p>
@@ -2529,7 +2574,7 @@ export function OrderDetailPage() {
           </article>
 
           {isAdmin && order.financeLedgerPreview ? (
-            <article className="order-detail-card-v2" aria-label="Finance ledger preview">
+            <article className="order-detail-card-v2 order-finance-ledger-card order-workspace-panel" aria-label="Finance ledger preview">
               <div className="order-card-heading">
                 <div>
                   <h2>Finance ledger preview</h2>
@@ -2603,11 +2648,15 @@ export function OrderDetailPage() {
             </article>
           ) : null}
 
-          <article className="order-detail-card-v2">
+          <article className="order-detail-card-v2 order-additional-details-card order-context-panel">
             <div className="order-card-heading">
-              <h2>Additional details</h2>
+              <h2>Context</h2>
             </div>
             <div className="order-secondary-detail-grid">
+              <div>
+                <span>Customer</span>
+                <strong>{customerLabel}</strong>
+              </div>
               <div>
                 <span>Shopify order ID</span>
                 <strong>{order.sourceShopifyOrderId || '—'}</strong>
@@ -2623,12 +2672,14 @@ export function OrderDetailPage() {
             </div>
           </article>
 
-          <OperationalLinkCards
-            title="Related operational records"
-            subtitle="Returns, payout activity, and support linked to this order."
-            links={orderCrossLinks}
-            audience={audience}
-          />
+          <div className="order-context-panel order-linked-records-panel">
+            <OperationalLinkCards
+              title="Linked records"
+              subtitle="Returns, payout activity, and support linked to this order."
+              links={orderCrossLinks}
+              audience={audience}
+            />
+          </div>
         </div>
 
         <aside className="order-detail-right-column">
@@ -2660,7 +2711,7 @@ export function OrderDetailPage() {
             emptyMessage="No records available."
           />
 
-          <article className="order-detail-card-v2" aria-label="Shipment and return support">
+          <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
             <div className="order-card-heading">
               <div>
                 <h2>Support</h2>
@@ -2744,11 +2795,11 @@ export function OrderDetailPage() {
             </div>
           </article>
 
-          <article className="order-detail-card-v2 order-primary-action-card">
+          <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">
               <div>
-                <h2>Vendor actions</h2>
-                <p>{hasTrackingSync ? 'Shipment information is available for this order.' : 'Add shipment details when the package is ready.'}</p>
+                <h2>Shipment and return operations</h2>
+                <p>{hasTrackingSync ? 'Carrier, tracking, label, and Shopify sync controls.' : 'Add shipment details when the package is ready.'}</p>
               </div>
             </div>
             {canUseFulfillmentActions ? (
