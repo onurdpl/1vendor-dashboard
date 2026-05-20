@@ -314,7 +314,6 @@ export function OrdersPage() {
                     <strong>{metric.value}</strong>
                     <small>{metric.detail}</small>
                   </div>
-                  <span className="orders-kpi-sparkline" aria-hidden="true" />
                 </article>
               ))}
             </div>

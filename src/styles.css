@@ -3458,84 +3458,56 @@ h3 {
 
 .orders-enterprise-kpi {
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) 10px;
-  gap: 7px 10px;
-  align-items: start;
-  min-height: 104px;
-  padding: 12px;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 82px;
+  padding: 10px 11px;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  border-radius: 14px;
   background: #ffffff;
-  box-shadow: 0 12px 24px rgba(15, 23, 42, 0.06);
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.045);
 }
 
 .orders-enterprise-kpi div {
   display: grid;
-  gap: 3px;
+  gap: 2px;
   min-width: 0;
 }
 
 .orders-kpi-icon {
   display: inline-flex;
-  width: 30px;
-  height: 30px;
+  width: 28px;
+  height: 28px;
   align-items: center;
   justify-content: center;
-  border-radius: 11px;
+  border-radius: 9px;
   color: #2563eb;
   background: #dbeafe;
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   font-weight: 900;
 }
 
 .orders-enterprise-kpi span:not(.orders-kpi-icon) {
   color: #64748b;
-  font-size: 0.68rem;
-  font-weight: 800;
+  font-size: 0.66rem;
+  font-weight: 750;
+  line-height: 1.15;
 }
 
 .orders-enterprise-kpi strong {
   color: #020617;
-  font-size: clamp(1.15rem, 1.45vw, 1.45rem);
+  font-size: clamp(1.28rem, 1.65vw, 1.62rem);
   line-height: 1;
-  font-weight: 800;
+  font-weight: 850;
   font-variant-numeric: tabular-nums;
 }
 
 .orders-enterprise-kpi small {
-  color: #64748b;
-  font-size: 0.66rem;
+  color: #94a3b8;
+  font-size: 0.62rem;
   font-weight: 600;
-  line-height: 1.25;
-}
-
-.orders-kpi-sparkline {
-  grid-column: 1 / -1;
-  display: block;
-  height: 10px;
-  border-radius: 999px;
-  background:
-    linear-gradient(90deg, transparent 0 8%, rgba(37, 99, 235, 0.18) 8% 10%, transparent 10% 18%, rgba(37, 99, 235, 0.28) 18% 21%, transparent 21% 35%, rgba(37, 99, 235, 0.2) 35% 38%, transparent 38% 100%),
-    linear-gradient(180deg, transparent 50%, #eff6ff 50% 54%, transparent 54%);
-}
-
-.orders-kpi-awaiting .orders-kpi-sparkline {
-  background:
-    linear-gradient(90deg, transparent 0 8%, rgba(245, 158, 11, 0.18) 8% 10%, transparent 10% 18%, rgba(245, 158, 11, 0.28) 18% 21%, transparent 21% 35%, rgba(245, 158, 11, 0.2) 35% 38%, transparent 38% 100%),
-    linear-gradient(180deg, transparent 50%, #fef3c7 50% 54%, transparent 54%);
-}
-
-.orders-kpi-blocked .orders-kpi-sparkline {
-  background:
-    linear-gradient(90deg, transparent 0 8%, rgba(220, 38, 38, 0.18) 8% 10%, transparent 10% 18%, rgba(220, 38, 38, 0.28) 18% 21%, transparent 21% 35%, rgba(220, 38, 38, 0.2) 35% 38%, transparent 38% 100%),
-    linear-gradient(180deg, transparent 50%, #fee2e2 50% 54%, transparent 54%);
-}
-
-.orders-kpi-fulfilled .orders-kpi-sparkline {
-  background:
-    linear-gradient(90deg, transparent 0 8%, rgba(22, 163, 74, 0.18) 8% 10%, transparent 10% 18%, rgba(22, 163, 74, 0.28) 18% 21%, transparent 21% 35%, rgba(22, 163, 74, 0.2) 35% 38%, transparent 38% 100%),
-    linear-gradient(180deg, transparent 50%, #dcfce7 50% 54%, transparent 54%);
+  line-height: 1.18;
 }
 
 .orders-kpi-awaiting .orders-kpi-icon {
