@@ -68,6 +68,7 @@ describe('OperationalLinkCards', () => {
 
     expect(screen.getByText('Order #1029').closest('a')).toHaveAttribute('href', '/orders/order-1029');
     expect(screen.getByText('Linked')).toBeInTheDocument();
+    expect(screen.getByText('Open')).toBeInTheDocument();
 
     rerender(
       <MemoryRouter>

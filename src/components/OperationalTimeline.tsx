@@ -98,13 +98,21 @@ export function OperationalLinkCards({
           {visibleLinks.map((link) => {
             const body = (
               <>
-                <div>
+                <div className="operational-link-main">
                   {link.eyebrow ? <span>{link.eyebrow}</span> : null}
                   <strong>{link.title}</strong>
                   {link.description ? <small>{link.description}</small> : null}
-                  {link.href ? <small>{link.actionLabel ?? 'Open record'}</small> : null}
                 </div>
-                {link.status ? <StatusBadge tone={link.tone ?? 'neutral'}>{link.status}</StatusBadge> : null}
+                {link.status ? (
+                  <div className="operational-link-status">
+                    <StatusBadge tone={link.tone ?? 'neutral'}>{link.status}</StatusBadge>
+                  </div>
+                ) : null}
+                {link.href ? (
+                  <span className="operational-link-action" aria-hidden="true">
+                    Open
+                  </span>
+                ) : null}
               </>
             );
 
