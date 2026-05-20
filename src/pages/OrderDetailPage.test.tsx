@@ -40,7 +40,7 @@ vi.mock('../features/orders/api', async () => {
   return {
     ...actual,
     getOrder: (orderId: string) => getOrderMock(orderId),
-    getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+    getShippingProviderDiagnostics: (options?: { vendorId?: string | null; provider?: string | null }) =>
       getShippingProviderDiagnosticsMock(options),
     getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
     updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
@@ -209,7 +209,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     getOrderMock.mockReset();
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
     getShippingProviderDiagnosticsMock.mockReset();
-    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) => {
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) => {
       if (options?.provider === 'try_oto') {
         return Promise.resolve({
           provider: 'try_oto',
@@ -236,10 +236,36 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           warnings: ['Try OTO is sandbox-only in this phase.'],
         });
       }
+      if (options?.provider === 'kargonomi') {
+        return Promise.resolve({
+          provider: 'kargonomi',
+          supportedProviders: ['kargo_entegrator', 'hepsijet', 'kargonomi'],
+          executionReady: true,
+          sandboxModeEnabled: false,
+          shippingExecutionEnabled: true,
+          providerSelected: true,
+          providerEnabled: true,
+          webhookIngestEnabled: false,
+          baseUrlConfigured: true,
+          apiKeyConfigured: true,
+          cargoIntegrationIdConfigured: false,
+          warehouseIdConfigured: true,
+          defaultDesiConfigured: true,
+          packageTypeUsed: 'box',
+          notificationUrlConfigured: false,
+          webhookRouteImplemented: true,
+          receiverAddressAvailability: 'confirmed_required',
+          dummyKargoSupport: 'not_implemented',
+          statusSyncSupport: 'not_implemented',
+          missing: [],
+          deprecatedEnvFallbacks: [],
+          warnings: ['Kargonomi return/reverse shipment is not implemented.'],
+        });
+      }
 
       return Promise.resolve({
         provider: 'kargo_entegrator',
-        supportedProviders: ['kargo_entegrator', 'hepsijet'],
+        supportedProviders: ['kargo_entegrator', 'hepsijet', 'kargonomi'],
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,
@@ -1087,7 +1113,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
-    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(4));
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
   });
 
@@ -1191,7 +1217,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
     });
-    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) =>
       Promise.resolve({
         provider: options?.provider === 'try_oto' ? 'try_oto' : 'kargo_entegrator',
         supportedProviders: ['kargo_entegrator', 'hepsijet', 'try_oto'],
@@ -1237,7 +1263,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       canSwitchVendors: true,
       defaultVendorId: 'sporjinal',
     });
-    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: 'kargo_entegrator' | 'try_oto' | null }) =>
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) =>
       Promise.resolve({
         provider: options?.provider === 'try_oto' ? 'try_oto' : 'kargo_entegrator',
         supportedProviders: ['kargo_entegrator', 'hepsijet', 'try_oto'],
@@ -1273,6 +1299,133 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
     expect(screen.getByLabelText('Try OTO origin city')).toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
+  });
+
+  it('shows Kargonomi provider option and warehouse config when backend diagnostics expose it as supported', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) =>
+      Promise.resolve({
+        provider: options?.provider === 'kargonomi' ? 'kargonomi' : options?.provider === 'try_oto' ? 'try_oto' : 'kargo_entegrator',
+        supportedProviders: ['kargo_entegrator', 'hepsijet', 'kargonomi'],
+        executionReady: options?.provider === 'kargonomi',
+        sandboxModeEnabled: false,
+        shippingExecutionEnabled: true,
+        providerSelected: options?.provider === 'kargonomi',
+        providerEnabled: true,
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: options?.provider === 'kargo_entegrator',
+        warehouseIdConfigured: true,
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: true,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: [],
+        deprecatedEnvFallbacks: [],
+        warnings: [],
+      }),
+    );
+
+    renderOrderDetail();
+
+    const providerSelect = await screen.findByLabelText('Provider');
+    expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
+    await user.selectOptions(providerSelect, 'kargonomi');
+    const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    await user.clear(warehouseInput);
+    await user.type(warehouseInput, '112668');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'sporjinal',
+        expect.objectContaining({
+          preferredProvider: 'kargonomi',
+          cargoIntegrationId: null,
+          defaultWarehouseId: '112668',
+          defaultDesi: 3,
+          warehouses: [
+            expect.objectContaining({
+              provider: 'kargonomi',
+              warehouseId: '112668',
+              isDefault: true,
+            }),
+          ],
+        }),
+      ),
+    );
+    expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+  });
+
+  it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'kargonomi',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Kargonomi',
+        warehouseId: '112668',
+        providerShipmentId: 'kg-1048',
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created',
+        returnShipment: {
+          provider: 'try_oto',
+          returnOrderId: 'should-not-render',
+          trackingNumber: 'RET-TRACK',
+          trackingUrl: null,
+          labelUrl: null,
+          barcode: 'RET-TRACK',
+          carrierName: 'Sürat Kargo',
+          status: 'newReturn',
+          createdAt: '2026-05-15T19:46:00.000Z',
+          requestKeys: [],
+          responseKeys: [],
+          trackingPresent: true,
+          labelPresent: false,
+          labelRetrievalConfirmed: false,
+          labelRetrievalNote: null,
+          finalized: true,
+          labelRetrievable: false,
+          providerStatusSource: 'createReturnShipment',
+          diagnostics: null,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect((await screen.findAllByText('Kargonomi')).length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText('Try OTO return shipment')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Try OTO shipment status refresh')).not.toBeInTheDocument();
+    expect(screen.queryByText('Try OTO status refresh')).not.toBeInTheDocument();
+    expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
   });
 
   it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {

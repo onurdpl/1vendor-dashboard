@@ -1469,6 +1469,50 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('passes Kargonomi provider override through the admin provider diagnostics route', async () => {
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: Record<string, string> }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (
+          request: { authUser?: { role?: string }; query?: Record<string, string> },
+          reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+        ) => unknown;
+        gets.set(path, handler);
+      }),
+      put: vi.fn(),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(
+      app as never,
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'configured-token',
+        KARGONOMI_DEFAULT_WAREHOUSE_ID: '112668',
+      },
+    );
+    const result = await gets.get('/admin/shipments/provider-config')?.(
+      { authUser: { role: 'admin' }, query: { provider: 'kargonomi' } },
+      reply,
+    );
+
+    expect(result).toMatchObject({
+      provider: 'kargonomi',
+      providerSelected: true,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      supportedProviders: expect.arrayContaining(['kargonomi']),
+    });
+  });
+
   it('reports vendor Kargo readiness booleans without exposing secrets or raw config values', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',

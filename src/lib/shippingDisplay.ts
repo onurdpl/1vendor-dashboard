@@ -11,6 +11,9 @@ export function formatShippingProviderName(value?: string | null) {
   if (normalized === 'kargo_entegrator') {
     return 'Kargo Entegratör';
   }
+  if (normalized === 'kargonomi') {
+    return 'Kargonomi';
+  }
   if (normalized === 'hepsijet') {
     return 'Hepsijet';
   }

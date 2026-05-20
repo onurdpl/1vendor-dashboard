@@ -240,7 +240,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
 
       const query = request.query as { provider?: string; vendorId?: string };
       const provider =
-        query.provider === 'kargo_entegrator' || query.provider === 'try_oto'
+        query.provider === 'kargo_entegrator' || query.provider === 'try_oto' || query.provider === 'kargonomi'
           ? query.provider
           : undefined;
       return getShippingProviderReadinessDiagnostics(env, provider, query.vendorId);

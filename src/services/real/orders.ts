@@ -9,6 +9,7 @@ import type {
   OrderLineItem,
   ShipmentExecution,
   ShipmentCustomerOverrides,
+  ShippingProvider,
   ShippingProviderDiagnostics,
   OrderStatus,
   OrderSummary,
@@ -575,7 +576,7 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 }
 
 export async function getShippingProviderDiagnostics(
-  provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator',
+  provider: ShippingProvider = 'kargo_entegrator',
   options: { vendorId?: string | null } = {},
 ) {
   const params = new URLSearchParams({ provider });

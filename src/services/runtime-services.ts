@@ -30,6 +30,7 @@ import type {
   SupportTicketContextSummary,
   SupportTicketStatus,
   ShipmentCustomerOverrides,
+  ShippingProvider,
   VendorShippingConfigUpdate,
 } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload } from './real/orders';
@@ -823,14 +824,14 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: 'kargo_entegrator' | 'try_oto' = 'kargo_entegrator') {
+    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: ShippingProvider = 'kargo_entegrator') {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics(provider, { vendorId });
       }
 
       return {
         provider,
-        supportedProviders: ['kargo_entegrator' as const, 'hepsijet' as const],
+        supportedProviders: ['kargo_entegrator' as const, 'hepsijet' as const, 'kargonomi' as const],
         executionReady: false,
         sandboxModeEnabled: false,
         shippingExecutionEnabled: false,

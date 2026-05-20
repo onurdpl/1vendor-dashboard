@@ -1,5 +1,5 @@
 import { runtimeServices } from '../../services/runtime-services';
-import type { ShipmentCustomerOverrides, VendorShippingConfigUpdate } from './contracts';
+import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
 
 export async function listOrders(options: { vendorId?: string | null } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined);
@@ -88,7 +88,7 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 }
 
 export async function getShippingProviderDiagnostics(
-  options: { vendorId?: string | null; provider?: 'kargo_entegrator' | 'try_oto' | null } = {},
+  options: { vendorId?: string | null; provider?: ShippingProvider | null } = {},
 ) {
   return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined, options.provider ?? undefined);
 }

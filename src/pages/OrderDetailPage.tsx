@@ -580,6 +580,9 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   if (draft.preferredProvider === 'try_oto' && !draft.tryOtoOriginCity.trim()) {
     errors.push('Try OTO origin city is required.');
   }
+  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.defaultWarehouseId.trim())) {
+    errors.push('Kargonomi warehouse ID must be numeric.');
+  }
   const defaultDesi = Number(draft.defaultDesi);
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
     errors.push('Default desi must be greater than zero.');
@@ -613,6 +616,24 @@ function buildShippingConfigUpdate(
         tryOtoOriginCity: draft.tryOtoOriginCity.trim(),
       },
       warehouses: [],
+    };
+  }
+
+  if (draft.preferredProvider === 'kargonomi') {
+    return {
+      ...baseUpdate,
+      cargoIntegrationId: null,
+      defaultWarehouseId: draft.defaultWarehouseId.trim(),
+      providerMetadata: metadata,
+      warehouses: [
+        {
+          warehouseId: draft.defaultWarehouseId.trim(),
+          name: existingDefaultWarehouse?.name ?? 'Default warehouse',
+          address: existingDefaultWarehouse?.address ?? null,
+          isDefault: true,
+          provider: 'kargonomi',
+        },
+      ],
     };
   }
 
@@ -834,7 +855,12 @@ export function OrderDetailPage() {
       enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId),
     },
   );
-  const diagnosticsProvider = vendorShippingConfig?.preferredProvider === 'try_oto' ? 'try_oto' : 'kargo_entegrator';
+  const diagnosticsProvider =
+    vendorShippingConfig?.preferredProvider === 'try_oto'
+      ? 'try_oto'
+      : vendorShippingConfig?.preferredProvider === 'kargonomi'
+        ? 'kargonomi'
+        : 'kargo_entegrator';
   const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
     () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider }),
@@ -845,6 +871,13 @@ export function OrderDetailPage() {
   const { data: tryOtoOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('try_oto', currentVendor.vendorId),
     () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto' }),
+    {
+      enabled: authContextReady && isAdmin,
+    },
+  );
+  const { data: kargonomiOptionDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig('kargonomi', currentVendor.vendorId),
+    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi' }),
     {
       enabled: authContextReady && isAdmin,
     },
@@ -2383,12 +2416,19 @@ export function OrderDetailPage() {
 
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
+  const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
   const shouldShowTryOtoProviderOption =
     vendorShippingConfig?.preferredProvider === 'try_oto' ||
     shippingProviderDiagnostics?.provider === 'try_oto' ||
     Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('try_oto')) ||
     Boolean(tryOtoOptionDiagnostics?.supportedProviders?.includes('try_oto')) ||
     Boolean(tryOtoOptionDiagnostics?.providerEnabled);
+  const shouldShowKargonomiProviderOption =
+    vendorShippingConfig?.preferredProvider === 'kargonomi' ||
+    shippingProviderDiagnostics?.provider === 'kargonomi' ||
+    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi')) ||
+    Boolean(kargonomiOptionDiagnostics?.supportedProviders?.includes('kargonomi')) ||
+    Boolean(kargonomiOptionDiagnostics?.providerEnabled);
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
 
@@ -2422,27 +2462,30 @@ export function OrderDetailPage() {
           >
             <option value="kargo_entegrator">Kargo Entegratör</option>
             {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
+            {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
             <option value="hepsijet">Hepsijet</option>
           </select>
         </label>
-        {isKargoConfigDraft ? (
+        {isKargoConfigDraft || isKargonomiConfigDraft ? (
           <>
+            {isKargoConfigDraft ? (
+              <label className="field">
+                <span>Cargo integration ID</span>
+                <input
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={shippingConfigDraft.cargoIntegrationId}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      cargoIntegrationId: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            ) : null}
             <label className="field">
-              <span>Cargo integration ID</span>
-              <input
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={shippingConfigDraft.cargoIntegrationId}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    cargoIntegrationId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Warehouse ID</span>
+              <span>{isKargonomiConfigDraft ? 'Kargonomi warehouse ID' : 'Warehouse ID'}</span>
               <input
                 inputMode="numeric"
                 pattern="[0-9]*"
@@ -3760,6 +3803,11 @@ export function OrderDetailPage() {
                               <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
                             </div>
                           </>
+                        ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
+                          <div className="summary-row">
+                            <span>Kargonomi warehouse configured</span>
+                            <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                          </div>
                         ) : (
                           <>
                             <div className="summary-row">
@@ -4836,6 +4884,11 @@ export function OrderDetailPage() {
                           <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
                         </div>
                       </>
+                    ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
+                      <div className="summary-row">
+                        <span>Kargonomi warehouse configured</span>
+                        <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                      </div>
                     ) : (
                       <>
                         <div className="summary-row">

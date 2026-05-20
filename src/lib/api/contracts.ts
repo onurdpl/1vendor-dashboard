@@ -318,7 +318,7 @@ export type ShipmentCustomerField =
 export type ShipmentCustomerOverrides = Partial<Record<ShipmentCustomerField, string>>;
 
 export type ShippingProviderDiagnostics = {
-  provider: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
+  provider: ShippingProvider;
   supportedProviders?: ShippingProvider[];
   executionReady: boolean;
   sandboxModeEnabled?: boolean;
@@ -355,7 +355,7 @@ export type ShippingProviderDiagnostics = {
   warnings?: string[];
 };
 
-export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
+export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'mng' | 'yurtici' | 'aras';
 
 export type VendorShippingWarehouse = {
   id: string;
