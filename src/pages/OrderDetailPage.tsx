@@ -39,9 +39,7 @@ import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
-import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
-import type { OperationsRecommendation } from '../lib/api/contracts';
 import { getApiErrorDiagnostics, type ApiErrorDiagnostics } from '../lib/api/errors';
 import {
   sameOperationalOrderNumber,
@@ -613,15 +611,6 @@ function buildShippingConfigUpdate(
       },
     ],
   };
-}
-
-function getInitialsLabel(value: string) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join('') || '—';
 }
 
 function getVendorTimelineLabel(label: string) {
@@ -2083,7 +2072,6 @@ export function OrderDetailPage() {
     );
   }
 
-  const orderItems = order.lineItems ?? order.items;
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
@@ -2300,69 +2288,8 @@ export function OrderDetailPage() {
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
     })),
   ];
-  const orderRecommendations: OperationsRecommendation[] = [];
-  if (!hasTrackingSync && order.shippingStatus !== 'Delivered') {
-    orderRecommendations.push({
-      id: `order-rec-tracking-${order.id}`,
-      type: 'shipment_tracking',
-      severity: order.shipmentCreatedAt ? 'warning' : 'info',
-      title: 'Review shipment tracking',
-      description: `Order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)} does not have tracking visible yet.`,
-      recommendedAction: 'Confirm shipment progress and add tracking when available',
-      relatedObjectType: 'Order',
-      relatedObjectId: order.id,
-      vendor: {
-        id: order.assignedVendorId,
-        name: currentVendor.vendorName ?? order.assignedVendorId,
-      },
-      createdFromSignal: `order:${order.id}:tracking`,
-      deepLink: `/orders/${order.id}`,
-      vendorVisible: true,
-      createdAt: order.shipmentUpdatedAt ?? order.date,
-    });
-  }
   const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
-  if (activeReturn) {
-    orderRecommendations.push({
-      id: `order-rec-return-${activeReturn.id}`,
-      type: 'return_review',
-      severity: activeReturn.status === 'Requested' || activeReturn.status === 'In Review' ? 'warning' : 'info',
-      title: 'Review unresolved return',
-      description: `A related return for ${formatShopifyOrderNumber(activeReturn.sourceShopifyOrderNumber)} is still active.`,
-      recommendedAction: 'Open the return and review the next vendor action',
-      relatedObjectType: 'Return',
-      relatedObjectId: activeReturn.id,
-      vendor: {
-        id: activeReturn.assignedVendorId,
-        name: currentVendor.vendorName ?? activeReturn.assignedVendorId,
-      },
-      createdFromSignal: `return:${activeReturn.id}`,
-      deepLink: `/returns/${activeReturn.id}`,
-      vendorVisible: true,
-      createdAt: activeReturn.updatedAt ?? activeReturn.date,
-    });
-  }
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
-  if (waitingSupportTicket) {
-    orderRecommendations.push({
-      id: `order-rec-support-${waitingSupportTicket.id}`,
-      type: 'support_assignment',
-      severity: 'warning',
-      title: 'Reply to support request',
-      description: waitingSupportTicket.subject,
-      recommendedAction: 'Open support and provide the requested update',
-      relatedObjectType: 'Support ticket',
-      relatedObjectId: waitingSupportTicket.id,
-      vendor: {
-        id: waitingSupportTicket.vendorId,
-        name: waitingSupportTicket.vendorName ?? waitingSupportTicket.vendorId,
-      },
-      createdFromSignal: `support:${waitingSupportTicket.id}`,
-      deepLink: `${supportBasePath}/${waitingSupportTicket.id}`,
-      vendorVisible: true,
-      createdAt: waitingSupportTicket.lastReplyAt ?? waitingSupportTicket.updatedAt,
-    });
-  }
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
   const needsOperationalAttention = Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
   const orderHealth = hasOperationalReturn
@@ -2659,46 +2586,7 @@ export function OrderDetailPage() {
       </div>
 
       <div className="order-detail-main-grid">
-        <div className="order-detail-left-column">
-          <article className="order-detail-card-v2 order-line-items-card order-context-panel">
-            <div className="order-card-heading">
-              <h2>Line items ({orderItems.length})</h2>
-            </div>
-            <div className="order-line-items-compact">
-              {orderItems.length > 0 ? (
-                orderItems.map((item) => (
-                  <div key={item.id} className="order-line-item-row-v2">
-                    <span className="order-item-thumb" aria-hidden="true">
-                      {getInitialsLabel(item.name || item.sku || 'Item')}
-                    </span>
-                    <div className="order-item-primary">
-                      <strong>{item.name || 'Unknown item'}</strong>
-                      <span>{item.sku || '—'}</span>
-                    </div>
-                    <div>
-                      <span>Variant / SKU</span>
-                      <strong>{item.variantTitle || item.sku || '—'}</strong>
-                    </div>
-                    <div>
-                      <span>Qty</span>
-                      <strong>{item.quantity}</strong>
-                    </div>
-                    <div>
-                      <span>Unit price</span>
-                      <strong>{item.price}</strong>
-                    </div>
-                    <div>
-                      <span>Total</span>
-                      <strong>{item.price}</strong>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <p className="order-empty-copy">No records available.</p>
-              )}
-            </div>
-          </article>
-
+        <main className="order-detail-main-column" aria-label="Order operations">
           <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
             <div className="order-card-heading">
               <h2>Financial summary</h2>
@@ -2801,7 +2689,7 @@ export function OrderDetailPage() {
             </article>
           ) : null}
 
-          <div className="order-context-panel order-linked-records-panel">
+          <div className="order-linked-records-panel">
             <OperationalLinkCards
               title="Linked records"
               subtitle="Returns, payout activity, and support linked to this order."
@@ -2809,20 +2697,9 @@ export function OrderDetailPage() {
               audience={audience}
             />
           </div>
-        </div>
+        </main>
 
-        <aside className="order-detail-right-column">
-          <OperationalRecommendations
-            title="Next action"
-            subtitle="Contextual, read-only guidance for this order."
-            recommendations={orderRecommendations}
-            audience={audience}
-          />
-
-          {order ? (
-            <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
-          ) : null}
-
+        <aside className="order-detail-right-rail" aria-label="Order timeline and support">
           <OperationalTimeline
             title="Unified activity"
             subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
@@ -2923,6 +2800,10 @@ export function OrderDetailPage() {
               ) : null}
             </div>
           </article>
+
+          {order ? (
+            <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
+          ) : null}
 
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">

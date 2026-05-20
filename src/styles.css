@@ -4619,15 +4619,15 @@ h3 {
   align-items: start;
 }
 
-.order-detail-left-column,
-.order-detail-right-column {
+.order-detail-main-column,
+.order-detail-right-rail {
   display: contents;
   min-width: 0;
 }
 
 .order-detail-main-grid > *,
-.order-detail-left-column > *,
-.order-detail-right-column > * {
+.order-detail-main-column > *,
+.order-detail-right-rail > * {
   min-width: 0;
 }
 
@@ -4636,24 +4636,19 @@ h3 {
   order: 1;
 }
 
-.order-line-items-card {
+.order-financial-summary-card {
   grid-column: 1;
   order: 2;
 }
 
-.order-financial-summary-card {
+.order-finance-ledger-card {
   grid-column: 1;
   order: 3;
 }
 
-.order-finance-ledger-card {
-  grid-column: 1;
-  order: 4;
-}
-
 .order-linked-records-panel {
   grid-column: 1;
-  order: 5;
+  order: 4;
 }
 
 .order-linked-records-panel > .operational-links-card {
@@ -4673,14 +4668,9 @@ h3 {
   order: 2;
 }
 
-.operational-recommendations-card {
-  grid-column: 2;
-  order: 3;
-}
-
 .admin-collab-card {
   grid-column: 2;
-  order: 4;
+  order: 3;
 }
 
 .order-detail-card-v2 {
@@ -5174,13 +5164,11 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .order-primary-action-card,
-  .order-line-items-card,
   .order-financial-summary-card,
   .order-finance-ledger-card,
   .order-linked-records-panel,
   .operational-timeline-card,
   .order-support-card,
-  .operational-recommendations-card,
   .admin-collab-card {
     grid-column: 1;
   }
@@ -5212,8 +5200,6 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .order-status-summary-grid,
-  .order-detail-left-column,
-  .order-detail-right-column,
   .order-financial-impact-grid,
   .order-secondary-detail-grid,
   .order-shipping-state-grid,
@@ -5222,7 +5208,6 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-template-columns: 1fr;
   }
 
-  .order-context-panel,
   .order-workspace-panel {
     grid-column: 1;
   }
