@@ -2418,6 +2418,81 @@ export function OrderDetailPage() {
             </div>
           </article>
 
+          {isAdmin && order.financeLedgerPreview ? (
+            <article className="order-detail-card-v2" aria-label="Finance ledger preview">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Finance ledger preview</h2>
+                  <p>Read-only simulation. Not payout, refund, invoice, or tax truth.</p>
+                </div>
+              </div>
+              <div className="order-financial-impact-grid">
+                <div>
+                  <span>Vendor payable estimate</span>
+                  <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
+                </div>
+                <div>
+                  <span>Marketplace commission estimate</span>
+                  <strong>{formatCurrency(order.financeLedgerPreview.balance.marketplaceCommission, order.financeLedgerPreview.currency)}</strong>
+                </div>
+                <div>
+                  <span>Refund impact</span>
+                  <strong>
+                    {order.financeLedgerPreview.balance.vendorDebt !== '0.00'
+                      ? `Debt ${formatCurrency(order.financeLedgerPreview.balance.vendorDebt, order.financeLedgerPreview.currency)}`
+                      : formatCurrency(
+                          String(
+                            Math.max(
+                              Number(order.financeLedgerPreview.balance.grossSales) -
+                                Number(order.financeLedgerPreview.balance.marketplaceCommission) -
+                                Number(order.financeLedgerPreview.balance.vendorPayable),
+                              0,
+                            ).toFixed(2),
+                          ),
+                          order.financeLedgerPreview.currency,
+                        )}
+                  </strong>
+                </div>
+              </div>
+              <div className="tracking-summary-card order-tracking-summary-card">
+                <div className="summary-row">
+                  <span>Status</span>
+                  <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Unknown fields</span>
+                  <strong>{order.financeLedgerPreview.unknowns.length ? order.financeLedgerPreview.unknowns.join(', ') : '—'}</strong>
+                </div>
+                <div className="summary-row">
+                  <span>Source fields</span>
+                  <strong>
+                    {order.financeLedgerPreview.sourceFields.lineItemCount} line items · {order.financeLedgerPreview.sourceFields.returnCount} returns ·{' '}
+                    {order.financeLedgerPreview.sourceFields.refundCount} refunds
+                  </strong>
+                </div>
+                <div className="summary-row">
+                  <span>Assumptions</span>
+                  <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
+                </div>
+              </div>
+              <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
+                {order.financeLedgerPreview.entries.slice(0, 12).map((entry) => (
+                  <div className="summary-row" key={entry.id}>
+                    <span>{toTitleCaseLabel(entry.eventType)}</span>
+                    <strong>
+                      {[
+                        entry.impact.vendorPayable ? `payable ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
+                        entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
+                        entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
+                        entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
+                      ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
+                    </strong>
+                  </div>
+                ))}
+              </div>
+            </article>
+          ) : null}
+
           <article className="order-detail-card-v2">
             <div className="order-card-heading">
               <h2>Additional details</h2>

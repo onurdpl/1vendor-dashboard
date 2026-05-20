@@ -38,6 +38,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
 
       const order = await getVendorOrderByIdForUser(vendorId, request.params.orderId, {
         includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
+        includeFinanceLedgerPreview: request.authUser?.role === 'admin',
       });
       if (!order) {
         return reply.code(404).send({ message: 'Order not found.' });

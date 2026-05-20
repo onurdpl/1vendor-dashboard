@@ -712,6 +712,140 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(createSupportTicketMock.mock.calls[0][0].contextSnapshot).not.toHaveProperty('adminDiagnostics');
   });
 
+  it('shows finance ledger preview to admins and hides it from vendors', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      financeLedgerPreview: {
+        status: 'partial',
+        currency: 'TRY',
+        entries: [
+          {
+            id: 'preview-entry-1',
+            eventType: 'ORDER_CREATED',
+            sourceType: 'shopify_order',
+            lineItemId: 'line-1028',
+            returnId: null,
+            refundId: null,
+            amount: '4999.00',
+            currency: 'TRY',
+            occurredAt: '2026-05-15T12:08:00.000Z',
+            impact: {
+              grossSales: '4999.00',
+              marketplaceCommission: null,
+              vendorPayable: null,
+              shippingCostReserved: null,
+              vendorDebt: null,
+            },
+          },
+          {
+            id: 'preview-entry-2',
+            eventType: 'MARKETPLACE_COMMISSION_RESERVED',
+            sourceType: 'shopify_order',
+            lineItemId: 'line-1028',
+            returnId: null,
+            refundId: null,
+            amount: '499.90',
+            currency: 'TRY',
+            occurredAt: '2026-05-15T12:08:00.000Z',
+            impact: {
+              grossSales: null,
+              marketplaceCommission: '499.90',
+              vendorPayable: null,
+              shippingCostReserved: null,
+              vendorDebt: null,
+            },
+          },
+        ],
+        balance: {
+          grossSales: '4999.00',
+          marketplaceCommission: '499.90',
+          vendorPayable: '4499.10',
+          shippingCostReserved: '0.00',
+          vendorDebt: '0.00',
+          netVendorPosition: '4499.10',
+        },
+        unknowns: ['shipping_cost'],
+        assumptions: ['Preview is read-only and does not mutate payouts, refunds, Shopify, invoices, or balances.'],
+        sourceFields: {
+          orderId: '7616544244049',
+          orderNumber: '#1028',
+          allocationId: 'alloc-sporjinal-7621783322961',
+          vendorId: 'sporjinal',
+          lineItemCount: 1,
+          returnCount: 0,
+          refundCount: 0,
+          commissionProfile: 'configured',
+          shippingCost: 'unknown',
+          payoutAlreadyPaid: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
+    expect(screen.getByText('Read-only simulation. Not payout, refund, invoice, or tax truth.')).toBeInTheDocument();
+    expect(screen.getByText('shipping_cost')).toBeInTheDocument();
+    expect(screen.getByText(/Marketplace commission reserved/i)).toBeInTheDocument();
+
+    cleanup();
+    window.localStorage.clear();
+    setToken('test-token');
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      financeLedgerPreview: {
+        status: 'ready',
+        currency: 'TRY',
+        entries: [],
+        balance: {
+          grossSales: '0.00',
+          marketplaceCommission: '0.00',
+          vendorPayable: '0.00',
+          shippingCostReserved: '0.00',
+          vendorDebt: '0.00',
+          netVendorPosition: '0.00',
+        },
+        unknowns: [],
+        assumptions: [],
+        sourceFields: {
+          orderId: '7616544244049',
+          orderNumber: '#1028',
+          allocationId: 'alloc-sporjinal-7621783322961',
+          vendorId: 'sporjinal',
+          lineItemCount: 1,
+          returnCount: 0,
+          refundCount: 0,
+          commissionProfile: 'configured',
+          shippingCost: 'confirmed',
+          payoutAlreadyPaid: false,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Contact support');
+    expect(screen.queryByLabelText('Finance ledger preview')).not.toBeInTheDocument();
+  });
+
   it('shows admin support diagnostics copy tooling without exposing it to vendors', async () => {
     const writeText = vi.fn();
     Object.defineProperty(navigator, 'clipboard', {

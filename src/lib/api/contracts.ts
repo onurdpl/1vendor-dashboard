@@ -472,6 +472,65 @@ export type OrderLineItem = {
   estimatedDelivery?: string;
 };
 
+export type FinanceLedgerPreviewEntry = {
+  id: string;
+  eventType:
+    | 'ORDER_CREATED'
+    | 'PAYMENT_CAPTURED'
+    | 'MARKETPLACE_COMMISSION_RESERVED'
+    | 'VENDOR_PAYABLE_RESERVED'
+    | 'SHIPPING_COST_RESERVED'
+    | 'RETURN_CREATED'
+    | 'REFUND_APPROVED'
+    | 'REFUND_COMPLETED'
+    | 'COMMISSION_REVERSED'
+    | 'VENDOR_PAYABLE_REVERSED'
+    | 'VENDOR_DEBT_CREATED'
+    | 'MANUAL_ADJUSTMENT';
+  sourceType: 'shopify_order' | 'shopify_return' | 'shopify_refund' | 'manual' | 'system';
+  lineItemId: string | null;
+  returnId: string | null;
+  refundId: string | null;
+  amount: string;
+  currency: string;
+  occurredAt: string;
+  impact: {
+    grossSales: string | null;
+    marketplaceCommission: string | null;
+    vendorPayable: string | null;
+    shippingCostReserved: string | null;
+    vendorDebt: string | null;
+  };
+};
+
+export type FinanceLedgerPreview = {
+  status: 'ready' | 'partial';
+  currency: string;
+  entries: FinanceLedgerPreviewEntry[];
+  balance: {
+    grossSales: string;
+    marketplaceCommission: string;
+    vendorPayable: string;
+    shippingCostReserved: string;
+    vendorDebt: string;
+    netVendorPosition: string;
+  };
+  unknowns: string[];
+  assumptions: string[];
+  sourceFields: {
+    orderId: string;
+    orderNumber: string;
+    allocationId: string;
+    vendorId: string;
+    lineItemCount: number;
+    returnCount: number;
+    refundCount: number;
+    commissionProfile: 'configured' | 'unknown';
+    shippingCost: 'confirmed' | 'provider_snapshot' | 'unknown';
+    payoutAlreadyPaid: boolean;
+  };
+};
+
 export type OrderDetail = OrderSummary & {
   shippingAddress: string;
   notes: string;
@@ -501,6 +560,7 @@ export type OrderDetail = OrderSummary & {
     matchedOrderId: string | null;
     matchedByField: string | null;
   } | null;
+  financeLedgerPreview?: FinanceLedgerPreview | null;
 };
 
 export type VendorAllocationSummary = {

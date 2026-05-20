@@ -7,6 +7,7 @@ import type {
   ShopifyFulfillmentSyncDto,
   ShopifyReturnSignalDiscoveryDto,
 } from './orders.types.js';
+import { getFinanceLedgerPreviewForAllocation } from '../finance/finance-ledger-preview.service.js';
 import {
   isShopifyReturnSignalTopic,
   mapWebhookEventToReturnSignalDiscovery,
@@ -848,28 +849,37 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
 export async function getVendorOrderByIdForUser(
   vendorId: string,
   orderId: string,
-  options: { includeShipmentProviderResponseSummary?: boolean } = {},
+  options: { includeShipmentProviderResponseSummary?: boolean; includeFinanceLedgerPreview?: boolean } = {},
 ): Promise<OrderDetailDto | null> {
   const order = await getVendorOrderById(vendorId, orderId);
-  if (!order || !options.includeShipmentProviderResponseSummary) {
+  if (!order) {
     return order;
   }
 
-  const shipmentExecution = await prisma.shipmentExecution.findFirst({
-    where: {
-      allocationId: order.id,
-      vendorId,
-    },
-    orderBy: {
-      createdAt: 'desc',
-    },
-  });
+  const financeLedgerPreview = options.includeFinanceLedgerPreview
+    ? await getFinanceLedgerPreviewForAllocation(vendorId, order.id)
+    : undefined;
+
+  const shipmentExecution = options.includeShipmentProviderResponseSummary
+    ? await prisma.shipmentExecution.findFirst({
+        where: {
+          allocationId: order.id,
+          vendorId,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+      })
+    : null;
 
   return {
     ...order,
-    shipmentExecution: mapShipmentExecution(shipmentExecution, {
-      includeProviderResponseSummary: true,
-    }),
+    ...(financeLedgerPreview !== undefined ? { financeLedgerPreview } : {}),
+    shipmentExecution: options.includeShipmentProviderResponseSummary
+      ? mapShipmentExecution(shipmentExecution, {
+          includeProviderResponseSummary: true,
+        })
+      : order.shipmentExecution,
   };
 }
 

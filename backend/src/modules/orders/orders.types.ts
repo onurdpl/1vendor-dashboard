@@ -1,3 +1,5 @@
+import type { FinanceLedgerPreviewDto } from '../finance/finance-ledger-preview.types.js';
+
 export type OrderSummaryDto = {
   id: string;
   sourceShopifyOrderId: string;
@@ -360,6 +362,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   cancellationReason: string | null;
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
   shopifyReturnSignal: ShopifyReturnSignalDiscoveryDto | null;
+  financeLedgerPreview?: FinanceLedgerPreviewDto | null;
   lineItems: OrderDetailLineItemDto[];
   assignmentHistory: OrderAssignmentHistoryDto[];
   shipmentExecution: OrderShipmentExecutionDto | null;

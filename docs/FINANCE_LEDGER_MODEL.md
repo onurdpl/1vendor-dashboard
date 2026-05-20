@@ -16,6 +16,23 @@ This first phase is a domain foundation only. It does not execute payouts, refun
 - Idempotency must be enforced by stable event ids when the ledger is later connected to live ingestion.
 - Historical snapshots such as commission rate, shipping cost, and source references must be preserved on entries that depend on them.
 
+## Read-Only Preview
+
+The first UI integration is an admin-only finance ledger preview on Order Detail. It simulates ledger entries from the existing allocation, line items, returns, refunds, active commission profile, and confirmed shipment cost when available.
+
+Preview rules:
+
+- Preview output is read-only.
+- Preview entries are not persisted.
+- Preview balances are not payout truth.
+- Preview balances are not tax or invoice truth.
+- Preview does not mutate payouts, refunds, Shopify, invoices, providers, shipping, or vendor balances.
+- Missing commission profile or shipping cost data is shown as unknown instead of guessed.
+- Shipping cost preview uses confirmed shipment cost records first, then a shipment execution provider snapshot when present.
+- Vendor users do not see preview finance numbers.
+
+Future persistent ledger integration should reuse the same event model, then write entries through an idempotent append-only persistence layer after Shopify/order/refund semantics are confirmed for each event.
+
 ## 3. Supported Initial Event Types
 
 - `ORDER_CREATED`
