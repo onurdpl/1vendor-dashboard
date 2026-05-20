@@ -2259,6 +2259,42 @@ export function OrderDetailPage() {
           helper: 'Shipment and order state are progressing normally.',
           tone: 'healthy',
         };
+  const operationalAlerts = [
+    hasOperationalReturn
+      ? {
+          id: 'return-active',
+          label: 'Return active',
+          detail: activeReturn
+            ? `Return ${activeReturn.status.toLowerCase()} · open return detail for next action.`
+            : 'Return shipment is linked to this order.',
+          tone: 'return',
+        }
+      : null,
+    !hasTrackingSync
+      ? {
+          id: 'tracking-missing',
+          label: 'Tracking missing',
+          detail: 'Tracking is not visible to the operational workspace yet.',
+          tone: 'attention',
+        }
+      : null,
+    order.shippingStatus === 'Awaiting Shipment'
+      ? {
+          id: 'awaiting-shipment',
+          label: 'Awaiting shipment',
+          detail: 'Create shipment or add tracking when the package is ready.',
+          tone: 'warning',
+        }
+      : null,
+    waitingSupportTicket
+      ? {
+          id: 'support-needed',
+          label: 'Support action needed',
+          detail: waitingSupportTicket.subject,
+          tone: 'support',
+        }
+      : null,
+  ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string }>;
 
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
@@ -2429,7 +2465,6 @@ export function OrderDetailPage() {
             <div className="order-detail-heading-line">
               <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
               <span className="order-source-pill">{order.channel || 'Unknown'}</span>
-              <span className={`status-badge status-${getStatusClass(order.status)}`}>{order.status}</span>
               {hasOperationalReturn ? <span className="status-badge status-warning">Return active</span> : null}
             </div>
             <div className="order-detail-meta-strip">
@@ -2471,6 +2506,16 @@ export function OrderDetailPage() {
           <strong>{orderHealth.label}</strong>
           <span>{orderHealth.helper}</span>
         </div>
+        {operationalAlerts.length ? (
+          <div className="order-operational-alerts" aria-label="Operational alerts">
+            {operationalAlerts.map((alert) => (
+              <div key={alert.id} className={`order-operational-alert order-alert-${alert.tone}`}>
+                <strong>{alert.label}</strong>
+                <span>{alert.detail}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
       </header>
 
       <div className="order-status-summary-grid">

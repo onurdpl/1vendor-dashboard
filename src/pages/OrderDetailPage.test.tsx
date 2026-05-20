@@ -665,6 +665,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect(await screen.findByLabelText('Primary operational status')).toBeInTheDocument();
+    expect(screen.getByLabelText('Operational alerts')).toBeInTheDocument();
+    expect(screen.getByText('Tracking missing')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting shipment')).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Order detail sections' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Financial summary' })).toBeInTheDocument();
