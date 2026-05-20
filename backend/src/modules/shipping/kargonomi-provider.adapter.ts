@@ -74,6 +74,22 @@ export type ParsedKargonomiShipment = {
   }>;
 };
 
+export type KargonomiRawHttpResponse<TBody = unknown> = {
+  ok: boolean;
+  status: number;
+  contentType: string;
+  body: TBody;
+};
+
+export type KargonomiHttpClientOptions = {
+  fetchImpl?: typeof fetch;
+};
+
+export type KargonomiConfirmShippingPriceInput = {
+  shipmentId: string | number;
+  shippingProviderId: string | number;
+};
+
 function compactRecord<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(
     Object.entries(value).filter(([, item]) => item !== undefined && item !== null && item !== ''),
@@ -214,6 +230,126 @@ export function parseKargonomiShipment(value: unknown): ParsedKargonomiShipment 
       realDesi: readString(shipmentPackage, ['real_desi']),
     })),
   };
+}
+
+function parseKargonomiResponseBody(contentType: string, responseText: string): unknown {
+  if (!responseText) {
+    return null;
+  }
+
+  if (!contentType.includes('application/json')) {
+    return responseText;
+  }
+
+  try {
+    return JSON.parse(responseText);
+  } catch {
+    return responseText;
+  }
+}
+
+export class KargonomiHttpClient {
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(
+    private readonly env: AppEnv,
+    options: KargonomiHttpClientOptions = {},
+  ) {
+    this.fetchImpl = options.fetchImpl ?? fetch;
+  }
+
+  async createShipmentDraft(input: KargonomiShipmentCreatePayloadInput): Promise<KargonomiRawHttpResponse> {
+    return this.request('/shipments', {
+      method: 'POST',
+      contentType: 'application/json',
+      body: JSON.stringify(buildKargonomiShipmentCreatePayload(input)),
+    });
+  }
+
+  async getShipmentPriceComparison(shipmentId: string | number): Promise<KargonomiRawHttpResponse> {
+    return this.request(`/shipment-price-comparison/${encodeURIComponent(String(shipmentId))}`, {
+      method: 'GET',
+    });
+  }
+
+  async confirmShippingPrice(input: KargonomiConfirmShippingPriceInput): Promise<KargonomiRawHttpResponse> {
+    const body = new URLSearchParams({
+      shipment_id: String(input.shipmentId),
+      shipping_provider_id: String(input.shippingProviderId),
+    });
+
+    return this.request('/confirm-shipping-price', {
+      method: 'POST',
+      contentType: 'application/x-www-form-urlencoded',
+      body,
+    });
+  }
+
+  // Kargonomi docs say barcode PDF output is base64, but the exact response envelope is unknown.
+  async getShipmentBarcodePdf(shipmentId: string | number): Promise<KargonomiRawHttpResponse<unknown>> {
+    return this.request(`/shipments/${encodeURIComponent(String(shipmentId))}/barcode?format=pdf`, {
+      method: 'GET',
+    });
+  }
+
+  async getShipment(shipmentId: string | number): Promise<KargonomiRawHttpResponse> {
+    return this.request(`/shipments/${encodeURIComponent(String(shipmentId))}`, {
+      method: 'GET',
+    });
+  }
+
+  private requestUrl(path: string) {
+    if (!this.env.KARGONOMI_BASE_URL) {
+      throw new Error('Kargonomi base URL is not configured.');
+    }
+
+    return `${this.env.KARGONOMI_BASE_URL.replace(/\/$/, '')}${path}`;
+  }
+
+  private requestHeaders(contentType?: string) {
+    if (!this.env.KARGONOMI_API_TOKEN) {
+      throw new Error('Kargonomi API token is not configured.');
+    }
+
+    const headers: Record<string, string> = {
+      Accept: 'application/json',
+      Authorization: `Bearer ${this.env.KARGONOMI_API_TOKEN}`,
+    };
+
+    if (contentType) {
+      headers['Content-Type'] = contentType;
+    }
+
+    if (this.env.KARGONOMI_APP_KEY) {
+      headers['X-App-Key'] = this.env.KARGONOMI_APP_KEY;
+    }
+
+    return headers;
+  }
+
+  private async request(
+    path: string,
+    init: {
+      method: 'GET' | 'POST';
+      contentType?: string;
+      body?: BodyInit;
+    },
+  ): Promise<KargonomiRawHttpResponse> {
+    const response = await this.fetchImpl(this.requestUrl(path), {
+      method: init.method,
+      headers: this.requestHeaders(init.contentType),
+      body: init.body,
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseKargonomiResponseBody(contentType, responseText),
+    };
+  }
 }
 
 export function getKargonomiConfigDiagnostics(env: AppEnv) {

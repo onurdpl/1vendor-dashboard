@@ -330,6 +330,21 @@ Unknown fields needing provider or PoC confirmation:
 - Return/reverse remains unsupported.
 - Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
 
+## HTTP Client Scaffold Status
+
+- An isolated Kargonomi HTTP client scaffold exists near the dormant adapter.
+- It supports documented forward endpoint methods for later manual/sandbox PoC work:
+  - draft shipment create
+  - shipment price comparison
+  - shipping price confirmation
+  - shipment barcode PDF fetch
+  - shipment detail fetch
+- Tests use mocked `fetch` only.
+- The client is not wired into shipment orchestration.
+- There is no live API execution from order/shipment flows.
+- Barcode response shape remains unknown and is treated as raw provider response data.
+- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+
 ## PoC Validation Checklist
 
 1. Confirm account credentials, Bearer token, `X-App-Key`, and webhook `secret_key`.

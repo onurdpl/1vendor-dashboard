@@ -4,6 +4,7 @@ import { createShippingProviderAdapter } from '../backend/src/modules/shipping/s
 import {
   getKargonomiConfigDiagnostics,
   KargonomiAdapter,
+  KargonomiHttpClient,
   buildKargonomiShipmentCreatePayload,
   KARGONOMI_ENV_NAMES,
   KARGONOMI_PROVIDER_DISPLAY_NAME,
@@ -47,6 +48,22 @@ function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
     KARGONOMI_APP_KEY: undefined,
     ...overrides,
   };
+}
+
+function buildMockFetch(body: unknown = { ok: true }, contentType = 'application/json') {
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init ?? {} });
+
+    return new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+      status: 200,
+      headers: {
+        'content-type': contentType,
+      },
+    });
+  }) as typeof fetch;
+
+  return { calls, fetchImpl };
 }
 
 describe('Kargonomi dormant adapter scaffold', () => {
@@ -331,5 +348,121 @@ describe('Kargonomi dormant adapter scaffold', () => {
     }
 
     expect(calls).toBe(0);
+  });
+
+  it('includes Authorization header and omits X-App-Key when not configured', async () => {
+    const { calls, fetchImpl } = buildMockFetch({ id: 1 });
+    const client = new KargonomiHttpClient(
+      buildEnv({
+        KARGONOMI_API_TOKEN: 'secret-token',
+        KARGONOMI_APP_KEY: undefined,
+      }),
+      { fetchImpl },
+    );
+
+    await client.getShipment(1);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].url).toBe('https://app.kargonomi.com.tr/api/v1/shipments/1');
+    expect(calls[0].init.headers).toMatchObject({
+      Accept: 'application/json',
+      Authorization: 'Bearer secret-token',
+    });
+    expect(calls[0].init.headers).not.toHaveProperty('X-App-Key');
+  });
+
+  it('includes X-App-Key when configured', async () => {
+    const { calls, fetchImpl } = buildMockFetch({ id: 1 });
+    const client = new KargonomiHttpClient(
+      buildEnv({
+        KARGONOMI_API_TOKEN: 'secret-token',
+        KARGONOMI_APP_KEY: 'app-key',
+      }),
+      { fetchImpl },
+    );
+
+    await client.getShipment(1);
+
+    expect(calls[0].init.headers).toMatchObject({
+      Authorization: 'Bearer secret-token',
+      'X-App-Key': 'app-key',
+    });
+  });
+
+  it('builds documented forward endpoint paths', async () => {
+    const { calls, fetchImpl } = buildMockFetch({ ok: true });
+    const client = new KargonomiHttpClient(buildEnv(), { fetchImpl });
+
+    await client.createShipmentDraft({
+      warehouseId: '12707',
+      buyer: {
+        buyer_name: 'Test Buyer',
+        buyer_phone: '5551112233',
+        buyer_address: 'Test Buyer Address',
+        buyer_state_id: '34',
+        buyer_city_id: '828',
+      },
+      packages: [{ desi: '1' }],
+    });
+    await client.getShipmentPriceComparison(123);
+    await client.confirmShippingPrice({ shipmentId: 123, shippingProviderId: 5 });
+    await client.getShipmentBarcodePdf(123);
+    await client.getShipment(123);
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://app.kargonomi.com.tr/api/v1/shipments'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipment-price-comparison/123'],
+      ['POST', 'https://app.kargonomi.com.tr/api/v1/confirm-shipping-price'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123/barcode?format=pdf'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123'],
+    ]);
+
+    expect(JSON.parse(String(calls[0].init.body))).toEqual({
+      shipment: {
+        warehouse_id: '12707',
+        buyer_name: 'Test Buyer',
+        buyer_phone: '5551112233',
+        buyer_address: 'Test Buyer Address',
+        buyer_state_id: '34',
+        buyer_city_id: '828',
+        packages: [{ desi: '1' }],
+      },
+    });
+    expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=5');
+  });
+
+  it('keeps barcode response as unknown raw provider body', async () => {
+    const { fetchImpl } = buildMockFetch({ barcode_pdf_base64: 'JVBERi0xLjQ=' });
+    const client = new KargonomiHttpClient(buildEnv(), { fetchImpl });
+
+    const response = await client.getShipmentBarcodePdf(123);
+
+    expect(response).toMatchObject({
+      ok: true,
+      status: 200,
+      contentType: 'application/json',
+      body: { barcode_pdf_base64: 'JVBERi0xLjQ=' },
+    });
+  });
+
+  it('uses injected fetch and does not make live network calls', async () => {
+    const originalFetch = globalThis.fetch;
+    let globalFetchCalls = 0;
+    globalThis.fetch = (async () => {
+      globalFetchCalls += 1;
+      throw new Error('unexpected live fetch');
+    }) as typeof fetch;
+
+    const { calls, fetchImpl } = buildMockFetch({ id: 1 });
+    const client = new KargonomiHttpClient(buildEnv(), { fetchImpl });
+
+    try {
+      await client.getShipment(1);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(calls).toHaveLength(1);
+    expect(globalFetchCalls).toBe(0);
   });
 });
