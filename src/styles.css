@@ -4918,7 +4918,7 @@ h3 {
 
 .order-tracking-summary-card {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 6px;
   padding: 0;
   border: 0;
@@ -4927,10 +4927,56 @@ h3 {
 
 .order-tracking-summary-card .summary-row {
   min-height: auto;
+  padding: 6px 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.order-shipment-compact-grid .summary-row {
+  align-content: start;
+  gap: 2px;
+}
+
+.order-tracking-summary-card > .shipment-recovery-actions {
+  grid-column: 1 / -1;
+}
+
+.shipment-provider-details {
+  display: grid;
+  gap: 6px;
   padding: 7px 8px;
   border: 1px solid #e2e8f0;
   border-radius: 9px;
   background: #f8fafc;
+}
+
+.shipment-provider-details summary {
+  cursor: pointer;
+  color: #334155;
+  font-size: 0.76rem;
+  font-weight: 900;
+}
+
+.shipment-provider-details .order-shipping-state-grid {
+  margin-top: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.shipment-provider-details .summary-row {
+  min-height: 0;
+}
+
+.shipment-return-compact {
+  gap: 5px;
+  margin-top: 6px;
+  padding: 7px 8px;
+}
+
+.shipment-return-compact .summary-row {
+  min-height: 0;
+  padding: 6px 7px;
 }
 
 .order-tracking-summary-card .summary-row a,
@@ -5130,7 +5176,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .order-primary-action-card .order-tracking-summary-card,
 .order-primary-action-card .order-shipping-state-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .order-primary-action-card .order-tracking-form {

@@ -2904,76 +2904,87 @@ export function OrderDetailPage() {
                 {isRealMode ? (
                   <>
                     {hasTrackingSync || hasShipmentExecution || hasShopifyFulfillmentSyncAttempt ? (
-                      <div className="tracking-summary-card order-tracking-summary-card">
-                        {visibleShipmentExecution ? (
-                          <>
-                            <div className="summary-row">
-                              <span>Shipment provider</span>
-                              <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Carrier status</span>
-                              <strong>{getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus)}</strong>
-                            </div>
-                            {visibleShipmentExecution.warehouseId ? (
-                              <div className="summary-row">
-                                <span>Warehouse</span>
-                                <strong>{visibleShipmentExecution.warehouseId}</strong>
-                              </div>
-                            ) : null}
-                            <div className="summary-row">
-                              <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
-                              <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
-                                {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
-                              </strong>
-                            </div>
-                            <div className="summary-row">
-                              <span>Barcode</span>
-                              <strong
-                                className={
-                                  visibleShipmentExecution.barcode || getShipmentTrackingNumber(order, visibleShipmentExecution) ? '' : 'muted'
-                                }
+                      <>
+                        <div className="tracking-summary-card order-tracking-summary-card order-shipment-compact-grid">
+                          <div className="summary-row">
+                            <span>Carrier</span>
+                            <strong className={shipmentShopifyCarrier ? '' : 'muted'}>{shipmentShopifyCarrier || 'Not available'}</strong>
+                          </div>
+                          <div className="summary-row">
+                            <span>Status</span>
+                            <strong>
+                              {visibleShipmentExecution
+                                ? getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus)
+                                : order.shippingStatus}
+                            </strong>
+                          </div>
+                          <div className="summary-row">
+                            <span>Tracking number</span>
+                            <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
+                              {getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}
+                            </strong>
+                          </div>
+                          <div className="summary-row">
+                            <span>Tracking link</span>
+                            {getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
+                              <a
+                                className="inline-link"
+                                href={getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
+                                target="_blank"
+                                rel="noreferrer"
                               >
-                                {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
-                              </strong>
-                            </div>
-                          </>
-                        ) : null}
-                        <div className="summary-row">
-                          <span>Tracking</span>
-                          <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
-                            {getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}
-                          </strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Carrier</span>
-                          <strong className={shipmentShopifyCarrier ? '' : 'muted'}>{shipmentShopifyCarrier || 'Not available'}</strong>
-                        </div>
-                        <div className="summary-row">
-                          <span>Tracking link</span>
-                          {getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
-                            <a
-                              className="inline-link"
-                              href={getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
-                              target="_blank"
-                              rel="noreferrer"
-                            >
-                              Open tracking
-                            </a>
-                          ) : (
-                            <strong className="muted">Not available</strong>
-                          )}
-                        </div>
-                        {visibleShipmentExecution?.labelUrl ? (
+                                Open tracking
+                              </a>
+                            ) : (
+                              <strong className="muted">Not available</strong>
+                            )}
+                          </div>
                           <div className="summary-row">
                             <span>Label</span>
-                            <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
-                              Open label PDF
-                            </a>
+                            {visibleShipmentExecution?.labelUrl ? (
+                              <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                                Open label PDF
+                              </a>
+                            ) : (
+                              <strong className="muted">Not available</strong>
+                            )}
                           </div>
+                        </div>
+                        {visibleShipmentExecution ? (
+                          <details className="shipment-provider-details">
+                            <summary>Additional provider details</summary>
+                            <div className="order-shipping-state-grid">
+                              <div className="summary-row">
+                                <span>Shipment provider</span>
+                                <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
+                              </div>
+                              {visibleShipmentExecution.warehouseId ? (
+                                <div className="summary-row">
+                                  <span>Warehouse</span>
+                                  <strong>{visibleShipmentExecution.warehouseId}</strong>
+                                </div>
+                              ) : null}
+                              <div className="summary-row">
+                                <span>{getShipmentReferenceLabel(visibleShipmentExecution)}</span>
+                                <strong className={visibleShipmentExecution.providerShipmentId ? '' : 'muted'}>
+                                  {formatShipmentReference(visibleShipmentExecution.providerShipmentId)}
+                                </strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>Barcode</span>
+                                <strong
+                                  className={
+                                    visibleShipmentExecution.barcode || getShipmentTrackingNumber(order, visibleShipmentExecution) ? '' : 'muted'
+                                  }
+                                >
+                                  {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
+                                </strong>
+                              </div>
+                            </div>
+                          </details>
                         ) : null}
                         {visibleShipmentExecution?.provider === 'try_oto' ? (
-                          <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
+                          <div className="shipment-recovery-actions shipment-return-compact" aria-label="Try OTO return shipment">
                             <strong>Try OTO return shipment</strong>
                             {visibleShipmentExecution.returnShipment ? (
                               <>
@@ -3430,6 +3441,8 @@ export function OrderDetailPage() {
                             )}
                           </div>
                         ) : null}
+                      </>
+                    ) : null}
                         {visibleShipmentExecution?.shippingCost ? (
                           <div className="summary-row">
                             <span>Shipping cost</span>
@@ -3697,8 +3710,6 @@ export function OrderDetailPage() {
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
-                      </div>
-                    ) : null}
                     {!hasTrackingSync && !hasShipmentExecution ? (
                       <div className="detail-actions">
                         <button
