@@ -648,7 +648,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText('Customer hidden for vendor scope')).length).toBeGreaterThan(0);
-    const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/provider status/i)).not.toBeInTheDocument();
@@ -677,9 +677,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Tracking missing')).toBeInTheDocument();
     expect(screen.getByText('Awaiting shipment')).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: 'Order detail sections' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Operational summary')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Context' })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Context$/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /Guided Operations/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Guided Operations$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Overview' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Line items/ })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Financial summary' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor actions' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Timeline' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support' })).toBeInTheDocument();
     expect(screen.queryByLabelText('Provider response summary')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shipping provider diagnostics')).not.toBeInTheDocument();
   });
@@ -2352,7 +2363,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
     );
-    const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();

@@ -4633,22 +4633,27 @@ h3 {
 
 .order-primary-action-card {
   grid-column: 1;
+  order: 2;
+}
+
+.order-line-items-card {
+  grid-column: 1;
   order: 1;
 }
 
 .order-financial-summary-card {
   grid-column: 1;
-  order: 2;
+  order: 3;
 }
 
 .order-finance-ledger-card {
   grid-column: 1;
-  order: 3;
+  order: 4;
 }
 
 .order-linked-records-panel {
   grid-column: 1;
-  order: 4;
+  order: 5;
 }
 
 .order-linked-records-panel > .operational-links-card {
@@ -4823,6 +4828,27 @@ h3 {
 .order-primary-action-card .vendor-blocked-panel {
   display: grid;
   gap: 8px;
+}
+
+.vendor-actions-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 10px;
+}
+
+.vendor-actions-heading h3 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.82rem;
+  font-weight: 900;
+}
+
+.vendor-actions-heading span {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .order-tracking-summary-card {
@@ -5164,6 +5190,7 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .order-primary-action-card,
+  .order-line-items-card,
   .order-financial-summary-card,
   .order-finance-ledger-card,
   .order-linked-records-panel,

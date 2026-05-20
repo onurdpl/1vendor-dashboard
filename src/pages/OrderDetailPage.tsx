@@ -613,6 +613,15 @@ function buildShippingConfigUpdate(
   };
 }
 
+function getInitialsLabel(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('') || '—';
+}
+
 function getVendorTimelineLabel(label: string) {
   const normalized = label.toLowerCase();
 
@@ -2072,6 +2081,7 @@ export function OrderDetailPage() {
     );
   }
 
+  const orderItems = order.lineItems ?? order.items;
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
@@ -2587,6 +2597,45 @@ export function OrderDetailPage() {
 
       <div className="order-detail-main-grid">
         <main className="order-detail-main-column" aria-label="Order operations">
+          <article className="order-detail-card-v2 order-line-items-card">
+            <div className="order-card-heading">
+              <h2>Line items ({orderItems.length})</h2>
+            </div>
+            <div className="order-line-items-compact">
+              {orderItems.length > 0 ? (
+                orderItems.map((item) => (
+                  <div key={item.id} className="order-line-item-row-v2">
+                    <span className="order-item-thumb" aria-hidden="true">
+                      {getInitialsLabel(item.name || item.sku || 'Item')}
+                    </span>
+                    <div className="order-item-primary">
+                      <strong>{item.name || 'Unknown item'}</strong>
+                      <span>{item.sku || '—'}</span>
+                    </div>
+                    <div>
+                      <span>Variant / SKU</span>
+                      <strong>{item.variantTitle || item.sku || '—'}</strong>
+                    </div>
+                    <div>
+                      <span>Qty</span>
+                      <strong>{item.quantity}</strong>
+                    </div>
+                    <div>
+                      <span>Unit price</span>
+                      <strong>{item.price}</strong>
+                    </div>
+                    <div>
+                      <span>Total</span>
+                      <strong>{item.price}</strong>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <p className="order-empty-copy">No records available.</p>
+              )}
+            </div>
+          </article>
+
           <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
             <div className="order-card-heading">
               <h2>Financial summary</h2>
@@ -2701,7 +2750,7 @@ export function OrderDetailPage() {
 
         <aside className="order-detail-right-rail" aria-label="Order timeline and support">
           <OperationalTimeline
-            title="Unified activity"
+            title="Timeline"
             subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
             events={groupOrderDetailTimelineEvents([
               ...order.timeline.map((entry) => ({
@@ -2814,6 +2863,10 @@ export function OrderDetailPage() {
             </div>
             {canUseFulfillmentActions ? (
               <div className="action-row vendor-action-panel">
+                <div className="vendor-actions-heading">
+                  <h3>Vendor actions</h3>
+                  <span>Shipment, tracking, and return controls for this order.</span>
+                </div>
                 {isRealMode ? (
                   <>
                     {hasTrackingSync || hasShipmentExecution || hasShopifyFulfillmentSyncAttempt ? (
