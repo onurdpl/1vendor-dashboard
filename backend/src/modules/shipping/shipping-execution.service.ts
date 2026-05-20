@@ -888,6 +888,14 @@ function resolveKargonomiShippingProviderId(providerMetadata: unknown) {
   ]);
 }
 
+function resolveKargonomiBuyerStateId(providerMetadata: unknown) {
+  return resolveKargonomiAddressId(providerMetadata, ['kargonomiBuyerStateId', 'buyerStateId', 'buyer_state_id']);
+}
+
+function resolveKargonomiBuyerCityId(providerMetadata: unknown) {
+  return resolveKargonomiAddressId(providerMetadata, ['kargonomiBuyerCityId', 'buyerCityId', 'buyer_city_id']);
+}
+
 function resolveKargonomiAddressId(source: unknown, keys: string[]) {
   return readString(source, keys);
 }
@@ -1648,17 +1656,27 @@ export async function getShippingProviderReadinessDiagnostics(
 
   if (diagnostics.provider === 'kargonomi') {
     const warehouseIdConfigured = Boolean(resolveKargonomiWarehouseId(config, env));
+    const buyerStateIdConfigured = Boolean(resolveKargonomiBuyerStateId(config.providerMetadata));
+    const buyerCityIdConfigured = Boolean(resolveKargonomiBuyerCityId(config.providerMetadata));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
       !warehouseIdConfigured ? 'VENDOR_KARGONOMI_WAREHOUSE_ID' : null,
+      !buyerStateIdConfigured ? 'VENDOR_KARGONOMI_BUYER_STATE_ID' : null,
+      !buyerCityIdConfigured ? 'VENDOR_KARGONOMI_BUYER_CITY_ID' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
     ].filter((value): value is string => Boolean(value));
 
     return {
       ...diagnostics,
       providerSelected: configProviderSelected,
-      executionReady: diagnostics.executionReady && configProviderSelected && warehouseIdConfigured && defaultDesiConfigured,
+      executionReady:
+        diagnostics.executionReady &&
+        configProviderSelected &&
+        warehouseIdConfigured &&
+        buyerStateIdConfigured &&
+        buyerCityIdConfigured &&
+        defaultDesiConfigured,
       warehouseIdConfigured,
       defaultDesiConfigured,
       missing,

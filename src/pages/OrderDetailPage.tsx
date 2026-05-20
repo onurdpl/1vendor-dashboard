@@ -495,6 +495,8 @@ type ShippingConfigDraft = {
   packageType: 'box' | 'document';
   tryOtoPickupLocationCode: string;
   tryOtoOriginCity: string;
+  kargonomiBuyerStateId: string;
+  kargonomiBuyerCityId: string;
 };
 
 const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
@@ -518,6 +520,18 @@ function readTryOtoPickupLocationCode(config?: VendorShippingConfig | null) {
 function readTryOtoOriginCity(config?: VendorShippingConfig | null) {
   const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
   const raw = metadata.tryOtoOriginCity ?? metadata.originCity ?? metadata.origin_city ?? metadata.pickupCity ?? metadata.pickup_city;
+  return typeof raw === 'string' ? raw : '';
+}
+
+function readKargonomiBuyerStateId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.kargonomiBuyerStateId ?? metadata.buyerStateId ?? metadata.buyer_state_id;
+  return typeof raw === 'string' ? raw : '';
+}
+
+function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.kargonomiBuyerCityId ?? metadata.buyerCityId ?? metadata.buyer_city_id;
   return typeof raw === 'string' ? raw : '';
 }
 
@@ -554,6 +568,8 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     packageType: readPackageType(config),
     tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
     tryOtoOriginCity: readTryOtoOriginCity(config),
+    kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
+    kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
   };
 }
 
@@ -582,6 +598,12 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   }
   if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.defaultWarehouseId.trim())) {
     errors.push('Kargonomi warehouse ID must be numeric.');
+  }
+  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.kargonomiBuyerStateId.trim())) {
+    errors.push('Kargonomi buyer state ID must be numeric.');
+  }
+  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.kargonomiBuyerCityId.trim())) {
+    errors.push('Kargonomi buyer city ID must be numeric.');
   }
   const defaultDesi = Number(draft.defaultDesi);
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
@@ -624,7 +646,11 @@ function buildShippingConfigUpdate(
       ...baseUpdate,
       cargoIntegrationId: null,
       defaultWarehouseId: draft.defaultWarehouseId.trim(),
-      providerMetadata: metadata,
+      providerMetadata: {
+        ...metadata,
+        kargonomiBuyerStateId: draft.kargonomiBuyerStateId.trim(),
+        kargonomiBuyerCityId: draft.kargonomiBuyerCityId.trim(),
+      },
       warehouses: [
         {
           warehouseId: draft.defaultWarehouseId.trim(),
@@ -2431,6 +2457,8 @@ export function OrderDetailPage() {
     Boolean(kargonomiOptionDiagnostics?.providerEnabled);
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
+  const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
+  const kargonomiBuyerCityId = readKargonomiBuyerCityId(vendorShippingConfig);
 
   const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
     <form
@@ -2498,6 +2526,38 @@ export function OrderDetailPage() {
                 }
               />
             </label>
+            {isKargonomiConfigDraft ? (
+              <>
+                <label className="field">
+                  <span>Kargonomi buyer state ID</span>
+                  <input
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={shippingConfigDraft.kargonomiBuyerStateId}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiBuyerStateId: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+                <label className="field">
+                  <span>Kargonomi buyer city ID</span>
+                  <input
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={shippingConfigDraft.kargonomiBuyerCityId}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiBuyerCityId: event.target.value,
+                      }))
+                    }
+                  />
+                </label>
+              </>
+            ) : null}
           </>
         ) : null}
         {isTryOtoConfigDraft ? (
@@ -3804,10 +3864,20 @@ export function OrderDetailPage() {
                             </div>
                           </>
                         ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
-                          <div className="summary-row">
-                            <span>Kargonomi warehouse configured</span>
-                            <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                          </div>
+                          <>
+                            <div className="summary-row">
+                              <span>Kargonomi warehouse configured</span>
+                              <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Kargonomi buyer state ID</span>
+                              <strong>{kargonomiBuyerStateId || '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Kargonomi buyer city ID</span>
+                              <strong>{kargonomiBuyerCityId || '—'}</strong>
+                            </div>
+                          </>
                         ) : (
                           <>
                             <div className="summary-row">
@@ -4885,10 +4955,20 @@ export function OrderDetailPage() {
                         </div>
                       </>
                     ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
-                      <div className="summary-row">
-                        <span>Kargonomi warehouse configured</span>
-                        <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
-                      </div>
+                      <>
+                        <div className="summary-row">
+                          <span>Kargonomi warehouse configured</span>
+                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Kargonomi buyer state ID</span>
+                          <strong>{kargonomiBuyerStateId || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Kargonomi buyer city ID</span>
+                          <strong>{kargonomiBuyerCityId || '—'}</strong>
+                        </div>
+                      </>
                     ) : (
                       <>
                         <div className="summary-row">

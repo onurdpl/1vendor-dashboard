@@ -310,6 +310,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ],
       providerMetadata: {
         packageType: 'box',
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:28:50.786Z',
@@ -326,6 +328,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         packageType: 'box',
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:45:00.000Z',
@@ -1108,6 +1112,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           defaultDesi: 3,
           providerMetadata: expect.objectContaining({
             packageType: 'box',
+            kargonomiBuyerStateId: '34',
+            kargonomiBuyerCityId: '828',
           }),
         }),
       ),
@@ -1345,8 +1351,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    const buyerStateInput = await screen.findByLabelText('Kargonomi buyer state ID');
+    const buyerCityInput = await screen.findByLabelText('Kargonomi buyer city ID');
     await user.clear(warehouseInput);
     await user.type(warehouseInput, '112668');
+    await user.clear(buyerStateInput);
+    await user.type(buyerStateInput, '34');
+    await user.clear(buyerCityInput);
+    await user.type(buyerCityInput, '828');
     await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
 
     await waitFor(() =>
@@ -1357,6 +1369,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           cargoIntegrationId: null,
           defaultWarehouseId: '112668',
           defaultDesi: 3,
+          providerMetadata: expect.objectContaining({
+            kargonomiBuyerStateId: '34',
+            kargonomiBuyerCityId: '828',
+          }),
           warehouses: [
             expect.objectContaining({
               provider: 'kargonomi',

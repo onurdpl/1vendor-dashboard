@@ -1640,6 +1640,119 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('tr-test-store-001');
   });
 
+  it('reports Kargonomi buyer state and city ids as required readiness fields', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-kargonomi',
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      providerMetadata: null,
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-112668',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGONOMI',
+          warehouseId: '112668',
+          name: 'Sporjinal Kargonomi warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'configured-token',
+      },
+      'kargonomi',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'kargonomi',
+      executionReady: false,
+      providerSelected: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      missing: expect.arrayContaining([
+        'VENDOR_KARGONOMI_BUYER_STATE_ID',
+        'VENDOR_KARGONOMI_BUYER_CITY_ID',
+      ]),
+    });
+  });
+
+  it('marks Kargonomi ready when warehouse and buyer location ids are configured', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-kargonomi',
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      providerMetadata: {
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-112668',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'KARGONOMI',
+          warehouseId: '112668',
+          name: 'Sporjinal Kargonomi warehouse',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'configured-token',
+      },
+      'kargonomi',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'kargonomi',
+      executionReady: true,
+      providerSelected: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      missing: [],
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('configured-token');
+    expect(JSON.stringify(diagnostics)).not.toContain('112668');
+    expect(JSON.stringify(diagnostics)).not.toContain('828');
+  });
+
   it('adds current Kargo readiness warnings to shipment previews without changing the payload', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
