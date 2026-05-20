@@ -7634,7 +7634,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .unified-operational-timeline {
   display: grid;
-  gap: 0.35rem;
+  gap: 0.24rem;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -7643,14 +7643,14 @@ summary.provider-response-heading::-webkit-details-marker {
 .unified-operational-timeline li {
   display: grid;
   grid-template-columns: 0.6rem minmax(0, 1fr);
-  gap: 0.42rem;
+  gap: 0.34rem;
   align-items: flex-start;
 }
 
 .unified-timeline-dot {
   width: 0.42rem;
   height: 0.42rem;
-  margin-top: 0.35rem;
+  margin-top: 0.3rem;
   border-radius: 999px;
   background: #94a3b8;
   box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
@@ -7681,7 +7681,7 @@ summary.provider-response-heading::-webkit-details-marker {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 0.45rem;
+  gap: 0.36rem;
 }
 
 .unified-timeline-title-row strong,
@@ -7693,14 +7693,14 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .unified-operational-timeline p {
-  margin: 0.04rem 0 0;
+  margin: 0.02rem 0 0;
   color: #475569;
-  font-size: 0.74rem;
+  font-size: 0.72rem;
 }
 
 .unified-operational-timeline small {
   display: block;
-  margin-top: 0.08rem;
+  margin-top: 0.04rem;
   color: #64748b;
   font-size: 0.68rem;
 }
