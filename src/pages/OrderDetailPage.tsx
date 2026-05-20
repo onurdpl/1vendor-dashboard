@@ -1098,8 +1098,6 @@ export function OrderDetailPage() {
     (['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus) ||
       shipmentProviderSummary?.ok === false ||
       Boolean(shipmentProviderSummary?.providerError || shipmentProviderSummary?.providerValidationErrors.length));
-  const shouldShowRealTrackingForm =
-    isRealMode && canUseFulfillmentActions && !hasTrackingSync && (!hasShipmentExecution || failedLikeShipmentExecution);
   const providerMissingShipmentCustomerFields =
     shipmentProviderSummary?.ok === false || ['failed', 'validation_failed', 'provider_rejected', 'malformed_response'].includes(visibleShipmentStatus)
       ? [
@@ -1112,6 +1110,12 @@ export function OrderDetailPage() {
   const missingShipmentCustomerFields = Array.from(
     new Set([...actionMissingShipmentCustomerFields, ...providerMissingShipmentCustomerFields]),
   );
+  const shouldShowRealTrackingForm =
+    isRealMode &&
+    canUseFulfillmentActions &&
+    !hasTrackingSync &&
+    missingShipmentCustomerFields.length === 0 &&
+    (!hasShipmentExecution || failedLikeShipmentExecution);
   const shouldShowShipmentProviderSummary =
     isAdmin &&
     Boolean(shipmentProviderSummary) &&

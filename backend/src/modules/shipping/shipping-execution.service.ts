@@ -1295,7 +1295,6 @@ function readKargonomiDestinationText(
     null;
   const city = overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null;
   const district =
-    overrides.district ??
     readString(orderRecord, [
       'shippingDistrict',
       'district',
@@ -1309,6 +1308,7 @@ function readKargonomiDestinationText(
     ]) ??
     webhookAddress?.shippingDistrict ??
     readStoredOrderWebhookDistrict(orderRecord) ??
+    overrides.district ??
     null;
 
   return {

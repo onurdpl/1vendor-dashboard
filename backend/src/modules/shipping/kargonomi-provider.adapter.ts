@@ -335,7 +335,7 @@ export async function resolveKargonomiDestinationAddress(
     return {
       ok: false,
       reason: 'city_unresolved',
-      message: `Kargonomi destination city/district could not be resolved for "${districtText}".`,
+      message: `Kargonomi destination district could not be matched: ${districtText}`,
     };
   }
 

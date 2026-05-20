@@ -4122,6 +4122,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
     expect(screen.getByLabelText('District *')).toBeInTheDocument();
     expect(screen.queryByLabelText('Phone *')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
 
     await user.type(screen.getByLabelText('District *'), 'Kadikoy');
     await user.click(screen.getByRole('button', { name: 'Create shipment with completed fields' }));
@@ -4135,6 +4136,45 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       }),
     );
     expect((await screen.findAllByText('Shipment ke-created-1028 recorded.')).length).toBeGreaterThan(0);
+  });
+
+  it('uses shipment-only district override for Kargonomi destination recovery', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue(orderWithoutShipment);
+    createShipmentExecutionMock.mockRejectedValueOnce(
+      new Error(
+        'Kargonomi destination district is missing from the order shipping address.\nMissing required shipment fields:\n- buyer.buyer_state_id\n- buyer.buyer_city_id\nProvider request blocked before create call.',
+      ),
+    );
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Create shipment' }));
+
+    expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+    expect(screen.getByLabelText('District *')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('District *'), 'Kadikoy');
+    await user.click(screen.getByRole('button', { name: 'Create shipment with completed fields' }));
+
+    await waitFor(() =>
+      expect(createShipmentExecutionMock).toHaveBeenLastCalledWith('alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      }),
+    );
   });
 
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {

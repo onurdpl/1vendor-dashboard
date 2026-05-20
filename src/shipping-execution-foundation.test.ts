@@ -539,6 +539,159 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('uses shipment-only district override for Kargonomi destination resolution', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress1: 'Test Mah. Test Sok. No:1',
+          shippingCity: 'İstanbul',
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'kg-1027',
+      trackingNumber: 'KG-TRACK-1027',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+    const kargonomiDestinationClient = {
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 828, name: 'Kadıköy' }] },
+      }),
+    };
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+        customerOverrides: {
+          district: 'Kadikoy',
+        },
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient,
+      },
+    );
+
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          buyer: expect.objectContaining({
+            buyer_city_id: '828',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('blocks Kargonomi before provider call when district override cannot be matched', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress1: 'Test Mah. Test Sok. No:1',
+          shippingCity: 'İstanbul',
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          provider: 'kargonomi',
+          customerOverrides: {
+            district: 'Beşiktaş',
+          },
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'kargonomi',
+            SHIPPING_EXECUTION_ENABLED: true,
+            KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+            KARGONOMI_API_TOKEN: 'test-token',
+          },
+          vendorId: 'sporjinal',
+          adapter,
+          kargonomiDestinationClient: {
+            listStates: vi.fn().mockResolvedValue({
+              ok: true,
+              status: 200,
+              contentType: 'application/json',
+              body: { data: [{ id: 34, name: 'İstanbul' }] },
+            }),
+            listCities: vi.fn().mockResolvedValue({
+              ok: true,
+              status: 200,
+              contentType: 'application/json',
+              body: { data: [{ id: 828, name: 'Kadıköy' }] },
+            }),
+          },
+        },
+      ),
+    ).rejects.toThrow('Kargonomi destination district could not be matched: Beşiktaş');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
   it('blocks Kargonomi before provider call when warehouse ID is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
