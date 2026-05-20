@@ -89,9 +89,12 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
   events.forEach((event) => {
     const normalizedTitle = event.title.toLowerCase();
     const isNoisyShipmentEvent =
+      normalizedTitle.includes('order') ||
       normalizedTitle.includes('webhook') ||
       normalizedTitle.includes('tracking') ||
       normalizedTitle.includes('shipment') ||
+      normalizedTitle.includes('delivered') ||
+      normalizedTitle.includes('return') ||
       normalizedTitle.includes('status');
     const eventDay = event.at ? new Date(event.at).toISOString().slice(0, 10) : 'unknown';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay].join('|');
@@ -255,8 +258,36 @@ function isRawProviderTimelineLabel(label: string) {
     normalized.includes('payload') ||
     normalized.includes('reverse') ||
     normalized.includes('searchingdriver') ||
+    normalized.includes('provider validation') ||
+    normalized.includes('try oto') ||
+    normalized.includes('malformed') ||
     normalized.includes('status updated')
   );
+}
+
+function getNativeTimelineVisibility(label: string) {
+  const normalized = label.toLowerCase();
+
+  if (isRawProviderTimelineLabel(label)) {
+    return 'admin' as const;
+  }
+
+  const vendorOperationalEvent =
+    normalized.includes('order created') ||
+    normalized.includes('order received') ||
+    normalized.includes('shipment created') ||
+    normalized.includes('tracking synced') ||
+    normalized.includes('tracking added') ||
+    normalized.includes('delivered') ||
+    normalized.includes('return requested') ||
+    (normalized.includes('return') && normalized.includes('tracking')) ||
+    (normalized.includes('support ticket') &&
+      (normalized.includes('created') ||
+        normalized.includes('opened') ||
+        normalized.includes('resolved') ||
+        normalized.includes('closed')));
+
+  return vendorOperationalEvent ? undefined : ('admin' as const);
 }
 
 function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
@@ -596,26 +627,29 @@ function getInitialsLabel(value: string) {
 function getVendorTimelineLabel(label: string) {
   const normalized = label.toLowerCase();
 
-  if (normalized.includes('webhook') || normalized.includes('provider status')) {
-    return 'Shipment status updated';
+  if (normalized.includes('shopify') && normalized.includes('return') && normalized.includes('tracking')) {
+    return 'Shopify return tracking synced';
   }
   if (normalized.includes('return') && normalized.includes('tracking')) {
     return 'Return tracking attached';
   }
-  if (normalized.includes('shopify') && normalized.includes('return') && normalized.includes('tracking')) {
-    return 'Shopify return tracking synced';
+  if (normalized.includes('support ticket') && (normalized.includes('opened') || normalized.includes('created'))) {
+    return 'Support ticket created';
+  }
+  if (normalized.includes('support ticket') && (normalized.includes('resolved') || normalized.includes('closed'))) {
+    return 'Support ticket resolved';
+  }
+  if (normalized.includes('webhook') || normalized.includes('provider status')) {
+    return 'Shipment status updated';
   }
   if (normalized.includes('order')) {
     return 'Order created';
   }
-  if (normalized.includes('fulfillment')) {
-    return 'Fulfillment pending';
+  if (normalized.includes('shipment created')) {
+    return 'Shipment created';
   }
-  if (normalized.includes('shipping') || normalized.includes('shipment')) {
-    return 'Awaiting shipment';
-  }
-  if (normalized.includes('tracking')) {
-    return 'Tracking pending';
+  if (normalized.includes('tracking added') || normalized.includes('tracking synced')) {
+    return 'Tracking synced';
   }
   if (normalized.includes('delivered')) {
     return 'Delivered';
@@ -2069,7 +2103,6 @@ export function OrderDetailPage() {
     title: 'Order created',
     description: `Order ${formatShopifyOrderNumber(order.sourceShopifyOrderNumber)} entered the vendor workspace.`,
     at: order.date,
-    status: order.status,
     tone: 'info',
   });
   if (order.shipmentCreatedAt) {
@@ -2085,10 +2118,41 @@ export function OrderDetailPage() {
   if (order.trackingNumber || order.trackingUrl) {
     orderTimelineEvents.push({
       id: 'tracking-added',
-      title: 'Tracking added',
+      title: 'Tracking synced',
       description: [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
       at: order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date,
-      status: 'Tracking added',
+      tone: 'success',
+    });
+  }
+  if (order.shippingStatus === 'Delivered' || visibleShipmentExecution?.shipmentStatus === 'delivered') {
+    orderTimelineEvents.push({
+      id: 'shipment-delivered',
+      title: 'Delivered',
+      description: 'Carrier delivery is confirmed.',
+      at: visibleShipmentExecution?.lastProviderResponseAt ?? order.fulfilledAt ?? order.shipmentUpdatedAt ?? order.date,
+      tone: 'success',
+    });
+  }
+  if (visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode || visibleShipmentExecution?.returnShipment?.trackingUrl) {
+    orderTimelineEvents.push({
+      id: 'return-tracking-attached',
+      title: 'Return tracking attached',
+      description: visibleShipmentExecution.returnShipment.trackingUrl
+        ? 'Customer can track return shipment.'
+        : 'Return tracking code is available.',
+      at: visibleShipmentExecution.returnShipment.createdAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
+      tone: 'success',
+    });
+  }
+  if (visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.trackingAccepted) {
+    orderTimelineEvents.push({
+      id: 'shopify-return-tracking-synced',
+      title: 'Shopify return tracking synced',
+      description: 'Customer can track return shipment in Shopify.',
+      at:
+        visibleShipmentExecution.returnShipment.shopifyReturnLabelUploadProbe.attemptedAt ??
+        visibleShipmentExecution.returnShipment.createdAt ??
+        order.date,
       tone: 'success',
     });
   }
@@ -2110,10 +2174,11 @@ export function OrderDetailPage() {
       status: record.status,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
       href: buildFinanceHref(record),
+      visibility: 'admin' as const,
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
-      title: 'Support ticket opened',
+      title: 'Support ticket created',
       description: ticket.subject,
       at: ticket.createdAt,
       status: ticket.status.replace(/_/g, ' '),
@@ -2130,12 +2195,13 @@ export function OrderDetailPage() {
         status: ticket.lastReplyByRole ?? 'Reply',
         tone: 'neutral' as const,
         href: `${supportBasePath}/${ticket.id}`,
+        visibility: 'admin' as const,
       })),
     ...relatedSupportTickets
       .filter((ticket) => ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')
       .map((ticket) => ({
         id: `support-status-${ticket.id}`,
-        title: ticket.status === 'RESOLVED' ? 'Support ticket resolved' : 'Support ticket closed',
+        title: 'Support ticket resolved',
         description: ticket.subject,
         at: ticket.resolvedAt ?? ticket.closedAt ?? ticket.updatedAt,
         status: ticket.status.replace(/_/g, ' '),
@@ -2706,14 +2772,14 @@ export function OrderDetailPage() {
 
           <OperationalTimeline
             title="Unified activity"
-            subtitle="Grouped order, shipment, return, finance, and support events. Filters planned: operations, returns, finance, support."
+            subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
             events={groupOrderDetailTimelineEvents([
               ...order.timeline.map((entry) => ({
                 id: `order-native-${entry.label}-${entry.at}`,
                 title: getVendorTimelineLabel(entry.label),
                 at: entry.at,
                 tone: 'neutral' as const,
-                visibility: isRawProviderTimelineLabel(entry.label) ? ('admin' as const) : undefined,
+                visibility: getNativeTimelineVisibility(entry.label),
               })),
               ...orderTimelineEvents,
             ])}

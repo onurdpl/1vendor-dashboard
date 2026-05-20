@@ -638,6 +638,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       timeline: [
         { label: 'Carrier webhook received', at: '2026-05-15T19:40:00.000Z' },
         { label: 'Carrier webhook received', at: '2026-05-15T19:41:00.000Z' },
+        { label: 'Provider status updated', at: '2026-05-15T19:42:00.000Z' },
+        { label: 'SearchingDriver', at: '2026-05-15T19:43:00.000Z' },
+        { label: 'reverseShipmentProcessing', at: '2026-05-15T19:44:00.000Z' },
+        { label: 'Tracking pending', at: '2026-05-15T19:45:00.000Z' },
       ],
     });
 
@@ -647,8 +651,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/provider status/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/SearchingDriver/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/Tracking pending/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
-    expect(within(timeline as HTMLElement).getByText(/Filters planned: operations, returns, finance, support/)).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText(/Human order, shipment, return, and support events/)).toBeInTheDocument();
   });
 
   it('renders the dense operational foundation without exposing vendor diagnostics', async () => {
@@ -2336,6 +2344,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'href',
       'https://app.tryoto.example/return-label-1028.pdf',
     );
+    const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getByText('Return tracking attached')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Shopify return label upload probe')).not.toBeInTheDocument();
   });
