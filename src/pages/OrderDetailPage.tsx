@@ -2813,7 +2813,7 @@ export function OrderDetailPage() {
 
         <aside className="order-detail-right-column">
           <OperationalRecommendations
-            title="Suggested next steps"
+            title="Next action"
             subtitle="Contextual, read-only guidance for this order."
             recommendations={orderRecommendations}
             audience={audience}

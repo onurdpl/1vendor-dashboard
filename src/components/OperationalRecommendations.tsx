@@ -35,7 +35,7 @@ export function OperationalRecommendations({
     <article className="operational-card operational-recommendations-card">
       <div className="operational-card-heading">
         <div>
-          <p className="eyebrow">Guided operations</p>
+          <p className="eyebrow">Operations</p>
           <h3>{title}</h3>
           {subtitle ? <span>{subtitle}</span> : null}
         </div>

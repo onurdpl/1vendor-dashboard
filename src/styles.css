@@ -4614,43 +4614,73 @@ h3 {
 
 .order-detail-main-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(330px, 380px);
-  gap: 10px;
+  grid-template-columns: minmax(0, 2.55fr) minmax(300px, 0.95fr);
+  gap: 12px;
   align-items: start;
 }
 
 .order-detail-left-column,
 .order-detail-right-column {
-  display: grid;
-  gap: 10px;
+  display: contents;
   min-width: 0;
 }
 
-.order-detail-left-column {
-  grid-template-columns: 1fr;
-  align-items: start;
+.order-detail-main-grid > *,
+.order-detail-left-column > *,
+.order-detail-right-column > * {
+  min-width: 0;
 }
 
-.order-context-panel {
-  grid-column: auto;
-}
-
-.order-workspace-panel {
-  grid-column: auto;
+.order-primary-action-card {
+  grid-column: 1;
+  order: 1;
 }
 
 .order-line-items-card {
-  grid-row: auto;
+  grid-column: 1;
+  order: 2;
+}
+
+.order-financial-summary-card {
+  grid-column: 1;
+  order: 3;
+}
+
+.order-finance-ledger-card {
+  grid-column: 1;
+  order: 4;
+}
+
+.order-linked-records-panel {
+  grid-column: 1;
+  order: 5;
 }
 
 .order-linked-records-panel > .operational-links-card {
   height: 100%;
 }
 
-.order-detail-right-column {
+.operational-timeline-card {
+  grid-column: 2;
+  order: 1;
   position: sticky;
   top: 84px;
   align-self: start;
+}
+
+.order-support-card {
+  grid-column: 2;
+  order: 2;
+}
+
+.operational-recommendations-card {
+  grid-column: 2;
+  order: 3;
+}
+
+.admin-collab-card {
+  grid-column: 2;
+  order: 4;
 }
 
 .order-detail-card-v2 {
@@ -4789,7 +4819,6 @@ h3 {
 }
 
 .order-primary-action-card {
-  order: -20;
   border-color: #bfdbfe;
   background: #ffffff;
 }
@@ -5144,13 +5173,20 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-template-columns: 1fr;
   }
 
-  .order-detail-left-column {
-    grid-template-columns: minmax(270px, 0.82fr) minmax(0, 1.18fr);
+  .order-primary-action-card,
+  .order-line-items-card,
+  .order-financial-summary-card,
+  .order-finance-ledger-card,
+  .order-linked-records-panel,
+  .operational-timeline-card,
+  .order-support-card,
+  .operational-recommendations-card,
+  .admin-collab-card {
+    grid-column: 1;
   }
 
-  .order-detail-right-column {
+  .operational-timeline-card {
     position: static;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .order-tracking-summary-card,
