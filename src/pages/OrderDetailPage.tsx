@@ -30,6 +30,7 @@ import {
 import { useActionFeedback } from '../lib/ui';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { runtimeConfig } from '../config/runtime';
+import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
@@ -49,6 +50,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
+import type { KargonomiLocationLookupDiagnostics } from '../services/real/diagnostics';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -876,6 +878,8 @@ export function OrderDetailPage() {
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
+  const [kargonomiLookupDiagnostics, setKargonomiLookupDiagnostics] = useState<KargonomiLocationLookupDiagnostics | null>(null);
+  const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1055,6 +1059,18 @@ export function OrderDetailPage() {
       onError: (error) => {
         const message = error instanceof Error ? error.message : 'Shipping provider configuration could not be saved.';
         setShippingConfigFeedback({ tone: 'error', message });
+      },
+    },
+  );
+  const { mutateAsync: runKargonomiLookupDiagnosticsMutation, isPending: isRunningKargonomiLookupDiagnostics } = useMutationAction(
+    async () => runtimeServices.diagnostics.kargonomiLocationLookup(),
+    {
+      onSuccess: (result) => {
+        setKargonomiLookupDiagnostics(result);
+        setKargonomiLookupError(null);
+      },
+      onError: (error) => {
+        setKargonomiLookupError(error instanceof Error ? error.message : 'Kargonomi lookup diagnostic could not be run.');
       },
     },
   );
@@ -5007,6 +5023,89 @@ export function OrderDetailPage() {
                           <span>Kargonomi fallback buyer city ID</span>
                           <strong>{kargonomiBuyerCityId || '—'}</strong>
                         </div>
+                        <div className="shipment-recovery-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void runKargonomiLookupDiagnosticsMutation(undefined)}
+                            disabled={isRunningKargonomiLookupDiagnostics}
+                          >
+                            {isRunningKargonomiLookupDiagnostics ? 'Running lookup...' : 'Run Kargonomi lookup diagnostic'}
+                          </button>
+                          <span className="muted">Temporary admin-only check. Calls only states and city lookup endpoints.</span>
+                        </div>
+                        {kargonomiLookupError ? (
+                          <p className="form-error" role="alert">{kargonomiLookupError}</p>
+                        ) : null}
+                        {kargonomiLookupDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Kargonomi lookup diagnostic result">
+                            <div className="summary-row">
+                              <span>Base URL</span>
+                              <strong>
+                                {kargonomiLookupDiagnostics.baseUrlHost ?? '—'}
+                                {kargonomiLookupDiagnostics.baseUrlPath ? kargonomiLookupDiagnostics.baseUrlPath : ''}
+                              </strong>
+                            </div>
+                            {kargonomiLookupDiagnostics.baseUrlParseError ? (
+                              <div className="summary-row">
+                                <span>Base URL parse error</span>
+                                <strong>{kargonomiLookupDiagnostics.baseUrlParseError}</strong>
+                              </div>
+                            ) : null}
+                            <div className="summary-row">
+                              <span>Token present</span>
+                              <strong>{kargonomiLookupDiagnostics.tokenPresent ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>States request</span>
+                              <strong>{kargonomiLookupDiagnostics.statesRequestUrl}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>States result</span>
+                              <strong>
+                                {kargonomiLookupDiagnostics.statesFetchError
+                                  ? `${kargonomiLookupDiagnostics.statesFetchError.name}: ${kargonomiLookupDiagnostics.statesFetchError.message}`
+                                  : kargonomiLookupDiagnostics.statesHttpStatus ?? '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>States content type</span>
+                              <strong>{kargonomiLookupDiagnostics.statesContentType ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>States response shape</span>
+                              <strong>
+                                {kargonomiLookupDiagnostics.statesShapeSummary
+                                  ? `${kargonomiLookupDiagnostics.statesShapeSummary.kind}${
+                                      kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.length
+                                        ? ` · ${kargonomiLookupDiagnostics.statesShapeSummary.topLevelKeys.join(', ')}`
+                                        : ''
+                                    }`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>First states</span>
+                              <strong>{kargonomiLookupDiagnostics.firstStateNames.length ? kargonomiLookupDiagnostics.firstStateNames.join(', ') : '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>İstanbul state ID</span>
+                              <strong>{kargonomiLookupDiagnostics.istanbulStateId ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Cities result</span>
+                              <strong>
+                                {kargonomiLookupDiagnostics.citiesFetchError
+                                  ? `${kargonomiLookupDiagnostics.citiesFetchError.name}: ${kargonomiLookupDiagnostics.citiesFetchError.message}`
+                                  : kargonomiLookupDiagnostics.citiesHttpStatus ?? '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>First İstanbul districts</span>
+                              <strong>{kargonomiLookupDiagnostics.firstCityNames.length ? kargonomiLookupDiagnostics.firstCityNames.join(', ') : '—'}</strong>
+                            </div>
+                          </div>
+                        ) : null}
                       </>
                     ) : (
                       <>

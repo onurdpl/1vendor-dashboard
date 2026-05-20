@@ -234,6 +234,27 @@ export type RetryOperationalJobResponse = {
   message?: string;
 };
 
+export type KargonomiLocationLookupDiagnostics = {
+  temporary: true;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  baseUrlParseError: string | null;
+  tokenPresent: boolean;
+  statesRequestUrl: string;
+  statesHttpStatus: number | null;
+  statesFetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
+  statesContentType: string | null;
+  statesShapeSummary: { kind: string; itemCount?: number; topLevelKeys: string[] } | null;
+  firstStateNames: string[];
+  istanbulStateId: string | null;
+  citiesRequestUrl: string | null;
+  citiesHttpStatus: number | null;
+  citiesFetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
+  citiesContentType: string | null;
+  citiesShapeSummary: { kind: string; itemCount?: number; topLevelKeys: string[] } | null;
+  firstCityNames: string[];
+};
+
 export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -251,6 +272,10 @@ export async function listSyncEvents() {
 
 export async function getReconciliationDiagnostics() {
   return apiClient.get<ReconciliationResponseDto>('/admin/diagnostics/reconciliation');
+}
+
+export async function runKargonomiLocationLookupDiagnostics() {
+  return apiClient.get<KargonomiLocationLookupDiagnostics>('/admin/diagnostics/kargonomi/location-lookup');
 }
 
 export async function replayWebhook(webhookEventId: string) {

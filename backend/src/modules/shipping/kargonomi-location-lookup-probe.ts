@@ -18,9 +18,42 @@ export type KargonomiLookupProbeValidationResult =
       reason: string;
     };
 
+export type KargonomiLookupProbeFetchError = {
+  name: string;
+  message: string;
+  cause: { name: string; message: string } | string | null;
+};
+
+type ShapeSummary = {
+  kind: string;
+  itemCount?: number;
+  topLevelKeys: string[];
+};
+
 type LocationSummary = {
   count: number;
   firstNames: string[];
+};
+
+export type KargonomiLocationLookupDiagnostics = {
+  temporary: true;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  baseUrlParseError: string | null;
+  tokenPresent: boolean;
+  statesRequestUrl: string;
+  statesHttpStatus: number | null;
+  statesFetchError: KargonomiLookupProbeFetchError | null;
+  statesContentType: string | null;
+  statesShapeSummary: ShapeSummary | null;
+  firstStateNames: string[];
+  istanbulStateId: string | null;
+  citiesRequestUrl: string | null;
+  citiesHttpStatus: number | null;
+  citiesFetchError: KargonomiLookupProbeFetchError | null;
+  citiesContentType: string | null;
+  citiesShapeSummary: ShapeSummary | null;
+  firstCityNames: string[];
 };
 
 const DEFAULT_KARGONOMI_BASE_URL = 'https://app.kargonomi.com.tr/api/v1';
@@ -81,12 +114,22 @@ function buildLookupProbeAppEnv(env: LookupProbeEnv): AppEnv {
 }
 
 function summarizeBaseUrl(baseUrl: string) {
-  const parsed = new URL(baseUrl);
-  return {
-    protocol: parsed.protocol,
-    hostname: parsed.hostname,
-    path: parsed.pathname || '/',
-  };
+  try {
+    const parsed = new URL(baseUrl);
+    return {
+      protocol: parsed.protocol,
+      hostname: parsed.hostname,
+      path: parsed.pathname || '/',
+      parseError: null,
+    };
+  } catch (error) {
+    return {
+      protocol: null,
+      hostname: null,
+      path: null,
+      parseError: error instanceof Error ? error.message : 'Invalid Kargonomi base URL.',
+    };
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -122,7 +165,7 @@ function extractLocationItems(value: unknown) {
   });
 }
 
-function summarizeResponseShape(body: unknown) {
+function summarizeResponseShape(body: unknown): ShapeSummary {
   if (Array.isArray(body)) {
     return {
       kind: 'array',
@@ -133,13 +176,11 @@ function summarizeResponseShape(body: unknown) {
   if (isRecord(body)) {
     return {
       kind: 'object',
-      itemCount: undefined,
       topLevelKeys: Object.keys(body).slice(0, 20),
     };
   }
   return {
     kind: body === null ? 'null' : typeof body,
-    itemCount: undefined,
     topLevelKeys: [],
   };
 }
@@ -161,15 +202,15 @@ function normalizeLocationName(value: string | null | undefined) {
     .replace(/\s+/g, ' ');
 }
 
-function summarizeLocations(body: unknown): LocationSummary {
+function summarizeLocations(body: unknown, limit: number): LocationSummary {
   const items = extractLocationItems(body);
   return {
     count: items.length,
-    firstNames: items.slice(0, 5).map((item) => item.name),
+    firstNames: items.slice(0, limit).map((item) => item.name),
   };
 }
 
-function summarizeFetchError(error: unknown) {
+function summarizeFetchError(error: unknown): KargonomiLookupProbeFetchError {
   if (error instanceof Error) {
     const cause = error.cause;
     return {
@@ -186,27 +227,90 @@ function summarizeFetchError(error: unknown) {
   };
 }
 
-function logResponse(logger: LookupProbeLogger, label: string, response: KargonomiRawHttpResponse) {
-  const locations = summarizeLocations(response.body);
-  logger.log(
-    JSON.stringify(
-      {
-        label,
-        ok: response.ok,
-        httpStatus: response.status,
-        contentType: response.contentType,
-        responseShape: summarizeResponseShape(response.body),
-        locationCount: locations.count,
-        firstLocationNames: locations.firstNames,
-      },
-      null,
-      2,
-    ),
-  );
-}
-
 function findIstanbulStateId(body: unknown) {
   return extractLocationItems(body).find((item) => normalizeLocationName(item.name) === 'istanbul')?.id ?? null;
+}
+
+export async function runKargonomiLocationLookupDiagnostics(
+  env: AppEnv,
+  options: { fetchImpl?: typeof fetch } = {},
+): Promise<KargonomiLocationLookupDiagnostics> {
+  const effectiveBaseUrl = env.KARGONOMI_BASE_URL?.trim() || DEFAULT_KARGONOMI_BASE_URL;
+  const baseUrl = summarizeBaseUrl(effectiveBaseUrl);
+  const diagnostics: KargonomiLocationLookupDiagnostics = {
+    temporary: true,
+    baseUrlHost: baseUrl.hostname,
+    baseUrlPath: baseUrl.path,
+    baseUrlParseError: baseUrl.parseError,
+    tokenPresent: Boolean(env.KARGONOMI_API_TOKEN?.trim()),
+    statesRequestUrl: '/states/1',
+    statesHttpStatus: null,
+    statesFetchError: null,
+    statesContentType: null,
+    statesShapeSummary: null,
+    firstStateNames: [],
+    istanbulStateId: null,
+    citiesRequestUrl: null,
+    citiesHttpStatus: null,
+    citiesFetchError: null,
+    citiesContentType: null,
+    citiesShapeSummary: null,
+    firstCityNames: [],
+  };
+
+  if (!env.KARGONOMI_API_TOKEN?.trim()) {
+    diagnostics.statesFetchError = {
+      name: 'ConfigError',
+      message: 'KARGONOMI_API_TOKEN is not configured.',
+      cause: null,
+    };
+    return diagnostics;
+  }
+
+  const client = new KargonomiHttpClient(
+    {
+      ...env,
+      KARGONOMI_BASE_URL: effectiveBaseUrl,
+    },
+    {
+      fetchImpl: options.fetchImpl,
+    },
+  );
+
+  let statesResponse: KargonomiRawHttpResponse;
+  try {
+    statesResponse = await client.listStates(1);
+  } catch (error) {
+    diagnostics.statesFetchError = summarizeFetchError(error);
+    return diagnostics;
+  }
+
+  diagnostics.statesHttpStatus = statesResponse.status;
+  diagnostics.statesContentType = statesResponse.contentType;
+  diagnostics.statesShapeSummary = summarizeResponseShape(statesResponse.body);
+  diagnostics.firstStateNames = summarizeLocations(statesResponse.body, 5).firstNames;
+  if (!statesResponse.ok) {
+    return diagnostics;
+  }
+
+  const istanbulStateId = findIstanbulStateId(statesResponse.body);
+  diagnostics.istanbulStateId = istanbulStateId;
+  if (!istanbulStateId) {
+    return diagnostics;
+  }
+
+  diagnostics.citiesRequestUrl = `/cities/${istanbulStateId}`;
+  try {
+    const citiesResponse = await client.listCities(istanbulStateId);
+    diagnostics.citiesHttpStatus = citiesResponse.status;
+    diagnostics.citiesContentType = citiesResponse.contentType;
+    diagnostics.citiesShapeSummary = summarizeResponseShape(citiesResponse.body);
+    diagnostics.firstCityNames = summarizeLocations(citiesResponse.body, 10).firstNames;
+  } catch (error) {
+    diagnostics.citiesFetchError = summarizeFetchError(error);
+  }
+
+  return diagnostics;
 }
 
 export async function runManualKargonomiLocationLookupProbe(options: LookupProbeOptions = {}) {
@@ -219,9 +323,6 @@ export async function runManualKargonomiLocationLookupProbe(options: LookupProbe
   }
 
   const appEnv = buildLookupProbeAppEnv(env);
-  const client = new KargonomiHttpClient(appEnv, {
-    fetchImpl: options.fetchImpl,
-  });
 
   logger.log('MANUAL/DEV ONLY: Kargonomi location lookup probe starting.');
   logger.log(
@@ -237,50 +338,8 @@ export async function runManualKargonomiLocationLookupProbe(options: LookupProbe
     ),
   );
 
-  let statesResponse: KargonomiRawHttpResponse;
-  try {
-    statesResponse = await client.listStates(1);
-  } catch (error) {
-    logger.log(
-      JSON.stringify(
-        {
-          label: 'GET /states/1',
-          fetchFailed: true,
-          error: summarizeFetchError(error),
-        },
-        null,
-        2,
-      ),
-    );
-    return;
-  }
-
-  logResponse(logger, 'GET /states/1', statesResponse);
-  if (!statesResponse.ok) {
-    logger.log('Stopping: states lookup returned a non-2xx response.');
-    return;
-  }
-
-  const istanbulStateId = findIstanbulStateId(statesResponse.body);
-  if (!istanbulStateId) {
-    logger.log('Stopping: İstanbul was not found in the states response.');
-    return;
-  }
-
-  try {
-    const citiesResponse = await client.listCities(istanbulStateId);
-    logResponse(logger, `GET /cities/${istanbulStateId}`, citiesResponse);
-  } catch (error) {
-    logger.log(
-      JSON.stringify(
-        {
-          label: `GET /cities/${istanbulStateId}`,
-          fetchFailed: true,
-          error: summarizeFetchError(error),
-        },
-        null,
-        2,
-      ),
-    );
-  }
+  const diagnostics = await runKargonomiLocationLookupDiagnostics(appEnv, {
+    fetchImpl: options.fetchImpl,
+  });
+  logger.log(JSON.stringify(diagnostics, null, 2));
 }

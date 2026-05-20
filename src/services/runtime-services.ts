@@ -1472,6 +1472,33 @@ export const runtimeServices = {
             },
             items: [],
           }),
+    kargonomiLocationLookup: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.runKargonomiLocationLookupDiagnostics()
+        : Promise.resolve({
+            temporary: true as const,
+            baseUrlHost: 'app.kargonomi.com.tr',
+            baseUrlPath: '/api/v1',
+            baseUrlParseError: null,
+            tokenPresent: false,
+            statesRequestUrl: '/states/1',
+            statesHttpStatus: null,
+            statesFetchError: {
+              name: 'MockMode',
+              message: 'Kargonomi lookup diagnostics are available in real API mode only.',
+              cause: null,
+            },
+            statesContentType: null,
+            statesShapeSummary: null,
+            firstStateNames: [],
+            istanbulStateId: null,
+            citiesRequestUrl: null,
+            citiesHttpStatus: null,
+            citiesFetchError: null,
+            citiesContentType: null,
+            citiesShapeSummary: null,
+            firstCityNames: [],
+          }),
     replay: (webhookEventId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.replayWebhook(webhookEventId)

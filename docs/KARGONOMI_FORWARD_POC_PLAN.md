@@ -398,6 +398,26 @@ Default behavior:
 - Return/reverse shipment remains unsupported.
 - Kargonomi can be enabled for runtime only through explicit provider config; the probe remains manual/dev only.
 
+## Temporary Location Lookup Diagnostics
+
+- A temporary admin-only diagnostics endpoint exists while investigating deployed Kargonomi destination lookup failures:
+  - `GET /admin/diagnostics/kargonomi/location-lookup`
+- The endpoint requires the existing admin auth/session path.
+- It does not create shipments.
+- It never calls `POST /shipments`.
+- It returns sanitized JSON only and must never expose `KARGONOMI_API_TOKEN` or `Authorization` headers.
+- It calls only:
+  - `GET /states/1`
+  - `GET /cities/{istanbulStateId}` when İstanbul is found in the states response
+- It reports:
+  - base URL host/path
+  - token present yes/no
+  - HTTP status or fetch error
+  - content type
+  - response shape summary
+  - first returned state/district names
+- Remove this endpoint after the Kargonomi location lookup issue is resolved and normal operational diagnostics are sufficient.
+
 ## PoC Validation Checklist
 
 1. Confirm account credentials, Bearer token, and webhook `secret_key`. `X-App-Key` is not required for this account.
