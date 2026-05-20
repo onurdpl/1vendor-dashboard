@@ -2323,50 +2323,50 @@ export function OrderDetailPage() {
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
   const needsOperationalAttention = Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
-  const orderHealth = hasOperationalReturn
+  const orderHealth = needsOperationalAttention
     ? {
-        label: 'Return active',
-        helper: 'A return is linked to this order. Review return tracking and Shopify sync before closing the loop.',
-        tone: 'return',
+        label: 'Needs attention',
+        helper: waitingSupportTicket
+          ? 'Support is waiting for a vendor update.'
+          : 'Shipment tracking is not fully visible yet.',
+        tone: 'attention',
       }
-    : needsOperationalAttention
-      ? {
-          label: 'Needs attention',
-          helper: waitingSupportTicket
-            ? 'Support is waiting for a vendor update.'
-            : 'Shipment tracking is not fully visible yet.',
-          tone: 'attention',
-        }
-      : {
-          label: 'Healthy',
-          helper: 'Shipment and order state are progressing normally.',
-          tone: 'healthy',
-        };
+    : {
+        label: 'Healthy',
+        helper: 'Shipment and order state are progressing normally.',
+        tone: 'healthy',
+      };
   const operationalAlerts = [
     hasOperationalReturn
       ? {
           id: 'return-active',
           label: 'Return active',
           detail: activeReturn
-            ? `Return ${activeReturn.status.toLowerCase()} · open return detail for next action.`
-            : 'Return shipment is linked to this order.',
+            ? `Customer return ${activeReturn.status.toLowerCase()}. Review return tracking and Shopify sync before closing the loop.`
+            : 'Customer return is linked. Review return tracking and Shopify sync before closing the loop.',
           tone: 'return',
+          href: activeReturn ? `/returns/${activeReturn.id}` : null,
+          action: activeReturn ? 'Open return details' : null,
         }
       : null,
-    !hasTrackingSync
+    !hasOperationalReturn && !hasTrackingSync
       ? {
           id: 'tracking-missing',
           label: 'Tracking missing',
           detail: 'Tracking is not visible to the operational workspace yet.',
           tone: 'attention',
+          href: null,
+          action: null,
         }
       : null,
-    order.shippingStatus === 'Awaiting Shipment'
+    !hasOperationalReturn && order.shippingStatus === 'Awaiting Shipment'
       ? {
           id: 'awaiting-shipment',
           label: 'Awaiting shipment',
           detail: 'Create shipment or add tracking when the package is ready.',
           tone: 'warning',
+          href: null,
+          action: null,
         }
       : null,
     waitingSupportTicket
@@ -2375,9 +2375,11 @@ export function OrderDetailPage() {
           label: 'Support action needed',
           detail: waitingSupportTicket.subject,
           tone: 'support',
+          href: `${supportBasePath}/${waitingSupportTicket.id}`,
+          action: 'Open support',
         }
       : null,
-  ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string }>;
+  ].filter(Boolean) as Array<{ id: string; label: string; detail: string; tone: string; href: string | null; action: string | null }>;
 
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
@@ -2548,7 +2550,6 @@ export function OrderDetailPage() {
             <div className="order-detail-heading-line">
               <h1>Order {formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</h1>
               <span className="order-source-pill">{order.channel || 'Unknown'}</span>
-              {hasOperationalReturn ? <span className="status-badge status-warning">Return active</span> : null}
             </div>
             <div className="order-detail-meta-strip">
               <div>
@@ -2567,10 +2568,10 @@ export function OrderDetailPage() {
                 <span>Shopify ID</span>
                 <strong>{order.sourceShopifyOrderId || '—'}</strong>
               </div>
-              <div>
-                <span>Ship to</span>
-                <strong>{order.shippingAddress || 'Unknown'}</strong>
-              </div>
+            </div>
+            <div className="order-ship-to-note" aria-label="Shipping address summary">
+              <span>Ship to</span>
+              <strong>{order.shippingAddress && order.shippingAddress !== 'Unknown' ? order.shippingAddress : 'Shopify shipping address available in future detail sync.'}</strong>
             </div>
           </div>
         </div>
@@ -2585,16 +2586,26 @@ export function OrderDetailPage() {
             {order.shippingStatus}
           </span>
         </div>
-        <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
-          <strong>{orderHealth.label}</strong>
-          <span>{orderHealth.helper}</span>
-        </div>
+        {!hasOperationalReturn ? (
+          <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
+            <strong>{orderHealth.label}</strong>
+            <span>{orderHealth.helper}</span>
+          </div>
+        ) : null}
         {operationalAlerts.length ? (
           <div className="order-operational-alerts" aria-label="Operational alerts">
             {operationalAlerts.map((alert) => (
               <div key={alert.id} className={`order-operational-alert order-alert-${alert.tone}`}>
+                <span className="order-alert-icon" aria-hidden="true">
+                  !
+                </span>
                 <strong>{alert.label}</strong>
                 <span>{alert.detail}</span>
+                {alert.href && alert.action ? (
+                  <Link className="order-alert-link" to={alert.href}>
+                    {alert.action}
+                  </Link>
+                ) : null}
               </div>
             ))}
           </div>

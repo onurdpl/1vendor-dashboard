@@ -4028,6 +4028,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     expect((await screen.findAllByText(/Returned trainer/)).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Return active')).toHaveLength(1);
+    expect(screen.queryByLabelText('Primary operational status')).not.toBeInTheDocument();
+    const alertRegion = screen.getByLabelText('Operational alerts');
+    expect(within(alertRegion).getByText(/Customer return requested/i)).toBeInTheDocument();
+    expect(within(alertRegion).getByRole('link', { name: 'Open return details' })).toHaveAttribute('href', '/returns/return-1028');
+    expect(screen.getByLabelText('Shipping address summary')).toHaveTextContent('Ship to');
+    expect(screen.getByText('Shopify shipping address available in future detail sync.')).toBeInTheDocument();
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
     const financeLink = screen.getByRole('link', { name: /Payout activity/i });
