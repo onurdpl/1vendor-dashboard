@@ -4737,6 +4737,70 @@ h3 {
   order: 2;
 }
 
+.order-support-card.order-detail-card-v2 {
+  gap: 6px;
+  padding: 8px;
+}
+
+.order-support-card .order-card-heading {
+  gap: 6px;
+}
+
+.order-support-card .order-card-heading p {
+  max-width: 24rem;
+}
+
+.order-support-compact-stack {
+  display: grid;
+  gap: 6px;
+}
+
+.order-support-contact-button {
+  min-height: 34px;
+  justify-content: center;
+  width: 100%;
+}
+
+.order-support-ticket-list {
+  display: grid;
+  gap: 5px;
+  padding: 7px;
+  border: 1px solid #e2e8f0;
+  border-radius: 9px;
+  background: #f8fafc;
+}
+
+.order-support-ticket-list > strong {
+  color: #334155;
+  font-size: 0.74rem;
+  font-weight: 900;
+}
+
+.order-support-ticket-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  color: inherit;
+  text-decoration: none;
+}
+
+.order-support-ticket-row span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.order-support-ticket-row strong {
+  overflow: hidden;
+  color: #0f172a;
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .admin-collab-card {
   grid-column: 2;
   grid-row: 5;

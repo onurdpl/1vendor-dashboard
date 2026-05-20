@@ -2804,19 +2804,15 @@ export function OrderDetailPage() {
             <div className="order-card-heading">
               <div>
                 <h2>Support</h2>
-                <p>
-                  {isAdmin
-                    ? 'Operational support context and safe diagnostics for this order.'
-                    : 'Contact support with the shipment and return context already attached.'}
-                </p>
+                <p>{isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.'}</p>
               </div>
             </div>
-            <div className="shipment-recovery-actions">
+            <div className="order-support-compact-stack">
               {isVendorAssignedOwner ? (
                 <>
                   <button
                     type="button"
-                    className="button button-secondary"
+                    className="button button-secondary button-compact order-support-contact-button"
                     onClick={() => setSupportOpen(true)}
                     disabled={!canReportIssue}
                   >
@@ -2825,24 +2821,19 @@ export function OrderDetailPage() {
                   {!canReportIssue ? (
                     <span className="muted">Support is available for active or fulfilled assigned orders.</span>
                   ) : (
-                    <span className="muted">Order, shipment, return, tracking, and Shopify sync context will be attached.</span>
+                    <span className="muted">Order, shipment, return, and sync context attached.</span>
                   )}
                 </>
               ) : null}
 
               {relatedSupportTickets.length ? (
-                <div className="provider-response-summary" aria-label="Support ticket summary">
-                  <div className="provider-response-heading">
-                    <strong>Support tickets</strong>
-                    <span>{relatedSupportTickets.length}</span>
-                  </div>
+                <div className="order-support-ticket-list" aria-label="Support ticket summary">
+                  <strong>Tickets · {relatedSupportTickets.length}</strong>
                   {relatedSupportTickets.slice(0, 3).map((ticket) => (
-                    <div className="summary-row" key={ticket.id}>
+                    <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
                       <span>{ticket.status.replace(/_/g, ' ')}</span>
-                      <Link className="inline-link" to={`${supportBasePath}/${ticket.id}`}>
-                        {ticket.subject}
-                      </Link>
-                    </div>
+                      <strong>{ticket.subject}</strong>
+                    </Link>
                   ))}
                 </div>
               ) : (

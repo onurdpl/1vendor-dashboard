@@ -1015,6 +1015,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportDiagnostics = (await screen.findByLabelText('Admin support diagnostics')) as HTMLDetailsElement;
+    expect(await screen.findByLabelText('Support ticket summary')).toHaveTextContent('Tickets · 1');
     expect(supportDiagnostics).toBeInTheDocument();
     expect(supportDiagnostics.tagName).toBe('DETAILS');
     expect(supportDiagnostics.open).toBe(false);
