@@ -4006,7 +4006,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Returned trainer')).toBeInTheDocument();
+    expect((await screen.findAllByText(/Returned trainer/)).length).toBeGreaterThan(0);
+    expect(screen.getByText('Return linked')).toBeInTheDocument();
+    expect(screen.getByText('Payout pending')).toBeInTheDocument();
     expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
   });
 

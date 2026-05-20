@@ -109,11 +109,11 @@ export function OperationalLinkCards({
             );
 
             return link.href ? (
-              <Link key={link.id} to={link.href} className="operational-link-row">
+              <Link key={link.id} to={link.href} className={`operational-link-row op-linked-${link.tone ?? 'neutral'}`}>
                 {body}
               </Link>
             ) : (
-              <div key={link.id} className="operational-link-row">
+              <div key={link.id} className={`operational-link-row op-linked-${link.tone ?? 'neutral'}`}>
                 {body}
               </div>
             );

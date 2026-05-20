@@ -2106,6 +2106,22 @@ export function OrderDetailPage() {
           : 'No return/refund impact'
       : 'Unknown';
   const shippingCostStatus = isAdmin && financePreview ? financePreview.sourceFields.shippingCost : 'Unknown';
+  const financeSummaryCards = [
+    { label: 'Order total', value: order.amount },
+    isAdmin && financePreview ? { label: 'Estimated vendor payable', value: estimatedVendorPayable } : null,
+    isAdmin && financePreview ? { label: 'Estimated marketplace commission', value: estimatedMarketplaceCommission } : null,
+    isAdmin && financePreview ? { label: 'Refund impact', value: refundImpact } : null,
+    isAdmin && financePreview && financePreview.sourceFields.shippingCost !== 'unknown'
+      ? { label: 'Shipping cost status', value: shippingCostStatus }
+      : null,
+  ].filter(Boolean) as Array<{ label: string; value: string }>;
+  const financeUnknownIndicators = isAdmin
+    ? [
+        ...(financeSummaryUnknowns.length ? financeSummaryUnknowns : []),
+        financePreview?.sourceFields.shippingCost === 'unknown' ? 'shipping_cost' : null,
+        !financePreview ? 'ledger_preview_unavailable' : null,
+      ].filter(Boolean) as string[]
+    : ['finance_preview_admin_only'];
   const summaryCards = [
     {
       label: 'Allocation status',
@@ -2257,10 +2273,10 @@ export function OrderDetailPage() {
       id: `return-${returnRecord.id}`,
       eyebrow: 'Return',
       title: `Return for ${formatShopifyOrderNumber(returnRecord.sourceShopifyOrderNumber)}`,
-      description: returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item',
+      description: [returnRecord.status, returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item'].filter(Boolean).join(' · '),
       actionLabel: 'Open return detail',
       href: `/returns/${returnRecord.id}`,
-      status: returnRecord.status,
+      status: returnRecord.status === 'Closed' || returnRecord.status === 'Refunded' ? 'Return closed' : 'Return linked',
       tone: returnRecord.status === 'Refunded' || returnRecord.status === 'Closed' ? ('success' as const) : ('attention' as const),
     })),
     ...relatedFinanceRecords.map((record) => ({
@@ -2270,17 +2286,17 @@ export function OrderDetailPage() {
       description: `${record.amount} · ${record.status}`,
       actionLabel: 'Open finance detail',
       href: buildFinanceHref(record),
-      status: record.category,
+      status: record.status === 'Pending' ? 'Payout pending' : record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
     })),
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
       eyebrow: 'Support',
       title: ticket.subject,
-      description: ticket.vendorName ?? ticket.vendorId,
+      description: [ticket.status.replace(/_/g, ' '), ticket.vendorName ?? ticket.vendorId].filter(Boolean).join(' · '),
       actionLabel: 'Open support ticket',
       href: `${supportBasePath}/${ticket.id}`,
-      status: ticket.status.replace(/_/g, ' '),
+      status: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? 'Support resolved' : 'Support active',
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
     })),
   ];
@@ -2686,34 +2702,24 @@ export function OrderDetailPage() {
           <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
             <div className="order-card-heading">
               <h2>Financial summary</h2>
-              <p>Read-only operational estimate. Unknown values stay explicit.</p>
+              <p>Read-only operational estimate. Unknowns are flagged inline, not treated as balances.</p>
             </div>
             <div className="order-financial-impact-grid">
-              <div>
-                <span>Order total</span>
-                <strong>{order.amount}</strong>
-              </div>
-              <div>
-                <span>Estimated vendor payable</span>
-                <strong>{estimatedVendorPayable}</strong>
-              </div>
-              <div>
-                <span>Estimated marketplace commission</span>
-                <strong>{estimatedMarketplaceCommission}</strong>
-              </div>
-              <div>
-                <span>Refund impact</span>
-                <strong>{refundImpact}</strong>
-              </div>
-              <div>
-                <span>Shipping cost status</span>
-                <strong>{shippingCostStatus}</strong>
-              </div>
-              <div>
-                <span>Unknown values</span>
-                <strong>{financeSummaryUnknowns.length ? financeSummaryUnknowns.join(', ') : 'None reported'}</strong>
-              </div>
+              {financeSummaryCards.map((card) => (
+                <div key={card.label}>
+                  <span>{card.label}</span>
+                  <strong>{card.value}</strong>
+                </div>
+              ))}
             </div>
+            {financeUnknownIndicators.length ? (
+              <div className="finance-inline-unknowns" aria-label="Finance unknown indicators">
+                <span>Unknown</span>
+                {Array.from(new Set(financeUnknownIndicators)).map((unknown) => (
+                  <strong key={unknown}>{toTitleCaseLabel(unknown.replace(/_/g, ' '))}</strong>
+                ))}
+              </div>
+            ) : null}
           </article>
 
           {isAdmin && order.financeLedgerPreview ? (
