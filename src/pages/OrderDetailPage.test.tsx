@@ -995,12 +995,20 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByLabelText('Admin support diagnostics')).toBeInTheDocument();
+    const supportDiagnostics = (await screen.findByLabelText('Admin support diagnostics')) as HTMLDetailsElement;
+    expect(supportDiagnostics).toBeInTheDocument();
+    expect(supportDiagnostics.tagName).toBe('DETAILS');
+    expect(supportDiagnostics.open).toBe(false);
     expect(screen.getByText('Tracking has not updated.')).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: 'Copy shipment diagnostics' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy diagnostics' }));
     expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Shipment diagnostics'));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Return diagnostics'));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy shipment summary' }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Shipment summary'));
+    await userEvent.click(screen.getByRole('button', { name: 'Copy return summary' }));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Return summary'));
     expect(writeText).toHaveBeenCalledWith(expect.not.stringMatching(/token|secret|authorization|payload/i));
-    expect(await screen.findByText('Copied shipment diagnostics.')).toBeInTheDocument();
+    expect(await screen.findByText('Copied return summary.')).toBeInTheDocument();
 
     cleanup();
     window.localStorage.clear();
@@ -1021,7 +1029,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByText('Contact support')).toBeInTheDocument();
     expect(screen.queryByLabelText('Admin support diagnostics')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy shipment diagnostics' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy diagnostics' })).not.toBeInTheDocument();
   });
 
   it('lets admins update vendor shipping provider configuration and refresh diagnostics', async () => {
@@ -3483,7 +3491,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const diagnostics = await screen.findByLabelText('Shopify return signal diagnostics');
+    const diagnostics = (await screen.findByLabelText('Shopify return signal diagnostics')) as HTMLDetailsElement;
+    expect(diagnostics.tagName).toBe('DETAILS');
+    expect(diagnostics.open).toBe(false);
     expect(within(diagnostics).getByText('Shopify return signal discovery')).toBeInTheDocument();
     expect(within(diagnostics).getByText('returns/update')).toBeInTheDocument();
     expect(within(diagnostics).getByText('order_id')).toBeInTheDocument();
@@ -3615,7 +3625,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(
       await screen.findByText('Failed · Shopify fulfillment sync failed. Admin diagnostics include the safe error summary.'),
     ).toBeInTheDocument();
-    const diagnostics = screen.getByLabelText('Shopify fulfillment diagnostics');
+    const diagnostics = screen.getByLabelText('Shopify fulfillment diagnostics') as HTMLDetailsElement;
+    expect(diagnostics.tagName).toBe('DETAILS');
+    expect(diagnostics.open).toBe(false);
     expect(within(diagnostics).getByText('Fulfillment order id present')).toBeInTheDocument();
     expect(within(diagnostics).getAllByText('no').length).toBeGreaterThanOrEqual(2);
     expect(

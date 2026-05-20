@@ -4837,6 +4837,16 @@ summary.provider-response-heading::-webkit-details-marker {
   background: #f8fafc;
 }
 
+.admin-diagnostics-panel {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.diagnostics-nested-panel {
+  margin-top: 4px;
+  padding: 7px;
+}
+
 .admin-diagnostics-panel:not([open]) .provider-response-heading::after {
   color: #64748b;
   content: "Open";

@@ -320,11 +320,11 @@ function TryOtoReturnAwbPrintProbeSummary({
   }
 
   return (
-    <div className="provider-response-summary" aria-label="Try OTO return AWB print probe">
-      <div className="provider-response-heading">
+    <details className="provider-response-summary admin-diagnostics-panel" aria-label="Try OTO return AWB print probe">
+      <summary className="provider-response-heading">
         <strong>Try OTO return AWB print probe</strong>
-        <span>Admin only</span>
-      </div>
+        <span>Return diagnostics</span>
+      </summary>
       <div className="summary-row">
         <span>HTTP</span>
         <strong>{probe.httpStatus ?? '—'}</strong>
@@ -341,7 +341,7 @@ function TryOtoReturnAwbPrintProbeSummary({
         <span>Provider message</span>
         <strong>{probe.providerMessage ?? probe.errorMessage ?? '—'}</strong>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -420,11 +420,11 @@ function ShopifyReturnSignalDiagnostics({ order, isAdmin }: { order: OrderDetail
   }
 
   return (
-    <div className="provider-response-summary" aria-label="Shopify return signal diagnostics">
-      <div className="provider-response-heading">
+    <details className="provider-response-summary admin-diagnostics-panel" aria-label="Shopify return signal diagnostics">
+      <summary className="provider-response-heading">
         <strong>Shopify return signal discovery</strong>
-        <span>Admin only</span>
-      </div>
+        <span>Shopify sync diagnostics</span>
+      </summary>
       <div className="summary-row">
         <span>Topic</span>
         <strong>{signal.topic}</strong>
@@ -449,7 +449,7 @@ function ShopifyReturnSignalDiagnostics({ order, isAdmin }: { order: OrderDetail
         <span>Payload keys</span>
         <strong>{signal.topLevelPayloadKeys.length ? signal.topLevelPayloadKeys.join(', ') : '—'}</strong>
       </div>
-    </div>
+    </details>
   );
 }
 
@@ -1606,7 +1606,11 @@ export function OrderDetailPage() {
     }
 
     return (
-      <>
+      <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Provider payload diagnostics">
+        <summary className="provider-response-heading">
+          <strong>Provider payload diagnostics</strong>
+          <span>Provider diagnostics</span>
+        </summary>
         <div className="summary-row">
           <span>Request endpoint</span>
           <strong>{summary.requestPath || '—'}</strong>
@@ -1683,7 +1687,7 @@ export function OrderDetailPage() {
             {diagnostics.addressFieldPresence.customerCountry ? 'yes' : 'no'}
           </strong>
         </div>
-      </>
+      </details>
     );
   }
 
@@ -1707,7 +1711,11 @@ export function OrderDetailPage() {
         : '—';
 
     return (
-      <>
+      <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Try OTO shipment finalization diagnostics">
+        <summary className="provider-response-heading">
+          <strong>Try OTO shipment finalization</strong>
+          <span>Provider diagnostics</span>
+        </summary>
         <div className="summary-row">
           <span>Try OTO createOrder</span>
           <strong>{diagnostics.createOrderSuccess === null ? '—' : diagnostics.createOrderSuccess ? 'success' : 'failed'}</strong>
@@ -1825,7 +1833,7 @@ export function OrderDetailPage() {
           <span>orderStatus value</span>
           <strong>{diagnostics.orderStatusValue || '—'}</strong>
         </div>
-      </>
+      </details>
     );
   }
 
@@ -1929,14 +1937,12 @@ export function OrderDetailPage() {
     void updateShippingConfigMutation(buildShippingConfigUpdate(shippingConfigDraft, vendorShippingConfig));
   };
 
-  const handleCopyDiagnostics = (kind: 'shipment' | 'return' | 'shopify') => {
+  const handleCopyDiagnostics = (kind: 'diagnostics' | 'shipment-summary' | 'return-summary' | 'shipment' | 'return' | 'shopify') => {
     if (!order) {
       return;
     }
 
-    const text =
-      kind === 'shipment'
-        ? buildDiagnosticsCopyText('Shipment diagnostics', [
+    const shipmentDiagnosticsText = buildDiagnosticsCopyText('Shipment diagnostics', [
             ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
             ['Support correlation id', supportCorrelationId],
             ['Shipment provider', visibleShipmentExecution?.provider ? formatShippingProviderName(visibleShipmentExecution.provider) : null],
@@ -1948,9 +1954,8 @@ export function OrderDetailPage() {
             ['Provider message', shipmentProviderSummary?.providerError ?? null],
             ['Webhook received', visibleShipmentExecution?.webhookReceived ?? false],
             ['Provider status', visibleShipmentExecution?.providerStatus ?? null],
-          ])
-        : kind === 'return'
-          ? buildDiagnosticsCopyText('Return diagnostics', [
+          ]);
+    const returnDiagnosticsText = buildDiagnosticsCopyText('Return diagnostics', [
               ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
               ['Support correlation id', supportCorrelationId],
               ['Return order id present', Boolean(visibleShipmentExecution?.returnShipment?.returnOrderId)],
@@ -1961,8 +1966,8 @@ export function OrderDetailPage() {
               ['Return finalized', visibleShipmentExecution?.returnShipment?.finalized ?? null],
               ['Provider message', visibleShipmentExecution?.returnShipment?.diagnostics?.providerMessage ?? null],
               ['Shopify return tracking accepted', visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.trackingAccepted ?? null],
-            ])
-          : buildDiagnosticsCopyText('Shopify diagnostics', [
+            ]);
+    const shopifyDiagnosticsText = buildDiagnosticsCopyText('Shopify diagnostics', [
               ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
               ['Support correlation id', supportCorrelationId],
               ['Fulfillment sync status', shopifyFulfillmentSyncSummary?.label ?? null],
@@ -1974,9 +1979,47 @@ export function OrderDetailPage() {
               ['Shopify return id present', hasShopifyReturnIdForLabelProbe],
               ['Reverse delivery id present', visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.reverseDeliveryIdPresent ?? null],
             ]);
+    const shipmentSummaryText = buildDiagnosticsCopyText('Shipment summary', [
+      ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
+      ['Shipment provider', visibleShipmentExecution?.provider ? formatShippingProviderName(visibleShipmentExecution.provider) : null],
+      ['Carrier', shipmentShopifyCarrier],
+      ['Shipment status', visibleShipmentExecution ? getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus) : order.shippingStatus],
+      ['Tracking number', getShipmentTrackingNumber(order, visibleShipmentExecution)],
+      ['Tracking link present', Boolean(getShipmentTrackingUrl(order, visibleShipmentExecution))],
+      ['Label present', Boolean(visibleShipmentExecution?.labelUrl)],
+    ]);
+    const returnSummaryText = buildDiagnosticsCopyText('Return summary', [
+      ['Order', formatShopifyOrderNumber(order.sourceShopifyOrderNumber)],
+      ['Return status', visibleShipmentExecution?.returnShipment ? getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment) : null],
+      ['Return carrier', visibleShipmentExecution?.returnShipment?.carrierName ?? null],
+      ['Return tracking code', visibleShipmentExecution?.returnShipment?.trackingNumber ?? visibleShipmentExecution?.returnShipment?.barcode ?? null],
+      ['Return tracking link present', Boolean(visibleShipmentExecution?.returnShipment?.trackingUrl)],
+      ['Printable return label available', Boolean(visibleShipmentExecution?.returnShipment?.labelUrl)],
+      ['Shopify return tracking accepted', visibleShipmentExecution?.returnShipment?.shopifyReturnLabelUploadProbe?.trackingAccepted ?? null],
+    ]);
+    const text =
+      kind === 'diagnostics'
+        ? [shipmentDiagnosticsText, returnDiagnosticsText, shopifyDiagnosticsText].join('\n\n')
+        : kind === 'shipment-summary'
+          ? shipmentSummaryText
+          : kind === 'return-summary'
+            ? returnSummaryText
+            : kind === 'shipment'
+              ? shipmentDiagnosticsText
+              : kind === 'return'
+                ? returnDiagnosticsText
+                : shopifyDiagnosticsText;
 
     void navigator.clipboard?.writeText(text);
-    setCopiedDiagnostics(kind);
+    setCopiedDiagnostics(
+      kind === 'diagnostics'
+        ? 'diagnostics'
+        : kind === 'shipment-summary'
+          ? 'shipment summary'
+          : kind === 'return-summary'
+            ? 'return summary'
+            : `${kind} diagnostics`,
+    );
     window.setTimeout(() => setCopiedDiagnostics(null), 2500);
   };
 
@@ -2709,7 +2752,11 @@ export function OrderDetailPage() {
                   </strong>
                 </div>
               </div>
-              <div className="tracking-summary-card order-tracking-summary-card">
+              <details className="provider-response-summary admin-diagnostics-panel" aria-label="Finance preview diagnostics">
+                <summary className="provider-response-heading">
+                  <strong>Finance preview diagnostics</strong>
+                  <span>Admin diagnostics</span>
+                </summary>
                 <div className="summary-row">
                   <span>Status</span>
                   <strong>{order.financeLedgerPreview.status === 'ready' ? 'Ready' : 'Partial · unknowns present'}</strong>
@@ -2729,22 +2776,22 @@ export function OrderDetailPage() {
                   <span>Assumptions</span>
                   <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
                 </div>
-              </div>
-              <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
-                {order.financeLedgerPreview.entries.slice(0, 12).map((entry) => (
-                  <div className="summary-row" key={entry.id}>
-                    <span>{toTitleCaseLabel(entry.eventType)}</span>
-                    <strong>
-                      {[
-                        entry.impact.vendorPayable ? `payable ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
-                        entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
-                        entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
-                        entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
-                      ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
-                    </strong>
-                  </div>
-                ))}
-              </div>
+                <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
+                  {order.financeLedgerPreview.entries.slice(0, 12).map((entry) => (
+                    <div className="summary-row" key={entry.id}>
+                      <span>{toTitleCaseLabel(entry.eventType)}</span>
+                      <strong>
+                        {[
+                          entry.impact.vendorPayable ? `payable ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
+                          entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
+                          entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
+                          entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
+                        ].filter(Boolean).join(' · ') || formatCurrency(entry.amount, entry.currency)}
+                      </strong>
+                    </div>
+                  ))}
+                </div>
+              </details>
             </article>
           ) : null}
 
@@ -2837,11 +2884,11 @@ export function OrderDetailPage() {
               )}
 
               {isAdmin ? (
-                <div className="provider-response-summary" aria-label="Admin support diagnostics">
-                  <div className="provider-response-heading">
+                <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
+                  <summary className="provider-response-heading">
                     <strong>Admin support context</strong>
-                    <span>Safe copy</span>
-                  </div>
+                    <span>Copy utilities</span>
+                  </summary>
                   {relatedSupportTickets[0] ? (
                     <>
                       <div className="summary-row">
@@ -2855,18 +2902,18 @@ export function OrderDetailPage() {
                     </>
                   ) : null}
                   <div className="order-inline-actions">
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment')}>
-                      Copy shipment diagnostics
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('diagnostics')}>
+                      Copy diagnostics
                     </button>
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return')}>
-                      Copy return diagnostics
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment-summary')}>
+                      Copy shipment summary
                     </button>
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shopify')}>
-                      Copy Shopify diagnostics
+                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return-summary')}>
+                      Copy return summary
                     </button>
                   </div>
-                  {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics} diagnostics.</span> : null}
-                </div>
+                  {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics}.</span> : null}
+                </details>
               ) : null}
             </div>
           </article>
@@ -3078,11 +3125,11 @@ export function OrderDetailPage() {
                                   </div>
                                 ) : null}
                                 {isAdmin && visibleShipmentExecution.returnShipment.diagnostics ? (
-                                  <div className="provider-response-summary" aria-label="Try OTO return diagnostics">
-                                    <div className="provider-response-heading">
+                                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Try OTO return diagnostics">
+                                    <summary className="provider-response-heading">
                                       <strong>Try OTO return diagnostics</strong>
-                                      <span>Admin only</span>
-                                    </div>
+                                      <span>Return diagnostics</span>
+                                    </summary>
                                     <div className="summary-row">
                                       <span>Endpoint</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
@@ -3200,14 +3247,14 @@ export function OrderDetailPage() {
                                       <span>Provider message</span>
                                       <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
                                     </div>
-                                  </div>
+                                  </details>
                                 ) : null}
                                 {isAdmin ? (
-                                  <div className="provider-response-summary" aria-label="Try OTO return details probe">
-                                    <div className="provider-response-heading">
+                                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Try OTO return details probe">
+                                    <summary className="provider-response-heading">
                                       <strong>Try OTO return details probe</strong>
-                                      <span>Admin only</span>
-                                    </div>
+                                      <span>Return diagnostics</span>
+                                    </summary>
                                     {visibleShipmentExecution.returnShipment.detailsProbe ? (
                                       <>
                                         <div className="summary-row">
@@ -3266,14 +3313,14 @@ export function OrderDetailPage() {
                                         ) : null}
                                       </>
                                     ) : null}
-                                  </div>
+                                  </details>
                                 ) : null}
                                 {isAdmin ? (
-                                  <div className="provider-response-summary" aria-label="Shopify return label upload probe">
-                                    <div className="provider-response-heading">
+                                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Shopify return label upload probe">
+                                    <summary className="provider-response-heading">
                                       <strong>Shopify return label upload probe</strong>
-                                      <span>Admin only</span>
-                                    </div>
+                                      <span>Shopify sync diagnostics</span>
+                                    </summary>
                                     <button
                                       type="button"
                                       className="secondary-action-button"
@@ -3388,7 +3435,7 @@ export function OrderDetailPage() {
                                         ) : null}
                                       </>
                                     ) : null}
-                                  </div>
+                                  </details>
                                 ) : null}
                               </>
                             ) : (
@@ -3434,11 +3481,11 @@ export function OrderDetailPage() {
                               {shopifyFulfillmentSyncSummary.message}
                             </span>
                             {isAdmin && order.shopifyFulfillmentSync ? (
-                              <div className="provider-response-summary" aria-label="Shopify fulfillment diagnostics">
-                                <div className="provider-response-heading">
+                              <details className="provider-response-summary admin-diagnostics-panel" aria-label="Shopify fulfillment diagnostics">
+                                <summary className="provider-response-heading">
                                   <strong>Shopify fulfillment diagnostics</strong>
-                                  <span>Admin only</span>
-                                </div>
+                                  <span>Shopify sync diagnostics</span>
+                                </summary>
                                 <div className="summary-row">
                                   <span>Fulfillment order id present</span>
                                   <strong>{order.shopifyFulfillmentSync.fulfillmentOrderIdPresent ? 'yes' : 'no'}</strong>
@@ -3463,7 +3510,7 @@ export function OrderDetailPage() {
                                   <span>Last attempted</span>
                                   <strong>{formatOptionalDate(order.shopifyFulfillmentSync.lastAttemptedAt ?? undefined)}</strong>
                                 </div>
-                              </div>
+                              </details>
                             ) : null}
                           </div>
                         ) : null}
@@ -3502,11 +3549,16 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
-                          <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
-                            <div className="provider-response-heading">
+                          <details
+                            id="provider-response-summary"
+                            className="provider-response-summary admin-diagnostics-panel"
+                            aria-label="Provider response summary"
+                            open={canRetryDryRunShipment || canRecoverFailedShipment || shouldShowRecoveryShipmentFieldCompletionForm}
+                          >
+                            <summary className="provider-response-heading">
                               <strong>Provider response summary</strong>
-                              <span>Admin only</span>
-                            </div>
+                              <span>Provider diagnostics</span>
+                            </summary>
                             <div className="summary-row">
                               <span>HTTP</span>
                               <strong>{shipmentProviderSummary.httpStatus ?? '—'}</strong>
@@ -3637,7 +3689,7 @@ export function OrderDetailPage() {
                                 {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                               </div>
                             ) : null}
-                          </div>
+                          </details>
                         ) : null}
                         {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                           <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
@@ -3695,11 +3747,11 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {shippingProviderDiagnostics && shippingConfigEditorForm ? (
-                      <div className="shipping-provider-diagnostics" aria-label="Shipping provider diagnostics">
-                        <div className="provider-response-heading">
+                      <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
+                        <summary className="provider-response-heading">
                           <strong>Shipping provider diagnostics</strong>
-                          <span>Admin only</span>
-                        </div>
+                          <span>Provider diagnostics</span>
+                        </summary>
                         {shippingConfigEditorForm}
                         {shippingProviderDiagnostics.provider === 'try_oto' ? (
                           <>
@@ -3734,7 +3786,7 @@ export function OrderDetailPage() {
                             <strong>{shippingProviderDiagnostics.packageTypeUsed || '—'}</strong>
                           </div>
                         ) : null}
-                      </div>
+                      </details>
                     ) : null}
                     {shouldShowRealTrackingForm ? (
                       <form
@@ -4022,11 +4074,11 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment?.diagnostics ? (
-                      <div className="provider-response-summary" aria-label="Try OTO return diagnostics">
-                        <div className="provider-response-heading">
+                      <details className="provider-response-summary admin-diagnostics-panel" aria-label="Try OTO return diagnostics">
+                        <summary className="provider-response-heading">
                           <strong>Try OTO return diagnostics</strong>
-                          <span>Admin only</span>
-                        </div>
+                          <span>Return diagnostics</span>
+                        </summary>
                         <div className="summary-row">
                           <span>Endpoint</span>
                           <strong>{visibleShipmentExecution.returnShipment.diagnostics.endpoint ?? '—'}</strong>
@@ -4131,14 +4183,14 @@ export function OrderDetailPage() {
                           <span>Provider message</span>
                           <strong>{visibleShipmentExecution.returnShipment.diagnostics.providerMessage ?? '—'}</strong>
                         </div>
-                      </div>
+                      </details>
                     ) : null}
                     {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
-                      <div className="provider-response-summary" aria-label="Try OTO return details probe">
-                        <div className="provider-response-heading">
+                      <details className="provider-response-summary admin-diagnostics-panel" aria-label="Try OTO return details probe">
+                        <summary className="provider-response-heading">
                           <strong>Try OTO return details probe</strong>
-                          <span>Admin only</span>
-                        </div>
+                          <span>Return diagnostics</span>
+                        </summary>
                         {visibleShipmentExecution.returnShipment.detailsProbe ? (
                           <>
                             <div className="summary-row">
@@ -4188,14 +4240,14 @@ export function OrderDetailPage() {
                             ) : null}
                           </>
                         ) : null}
-                      </div>
+                      </details>
                     ) : null}
                     {isAdmin && visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
-                      <div className="provider-response-summary" aria-label="Shopify return label upload probe">
-                        <div className="provider-response-heading">
+                      <details className="provider-response-summary admin-diagnostics-panel" aria-label="Shopify return label upload probe">
+                        <summary className="provider-response-heading">
                           <strong>Shopify return label upload probe</strong>
-                          <span>Admin only</span>
-                        </div>
+                          <span>Shopify sync diagnostics</span>
+                        </summary>
                         <button
                           type="button"
                           className="secondary-action-button"
@@ -4310,7 +4362,7 @@ export function OrderDetailPage() {
                             ) : null}
                           </>
                         ) : null}
-                      </div>
+                      </details>
                     ) : null}
                     {shopifyFulfillmentSyncSummary ? (
                       <div className="shipment-recovery-actions" aria-label="Shopify fulfillment status">
@@ -4321,11 +4373,11 @@ export function OrderDetailPage() {
                           {shopifyFulfillmentSyncSummary.message}
                         </span>
                         {isAdmin && order.shopifyFulfillmentSync ? (
-                          <div className="provider-response-summary" aria-label="Shopify fulfillment diagnostics">
-                            <div className="provider-response-heading">
+                          <details className="provider-response-summary admin-diagnostics-panel" aria-label="Shopify fulfillment diagnostics">
+                            <summary className="provider-response-heading">
                               <strong>Shopify fulfillment diagnostics</strong>
-                              <span>Admin only</span>
-                            </div>
+                              <span>Shopify sync diagnostics</span>
+                            </summary>
                             <div className="summary-row">
                               <span>Fulfillment order id present</span>
                               <strong>{order.shopifyFulfillmentSync.fulfillmentOrderIdPresent ? 'yes' : 'no'}</strong>
@@ -4350,7 +4402,7 @@ export function OrderDetailPage() {
                               <span>Last attempted</span>
                               <strong>{formatOptionalDate(order.shopifyFulfillmentSync.lastAttemptedAt ?? undefined)}</strong>
                             </div>
-                          </div>
+                          </details>
                         ) : null}
                       </div>
                     ) : null}
@@ -4397,7 +4449,7 @@ export function OrderDetailPage() {
                       >
                         <summary className="provider-response-heading">
                           <strong>Provider response summary</strong>
-                          <span>Admin diagnostics</span>
+                          <span>Provider diagnostics</span>
                         </summary>
                         <div className="summary-row">
                           <span>HTTP</span>
@@ -4618,7 +4670,7 @@ export function OrderDetailPage() {
                   <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
                     <summary className="provider-response-heading">
                       <strong>Shipping provider diagnostics</strong>
-                      <span>Admin diagnostics</span>
+                      <span>Provider diagnostics</span>
                     </summary>
                     {shippingConfigEditorForm}
                     <div className="summary-row">
