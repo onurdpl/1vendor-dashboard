@@ -36,6 +36,26 @@ The routed detail page should prioritize information in this order:
 Vendor views should stay operational and avoid provider/debug terminology. Admin views may
 show diagnostics, but they should be grouped and collapsible where practical.
 
+Vendor-first order detail hierarchy:
+
+1. Current order health.
+2. Next action.
+3. Shipment and return tracking.
+4. Read-only finance preview.
+5. Linked operational records.
+6. Clean timeline.
+7. Diagnostics only when the user has admin context.
+
+## Admin Diagnostics Philosophy
+
+Provider lifecycle, webhook traces, Shopify probe results, and safe payload summaries remain
+available to admins, but they should not compete visually with the operational state. These
+sections should be grouped into collapsed diagnostics panels by default.
+
+Vendors should never see raw provider payload semantics, webhook parsing language, reverse
+shipment internals, provider validation messages, stack traces, API keys, tokens, or Shopify
+GraphQL implementation details.
+
 ## Dashboard Loading Strategy
 
 The dashboard should render the workspace shell immediately, then populate operational cards
@@ -56,5 +76,12 @@ status, and day. Future filtering should expose stable timeline groups:
 - Finance
 - Support
 
-Unknown or provider-specific states should remain visible in admin diagnostics, while vendor
-timeline wording should stay concise and action-oriented.
+Vendor timeline policy:
+
+- Show human operational events such as order created, shipment created, tracking synced,
+  delivered, return requested, return tracking attached, Shopify return tracking synced, and
+  support ticket created or resolved.
+- Hide raw provider events such as webhook received, provider status updated, payload parsed,
+  `searchingDriver`, `reverseShipmentProcessing`, and reverse shipment implementation terms.
+- Keep unknown or provider-specific states visible in admin diagnostics instead of the vendor
+  timeline.

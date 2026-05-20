@@ -4678,6 +4678,28 @@ h3 {
   color: #0f172a;
 }
 
+summary.provider-response-heading {
+  cursor: pointer;
+  list-style: none;
+}
+
+summary.provider-response-heading::-webkit-details-marker {
+  display: none;
+}
+
+.admin-diagnostics-panel:not([open]) {
+  gap: 0;
+  background: #f8fafc;
+}
+
+.admin-diagnostics-panel:not([open]) .provider-response-heading::after {
+  color: #64748b;
+  content: "Open";
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .provider-response-heading span {
   color: #dc2626;
   font-size: 0.72rem;
@@ -7220,6 +7242,15 @@ h3 {
 .operational-link-row:hover {
   border-color: #bfdbfe;
   background: #eff6ff;
+}
+
+.operational-link-row[href]::after {
+  flex: 0 0 auto;
+  color: #2563eb;
+  content: "Open";
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .operational-link-row div {

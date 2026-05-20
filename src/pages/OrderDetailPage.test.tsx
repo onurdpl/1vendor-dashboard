@@ -622,7 +622,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
 
-  it('uses vendor-safe customer wording and groups repeated operational timeline events', async () => {
+  it('uses vendor-safe customer wording and hides raw provider timeline events', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -646,8 +646,46 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Customer hidden for vendor scope')).toBeInTheDocument();
     const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
     expect(timeline).not.toBeNull();
-    expect(within(timeline as HTMLElement).getAllByText('Carrier Webhook Received')).toHaveLength(1);
+    expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText(/Filters planned: operations, returns, finance, support/)).toBeInTheDocument();
+  });
+
+  it('collapses provider-heavy admin diagnostics by default', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        shipmentStatus: 'searchingDriver',
+        providerShipmentId: 'ke-created-1028',
+        trackingNumber: 'KE-TRACK-1028',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          dryRun: false,
+          disabledGates: [],
+          providerShipmentIdPresent: true,
+          trackingNumberPresent: true,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const providerDiagnostics = (await screen.findByLabelText('Provider response summary')) as HTMLDetailsElement;
+    const shippingDiagnostics = (await screen.findByLabelText('Shipping provider diagnostics')) as HTMLDetailsElement;
+    expect(providerDiagnostics.tagName).toBe('DETAILS');
+    expect(providerDiagnostics.open).toBe(false);
+    expect(shippingDiagnostics.tagName).toBe('DETAILS');
+    expect(shippingDiagnostics.open).toBe(false);
   });
 
   it('lets vendors open shipment support tickets with safe operational context', async () => {
@@ -2181,7 +2219,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         id: 'shipment-try_oto-alloc-sporjinal-7621783322961',
         provider: 'try_oto',
         providerCarrierName: 'Sürat Marketplace',
-        shipmentStatus: 'created',
+        shipmentStatus: 'searchingDriver',
         providerShipmentId: 'shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961',
         trackingNumber: 'OTO-TRACK-1028',
         trackingUrl: 'https://tracking.tryoto.example/OTO-TRACK-1028',
@@ -2204,6 +2242,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect((await screen.findAllByText('Try OTO')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Try Oto')).not.toBeInTheDocument();
+    expect(screen.getByText('Shipment processing')).toBeInTheDocument();
+    expect(screen.queryByText('SearchingDriver')).not.toBeInTheDocument();
     expect(screen.getByText('Internal reference')).toBeInTheDocument();
     expect(screen.queryByText('Provider id')).not.toBeInTheDocument();
     expect(screen.queryByText('shopify-cmpce0fbh0003cf3odp0j35yw-allocation-alloc-sporjinal-7621783322961')).not.toBeInTheDocument();

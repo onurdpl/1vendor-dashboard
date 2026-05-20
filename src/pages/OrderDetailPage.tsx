@@ -225,6 +225,40 @@ function getTryOtoReturnStatusLabel(returnShipment: NonNullable<ShipmentExecutio
   return 'Return shipment created';
 }
 
+function getOperationalShipmentStatusLabel(status?: string | null) {
+  const normalizedStatus = status?.trim().toLowerCase() ?? '';
+
+  if (!normalizedStatus) {
+    return 'Shipment status pending';
+  }
+  if (normalizedStatus === 'searchingdriver' || normalizedStatus === 'carrier_processing' || normalizedStatus === 'processing') {
+    return 'Shipment processing';
+  }
+  if (normalizedStatus === 'created' || normalizedStatus === 'pending') {
+    return 'Shipment created';
+  }
+  if (normalizedStatus === 'delivered' || normalizedStatus === 'completed') {
+    return 'Delivered';
+  }
+  if (normalizedStatus === 'failed') {
+    return 'Needs review';
+  }
+
+  return toTitleCaseLabel(status ?? '');
+}
+
+function isRawProviderTimelineLabel(label: string) {
+  const normalized = label.toLowerCase();
+  return (
+    normalized.includes('webhook') ||
+    normalized.includes('provider') ||
+    normalized.includes('payload') ||
+    normalized.includes('reverse') ||
+    normalized.includes('searchingdriver') ||
+    normalized.includes('status updated')
+  );
+}
+
 function getTryOtoReturnPendingLabel(returnShipment: NonNullable<ShipmentExecution['returnShipment']>) {
   if (
     returnShipment.labelRetrievalNote &&
@@ -562,8 +596,17 @@ function getInitialsLabel(value: string) {
 function getVendorTimelineLabel(label: string) {
   const normalized = label.toLowerCase();
 
+  if (normalized.includes('webhook') || normalized.includes('provider status')) {
+    return 'Shipment status updated';
+  }
+  if (normalized.includes('return') && normalized.includes('tracking')) {
+    return 'Return tracking attached';
+  }
+  if (normalized.includes('shopify') && normalized.includes('return') && normalized.includes('tracking')) {
+    return 'Shopify return tracking synced';
+  }
   if (normalized.includes('order')) {
-    return 'Order received';
+    return 'Order created';
   }
   if (normalized.includes('fulfillment')) {
     return 'Fulfillment pending';
@@ -2609,6 +2652,7 @@ export function OrderDetailPage() {
                 title: getVendorTimelineLabel(entry.label),
                 at: entry.at,
                 tone: 'neutral' as const,
+                visibility: isRawProviderTimelineLabel(entry.label) ? ('admin' as const) : undefined,
               })),
               ...orderTimelineEvents,
             ])}
@@ -2721,7 +2765,7 @@ export function OrderDetailPage() {
                             </div>
                             <div className="summary-row">
                               <span>Carrier status</span>
-                              <strong>{toTitleCaseLabel(visibleShipmentExecution.shipmentStatus)}</strong>
+                              <strong>{getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus)}</strong>
                             </div>
                             {visibleShipmentExecution.warehouseId ? (
                               <div className="summary-row">
@@ -3698,7 +3742,7 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>Carrier status</span>
-                          <strong>{toTitleCaseLabel(shipmentExecution.shipmentStatus)}</strong>
+                          <strong>{getOperationalShipmentStatusLabel(shipmentExecution.shipmentStatus)}</strong>
                         </div>
                         {shipmentExecution.warehouseId ? (
                           <div className="summary-row">
@@ -4218,11 +4262,16 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {shouldShowShipmentProviderSummary && shipmentProviderSummary ? (
-                      <div id="provider-response-summary" className="provider-response-summary" aria-label="Provider response summary">
-                        <div className="provider-response-heading">
+                      <details
+                        id="provider-response-summary"
+                        className="provider-response-summary admin-diagnostics-panel"
+                        aria-label="Provider response summary"
+                        open={canRetryDryRunShipment || canRecoverFailedShipment || shouldShowRecoveryShipmentFieldCompletionForm}
+                      >
+                        <summary className="provider-response-heading">
                           <strong>Provider response summary</strong>
-                          <span>Admin only</span>
-                        </div>
+                          <span>Admin diagnostics</span>
+                        </summary>
                         <div className="summary-row">
                           <span>HTTP</span>
                           <strong>{shipmentProviderSummary.httpStatus ?? '—'}</strong>
@@ -4393,7 +4442,7 @@ export function OrderDetailPage() {
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
                         ) : null}
-                      </div>
+                      </details>
                     ) : null}
                     {shouldShowFailedShipmentRetryDiagnostics && (!shipmentProviderSummary || !isAdmin) ? (
                       <div id="shipment-retry-diagnostics" className="shipment-recovery-actions" aria-label="Shipment retry eligibility">
@@ -4439,11 +4488,11 @@ export function OrderDetailPage() {
                   </div>
                 ) : null}
                 {isAdmin && shippingProviderDiagnostics ? (
-                  <div className="shipping-provider-diagnostics" aria-label="Shipping provider diagnostics">
-                    <div className="provider-response-heading">
+                  <details className="shipping-provider-diagnostics admin-diagnostics-panel" aria-label="Shipping provider diagnostics">
+                    <summary className="provider-response-heading">
                       <strong>Shipping provider diagnostics</strong>
-                      <span>Admin only</span>
-                    </div>
+                      <span>Admin diagnostics</span>
+                    </summary>
                     {shippingConfigEditorForm}
                     <div className="summary-row">
                       <span>Sandbox mode</span>
@@ -4660,7 +4709,7 @@ export function OrderDetailPage() {
                         <strong>{shippingProviderDiagnostics.warnings.join(' · ')}</strong>
                       </div>
                     ) : null}
-                  </div>
+                  </details>
                 ) : null}
                 <p className="page-description">
                   Shipping actions are currently unavailable.
