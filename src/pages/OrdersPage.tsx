@@ -80,8 +80,9 @@ function getTrackingHelper(order: OrderSummary | OrderDetail) {
 
 function getCustomerLabel(customer?: string | null) {
   const value = customer?.trim();
-  if (!value || value.toLowerCase().includes('customer details')) {
-    return 'Customer unavailable';
+  const normalized = value?.toLowerCase() ?? '';
+  if (!value || normalized.includes('customer details') || normalized.includes('customer unavailable')) {
+    return 'Customer hidden for vendor scope';
   }
   return value;
 }
@@ -411,11 +412,11 @@ export function OrdersPage() {
                       <small>{order.channel}</small>
                     </span>
                     <OperationalActionGroup>
-                      <button type="button" className="button button-secondary" onClick={() => setSelectedOrderId(order.id)}>
+                      <Link className="button button-secondary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
                         View
-                      </button>
+                      </Link>
                       <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
-                        Open
+                        Open detail
                       </Link>
                     </OperationalActionGroup>
                   </OperationalTableRow>
@@ -428,7 +429,7 @@ export function OrdersPage() {
           <SideDetailPanel
             eyebrow="Order detail"
             title={selectedOrder ? `Shopify ${formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber)}` : 'No order selected'}
-            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open</Link> : null}
+            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open canonical detail</Link> : null}
           >
           {selectedOrder ? (
             <>

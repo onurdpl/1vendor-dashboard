@@ -102,6 +102,7 @@ export function OperationalLinkCards({
                   {link.eyebrow ? <span>{link.eyebrow}</span> : null}
                   <strong>{link.title}</strong>
                   {link.description ? <small>{link.description}</small> : null}
+                  {link.href ? <small>{link.actionLabel ?? 'Open record'}</small> : null}
                 </div>
                 {link.status ? <StatusBadge tone={link.tone ?? 'neutral'}>{link.status}</StatusBadge> : null}
               </>

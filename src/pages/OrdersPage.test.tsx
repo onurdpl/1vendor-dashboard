@@ -145,6 +145,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
   });
 
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
@@ -174,6 +176,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect((await screen.findAllByText('#1038')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Customer hidden for vendor scope').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Try OTO / OTO-TRACK-1038').length).toBeGreaterThan(0);
     expect(screen.queryByText('try_oto / OTO-TRACK-1038')).not.toBeInTheDocument();
     expect(screen.getByText('2 line items')).toBeInTheDocument();

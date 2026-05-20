@@ -113,6 +113,15 @@ function renderDashboardPage() {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver;
+  });
+
+  return { promise, resolve };
+}
+
 function getNotificationCenter() {
   const headings = screen.getAllByRole('heading', { name: /notification center/i });
   const heading = headings[headings.length - 1];
@@ -181,6 +190,18 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
+  });
+
+  it('renders the dashboard shell and skeleton cards while overview data loads', () => {
+    const dashboardResult = deferred<DashboardOverview>();
+    getDashboardOverviewMock.mockReturnValue(dashboardResult.promise);
+
+    renderDashboardPage();
+
+    expect(screen.getByLabelText('Dashboard loading skeleton')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operational dashboard' })).toBeInTheDocument();
+    expect(screen.getByText('Loading priority signals')).toBeInTheDocument();
+    expect(screen.queryByText('Loading operational overview')).not.toBeInTheDocument();
   });
 
   it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {

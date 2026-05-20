@@ -133,6 +133,78 @@ function formatRecentActivity(item: string) {
   };
 }
 
+function DashboardLoadingSkeleton({
+  userName,
+  userRole,
+  vendorName,
+}: {
+  userName?: string | null;
+  userRole?: string | null;
+  vendorName?: string | null;
+}) {
+  const skeletonKpis = ['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate'];
+
+  return (
+    <section className="op-page dashboard-command-center dashboard-enterprise-shell" aria-label="Dashboard loading skeleton">
+      <header className="dashboard-enterprise-header">
+        <div className="dashboard-enterprise-title">
+          <h1>Operational dashboard</h1>
+          <p className="page-description">Preparing dashboard cards for the current vendor scope.</p>
+          <div className="dashboard-role-badges" aria-label="Workspace context">
+            <StatusBadge tone="info">User {userName ?? 'Unknown'}</StatusBadge>
+            <StatusBadge tone="attention">Role {userRole ?? 'Unknown'}</StatusBadge>
+            <StatusBadge tone="info">Vendor {vendorName ?? 'Unknown'}</StatusBadge>
+          </div>
+        </div>
+        <div className="dashboard-status-strip" aria-label="Dashboard status">
+          <StatusBadge tone="info">API preparing</StatusBadge>
+          <div className="dashboard-sync-card">
+            <span>Last sync</span>
+            <strong>—</strong>
+          </div>
+          <StatusBadge tone="attention">Refreshing</StatusBadge>
+        </div>
+      </header>
+
+      <div className="dashboard-enterprise-kpi-row" aria-label="Dashboard card skeletons">
+        {skeletonKpis.map((label) => (
+          <article key={label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(label)}`}>
+            <span>{label}</span>
+            <strong>—</strong>
+            <small>Loading</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="dashboard-enterprise-grid">
+        <div className="dashboard-enterprise-main">
+          <OperationalSection title="Operational priority queue" description="Cards load independently as data becomes available.">
+            <EmptyStatePanel title="Loading priority signals" description="The workspace is available while operational data refreshes." />
+          </OperationalSection>
+          <OperationalSection title="Recent operational events loading" description="Latest events will appear here.">
+            <EmptyStatePanel title="Loading activity" description="Event cards are preparing." />
+          </OperationalSection>
+        </div>
+        <aside className="dashboard-enterprise-aside">
+          <OperationalSection title="Needs attention" description="Attention items are loading.">
+            <EmptyStatePanel title="Loading attention items" description="No blocking dashboard fetch is required to render the workspace shell." />
+          </OperationalSection>
+          <OperationalSection title="Finance snapshot" description="Financial cards are loading.">
+            <div className="dashboard-status-metric-list dashboard-finance-rows">
+              {['Gross sales', 'Refunds', 'Net revenue', 'Payout estimate'].map((label) => (
+                <div className="dashboard-status-metric-row" key={label}>
+                  <span>{label}</span>
+                  <strong>—</strong>
+                </div>
+              ))}
+            </div>
+          </OperationalSection>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
 export function DashboardPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
@@ -277,11 +349,10 @@ export function DashboardPage() {
 
   if (!appReadiness.ready || isLoading) {
     return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Dashboard"
-        title="Loading operational overview"
-        description="Gathering backend-derived dashboard signals for the current vendor scope."
+      <DashboardLoadingSkeleton
+        userName={currentUser?.name}
+        userRole={currentUser?.role}
+        vendorName={currentVendor.vendorName}
       />
     );
   }

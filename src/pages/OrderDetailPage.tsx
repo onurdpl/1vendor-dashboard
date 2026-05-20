@@ -70,11 +70,43 @@ function buildFinanceHref(record: { id: string }) {
 function getCompactCustomerLabel(value?: string) {
   const normalized = value?.trim();
 
-  if (!normalized || normalized.toLowerCase().includes('outside the current') || normalized.toLowerCase().includes('available in order')) {
-    return 'Customer unavailable';
+  if (
+    !normalized ||
+    normalized.toLowerCase().includes('outside the current') ||
+    normalized.toLowerCase().includes('available in order') ||
+    normalized.toLowerCase().includes('customer unavailable')
+  ) {
+    return 'Customer hidden for vendor scope';
   }
 
   return normalized;
+}
+
+function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
+  const grouped: OperationalEventInput[] = [];
+  const seenGroupedEvents = new Set<string>();
+
+  events.forEach((event) => {
+    const normalizedTitle = event.title.toLowerCase();
+    const isNoisyShipmentEvent =
+      normalizedTitle.includes('webhook') ||
+      normalizedTitle.includes('tracking') ||
+      normalizedTitle.includes('shipment') ||
+      normalizedTitle.includes('status');
+    const eventDay = event.at ? new Date(event.at).toISOString().slice(0, 10) : 'unknown';
+    const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay].join('|');
+
+    if (isNoisyShipmentEvent && seenGroupedEvents.has(eventKey)) {
+      return;
+    }
+
+    if (isNoisyShipmentEvent) {
+      seenGroupedEvents.add(eventKey);
+    }
+    grouped.push(event);
+  });
+
+  return grouped;
 }
 
 function getStatusClass(value: string) {
@@ -1935,6 +1967,25 @@ export function OrderDetailPage() {
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
+  const financePreview = order.financeLedgerPreview;
+  const financeSummaryUnknowns = financePreview?.unknowns ?? [];
+  const estimatedVendorPayable =
+    isAdmin && financePreview
+      ? formatCurrency(financePreview.balance.vendorPayable, financePreview.currency)
+      : 'Unknown';
+  const estimatedMarketplaceCommission =
+    isAdmin && financePreview
+      ? formatCurrency(financePreview.balance.marketplaceCommission, financePreview.currency)
+      : 'Unknown';
+  const refundImpact =
+    isAdmin && financePreview
+      ? financePreview.balance.vendorDebt !== '0.00'
+        ? `Debt ${formatCurrency(financePreview.balance.vendorDebt, financePreview.currency)}`
+        : financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0
+          ? 'Reflected in preview'
+          : 'No return/refund impact'
+      : 'Unknown';
+  const shippingCostStatus = isAdmin && financePreview ? financePreview.sourceFields.shippingCost : 'Unknown';
   const summaryCards = [
     {
       label: 'Allocation status',
@@ -2055,6 +2106,7 @@ export function OrderDetailPage() {
       eyebrow: 'Return',
       title: `Return for ${formatShopifyOrderNumber(returnRecord.sourceShopifyOrderNumber)}`,
       description: returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item',
+      actionLabel: 'Open return detail',
       href: `/returns/${returnRecord.id}`,
       status: returnRecord.status,
       tone: returnRecord.status === 'Refunded' || returnRecord.status === 'Closed' ? ('success' as const) : ('attention' as const),
@@ -2064,6 +2116,7 @@ export function OrderDetailPage() {
       eyebrow: 'Finance',
       title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
       description: `${record.amount} · ${record.status}`,
+      actionLabel: 'Open finance detail',
       href: buildFinanceHref(record),
       status: record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
@@ -2073,6 +2126,7 @@ export function OrderDetailPage() {
       eyebrow: 'Support',
       title: ticket.subject,
       description: ticket.vendorName ?? ticket.vendorId,
+      actionLabel: 'Open support ticket',
       href: `${supportBasePath}/${ticket.id}`,
       status: ticket.status.replace(/_/g, ' '),
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
@@ -2401,6 +2455,7 @@ export function OrderDetailPage() {
           <article className="order-detail-card-v2">
             <div className="order-card-heading">
               <h2>Financial summary</h2>
+              <p>Read-only operational estimate. Unknown values stay explicit.</p>
             </div>
             <div className="order-financial-impact-grid">
               <div>
@@ -2408,12 +2463,24 @@ export function OrderDetailPage() {
                 <strong>{order.amount}</strong>
               </div>
               <div>
-                <span>Vendor payout impact</span>
-                <strong>Included in payout calculations</strong>
+                <span>Estimated vendor payable</span>
+                <strong>{estimatedVendorPayable}</strong>
               </div>
               <div>
-                <span>Refund status</span>
-                <strong>—</strong>
+                <span>Estimated marketplace commission</span>
+                <strong>{estimatedMarketplaceCommission}</strong>
+              </div>
+              <div>
+                <span>Refund impact</span>
+                <strong>{refundImpact}</strong>
+              </div>
+              <div>
+                <span>Shipping cost status</span>
+                <strong>{shippingCostStatus}</strong>
+              </div>
+              <div>
+                <span>Unknown values</span>
+                <strong>{financeSummaryUnknowns.length ? financeSummaryUnknowns.join(', ') : 'None reported'}</strong>
               </div>
             </div>
           </article>
@@ -2535,8 +2602,8 @@ export function OrderDetailPage() {
 
           <OperationalTimeline
             title="Unified activity"
-            subtitle="Order, return, finance, and support events."
-            events={[
+            subtitle="Grouped order, shipment, return, finance, and support events. Filters planned: operations, returns, finance, support."
+            events={groupOrderDetailTimelineEvents([
               ...order.timeline.map((entry) => ({
                 id: `order-native-${entry.label}-${entry.at}`,
                 title: getVendorTimelineLabel(entry.label),
@@ -2544,7 +2611,7 @@ export function OrderDetailPage() {
                 tone: 'neutral' as const,
               })),
               ...orderTimelineEvents,
-            ]}
+            ])}
             audience={audience}
             emptyMessage="No records available."
           />

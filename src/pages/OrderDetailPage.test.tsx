@@ -622,6 +622,34 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
 
+  it('uses vendor-safe customer wording and groups repeated operational timeline events', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      customer: 'Customer unavailable',
+      timeline: [
+        { label: 'Carrier webhook received', at: '2026-05-15T19:40:00.000Z' },
+        { label: 'Carrier webhook received', at: '2026-05-15T19:41:00.000Z' },
+      ],
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Customer hidden for vendor scope')).toBeInTheDocument();
+    const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getAllByText('Carrier Webhook Received')).toHaveLength(1);
+    expect(within(timeline as HTMLElement).getByText(/Filters planned: operations, returns, finance, support/)).toBeInTheDocument();
+  });
+
   it('lets vendors open shipment support tickets with safe operational context', async () => {
     const user = userEvent.setup();
     setCurrentUser({
@@ -794,7 +822,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
     expect(screen.getByText('Read-only simulation. Not payout, refund, invoice, or tax truth.')).toBeInTheDocument();
-    expect(screen.getByText('shipping_cost')).toBeInTheDocument();
+    expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
     expect(screen.getByText(/Marketplace commission reserved/i)).toBeInTheDocument();
 
     cleanup();

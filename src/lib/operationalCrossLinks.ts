@@ -20,6 +20,7 @@ export type OperationalLinkInput = {
   eyebrow?: string;
   title: string;
   description?: string;
+  actionLabel?: string;
   href?: string;
   status?: string;
   tone?: 'neutral' | 'info' | 'success' | 'warning' | 'danger' | 'attention';
