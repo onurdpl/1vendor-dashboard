@@ -4714,8 +4714,12 @@ h3 {
 
 .order-linked-records-panel {
   grid-column: 1;
-  grid-row: 5;
+  grid-row: 4;
   order: 5;
+}
+
+.order-finance-ledger-card + .order-linked-records-panel {
+  grid-row: 5;
 }
 
 .order-linked-records-panel > .operational-links-card {
