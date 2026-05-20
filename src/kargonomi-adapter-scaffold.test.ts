@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 import { createShippingProviderAdapter } from '../backend/src/modules/shipping/shipping-provider.adapter.js';
 import {
@@ -595,6 +595,110 @@ describe('Kargonomi forward adapter scaffold', () => {
       ok: false,
       reason: 'city_unresolved',
     });
+  });
+
+  it('reports state lookup transport failures and retries after a transient failure', async () => {
+    clearKargonomiLocationLookupCache();
+    const client = {
+      listStates: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          contentType: 'application/json',
+          body: { data: [{ id: 34, name: 'İstanbul' }] },
+        }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 829, name: 'Kartal' }] },
+      }),
+    };
+
+    const first = await resolveKargonomiDestinationAddress(
+      {
+        city: 'İstanbul',
+        district: 'Kartal',
+      },
+      client,
+    );
+
+    expect(first).toMatchObject({
+      ok: false,
+      reason: 'state_lookup_failed',
+    });
+    expect(first.ok === false ? first.message : '').toContain(
+      'Kargonomi states lookup failed before shipment creation: fetch failed.',
+    );
+
+    await expect(
+      resolveKargonomiDestinationAddress(
+        {
+          city: 'İstanbul',
+          district: 'Kartal',
+        },
+        client,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      buyerStateId: '34',
+      buyerCityId: '829',
+    });
+    expect(client.listStates).toHaveBeenCalledTimes(2);
+  });
+
+  it('reports city lookup transport failures and retries after a transient failure', async () => {
+    clearKargonomiLocationLookupCache();
+    const client = {
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: vi
+        .fn()
+        .mockRejectedValueOnce(new Error('fetch failed'))
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          contentType: 'application/json',
+          body: { data: [{ id: 829, name: 'Kartal' }] },
+        }),
+    };
+
+    const first = await resolveKargonomiDestinationAddress(
+      {
+        city: 'İstanbul',
+        district: 'Kartal',
+      },
+      client,
+    );
+
+    expect(first).toMatchObject({
+      ok: false,
+      reason: 'city_lookup_failed',
+    });
+    expect(first.ok === false ? first.message : '').toContain(
+      'Kargonomi cities lookup failed before shipment creation for resolved state 34: fetch failed.',
+    );
+
+    await expect(
+      resolveKargonomiDestinationAddress(
+        {
+          city: 'İstanbul',
+          district: 'Kartal',
+        },
+        client,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      buyerStateId: '34',
+      buyerCityId: '829',
+    });
+    expect(client.listCities).toHaveBeenCalledTimes(2);
   });
 
   it('keeps barcode response as unknown raw provider body', async () => {

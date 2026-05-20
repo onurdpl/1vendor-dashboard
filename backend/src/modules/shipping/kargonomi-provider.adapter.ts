@@ -221,12 +221,18 @@ async function cachedKargonomiStates(
   const key = countryId === undefined || countryId === null || countryId === '' ? 'default' : String(countryId);
   let pending = stateLookupCache.get(key);
   if (!pending) {
-    pending = client.listStates(countryId ?? undefined).then((response) => {
-      if (!response.ok) {
-        throw new Error(`Kargonomi states lookup failed with HTTP ${response.status}.`);
-      }
-      return extractLocationItems(response.body, 'state');
-    });
+    pending = client
+      .listStates(countryId ?? undefined)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Kargonomi states lookup failed with HTTP ${response.status}.`);
+        }
+        return extractLocationItems(response.body, 'state');
+      })
+      .catch((error) => {
+        stateLookupCache.delete(key);
+        throw error;
+      });
     stateLookupCache.set(key, pending);
   }
   return pending;
@@ -236,12 +242,18 @@ async function cachedKargonomiCities(client: KargonomiDestinationLookupClient, s
   const key = String(stateId);
   let pending = cityLookupCache.get(key);
   if (!pending) {
-    pending = client.listCities(stateId).then((response) => {
-      if (!response.ok) {
-        throw new Error(`Kargonomi cities lookup failed with HTTP ${response.status}.`);
-      }
-      return extractLocationItems(response.body, 'city');
-    });
+    pending = client
+      .listCities(stateId)
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error(`Kargonomi cities lookup failed with HTTP ${response.status}.`);
+        }
+        return extractLocationItems(response.body, 'city');
+      })
+      .catch((error) => {
+        cityLookupCache.delete(key);
+        throw error;
+      });
     cityLookupCache.set(key, pending);
   }
   return pending;
@@ -292,7 +304,9 @@ export async function resolveKargonomiDestinationAddress(
     return {
       ok: false,
       reason: 'state_lookup_failed',
-      message: error instanceof Error ? error.message : 'Kargonomi states lookup failed.',
+      message: error instanceof Error
+        ? `Kargonomi states lookup failed before shipment creation: ${error.message}. Check KARGONOMI_BASE_URL, KARGONOMI_API_TOKEN, Render/network access, and Kargonomi availability.`
+        : 'Kargonomi states lookup failed before shipment creation. Check KARGONOMI_BASE_URL, KARGONOMI_API_TOKEN, Render/network access, and Kargonomi availability.',
     };
   }
 
@@ -319,7 +333,9 @@ export async function resolveKargonomiDestinationAddress(
     return {
       ok: false,
       reason: 'city_lookup_failed',
-      message: error instanceof Error ? error.message : 'Kargonomi cities lookup failed.',
+      message: error instanceof Error
+        ? `Kargonomi cities lookup failed before shipment creation for resolved state ${stateMatch.item.id}: ${error.message}. Check KARGONOMI_BASE_URL, KARGONOMI_API_TOKEN, Render/network access, and Kargonomi availability.`
+        : `Kargonomi cities lookup failed before shipment creation for resolved state ${stateMatch.item.id}. Check KARGONOMI_BASE_URL, KARGONOMI_API_TOKEN, Render/network access, and Kargonomi availability.`,
     };
   }
 
