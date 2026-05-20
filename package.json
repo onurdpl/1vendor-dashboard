@@ -22,6 +22,7 @@
     "backend:db:studio": "npm --prefix backend run db:studio",
     "backend:db:seed": "npm --prefix backend run db:seed",
     "shopify:readiness": "npm --prefix backend run shopify:readiness",
+    "shopify:order-webhooks:register": "npm --prefix backend run shopify:order-webhooks:register",
     "shopify:return-webhooks:register": "npm --prefix backend run shopify:return-webhooks:register",
     "shopify:fulfillment-webhooks:register": "npm --prefix backend run shopify:fulfillment-webhooks:register",
     "backend:kargonomi:probe": "npm --prefix backend run kargonomi:probe",

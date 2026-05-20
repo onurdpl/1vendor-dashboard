@@ -13,6 +13,7 @@ Set these in `backend/.env` or the runtime environment before live rollout:
 - `SHOPIFY_WEBHOOK_SECRET`
 - `SHOPIFY_API_VERSION`
 - `SHOPIFY_RETURN_WEBHOOK_BASE_URL` (required only when registering return lifecycle webhooks)
+- `SHOPIFY_ORDER_WEBHOOK_BASE_URL` (required only when registering order-create webhooks)
 
 Optional:
 
@@ -21,6 +22,9 @@ Optional:
   - remains off by default so local and CI checks do not call live Shopify
 - `SHOPIFY_REGISTER_RETURN_WEBHOOKS=true`
   - opt-in flag required to register return lifecycle webhooks
+  - script exits safely without mutating Shopify when this flag is not set to `true`
+- `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
+  - opt-in flag required to register `ORDERS_CREATE`
   - script exits safely without mutating Shopify when this flag is not set to `true`
 
 ## Readiness Check
@@ -42,6 +46,25 @@ Behavior:
 - checks that the shop domain looks like a valid `*.myshopify.com` domain
 - never prints secret values
 - only runs a live Shopify Admin API check when `SHOPIFY_READINESS_LIVE_CHECK=true`
+
+## Order Create Webhook Registration (Opt-In)
+Order ingestion depends on Shopify `ORDERS_CREATE` delivery to the backend. Register it through the same idempotent GraphQL helper used for other webhook groups.
+
+Registration command from repository root:
+
+```bash
+npm run shopify:order-webhooks:register
+```
+
+Required env for registration:
+- `SHOPIFY_REGISTER_ORDER_WEBHOOKS=true`
+- `SHOPIFY_SHOP_DOMAIN`
+- `SHOPIFY_ADMIN_ACCESS_TOKEN`
+- `SHOPIFY_API_VERSION`
+- `SHOPIFY_ORDER_WEBHOOK_BASE_URL`
+
+Registered topic and callback:
+- `ORDERS_CREATE` -> `${SHOPIFY_ORDER_WEBHOOK_BASE_URL}/webhooks/shopify/orders-create`
 
 ## Starting the Backend for Tunnel Testing
 Use the normal backend start flow:
@@ -118,7 +141,7 @@ https://<public-domain>/webhooks/shopify/orders-create
    - `https://<public-domain>/webhooks/shopify/returns-decline`
    - `https://<public-domain>/webhooks/shopify/returns-close`
 7. Confirm the configured Shopify webhook secret matches backend configuration.
-8. Register or update the live webhook manually (or run the return-webhook registration script with explicit opt-in flag).
+8. Register or update the live webhooks manually, or run the order/return/fulfillment registration scripts with explicit opt-in flags.
 9. Observe webhook verification, ingestion, and diagnostics endpoints during the first live deliveries.
 
 ## Guardrails

@@ -124,3 +124,41 @@ https://vendor-dashboard-backend-398h.onrender.com/webhooks/shopify/orders-creat
 - Whether Shopify attempted any `ORDERS_CREATE` delivery before the subscription disappeared is unknown.
 - Whether production has a failed `WebhookEvent` row for order `#1048` is unknown until the production database is queried from a reachable environment.
 - Why the `ORDERS_CREATE` subscription is absent is unknown. Existing scripts currently register return and fulfillment webhooks, but I did not find an equivalent order-create registration script.
+
+## Shopify Order-Create Registration Restoration
+
+### Previous Intended Ingestion Path
+
+Order ingestion is intended to start from Shopify `ORDERS_CREATE` delivery to:
+
+```text
+/webhooks/shopify/orders-create
+```
+
+The backend route verifies HMAC, applies webhook idempotency, fetches `custom.seller_info`, and then persists `ShopifyOrder`, `ShopifyOrderLineItem`, `VendorAllocation`, and sale ledger records. This is the same path documented in `docs/BACKEND_ARCHITECTURE.md`, `docs/API_CONTRACTS.md`, and production smoke docs.
+
+### What Stopped Working
+
+The Shopify shop had active return and fulfillment subscriptions, but no active `ORDERS_CREATE` subscription. Existing registration tooling covered return and fulfillment webhooks, but there was no equivalent order-create registration script, leaving the required order-create subscription dependent on manual setup.
+
+### Minimal Fix
+
+Added an opt-in, idempotent registration script using the existing Shopify webhook registration helper:
+
+```bash
+SHOPIFY_REGISTER_ORDER_WEBHOOKS=true \
+SHOPIFY_ORDER_WEBHOOK_BASE_URL=https://vendor-dashboard-backend-398h.onrender.com \
+npm run shopify:order-webhooks:register
+```
+
+The script registers only:
+
+```text
+ORDERS_CREATE -> /webhooks/shopify/orders-create
+```
+
+It does not touch returns, fulfillments, refunds, ingestion logic, Kargonomi, or shipment execution.
+
+### #1048 Backfill
+
+Registering `ORDERS_CREATE` restores future order ingestion only. Shopify will not retroactively send `#1048`; that order still needs manual backfill/replay from Shopify canonical order data or an intentionally crafted/replayed verified webhook path.
