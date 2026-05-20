@@ -21,7 +21,8 @@
     "shopify:order-webhooks:register": "node scripts/shopify-register-order-webhooks.mjs",
     "shopify:return-webhooks:register": "node scripts/shopify-register-return-webhooks.mjs",
     "shopify:fulfillment-webhooks:register": "node scripts/shopify-register-fulfillment-webhooks.mjs",
-    "kargonomi:probe": "npm run build && node scripts/kargonomi-forward-probe.mjs"
+    "kargonomi:probe": "npm run build && node scripts/kargonomi-forward-probe.mjs",
+    "kargonomi:lookup-probe": "npm run build && node scripts/kargonomi-location-lookup-probe.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
