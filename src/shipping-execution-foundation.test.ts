@@ -625,6 +625,114 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('passes shipment-only district override from the create route into Kargonomi resolution', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress1: 'Test Mah. Test Sok. No:1',
+          shippingCity: 'İstanbul',
+        },
+      }),
+    );
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const body = typeof init?.body === 'string' && init.body.startsWith('{') ? JSON.parse(init.body) : init?.body;
+      calls.push({ url: String(url), body });
+      const responseBody = String(url).includes('/states')
+        ? { data: [{ id: 34, name: 'İstanbul' }] }
+        : String(url).includes('/cities/34')
+          ? { data: [{ id: 829, name: 'Kartal' }] }
+          : String(url).endsWith('/shipments')
+            ? { shipment: { id: 123, status: 'draft' } }
+            : String(url).includes('/shipment-price-comparison/')
+              ? { shipping_provider_with_price: [{ id: '-1', name: 'Otomatik', slug: 'otomatik', price: null }] }
+              : String(url).includes('/confirm-shipping-price')
+                ? { ok: true }
+                : String(url).includes('/barcode')
+                  ? { barcode_pdf_base64: 'JVBERi0xLjQ=' }
+                  : {
+                      shipment: {
+                        id: 123,
+                        status: 'webservice_order_created',
+                        shipping_provider_name: 'Yurtiçi Kargo',
+                      },
+                    };
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchMock as typeof fetch;
+    const posts = new Map<string, (request: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (request: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    try {
+      registerShippingExecutionRoutes(app as never, {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'test-token',
+      });
+      await posts.get('/shipments/create')?.(
+        {
+          body: {
+            allocationId: 'alloc-1',
+            provider: 'kargonomi',
+            customerOverrides: {
+              district: 'Kartal',
+            },
+          },
+          vendorContext: { vendorId: 'sporjinal' },
+          headers: {},
+          protocol: 'https',
+          hostname: 'example.test',
+        },
+        reply,
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    expect(fetchMock).toHaveBeenCalled();
+    expect(calls.some((call) => call.url.endsWith('/cities/34'))).toBe(true);
+    const createCall = calls.find((call) => call.url.endsWith('/shipments'));
+    expect(createCall?.body).toMatchObject({
+      shipment: expect.objectContaining({
+        buyer_state_id: '34',
+        buyer_city_id: '829',
+      }),
+    });
+  });
+
   it('blocks Kargonomi before provider call when district override cannot be matched', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',

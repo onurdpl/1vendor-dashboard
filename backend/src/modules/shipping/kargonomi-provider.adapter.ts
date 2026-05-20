@@ -332,10 +332,16 @@ export async function resolveKargonomiDestinationAddress(
     };
   }
   if (cityMatch.status === 'unresolved' || !cityMatch.item) {
+    const examples = cities
+      .slice(0, 8)
+      .map((city) => city.name)
+      .join(', ');
     return {
       ok: false,
       reason: 'city_unresolved',
-      message: `Kargonomi destination district could not be matched: ${districtText}`,
+      message: examples
+        ? `Kargonomi destination district could not be matched: ${districtText}. Available districts for selected state include: ${examples}.`
+        : `Kargonomi destination district could not be matched: ${districtText}.`,
     };
   }
 

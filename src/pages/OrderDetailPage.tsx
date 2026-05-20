@@ -1212,21 +1212,28 @@ export function OrderDetailPage() {
     }
   }, [orderId]);
 
-  function buildShipmentCustomerOverrides(fields: ShipmentCustomerField[]) {
+  function buildShipmentCustomerOverrides(fields: ShipmentCustomerField[], form?: HTMLFormElement | null) {
+    const formData = form ? new FormData(form) : null;
     const overrides = Object.fromEntries(
       fields
-        .map((field) => [field, shipmentCustomerOverrides[field]?.trim() ?? ''] as const)
+        .map((field) => {
+          const formValue = formData?.get(field);
+          return [
+            field,
+            (typeof formValue === 'string' ? formValue : shipmentCustomerOverrides[field] ?? '').trim(),
+          ] as const;
+        })
         .filter(([, value]) => Boolean(value)),
     ) as ShipmentCustomerOverrides;
     return Object.keys(overrides).length > 0 ? overrides : undefined;
   }
 
-  function handleCreateShipment(fields: ShipmentCustomerField[] = []) {
+  function handleCreateShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
     if (!order) {
       return;
     }
 
-    const customerOverrides = buildShipmentCustomerOverrides(fields);
+    const customerOverrides = completedOverrides ?? buildShipmentCustomerOverrides(fields);
     setShipmentActionState({
       tone: 'info',
       message: 'Creating shipment with the configured provider...',
@@ -1266,12 +1273,12 @@ export function OrderDetailPage() {
       });
   }
 
-  function handleRetryFailedShipment(fields: ShipmentCustomerField[] = []) {
+  function handleRetryFailedShipment(fields: ShipmentCustomerField[] = [], completedOverrides?: ShipmentCustomerOverrides) {
     if (!visibleShipmentExecution) {
       return;
     }
 
-    const customerOverrides = buildShipmentCustomerOverrides(fields);
+    const customerOverrides = completedOverrides ?? buildShipmentCustomerOverrides(fields);
     setShipmentActionState({
       tone: 'info',
       message: 'Retrying shipment provider request...',
@@ -1664,10 +1671,11 @@ export function OrderDetailPage() {
         className="shipment-field-completion-form"
         onSubmit={(event) => {
           event.preventDefault();
+          const completedOverrides = buildShipmentCustomerOverrides(missingShipmentCustomerFields, event.currentTarget);
           if (canRecoverFailedShipment) {
-            handleRetryFailedShipment(missingShipmentCustomerFields);
+            handleRetryFailedShipment(missingShipmentCustomerFields, completedOverrides);
           } else {
-            handleCreateShipment(missingShipmentCustomerFields);
+            handleCreateShipment(missingShipmentCustomerFields, completedOverrides);
           }
         }}
       >
@@ -1680,6 +1688,7 @@ export function OrderDetailPage() {
             <label className="field" key={field}>
               <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]} *</span>
               <input
+                name={field}
                 required
                 value={shipmentCustomerOverrides[field] ?? ''}
                 onChange={(event) =>
