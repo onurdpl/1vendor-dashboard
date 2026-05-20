@@ -25,6 +25,11 @@ Migration rules:
 
 ## Operational Information Hierarchy
 
+The routed detail page is intentionally dense. It should feel like a working operations
+dashboard, closer to Stripe/GitHub/Linear operational surfaces than a spacious marketing
+SaaS page. Density is a feature here because operators need to scan shipment, return,
+finance, support, and Shopify state together without hunting through oversized cards.
+
 The routed detail page should prioritize information in this order:
 
 1. Core order, allocation, shipment, and tracking state.
@@ -39,12 +44,31 @@ show diagnostics, but they should be grouped and collapsible where practical.
 Vendor-first order detail hierarchy:
 
 1. Current order health.
-2. Next action.
-3. Shipment and return tracking.
+2. Shipment and return operations.
+3. Next action.
 4. Read-only finance preview.
 5. Linked operational records.
 6. Clean timeline.
 7. Diagnostics only when the user has admin context.
+
+## Dense Operational Dashboard Philosophy
+
+The canonical order detail layout should preserve high information density while improving
+hierarchy. Incremental polish should tighten alignment, typography, grouping, and scanability
+instead of replacing the page with a broad split-workspace or low-density card layout.
+
+Design rules:
+
+- Keep operational sections close together so order, shipment, return, finance, and support
+  state can be read in one pass.
+- Prefer compact strips, grouped rows, and ledger-style summaries over oversized isolated cards.
+- Keep unknown values inline and explicit, but avoid turning every unknown into a large visual
+  tile.
+- Put shipment and return operations near the top of the operator flow.
+- Make linked records visibly clickable without making them visually louder than the active
+  order state.
+- Preserve responsive stacking on mobile, but keep row density and avoid oversized vertical
+  gaps.
 
 ## Admin Diagnostics Philosophy
 

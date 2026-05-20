@@ -2427,7 +2427,7 @@ export function OrderDetailPage() {
   ) : null;
 
   return (
-    <section className="order-detail-workspace order-detail-cockpit" data-active-workspace-tab={activeWorkspaceTab}>
+    <section className="order-detail-workspace order-detail-cockpit order-detail-dense" data-active-workspace-tab={activeWorkspaceTab}>
       <header className="order-detail-topbar">
         <Link className="order-detail-back" to="/orders">
           Back to orders
@@ -2448,6 +2448,10 @@ export function OrderDetailPage() {
               <div>
                 <span>Vendor</span>
                 <strong>{order.assignedVendorId || 'Unknown'}</strong>
+              </div>
+              <div>
+                <span>Customer</span>
+                <strong>{customerLabel}</strong>
               </div>
             </div>
           </div>

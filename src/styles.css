@@ -4304,10 +4304,10 @@ h3 {
 
 .order-detail-workspace {
   display: grid;
-  gap: 12px;
-  width: min(100%, 1480px);
+  gap: 10px;
+  width: min(100%, 1340px);
   margin: 0 auto;
-  padding: 14px 22px 24px;
+  padding: 12px 18px 22px;
   color: #0f172a;
 }
 
@@ -4325,10 +4325,10 @@ h3 {
   z-index: 12;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px 14px;
+  gap: 8px 12px;
   align-items: center;
-  padding: 12px 14px;
-  border-radius: 18px;
+  padding: 10px 12px;
+  border-radius: 14px;
 }
 
 .order-detail-back {
@@ -4356,14 +4356,14 @@ h3 {
 .order-detail-heading-line {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 7px;
   flex-wrap: wrap;
 }
 
 .order-detail-heading-line h1 {
   margin: 0;
   color: #0f172a;
-  font-size: 1.36rem;
+  font-size: 1.22rem;
   line-height: 1.08;
   letter-spacing: 0;
 }
@@ -4406,8 +4406,8 @@ h3 {
 .order-detail-meta-strip div {
   display: grid;
   grid-template-columns: auto;
-  gap: 3px;
-  min-width: 116px;
+  gap: 2px;
+  min-width: 104px;
 }
 
 .order-detail-meta-strip span,
@@ -4451,22 +4451,22 @@ h3 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 9px 11px;
+  gap: 10px;
+  padding: 7px 9px;
   border: 1px solid #dbeafe;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #eff6ff;
 }
 
 .order-health-banner strong {
   color: #0f172a;
-  font-size: 0.9rem;
+  font-size: 0.84rem;
   font-weight: 900;
 }
 
 .order-health-banner span {
   color: #475569;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1.35;
 }
@@ -4485,16 +4485,16 @@ h3 {
 .order-status-summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
 }
 
 .order-status-summary-card {
-  min-height: 76px;
+  min-height: 62px;
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 11px;
-  border-radius: 14px;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 11px;
   box-shadow: none;
 }
 
@@ -4506,20 +4506,20 @@ h3 {
 
 .order-status-summary-card span:not(.order-status-icon) {
   color: #475569;
-  font-size: 0.84rem;
+  font-size: 0.74rem;
   font-weight: 800;
 }
 
 .order-status-summary-card strong {
   color: #0f172a;
-  font-size: 0.94rem;
+  font-size: 0.84rem;
   line-height: 1.15;
 }
 
 .order-status-summary-card p {
   margin: 0;
   color: #64748b;
-  font-size: 0.73rem;
+  font-size: 0.69rem;
   line-height: 1.3;
 }
 
@@ -4527,10 +4527,10 @@ h3 {
   display: inline-grid;
   place-items: center;
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
-  border-radius: 10px;
-  font-size: 0.72rem;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  font-size: 0.68rem;
   font-weight: 900;
 }
 
@@ -4562,21 +4562,23 @@ h3 {
 .order-workspace-tabs {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 6px;
-  padding: 5px;
+  gap: 4px;
+  padding: 4px;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: 11px;
   background: #f8fafc;
 }
 
 .order-workspace-tabs button {
   display: grid;
-  gap: 2px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  align-items: baseline;
   min-width: 0;
-  min-height: 44px;
-  padding: 7px 9px;
+  min-height: 30px;
+  padding: 5px 7px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: transparent;
   color: #475569;
   cursor: pointer;
@@ -4592,13 +4594,13 @@ h3 {
 }
 
 .order-workspace-tabs span {
-  font-size: 0.82rem;
+  font-size: 0.76rem;
   font-weight: 900;
 }
 
 .order-workspace-tabs small {
   color: #64748b;
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   font-weight: 700;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4607,33 +4609,33 @@ h3 {
 
 .order-detail-main-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 340px);
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 380px);
+  gap: 10px;
   align-items: start;
 }
 
 .order-detail-left-column,
 .order-detail-right-column {
   display: grid;
-  gap: 12px;
+  gap: 10px;
   min-width: 0;
 }
 
 .order-detail-left-column {
-  grid-template-columns: minmax(290px, 0.78fr) minmax(0, 1.22fr);
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
 .order-context-panel {
-  grid-column: 1;
+  grid-column: auto;
 }
 
 .order-workspace-panel {
-  grid-column: 2;
+  grid-column: auto;
 }
 
 .order-line-items-card {
-  grid-row: span 2;
+  grid-row: auto;
 }
 
 .order-linked-records-panel > .operational-links-card {
@@ -4642,21 +4644,21 @@ h3 {
 
 .order-detail-right-column {
   position: sticky;
-  top: 92px;
+  top: 84px;
   align-self: start;
 }
 
 .order-detail-card-v2 {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 16px;
+  gap: 8px;
+  padding: 10px;
+  border-radius: 12px;
 }
 
 .order-card-heading {
   display: flex;
   justify-content: space-between;
-  gap: 10px;
+  gap: 8px;
   align-items: flex-start;
 }
 
@@ -4665,16 +4667,16 @@ h3 {
 .order-reconciliation-card h2 {
   margin: 0;
   color: #0f172a;
-  font-size: 0.94rem;
+  font-size: 0.88rem;
   line-height: 1.2;
 }
 
 .order-card-heading p,
 .order-admin-tools-card p,
 .order-reconciliation-card p {
-  margin: 4px 0 0;
+  margin: 2px 0 0;
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: 0.73rem;
   line-height: 1.4;
 }
 
@@ -4685,21 +4687,21 @@ h3 {
 
 .order-line-item-row-v2 {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(160px, 1.3fr) minmax(98px, 0.7fr) 42px minmax(80px, 0.62fr) minmax(80px, 0.62fr);
   gap: 8px;
   align-items: center;
-  padding: 8px;
+  padding: 7px 8px;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #ffffff;
 }
 
 .order-item-thumb {
   display: inline-grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: 10px;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
   background: linear-gradient(135deg, #eef2ff, #f8fafc);
   color: #2563eb;
   font-size: 0.75rem;
@@ -4713,34 +4715,33 @@ h3 {
 }
 
 .order-line-item-row-v2 > div:not(.order-item-primary) {
-  grid-column: 2;
+  grid-column: auto;
   display: grid;
-  grid-template-columns: minmax(78px, 0.74fr) minmax(0, 1fr);
-  gap: 6px;
-  align-items: center;
+  grid-template-columns: auto;
+  gap: 2px;
+  align-items: start;
 }
 
 .order-line-item-row-v2 > div:not(.order-item-primary) strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .order-financial-impact-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .order-financial-impact-grid div,
 .order-secondary-detail-grid div,
 .order-shipping-state-grid div {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 9px;
+  padding: 7px 8px;
   border: 1px solid #e2e8f0;
-  border-radius: 11px;
+  border-radius: 9px;
   background: #f8fafc;
 }
 
@@ -4752,26 +4753,27 @@ h3 {
 
 .order-secondary-detail-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
 }
 
 .order-primary-action-card {
+  order: -20;
   border-color: #bfdbfe;
-  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  background: #ffffff;
 }
 
 .order-primary-action-card .action-row,
 .order-primary-action-card .vendor-action-panel,
 .order-primary-action-card .vendor-blocked-panel {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
 
 .order-tracking-summary-card {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   padding: 0;
   border: 0;
   background: transparent;
@@ -4779,19 +4781,19 @@ h3 {
 
 .order-tracking-summary-card .summary-row {
   min-height: auto;
-  padding: 9px;
+  padding: 7px 8px;
   border: 1px solid #e2e8f0;
-  border-radius: 11px;
+  border-radius: 9px;
   background: #f8fafc;
 }
 
 .provider-response-summary {
   grid-column: 1 / -1;
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 9px;
   border: 1px solid #fecaca;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #fff7f7;
 }
 
@@ -4839,10 +4841,10 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .shipping-provider-diagnostics {
   display: grid;
-  gap: 8px;
-  padding: 12px;
+  gap: 6px;
+  padding: 9px;
   border: 1px solid #bfdbfe;
-  border-radius: 14px;
+  border-radius: 10px;
   background: #eff6ff;
 }
 

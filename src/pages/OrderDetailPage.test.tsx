@@ -643,7 +643,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Customer hidden for vendor scope')).toBeInTheDocument();
+    expect((await screen.findAllByText('Customer hidden for vendor scope')).length).toBeGreaterThan(0);
     const timeline = screen.getByRole('heading', { name: 'Unified activity' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
@@ -651,7 +651,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).getByText(/Filters planned: operations, returns, finance, support/)).toBeInTheDocument();
   });
 
-  it('renders the split workspace cockpit navigation without exposing vendor diagnostics', async () => {
+  it('renders the dense operational workspace navigation without exposing vendor diagnostics', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
