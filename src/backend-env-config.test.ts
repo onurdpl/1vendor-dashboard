@@ -122,4 +122,30 @@ describe('backend env shipping provider gates', () => {
     expect(env.TRY_OTO_SANDBOX_MODE).toBe(true);
     expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(true);
   });
+
+  it('parses dormant Kargonomi env values without making it a selectable shipping provider', () => {
+    resetEnv({
+      SHIPPING_PROVIDER: 'hepsijet',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
+      KARGONOMI_APP_KEY: 'configured-app-key',
+    });
+
+    const env = loadEnv();
+
+    expect(env.SHIPPING_PROVIDER).toBe('hepsijet');
+    expect(env.KARGONOMI_BASE_URL).toBe('https://app.kargonomi.com.tr/api/v1');
+    expect(env.KARGONOMI_API_TOKEN).toBe('configured-token');
+    expect(env.KARGONOMI_APP_KEY).toBe('configured-app-key');
+  });
+
+  it('does not allow Kargonomi as the live SHIPPING_PROVIDER yet', () => {
+    resetEnv({
+      SHIPPING_PROVIDER: 'kargonomi',
+      KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+      KARGONOMI_API_TOKEN: 'configured-token',
+    });
+
+    expect(() => loadEnv()).toThrow('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, or try_oto.');
+  });
 });

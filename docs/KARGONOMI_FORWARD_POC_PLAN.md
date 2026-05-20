@@ -306,6 +306,17 @@ Unknown fields needing provider or PoC confirmation:
 - Whether `ecommerce_provider_order_no` can be set on create.
 - Whether one shipment can contain packages for multiple warehouses.
 
+## Adapter Scaffold Status
+
+- A dormant Kargonomi adapter scaffold exists for later tests and implementation planning.
+- It is not enabled for live shipment execution.
+- It is not selectable through `SHIPPING_PROVIDER`.
+- It is not exposed in active provider diagnostics or admin provider selection.
+- It does not call Kargonomi APIs.
+- It does not implement price comparison, price confirmation, barcode fetching, webhook ingest, return shipment creation, reverse labels, or cancellation.
+- Return and reverse shipment methods remain unsupported.
+- `KARGONOMI_APP_KEY` remains unknown unless Kargonomi confirms/provides it for this integration.
+
 ## PoC Validation Checklist
 
 1. Confirm account credentials, Bearer token, `X-App-Key`, and webhook `secret_key`.

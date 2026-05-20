@@ -1,5 +1,6 @@
 import type { AppEnv } from '../../config/env.js';
 import type { ShipmentExecutionStatusDto, ShippingProviderDto } from './shipping-execution.types.js';
+import { KargonomiAdapter } from './kargonomi-provider.adapter.js';
 
 export type ShippingProviderCreateInput = {
   allocationId: string;
@@ -67,7 +68,7 @@ export class ShippingProviderExecutionError extends Error {
 }
 
 export interface ShippingProviderAdapter {
-  provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO';
+  provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO' | 'KARGONOMI';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
   createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
   probeReturnDetails?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
@@ -1891,6 +1892,9 @@ export function createShippingProviderAdapter(
   }
   if (provider === 'try_oto') {
     return new TryOtoAdapter(env);
+  }
+  if (provider === 'kargonomi') {
+    return new KargonomiAdapter(env);
   }
 
   return new HepsijetAdapter(env);

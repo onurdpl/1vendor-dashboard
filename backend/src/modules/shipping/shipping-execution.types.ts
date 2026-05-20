@@ -1,4 +1,11 @@
-export type ShippingProviderDto = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'mng' | 'yurtici' | 'aras';
+export type ShippingProviderDto =
+  | 'hepsijet'
+  | 'kargo_entegrator'
+  | 'try_oto'
+  | 'kargonomi'
+  | 'mng'
+  | 'yurtici'
+  | 'aras';
 
 export type ShipmentExecutionStatusDto =
   | 'pending'

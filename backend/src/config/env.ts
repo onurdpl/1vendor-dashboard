@@ -50,6 +50,9 @@ export type AppEnv = {
   TRY_OTO_REFRESH_TOKEN?: string;
   TRY_OTO_SANDBOX_MODE: boolean;
   TRY_OTO_WEBHOOK_INGEST_ENABLED: boolean;
+  KARGONOMI_BASE_URL?: string;
+  KARGONOMI_API_TOKEN?: string;
+  KARGONOMI_APP_KEY?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -266,5 +269,8 @@ export function loadEnv(): AppEnv {
     TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
     TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
     TRY_OTO_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false),
+    KARGONOMI_BASE_URL: process.env.KARGONOMI_BASE_URL || undefined,
+    KARGONOMI_API_TOKEN: process.env.KARGONOMI_API_TOKEN || undefined,
+    KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
   };
 }
