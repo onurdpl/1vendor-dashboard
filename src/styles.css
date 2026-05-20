@@ -3594,19 +3594,20 @@ h3 {
 .orders-op-table-v3 .op-table-head,
 .orders-op-table-v3 .op-table-row {
   min-width: 880px;
-  grid-template-columns: minmax(220px, 1.48fr) minmax(158px, 1fr) minmax(104px, 0.58fr) minmax(152px, 0.9fr) minmax(132px, 0.75fr) minmax(112px, 0.58fr);
+  grid-template-columns: minmax(210px, 1.42fr) minmax(138px, 0.82fr) minmax(104px, 0.56fr) minmax(146px, 0.82fr) minmax(126px, 0.7fr) minmax(94px, 0.48fr);
 }
 
 .orders-op-table-v3 .op-table-head {
-  min-height: 42px;
-  padding: 0 18px;
+  min-height: 38px;
+  padding: 0 16px;
   background: #f8fafc;
   color: #64748b;
+  font-size: 0.72rem;
 }
 
 .orders-op-table-v3 .op-table-row {
-  min-height: 80px;
-  padding: 12px 16px;
+  min-height: 68px;
+  padding: 9px 14px;
   border-bottom-color: #e2e8f0;
   transition:
     background 0.16s ease,
@@ -3621,19 +3622,47 @@ h3 {
 
 .orders-table-order-cell strong {
   color: #0f172a;
-  font-size: 0.92rem;
+  font-size: 0.86rem;
+  line-height: 1.15;
+}
+
+.orders-op-table-v3 .op-table-row > span,
+.orders-table-status-cell,
+.orders-table-shipping-cell {
+  gap: 2px;
+}
+
+.orders-op-table-v3 .op-table-row small {
+  color: #94a3b8;
+  font-size: 0.68rem;
+  font-weight: 600;
+  line-height: 1.2;
 }
 
 .orders-table-status-cell {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-items: center;
+  display: grid;
+  align-content: center;
+  justify-items: start;
   min-width: 0;
 }
 
-.orders-table-status-cell small {
-  flex-basis: 100%;
+.orders-table-status-cell .op-badge {
+  min-height: 22px;
+  padding: 3px 7px;
+  font-size: 0.67rem;
+}
+
+.orders-table-shipping-cell {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+}
+
+.orders-table-shipping-cell > strong {
+  color: #0f172a;
+  font-size: 0.79rem;
+  font-weight: 800;
+  line-height: 1.2;
 }
 
 .orders-op-table-v3 .op-action-group {
@@ -3641,10 +3670,10 @@ h3 {
 }
 
 .orders-op-table-v3 .button {
-  min-height: 30px;
-  padding: 5px 9px;
+  min-height: 28px;
+  padding: 5px 8px;
   border-radius: 10px;
-  font-size: 0.76rem;
+  font-size: 0.72rem;
 }
 
 .orders-control-center .op-side-panel {

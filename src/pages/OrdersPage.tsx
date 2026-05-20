@@ -100,6 +100,42 @@ function getAttentionLabel(order: OrderSummary) {
   return 'In flow';
 }
 
+function getLifecyclePrimaryLabel(order: OrderSummary) {
+  if (order.shippingStatus === 'Awaiting Shipment') {
+    return 'Awaiting shipment';
+  }
+  if (order.fulfillmentStatus === 'Fulfilled') {
+    return 'Fulfilled';
+  }
+  return getAttentionLabel(order);
+}
+
+function getLifecycleSecondaryLabel(order: OrderSummary) {
+  if (order.trackingNumber || order.carrier) {
+    return 'Tracking visible';
+  }
+  if (order.shippingStatus === 'Awaiting Shipment') {
+    return 'Tracking pending';
+  }
+  if (order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked') {
+    return order.allocationStatus.replace(/_/g, ' ');
+  }
+  return null;
+}
+
+function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
+  if (order.fulfillmentStatus === 'Fulfilled' || order.shippingStatus === 'Delivered') {
+    return 'Fulfilled';
+  }
+  if (order.trackingNumber && order.trackingUrl) {
+    return 'Tracking synced';
+  }
+  if (order.trackingNumber || order.carrier) {
+    return 'Shopify sync pending';
+  }
+  return 'No tracking yet';
+}
+
 function getItemInitials(name: string) {
   const [first = '', second = ''] = name.trim().split(/\s+/);
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
@@ -393,27 +429,22 @@ export function OrdersPage() {
                       <small>{currentVendor.vendorName} · {order.channel}</small>
                     </span>
                     <div className="orders-table-status-cell">
-                      <StatusBadge tone={getStatusTone(order.allocationStatus)}>{getAttentionLabel(order)}</StatusBadge>
-                      <StatusBadge tone={getStatusTone(order.fulfillmentStatus)}>{order.fulfillmentStatus}</StatusBadge>
-                      <small>{order.allocationStatus.replace(/_/g, ' ')}</small>
+                      <StatusBadge tone={getStatusTone(getLifecyclePrimaryLabel(order))}>{getLifecyclePrimaryLabel(order)}</StatusBadge>
+                      {getLifecycleSecondaryLabel(order) ? <small>{getLifecycleSecondaryLabel(order)}</small> : null}
                     </div>
                     <span>
                       <strong className="finance-amount-emphasis">{order.amount}</strong>
                       <small>{getLineItemCount(order)} line items</small>
                     </span>
-                    <span>
-                      <StatusBadge tone={getStatusTone(order.shippingStatus)}>{order.shippingStatus}</StatusBadge>
+                    <span className="orders-table-shipping-cell">
+                      <strong>{getShippingOperationalLabel(order)}</strong>
                       <small>{getTrackingLabel(order)}</small>
-                      <small>{getTrackingHelper(order)}</small>
                     </span>
                     <span>
                       <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
                       <small>{order.channel}</small>
                     </span>
                     <OperationalActionGroup>
-                      <Link className="button button-secondary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
-                        View
-                      </Link>
                       <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
                         Open detail
                       </Link>

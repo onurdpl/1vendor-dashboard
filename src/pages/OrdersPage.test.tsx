@@ -145,8 +145,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(screen.getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
   });
 
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
