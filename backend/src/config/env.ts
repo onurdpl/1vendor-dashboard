@@ -38,7 +38,7 @@ export type AppEnv = {
   BIZIMHESAP_ACCESS_TOKEN?: string;
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
-  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto';
+  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
   KARGO_ENTEGRATOR_BASE_URL?: string;
@@ -53,6 +53,7 @@ export type AppEnv = {
   KARGONOMI_BASE_URL?: string;
   KARGONOMI_API_TOKEN?: string;
   KARGONOMI_APP_KEY?: string;
+  KARGONOMI_DEFAULT_WAREHOUSE_ID?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -141,11 +142,16 @@ function parseInvoiceProvider(value: string | undefined): AppEnv['INVOICE_PROVID
 
 function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROVIDER'] {
   const normalized = (value || 'hepsijet').trim().toLowerCase();
-  if (normalized === 'hepsijet' || normalized === 'kargo_entegrator' || normalized === 'try_oto') {
+  if (
+    normalized === 'hepsijet' ||
+    normalized === 'kargo_entegrator' ||
+    normalized === 'try_oto' ||
+    normalized === 'kargonomi'
+  ) {
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, or try_oto.');
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, try_oto, or kargonomi.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -205,6 +211,19 @@ export function loadEnv(): AppEnv {
   }
 
   const kargoCargoIntegration = parseKargoCargoIntegrationEnv();
+  const shippingProvider = parseShippingProvider(process.env.SHIPPING_PROVIDER);
+  const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
+  const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
+  const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
+
+  if (shippingProvider === 'kargonomi') {
+    if (!kargonomiBaseUrl) {
+      throw new Error('KARGONOMI_BASE_URL is required when SHIPPING_PROVIDER=kargonomi.');
+    }
+    if (!kargonomiApiToken) {
+      throw new Error('KARGONOMI_API_TOKEN is required when SHIPPING_PROVIDER=kargonomi.');
+    }
+  }
 
   return {
     NODE_ENV: nodeEnv,
@@ -257,7 +276,7 @@ export function loadEnv(): AppEnv {
     BIZIMHESAP_ACCESS_TOKEN: process.env.BIZIMHESAP_ACCESS_TOKEN || undefined,
     SHIPPING_EXECUTION_ENABLED: parseBoolean(process.env.SHIPPING_EXECUTION_ENABLED, false),
     SHIPPING_SANDBOX_MODE: parseBoolean(process.env.SHIPPING_SANDBOX_MODE, false),
-    SHIPPING_PROVIDER: parseShippingProvider(process.env.SHIPPING_PROVIDER),
+    SHIPPING_PROVIDER: shippingProvider,
     KARGO_ENTEGRATOR_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_ENABLED, false),
     KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED, false),
     KARGO_ENTEGRATOR_BASE_URL: process.env.KARGO_ENTEGRATOR_BASE_URL || undefined,
@@ -269,8 +288,9 @@ export function loadEnv(): AppEnv {
     TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
     TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
     TRY_OTO_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false),
-    KARGONOMI_BASE_URL: process.env.KARGONOMI_BASE_URL || undefined,
-    KARGONOMI_API_TOKEN: process.env.KARGONOMI_API_TOKEN || undefined,
+    KARGONOMI_BASE_URL: kargonomiBaseUrl,
+    KARGONOMI_API_TOKEN: kargonomiApiToken,
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
+    KARGONOMI_DEFAULT_WAREHOUSE_ID: kargonomiDefaultWarehouseId,
   };
 }

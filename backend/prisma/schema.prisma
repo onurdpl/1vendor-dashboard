@@ -106,6 +106,7 @@ enum ShippingProvider {
   HEPSIJET
   KARGO_ENTEGRATOR
   TRY_OTO
+  KARGONOMI
   MNG
   YURTICI
   ARAS

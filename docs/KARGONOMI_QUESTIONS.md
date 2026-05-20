@@ -1,6 +1,5 @@
 # Kargonomi Questions
 
-- Çoklu warehouse gönderimi destekleniyor mu?
 - Her warehouse farklı bir kargo firması ile gönderim yapabilir mi?
 - Return / reverse shipment oluşturma API’si mevcut mu?
 - Reverse shipment için barcode / label endpoint’i mevcut mu?

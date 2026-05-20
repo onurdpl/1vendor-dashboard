@@ -66,7 +66,7 @@ function buildMockFetch(body: unknown = { ok: true }, contentType = 'application
   return { calls, fetchImpl };
 }
 
-describe('Kargonomi dormant adapter scaffold', () => {
+describe('Kargonomi forward adapter scaffold', () => {
   it('exposes provider constants without enabling runtime execution', () => {
     expect(KARGONOMI_PROVIDER_KEY).toBe('kargonomi');
     expect(KARGONOMI_PROVIDER_DISPLAY_NAME).toBe('Kargonomi');
@@ -87,7 +87,7 @@ describe('Kargonomi dormant adapter scaffold', () => {
       baseUrlConfigured: true,
       apiTokenConfigured: true,
       appKeyConfigured: false,
-      appKeyRequirement: 'unknown',
+      appKeyRequirement: 'not_required_for_account',
       missing: [],
     });
   });
@@ -103,17 +103,106 @@ describe('Kargonomi dormant adapter scaffold', () => {
     expect(diagnostics.missing).toContain('KARGONOMI_API_TOKEN');
   });
 
-  it('throws an explicit not implemented error for shipment execution', async () => {
-    const adapter = new KargonomiAdapter(buildEnv());
+  it('executes the documented forward flow with automatic provider selection by default', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      const responseBody = calls.length === 1
+        ? { shipment: { id: 123, status: 'draft' } }
+        : calls.length === 2
+          ? { options: [{ id: 5, price: 100 }] }
+          : calls.length === 3
+            ? {
+                shipment: {
+                  id: 123,
+                  status: 'webservice_order_created',
+                  shipping_webservice_tracking_code: 'KG-TRACK-1',
+                  shipping_provider_name: 'Test Carrier',
+                  pricing: { real_price: '100' },
+                },
+              }
+            : { barcode_pdf_base64: 'JVBERi0xLjQ=' };
 
-    await expect(
-      adapter.createShipment({
-        allocationId: 'alloc-1',
-        vendorId: 'vendor-1',
-        provider: 'kargonomi',
-        requestSnapshot: {},
-      }),
-    ).rejects.toThrow('Kargonomi adapter is not implemented yet.');
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    const result = await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'vendor-1',
+      provider: 'kargonomi',
+      requestSnapshot: {
+        warehouseId: '112668',
+        buyer: {
+          buyer_name: 'Test Buyer',
+          buyer_phone: '5551112233',
+          buyer_address: 'Test Buyer Address',
+          buyer_state_id: '34',
+          buyer_city_id: '828',
+        },
+        packages: [{ desi: '3', content: 'Shoes', barcode: 'PKG-1' }],
+      },
+    });
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://app.kargonomi.com.tr/api/v1/shipments'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipment-price-comparison/123'],
+      ['POST', 'https://app.kargonomi.com.tr/api/v1/confirm-shipping-price'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123/barcode?format=pdf'],
+    ]);
+    expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=-1');
+    expect(result).toMatchObject({
+      providerShipmentId: '123',
+      trackingNumber: 'KG-TRACK-1',
+      shipmentStatus: 'created',
+      shippingCost: 100,
+      currency: 'TRY',
+    });
+    expect(result.responseSnapshot).toMatchObject({
+      automaticProviderSelection: true,
+      labelUrlPresent: false,
+    });
+  });
+
+  it('uses preferred Kargonomi shipping provider id when configured in the request snapshot', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      const responseBody = calls.length === 1
+        ? { shipment: { id: 123, status: 'draft' } }
+        : calls.length === 3
+          ? { shipment: { id: 123, status: 'webservice_order_created' } }
+          : {};
+
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    await adapter.createShipment({
+      allocationId: 'alloc-1',
+      vendorId: 'vendor-1',
+      provider: 'kargonomi',
+      requestSnapshot: {
+        warehouseId: '112668',
+        shippingProviderId: 9,
+        buyer: {
+          buyer_name: 'Test Buyer',
+          buyer_phone: '5551112233',
+          buyer_address: 'Test Buyer Address',
+          buyer_state_id: '34',
+          buyer_city_id: '828',
+        },
+        packages: [{ desi: '3' }],
+      },
+    });
+
+    expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=9');
   });
 
   it('does not expose return or reverse shipment methods', () => {

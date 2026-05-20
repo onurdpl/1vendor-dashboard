@@ -15,7 +15,7 @@ export const KARGONOMI_ENV_NAMES = {
   appKey: 'KARGONOMI_APP_KEY',
 } as const;
 
-const KARGONOMI_NOT_IMPLEMENTED_MESSAGE = 'Kargonomi adapter is not implemented yet.';
+const KARGONOMI_CANCELLATION_UNSUPPORTED_MESSAGE = 'Kargonomi shipment cancellation is not implemented.';
 
 export type KargonomiShipmentPackageInput = {
   content?: string | null;
@@ -85,6 +85,15 @@ export type KargonomiHttpClientOptions = {
   fetchImpl?: typeof fetch;
 };
 
+export type KargonomiClient = Pick<
+  KargonomiHttpClient,
+  | 'createShipmentDraft'
+  | 'getShipmentPriceComparison'
+  | 'confirmShippingPrice'
+  | 'getShipmentBarcodePdf'
+  | 'getShipment'
+>;
+
 export type KargonomiConfirmShippingPriceInput = {
   shipmentId: string | number;
   shippingProviderId: string | number;
@@ -117,6 +126,18 @@ function readString(value: Record<string, unknown>, keys: string[]) {
 function readNestedRecord(value: Record<string, unknown>, key: string) {
   const nested = value[key];
   return isRecord(nested) ? nested : {};
+}
+
+function readNumber(value: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const raw = value[key];
+    const numeric = typeof raw === 'string' ? Number(raw.replace(',', '.')) : Number(raw);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+
+  return null;
 }
 
 export function buildKargonomiShipmentCreatePayload(input: KargonomiShipmentCreatePayloadInput) {
@@ -248,6 +269,167 @@ function parseKargonomiResponseBody(contentType: string, responseText: string): 
   }
 }
 
+function summarizeResponse(response: KargonomiRawHttpResponse) {
+  return {
+    ok: response.ok,
+    httpStatus: response.status,
+    contentType: response.contentType,
+    bodyKeys: isRecord(response.body) ? Object.keys(response.body) : [],
+  };
+}
+
+function extractShipmentBody(body: unknown): unknown {
+  if (!isRecord(body)) {
+    return body;
+  }
+
+  const direct = body.shipment;
+  if (isRecord(direct)) {
+    return direct;
+  }
+
+  const data = body.data;
+  if (isRecord(data)) {
+    if (isRecord(data.shipment)) {
+      return data.shipment;
+    }
+    return data;
+  }
+
+  return body;
+}
+
+function extractShipmentId(body: unknown) {
+  const shipmentBody = extractShipmentBody(body);
+  if (!isRecord(shipmentBody)) {
+    return null;
+  }
+
+  return readString(shipmentBody, ['id', 'shipment_id', 'shipmentId']);
+}
+
+function findPotentialBarcodePdf(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('JVBER') || trimmed.startsWith('data:application/pdf') || trimmed.endsWith('.pdf')) {
+      return trimmed;
+    }
+    return null;
+  }
+
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const key of ['barcode_pdf', 'barcodePdf', 'barcode_pdf_base64', 'pdf', 'pdf_base64', 'data', 'barcode']) {
+    const match = findPotentialBarcodePdf(value[key]);
+    if (match) {
+      return match;
+    }
+  }
+
+  for (const nested of Object.values(value)) {
+    const match = findPotentialBarcodePdf(nested);
+    if (match) {
+      return match;
+    }
+  }
+
+  return null;
+}
+
+function parseMoney(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const match = value.replace(',', '.').match(/-?\d+(?:\.\d+)?/);
+  if (!match) {
+    return null;
+  }
+
+  const numeric = Number(match[0]);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function buildKargonomiProviderResult(
+  responseBody: unknown,
+  fallbackShipmentId: string | null,
+  responseSnapshot: Record<string, unknown>,
+): ShippingProviderCreateResult {
+  const parsed = parseKargonomiShipment(extractShipmentBody(responseBody));
+  const providerShipmentId = parsed.id ?? fallbackShipmentId;
+  const trackingNumber =
+    parsed.shippingWebserviceTrackingCode ?? parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId ?? null;
+  const shippingCost =
+    parseMoney(parsed.pricing.realPrice) ??
+    parseMoney(parsed.pricing.estimatedPrice) ??
+    readNumber(isRecord(responseBody) ? responseBody : {}, ['price', 'shipping_price', 'total_price']);
+
+  return {
+    providerShipmentId,
+    trackingNumber,
+    trackingUrl: null,
+    labelUrl: null,
+    shipmentStatus: parsed.internalStatus,
+    shippingCost,
+    shippingVat: null,
+    currency: 'TRY',
+    responseSnapshot: {
+      ...responseSnapshot,
+      provider: KARGONOMI_PROVIDER_KEY,
+      parsedShipmentId: parsed.id,
+      providerShipmentId,
+      trackingNumberPresent: Boolean(trackingNumber),
+      shippingProviderName: parsed.shippingProviderName,
+      shippingProviderSlug: parsed.shippingProviderSlug,
+      status: parsed.status,
+      statusLabel: parsed.statusLabel,
+      barcodePresent: Boolean(parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId),
+      labelUrlPresent: false,
+      labelUnavailableReason: 'barcode_pdf_response_shape_unknown_or_unavailable',
+      shippingCostPresent: shippingCost !== null,
+    },
+  };
+}
+
+function ensureKargonomiPayload(value: Record<string, unknown>): KargonomiShipmentCreatePayloadInput {
+  const buyer = isRecord(value.buyer) ? value.buyer : {};
+  const packages = Array.isArray(value.packages) ? value.packages.filter(isRecord) : [];
+  const missing = [
+    !value.warehouseId ? 'warehouseId' : null,
+    !readString(buyer, ['buyer_name']) ? 'buyer.buyer_name' : null,
+    !readString(buyer, ['buyer_phone']) ? 'buyer.buyer_phone' : null,
+    !readString(buyer, ['buyer_address']) ? 'buyer.buyer_address' : null,
+    !readString(buyer, ['buyer_state_id']) ? 'buyer.buyer_state_id' : null,
+    !readString(buyer, ['buyer_city_id']) ? 'buyer.buyer_city_id' : null,
+    packages.length === 0 ? 'packages' : null,
+  ].filter((field): field is string => Boolean(field));
+
+  if (missing.length) {
+    throw new Error(`Kargonomi shipment payload is incomplete. Missing: ${missing.join(', ')}.`);
+  }
+
+  return {
+    warehouseId: value.warehouseId as string | number,
+    buyer: {
+      buyer_name: readString(buyer, ['buyer_name']) as string,
+      buyer_email: readString(buyer, ['buyer_email']),
+      buyer_phone: readString(buyer, ['buyer_phone']) as string,
+      buyer_address: readString(buyer, ['buyer_address']) as string,
+      buyer_state_id: readString(buyer, ['buyer_state_id']) as string,
+      buyer_city_id: readString(buyer, ['buyer_city_id']) as string,
+      buyer_tax_number: readString(buyer, ['buyer_tax_number']),
+      buyer_tax_place: readString(buyer, ['buyer_tax_place']),
+    },
+    packages: packages.map((shipmentPackage) => ({
+      content: readString(shipmentPackage, ['content']),
+      barcode: readString(shipmentPackage, ['barcode']),
+      desi: readString(shipmentPackage, ['desi']) ?? 1,
+    })),
+  };
+}
+
 export class KargonomiHttpClient {
   private readonly fetchImpl: typeof fetch;
 
@@ -364,7 +546,8 @@ export function getKargonomiConfigDiagnostics(env: AppEnv) {
     baseUrlConfigured: Boolean(env.KARGONOMI_BASE_URL),
     apiTokenConfigured: Boolean(env.KARGONOMI_API_TOKEN),
     appKeyConfigured: Boolean(env.KARGONOMI_APP_KEY),
-    appKeyRequirement: 'unknown',
+    appKeyRequirement: 'not_required_for_account',
+    defaultWarehouseIdConfigured: Boolean(env.KARGONOMI_DEFAULT_WAREHOUSE_ID),
     missing,
   };
 }
@@ -372,22 +555,99 @@ export function getKargonomiConfigDiagnostics(env: AppEnv) {
 export class KargonomiAdapter implements ShippingProviderAdapter {
   provider = 'KARGONOMI' as const;
 
-  constructor(private readonly env: AppEnv) {}
+  private readonly client: KargonomiClient;
 
-  async createShipment(_input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
-    throw new Error(KARGONOMI_NOT_IMPLEMENTED_MESSAGE);
+  constructor(
+    private readonly env: AppEnv,
+    client?: KargonomiClient,
+  ) {
+    this.client = client ?? new KargonomiHttpClient(env);
   }
 
-  async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
-    throw new Error(KARGONOMI_NOT_IMPLEMENTED_MESSAGE);
+  async createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult> {
+    const payload = ensureKargonomiPayload(input.requestSnapshot);
+    const shippingProviderId =
+      readString(input.requestSnapshot, ['shippingProviderId', 'shipping_provider_id', 'preferredShippingProviderId']) ??
+      '-1';
+    const responseSnapshot: Record<string, unknown> = {
+      provider: KARGONOMI_PROVIDER_KEY,
+      flow: 'forward',
+      createShipmentDraftCalled: false,
+      priceComparisonCalled: false,
+      confirmShippingPriceCalled: false,
+      barcodeFetchCalled: false,
+      shippingProviderId,
+      automaticProviderSelection: shippingProviderId === '-1',
+    };
+
+    const createResponse = await this.client.createShipmentDraft(payload);
+    responseSnapshot.createShipmentDraftCalled = true;
+    responseSnapshot.createShipmentDraft = summarizeResponse(createResponse);
+    if (!createResponse.ok) {
+      throw new Error(`Kargonomi shipment draft creation failed with HTTP ${createResponse.status}.`);
+    }
+
+    const shipmentId = extractShipmentId(createResponse.body);
+    if (!shipmentId) {
+      throw new Error('Kargonomi shipment draft creation did not return a shipment id.');
+    }
+    responseSnapshot.shipmentId = shipmentId;
+
+    const priceResponse = await this.client.getShipmentPriceComparison(shipmentId);
+    responseSnapshot.priceComparisonCalled = true;
+    responseSnapshot.priceComparison = summarizeResponse(priceResponse);
+    if (!priceResponse.ok) {
+      throw new Error(`Kargonomi price comparison failed with HTTP ${priceResponse.status}.`);
+    }
+
+    const confirmResponse = await this.client.confirmShippingPrice({
+      shipmentId,
+      shippingProviderId,
+    });
+    responseSnapshot.confirmShippingPriceCalled = true;
+    responseSnapshot.confirmShippingPrice = summarizeResponse(confirmResponse);
+    if (!confirmResponse.ok) {
+      throw new Error(`Kargonomi shipping price confirmation failed with HTTP ${confirmResponse.status}.`);
+    }
+
+    try {
+      const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
+      const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
+      responseSnapshot.barcodeFetchCalled = true;
+      responseSnapshot.barcodeFetch = {
+        ...summarizeResponse(barcodeResponse),
+        pdfLikeValuePresent: Boolean(barcodePdf),
+      };
+    } catch (error) {
+      responseSnapshot.barcodeFetchCalled = true;
+      responseSnapshot.barcodeFetch = {
+        ok: false,
+        error: error instanceof Error ? error.message : 'Unknown barcode fetch error.',
+      };
+    }
+
+    return buildKargonomiProviderResult(confirmResponse.body, shipmentId, responseSnapshot);
   }
 
-  async getTrackingInfo(): Promise<ShippingProviderCreateResult> {
-    throw new Error(KARGONOMI_NOT_IMPLEMENTED_MESSAGE);
+  async getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult> {
+    const response = await this.client.getShipment(providerShipmentId);
+    if (!response.ok) {
+      throw new Error(`Kargonomi shipment status lookup failed with HTTP ${response.status}.`);
+    }
+
+    return buildKargonomiProviderResult(response.body, providerShipmentId, {
+      provider: KARGONOMI_PROVIDER_KEY,
+      flow: 'status_lookup',
+      getShipment: summarizeResponse(response),
+    });
+  }
+
+  async getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult> {
+    return this.getShipmentStatus(providerShipmentId);
   }
 
   async cancelShipment(): Promise<ShippingProviderCreateResult> {
-    throw new Error(KARGONOMI_NOT_IMPLEMENTED_MESSAGE);
+    throw new Error(KARGONOMI_CANCELLATION_UNSUPPORTED_MESSAGE);
   }
 
   getConfigDiagnostics() {

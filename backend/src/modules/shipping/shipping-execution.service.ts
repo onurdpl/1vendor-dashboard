@@ -110,6 +110,9 @@ function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
   if (normalized === 'try_oto') {
     return ShippingProvider.TRY_OTO;
   }
+  if (normalized === 'kargonomi') {
+    return ShippingProvider.KARGONOMI;
+  }
   if (normalized === 'mng') {
     return ShippingProvider.MNG;
   }
@@ -872,6 +875,45 @@ function resolveTryOtoPackageWeight(providerMetadata: unknown, fallback: number)
   return Math.max(DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG, fallback > 0 ? fallback : DEFAULT_TRY_OTO_PACKAGE_WEIGHT_KG);
 }
 
+function resolveKargonomiWarehouseId(config: VendorShippingConfigDto, env?: AppEnv) {
+  return selectDefaultWarehouse(config, 'kargonomi')?.warehouseId ?? config.defaultWarehouseId ?? env?.KARGONOMI_DEFAULT_WAREHOUSE_ID ?? null;
+}
+
+function resolveKargonomiShippingProviderId(providerMetadata: unknown) {
+  return readString(providerMetadata, [
+    'kargonomiShippingProviderId',
+    'kargonomi_shipping_provider_id',
+    'shippingProviderId',
+    'shipping_provider_id',
+  ]);
+}
+
+function resolveKargonomiAddressId(source: unknown, keys: string[]) {
+  return readString(source, keys);
+}
+
+function normalizeKargonomiPhone(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return digits;
+  }
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return digits.slice(1);
+  }
+  if (digits.length === 12 && digits.startsWith('90')) {
+    return digits.slice(2);
+  }
+  if (digits.length > 10) {
+    return digits.slice(-10);
+  }
+
+  return null;
+}
+
 function splitCustomerName(name: string | null | undefined) {
   const parts = (name ?? '').trim().split(/\s+/).filter(Boolean);
   if (parts.length === 0) {
@@ -1171,6 +1213,56 @@ function buildTryOtoCustomer(input: {
   };
 }
 
+function buildKargonomiBuyer(input: {
+  order: unknown;
+  customerName: string | null | undefined;
+  customerEmail: string | null | undefined;
+  providerMetadata: unknown;
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+}) {
+  const orderRecord = isRecord(input.order) ? input.order : {};
+  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const overrides = normalizeCustomerOverrides(input.customerOverrides);
+  const buyerName = overrides.name ?? input.customerName ?? readString(orderRecord, ['customerName', 'name']);
+  const rawPhone =
+    overrides.phone ??
+    readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone', 'billingPhone']) ??
+    webhookAddress?.customerPhone ??
+    readStoredOrderWebhookPhone(orderRecord);
+  const buyer = {
+    buyer_name: buyerName,
+    buyer_email: overrides.email ?? input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
+    buyer_phone: normalizeKargonomiPhone(rawPhone),
+    buyer_address: overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
+    buyer_state_id:
+      resolveKargonomiAddressId(orderRecord, [
+        'kargonomiBuyerStateId',
+        'buyerStateId',
+        'buyer_state_id',
+        'shippingStateId',
+        'shipping_state_id',
+      ]) ??
+      resolveKargonomiAddressId(input.providerMetadata, ['kargonomiBuyerStateId', 'buyerStateId', 'buyer_state_id']),
+    buyer_city_id:
+      resolveKargonomiAddressId(orderRecord, [
+        'kargonomiBuyerCityId',
+        'buyerCityId',
+        'buyer_city_id',
+        'shippingCityId',
+        'shipping_city_id',
+      ]) ??
+      resolveKargonomiAddressId(input.providerMetadata, ['kargonomiBuyerCityId', 'buyerCityId', 'buyer_city_id']),
+  };
+  const missingFields = Object.entries(buyer)
+    .filter(([, value]) => !value)
+    .map(([key]) => `buyer.${key}`);
+
+  return {
+    buyer,
+    missingFields,
+  };
+}
+
 function resolveKargoPaymentType(orderRecord: Record<string, unknown>) {
   void orderRecord;
   return 'cash_money';
@@ -1397,15 +1489,37 @@ export function getShippingProviderGateDiagnostics(
   const provider = providerOverride ?? env.SHIPPING_PROVIDER;
   const isKargo = provider === 'kargo_entegrator';
   const isTryOto = provider === 'try_oto';
+  const isKargonomi = provider === 'kargonomi';
   const supportedProviders: ShippingProviderDto[] = [
     'kargo_entegrator',
     'hepsijet',
     ...(env.TRY_OTO_ENABLED ? (['try_oto'] as ShippingProviderDto[]) : []),
+    ...(env.SHIPPING_PROVIDER === 'kargonomi' || env.KARGONOMI_BASE_URL || env.KARGONOMI_API_TOKEN
+      ? (['kargonomi'] as ShippingProviderDto[])
+      : []),
   ];
   const providerSelected = env.SHIPPING_PROVIDER === provider;
-  const providerEnabled = isKargo ? env.KARGO_ENTEGRATOR_ENABLED : isTryOto ? env.TRY_OTO_ENABLED : false;
-  const baseUrlConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL) : isTryOto ? Boolean(env.TRY_OTO_BASE_URL) : false;
-  const apiKeyConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_API_KEY) : isTryOto ? Boolean(env.TRY_OTO_REFRESH_TOKEN) : false;
+  const providerEnabled = isKargo
+    ? env.KARGO_ENTEGRATOR_ENABLED
+    : isTryOto
+      ? env.TRY_OTO_ENABLED
+      : isKargonomi
+        ? providerSelected
+        : false;
+  const baseUrlConfigured = isKargo
+    ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL)
+    : isTryOto
+      ? Boolean(env.TRY_OTO_BASE_URL)
+      : isKargonomi
+        ? Boolean(env.KARGONOMI_BASE_URL)
+        : false;
+  const apiKeyConfigured = isKargo
+    ? Boolean(env.KARGO_ENTEGRATOR_API_KEY)
+    : isTryOto
+      ? Boolean(env.TRY_OTO_REFRESH_TOKEN)
+      : isKargonomi
+        ? Boolean(env.KARGONOMI_API_TOKEN)
+        : false;
   const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
   const tryOtoWebhookDiagnostics = isTryOto ? getTryOtoWebhookReceiveDiagnostics() : null;
   const packageTypeUsed = DEFAULT_KARGO_PACKAGE_TYPE;
@@ -1418,6 +1532,8 @@ export function getShippingProviderGateDiagnostics(
     isTryOto && !env.TRY_OTO_SANDBOX_MODE ? 'TRY_OTO_SANDBOX_MODE' : null,
     isTryOto && !env.TRY_OTO_BASE_URL ? 'TRY_OTO_BASE_URL' : null,
     isTryOto && !env.TRY_OTO_REFRESH_TOKEN ? 'TRY_OTO_REFRESH_TOKEN' : null,
+    isKargonomi && !env.KARGONOMI_BASE_URL ? 'KARGONOMI_BASE_URL' : null,
+    isKargonomi && !env.KARGONOMI_API_TOKEN ? 'KARGONOMI_API_TOKEN' : null,
   ].filter((value): value is string => Boolean(value));
 
   return {
@@ -1483,7 +1599,12 @@ export function getShippingProviderGateDiagnostics(
             TRY_OTO_WEBHOOK_SIGNATURE_WARNING,
             'Try OTO returns and production rollout are not implemented.',
           ]
-        : [],
+        : isKargonomi
+          ? [
+              'Kargonomi forward shipment execution is enabled only when explicitly selected.',
+              'Kargonomi return/reverse shipment is not implemented.',
+            ]
+          : [],
   };
 }
 
@@ -1493,7 +1614,12 @@ export async function getShippingProviderReadinessDiagnostics(
   vendorId?: string | null,
 ): Promise<ShippingProviderGateDiagnosticsDto> {
   const diagnostics = getShippingProviderGateDiagnostics(env, providerOverride);
-  if ((diagnostics.provider !== 'kargo_entegrator' && diagnostics.provider !== 'try_oto') || !vendorId) {
+  if (
+    (diagnostics.provider !== 'kargo_entegrator' &&
+      diagnostics.provider !== 'try_oto' &&
+      diagnostics.provider !== 'kargonomi') ||
+    !vendorId
+  ) {
     return diagnostics;
   }
 
@@ -1515,6 +1641,25 @@ export async function getShippingProviderReadinessDiagnostics(
       providerSelected: configProviderSelected,
       executionReady: diagnostics.executionReady && pickupLocationCodeConfigured && originCityConfigured && defaultDesiConfigured,
       warehouseIdConfigured: pickupLocationCodeConfigured,
+      defaultDesiConfigured,
+      missing,
+    };
+  }
+
+  if (diagnostics.provider === 'kargonomi') {
+    const warehouseIdConfigured = Boolean(resolveKargonomiWarehouseId(config, env));
+    const defaultDesiConfigured = Number(config.defaultDesi) > 0;
+    const missing = [
+      ...diagnostics.missing,
+      !warehouseIdConfigured ? 'VENDOR_KARGONOMI_WAREHOUSE_ID' : null,
+      !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
+    ].filter((value): value is string => Boolean(value));
+
+    return {
+      ...diagnostics,
+      providerSelected: configProviderSelected,
+      executionReady: diagnostics.executionReady && configProviderSelected && warehouseIdConfigured && defaultDesiConfigured,
+      warehouseIdConfigured,
       defaultDesiConfigured,
       missing,
     };
@@ -3869,11 +4014,21 @@ async function buildShipmentRequestPreview(
 
   const provider = normalizeProvider(input.provider ?? config.preferredProvider);
   const providerDto = mapProvider(provider);
-  if (provider !== ShippingProvider.HEPSIJET && provider !== ShippingProvider.KARGO_ENTEGRATOR && provider !== ShippingProvider.TRY_OTO) {
-    throw new Error('Only Hepsijet, Kargo Entegratör, and Try OTO sandbox shipment execution are implemented.');
+  if (
+    provider !== ShippingProvider.HEPSIJET &&
+    provider !== ShippingProvider.KARGO_ENTEGRATOR &&
+    provider !== ShippingProvider.TRY_OTO &&
+    provider !== ShippingProvider.KARGONOMI
+  ) {
+    throw new Error('Only Hepsijet, Kargo Entegratör, Try OTO, and Kargonomi shipment execution are implemented.');
   }
   const warehouseConfig =
     provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto, options.env) : null;
+  const kargonomiWarehouseId =
+    provider === ShippingProvider.KARGONOMI ? resolveKargonomiWarehouseId(config, options.env) : null;
+  if (provider === ShippingProvider.KARGONOMI && !kargonomiWarehouseId) {
+    throw new Error('Kargonomi warehouse ID is not configured for this vendor.');
+  }
   const tryOtoPickupLocationCode = provider === ShippingProvider.TRY_OTO
     ? resolveTryOtoPickupLocationCode(config.providerMetadata)
     : null;
@@ -3911,17 +4066,29 @@ async function buildShipmentRequestPreview(
     customerEmail: allocation.order.customerEmail,
     customerOverrides: input.customerOverrides,
   });
+  const kargonomiBuyer = buildKargonomiBuyer({
+    order: allocation.order,
+    customerName: allocation.order.customerName,
+    customerEmail: allocation.order.customerEmail,
+    providerMetadata: config.providerMetadata,
+    customerOverrides: input.customerOverrides,
+  });
   const missingCustomerFields = [
     ...(dummyKargoRequested
       ? kargoCustomer.missingFields
       : provider === ShippingProvider.TRY_OTO
         ? tryOtoCustomer.missingFields
-        : [
-            customer.name ? null : 'customer.name',
-            customer.surname ? null : 'customer.surname',
-          ]),
+        : provider === ShippingProvider.KARGONOMI
+          ? kargonomiBuyer.missingFields
+          : [
+              customer.name ? null : 'customer.name',
+              customer.surname ? null : 'customer.surname',
+            ]),
   ].filter((field): field is string => Boolean(field));
-  if ((dummyKargoRequested || provider === ShippingProvider.TRY_OTO) && missingCustomerFields.length > 0) {
+  if (
+    (dummyKargoRequested || provider === ShippingProvider.TRY_OTO || provider === ShippingProvider.KARGONOMI) &&
+    missingCustomerFields.length > 0
+  ) {
     throw new Error(
       [
         'Missing required shipment fields:',
@@ -3953,6 +4120,12 @@ async function buildShipmentRequestPreview(
     : null;
   const tryOtoInternalOrderReference = buildTryOtoInternalOrderReference(allocation);
   const tryOtoExternalOrderReference = buildTryOtoExternalOrderReference(allocation);
+  const kargonomiShippingProviderId =
+    provider === ShippingProvider.KARGONOMI ? resolveKargonomiShippingProviderId(config.providerMetadata) ?? '-1' : null;
+  const kargonomiPackageBarcode = `SPJ-${allocation.sourceShopifyOrderNumber ?? allocation.id}`.replace(
+    /[^A-Za-z0-9_-]/g,
+    '',
+  );
 
   const payload = provider === ShippingProvider.TRY_OTO
     ? {
@@ -3984,6 +4157,25 @@ async function buildShipmentRequestPreview(
           vendor_id: allocation.assignedVendorId,
         },
       }
+    : provider === ShippingProvider.KARGONOMI
+      ? {
+          warehouseId: kargonomiWarehouseId,
+          shippingProviderId: kargonomiShippingProviderId,
+          buyer: kargonomiBuyer.buyer,
+          packages: [
+            {
+              content: lineItems.map((lineItem) => lineItem.title).join(', ').slice(0, 240),
+              barcode: kargonomiPackageBarcode || allocation.id,
+              desi,
+            },
+          ],
+          reference: {
+            allocation_id: allocation.id,
+            shopify_order_id: allocation.sourceShopifyOrderId,
+            shopify_order_number: allocation.sourceShopifyOrderNumber,
+            vendor_id: allocation.assignedVendorId,
+          },
+        }
     : {
         cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
         warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
@@ -4023,7 +4215,12 @@ async function buildShipmentRequestPreview(
     vendorId: allocation.assignedVendorId,
     provider: providerDto,
     cargoIntegrationId,
-    warehouseId: provider === ShippingProvider.TRY_OTO ? tryOtoPickupLocationCode : warehouseId,
+    warehouseId:
+      provider === ShippingProvider.TRY_OTO
+        ? tryOtoPickupLocationCode
+        : provider === ShippingProvider.KARGONOMI
+          ? kargonomiWarehouseId
+          : warehouseId,
     desi: toAmountString(desi),
     notificationUrl,
     payload,
@@ -4042,7 +4239,9 @@ async function buildShipmentRequestPreview(
               'Try OTO is sandbox-only in this phase.',
               'Try OTO webhooks, returns, and production rollout are not implemented.',
             ]
-        : [],
+          : provider === ShippingProvider.KARGONOMI
+            ? ['Kargonomi return/reverse shipment is not implemented.']
+            : [],
   };
 }
 

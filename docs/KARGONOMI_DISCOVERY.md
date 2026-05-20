@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document captures confirmed Kargonomi API behavior from the uploaded Word document for a future forward shipment PoC. It is documentation-only and does not enable runtime Kargonomi shipment creation, return shipment creation, provider switching, or changes to Try OTO.
+This document captures confirmed Kargonomi API behavior from the uploaded Word document and later account-specific confirmations. Kargonomi forward shipment execution is now implemented only when explicitly selected/configured. It does not enable return shipment creation, provider default switching, or changes to Try OTO.
 
 Anything not explicitly documented in the uploaded Kargonomi API document is marked as unknown.
 
@@ -23,7 +23,8 @@ Authorization: Bearer <token>
 Partner integrations:
 
 - Kargonomi documentation states partner firms must also send `X-App-Key` with every request.
-- Whether this integration is considered a partner integration requiring `X-App-Key` is unknown.
+- Kargonomi support/account validation confirmed `X-App-Key` is not required for this account.
+- Runtime parsing may keep `KARGONOMI_APP_KEY` harmlessly optional, but it is not required.
 
 Unknown:
 
@@ -32,7 +33,6 @@ Unknown:
 - Token refresh or rotation behavior.
 - OAuth support.
 - API rate limits.
-- Whether `X-App-Key` is required for this account.
 
 ## Environment Variables
 
@@ -41,20 +41,21 @@ Required / likely required:
 ```text
 KARGONOMI_BASE_URL=https://app.kargonomi.com.tr/api/v1
 KARGONOMI_API_TOKEN=<Render secret value>
+KARGONOMI_DEFAULT_WAREHOUSE_ID=<optional default, e.g. 112668 for testing>
 ```
 
-Possibly required for partner integrations:
+Optional / not required for this account:
 
 ```text
-KARGONOMI_APP_KEY=<unknown>
+KARGONOMI_APP_KEY=<optional>
 ```
 
 Notes:
 
 - The user currently only has an API token.
-- Kargonomi documentation states partner integrations must also send `X-App-Key`.
-- Whether this integration requires `X-App-Key` is currently unknown.
-- Do not implement runtime auth logic yet.
+- Kargonomi documentation states partner integrations must also send `X-App-Key`, but this account does not require it.
+- `KARGONOMI_DEFAULT_WAREHOUSE_ID` is a fallback only. Prefer vendor/order shipping config warehouse IDs.
+- Confirmed testing warehouse IDs: `112668`, `112666`.
 - Do not assume OAuth exists.
 - Never hardcode secrets.
 - Render env configuration will likely be required later.
@@ -338,13 +339,17 @@ Unknown:
 - Whether carrier selection should be user-selected, admin-configured, or automatic.
 - Whether out-of-service options are always represented as strings like `Hizmet Dışı Bölge`.
 
-## 11. Marketplace / Multi-Warehouse Unknowns
+## 11. Marketplace / Multi-Warehouse Notes
 
-The following are unknown:
+Confirmed:
+
+- Multi-warehouse support exists for this account.
+- Warehouse IDs `112668` and `112666` exist for testing.
+
+The following remain unknown:
 
 - Multi-vendor marketplace account model.
 - Whether each vendor needs a separate Kargonomi account/token.
-- Whether one account can hold warehouses for multiple vendors safely.
 - Whether each warehouse can use a different carrier.
 - Whether Kargonomi supports one shipment with packages from multiple warehouses.
 - Whether Kargonomi warehouse ids should be stored per vendor, per store, or per allocation.
@@ -366,7 +371,16 @@ No return or reverse shipment implementation should be planned beyond discovery 
 
 Existing provider abstraction should be preserved.
 
-Kargonomi should later be added only as a new adapter. The existing Try OTO and Kargo Entegrator behavior should remain unchanged.
+Kargonomi is added only as a provider adapter. The existing Try OTO and Kargo Entegrator behavior should remain unchanged.
+
+Current forward execution status:
+
+- Kargonomi can be selected explicitly with `SHIPPING_PROVIDER=kargonomi`.
+- Required runtime env for selection: `KARGONOMI_BASE_URL` and `KARGONOMI_API_TOKEN`.
+- `KARGONOMI_DEFAULT_WAREHOUSE_ID` is supported as a fallback when no vendor warehouse config is available.
+- Runtime uses `warehouse_id` and blocks before provider calls if `warehouse_id`, Kargonomi buyer state ID, or Kargonomi buyer city ID is missing.
+- Carrier selection uses a configured Kargonomi shipping provider id when present; otherwise it sends `shipping_provider_id=-1` for Kargonomi automatic cheapest selection.
+- Barcode PDF response shape remains defensive/unknown; missing extractable PDF does not fail a successful forward shipment.
 
 Likely reusable:
 
@@ -376,14 +390,14 @@ Likely reusable:
 - Existing webhook ingestion and idempotency concepts.
 - Existing tracking/label/status display surfaces.
 
-Potential adapter requirements:
+Current adapter behavior:
 
-- The Kargonomi adapter likely needs to orchestrate multiple provider API calls inside forward create:
+- The Kargonomi adapter orchestrates the documented multi-step forward create:
   - `POST /shipments`
   - `GET /shipment-price-comparison/{id}`
   - `POST /confirm-shipping-price`
   - `GET /shipments/{id}/barcode?format=pdf`
-- The adapter needs safe diagnostics for each step.
+- The adapter records safe diagnostics for each step.
 - Existing webhook ingestion system should likely be reused.
 - Existing dashboard should not be redesigned.
 - Existing return orchestration should remain untouched until reverse flow is confirmed.
@@ -409,7 +423,7 @@ Unknown:
 
 Primary risks:
 
-- Missing `X-App-Key` requirement could block runtime requests.
+- If Kargonomi later changes account requirements, missing `X-App-Key` could block runtime requests.
 - Unknown sandbox behavior may make safe PoC setup harder.
 - Unknown token lifecycle could affect Render secret management and recovery.
 - Kargonomi requires numeric state/city ids, so Shopify address text needs a robust mapping layer.
@@ -417,7 +431,7 @@ Primary risks:
 - Price confirmation is a separate step and could create partial draft shipments if later steps fail.
 - Barcode response exact JSON shape is unknown.
 - Webhook signature details are incomplete until `secret_key` source and signature encoding are confirmed.
-- Multi-vendor warehouse/account model is unknown.
+- Multi-warehouse support is confirmed, but detailed multi-vendor account scoping remains unknown.
 - Return/reverse flow is unknown, so Kargonomi cannot replace Try OTO return operations yet.
 
 Migration posture:

@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is a documentation-only planning note for a future Kargonomi forward shipment PoC. It does not implement runtime shipment creation, return shipment creation, reverse labels, Shopify reverse delivery, production switching, dashboard redesign, or Try OTO removal.
+This plan now tracks the forward-only Kargonomi implementation. It does not implement return shipment creation, reverse labels, Shopify reverse delivery, production switching, dashboard redesign, or Try OTO removal.
 
 ## Sources Reviewed
 
@@ -18,7 +18,7 @@ This is a documentation-only planning note for a future Kargonomi forward shipme
 
 - Base URL: `https://app.kargonomi.com.tr/api/v1`
 - Authentication: `Authorization: Bearer <token>`
-- Partner firms must also send `X-App-Key`.
+- `X-App-Key` is confirmed not required for this account.
 - The uploaded Word document does not define token issuance, token lifetime, refresh behavior, sandbox URL, or production-vs-sandbox environment separation. These remain unknown.
 
 ## Environment Variables
@@ -28,20 +28,22 @@ Required / likely required:
 ```text
 KARGONOMI_BASE_URL=https://app.kargonomi.com.tr/api/v1
 KARGONOMI_API_TOKEN=<Render secret value>
+KARGONOMI_DEFAULT_WAREHOUSE_ID=<optional fallback, e.g. 112668 for testing>
 ```
 
-Possibly required for partner integrations:
+Optional / not required for this account:
 
 ```text
-KARGONOMI_APP_KEY=<unknown>
+KARGONOMI_APP_KEY=<optional>
 ```
 
 Notes:
 
 - The user currently only has an API token.
-- Kargonomi documentation states partner integrations must also send `X-App-Key`.
-- Whether this integration requires `X-App-Key` is currently unknown.
-- Do not implement runtime auth logic yet.
+- Kargonomi documentation states partner integrations must also send `X-App-Key`, but this account does not require it.
+- Multi-warehouse support is confirmed.
+- Testing warehouse IDs: `112668`, `112666`.
+- Do not hardcode warehouse IDs into business logic; use vendor config or `KARGONOMI_DEFAULT_WAREHOUSE_ID`.
 - Do not assume OAuth exists.
 - Never hardcode secrets.
 - Render env configuration will likely be required later.
@@ -95,6 +97,11 @@ Confirmed sender fields:
 - `shipment.warehouse_id`
 
 When `warehouse_id` is sent, the document marks sender fields as not required. For a multi-vendor platform, the safer PoC shape is to use a vendor warehouse mapping to `shipment.warehouse_id` when available.
+
+Confirmed account-specific notes:
+
+- Multi-warehouse support is available.
+- Testing warehouse IDs `112668` and `112666` exist.
 
 Unknowns:
 
@@ -280,24 +287,24 @@ Likely reusable:
 - Shipping cost fields.
 - Webhook idempotency concepts.
 
-Likely new or adjusted adapter behavior needed:
+Implemented / likely adjusted adapter behavior:
 
 - Kargonomi forward create is a multi-step create/price/confirm/barcode flow rather than a single create call.
-- The adapter may need internal step diagnostics:
+- The adapter records internal step diagnostics:
   - create shipment called/succeeded
   - price comparison called/succeeded
-  - selected shipping provider id/name/slug
+  - selected shipping provider id
   - confirm shipping price called/succeeded
   - barcode fetch called/succeeded
-- A future Kargonomi adapter may need a config field for preferred `shipping_provider_id` or an explicit automatic selection mode.
-- A future Kargonomi adapter needs warehouse and Kargonomi city/state ID mappings before provider execution.
+- Preferred `shipping_provider_id` can be supplied through provider metadata; otherwise `-1` requests automatic cheapest selection.
+- Warehouse and Kargonomi city/state ID mappings are required before provider execution.
 - Webhook signature verification must be implemented with raw-body access before enabling ingest.
 
 Unknown fields needing provider or PoC confirmation:
 
 - Sandbox base URL.
 - Token issuance and rotation.
-- `X-App-Key` ownership and environment model.
+- Whether other Kargonomi accounts require `X-App-Key`.
 - Exact barcode PDF response shape.
 - Whether tracking URL is returned anywhere.
 - Whether `shipping_webservice_tracking_code` is assigned immediately after confirmation or later by webhook.
@@ -308,14 +315,15 @@ Unknown fields needing provider or PoC confirmation:
 
 ## Adapter Scaffold Status
 
-- A dormant Kargonomi adapter scaffold exists for later tests and implementation planning.
-- It is not enabled for live shipment execution.
-- It is not selectable through `SHIPPING_PROVIDER`.
-- It is not exposed in active provider diagnostics or admin provider selection.
-- It does not call Kargonomi APIs.
-- It does not implement price comparison, price confirmation, barcode fetching, webhook ingest, return shipment creation, reverse labels, or cancellation.
+- Kargonomi forward execution is implemented through the existing provider abstraction.
+- It is selectable only through explicit `SHIPPING_PROVIDER=kargonomi` plus required Kargonomi env.
+- It is exposed through existing provider diagnostics when Kargonomi env/provider selection is present.
+- It calls Kargonomi APIs only from the explicit forward shipment execution path.
+- It implements price comparison, price confirmation, and defensive barcode fetching for forward shipment only.
+- It does not implement webhook ingest, return shipment creation, reverse labels, or cancellation.
 - Return and reverse shipment methods remain unsupported.
-- `KARGONOMI_APP_KEY` remains unknown unless Kargonomi confirms/provides it for this integration.
+- `KARGONOMI_APP_KEY` is optional/not required for this account.
+- `KARGONOMI_DEFAULT_WAREHOUSE_ID` is a fallback only; vendor warehouse config remains preferred.
 
 ## Mapping Scaffold Status
 
@@ -326,9 +334,9 @@ Unknown fields needing provider or PoC confirmation:
 - `webservice_shipment_returning` is intentionally not treated as confirmed return shipment support.
 - Unknown/unrecognized provider statuses map to a safe pending state.
 - These helpers do not call Kargonomi APIs.
-- These helpers are not wired into live shipment execution.
+- These helpers are wired only into Kargonomi forward shipment execution.
 - Return/reverse remains unsupported.
-- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+- Kargonomi is available only through explicit live `SHIPPING_PROVIDER=kargonomi` selection and required env.
 
 ## HTTP Client Scaffold Status
 
@@ -340,10 +348,10 @@ Unknown fields needing provider or PoC confirmation:
   - shipment barcode PDF fetch
   - shipment detail fetch
 - Tests use mocked `fetch` only.
-- The client is not wired into shipment orchestration.
-- There is no live API execution from order/shipment flows.
+- The client is wired only into explicit Kargonomi forward shipment execution.
+- There is no default Kargonomi provider switch and no Try OTO behavior change.
 - Barcode response shape remains unknown and is treated as raw provider response data.
-- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+- Kargonomi return/reverse remains unsupported.
 
 ## Manual Probe Status
 
@@ -369,7 +377,7 @@ Optional env vars:
 
 ```text
 KARGONOMI_BASE_URL=https://app.kargonomi.com.tr/api/v1
-KARGONOMI_APP_KEY=<unknown>
+KARGONOMI_APP_KEY=<optional>
 KARGONOMI_PROBE_CONFIRM_PRICE=YES
 KARGONOMI_PROBE_SHIPPING_PROVIDER_ID=<id from price comparison>
 KARGONOMI_PROBE_FETCH_BARCODE=YES
@@ -381,11 +389,11 @@ Default behavior:
 - `POST /confirm-shipping-price` runs only when `KARGONOMI_PROBE_CONFIRM_PRICE=YES` and an explicit `KARGONOMI_PROBE_SHIPPING_PROVIDER_ID` is provided.
 - `GET /shipments/{id}/barcode?format=pdf` runs only when `KARGONOMI_PROBE_FETCH_BARCODE=YES`.
 - Return/reverse shipment remains unsupported.
-- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+- Kargonomi can be enabled for runtime only through explicit provider config; the probe remains manual/dev only.
 
 ## PoC Validation Checklist
 
-1. Confirm account credentials, Bearer token, `X-App-Key`, and webhook `secret_key`.
+1. Confirm account credentials, Bearer token, and webhook `secret_key`. `X-App-Key` is not required for this account.
 2. Confirm warehouse setup for at least one vendor.
 3. Confirm Kargonomi state/city ID mapping for a Turkish Shopify shipping address.
 4. Create shipment with `POST /shipments`.
