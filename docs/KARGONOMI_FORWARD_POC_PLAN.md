@@ -317,6 +317,19 @@ Unknown fields needing provider or PoC confirmation:
 - Return and reverse shipment methods remain unsupported.
 - `KARGONOMI_APP_KEY` remains unknown unless Kargonomi confirms/provides it for this integration.
 
+## Mapping Scaffold Status
+
+- Isolated Kargonomi request/response mapping helpers exist for future PoC tests.
+- The create-payload helper covers documented sender fields, `warehouse_id`, buyer fields, and package `content` / `barcode` / `desi`.
+- The response parser captures documented shipment id, webservice order id, barcode, tracking code, provider name/slug, status, status label, pricing fields, and shipment packages.
+- The status mapper covers documented Kargonomi statuses.
+- `webservice_shipment_returning` is intentionally not treated as confirmed return shipment support.
+- Unknown/unrecognized provider statuses map to a safe pending state.
+- These helpers do not call Kargonomi APIs.
+- These helpers are not wired into live shipment execution.
+- Return/reverse remains unsupported.
+- Kargonomi remains unavailable for live `SHIPPING_PROVIDER` selection.
+
 ## PoC Validation Checklist
 
 1. Confirm account credentials, Bearer token, `X-App-Key`, and webhook `secret_key`.
