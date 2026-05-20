@@ -4979,6 +4979,24 @@ h3 {
   padding: 6px 7px;
 }
 
+.return-shipment-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.return-shipment-compact-grid .summary-row {
+  align-content: start;
+  gap: 2px;
+}
+
+.return-shipment-compact-grid small {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
 .order-tracking-summary-card .summary-row a,
 .inline-link {
   font-weight: 900;
@@ -5319,6 +5337,7 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .order-tracking-summary-card,
+  .return-shipment-compact-grid,
   .order-tracking-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5374,6 +5393,7 @@ summary.provider-response-heading::-webkit-details-marker {
   .order-secondary-detail-grid,
   .order-shipping-state-grid,
   .order-tracking-summary-card,
+  .return-shipment-compact-grid,
   .order-tracking-form {
     grid-template-columns: 1fr;
   }

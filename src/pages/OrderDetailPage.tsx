@@ -2986,56 +2986,65 @@ export function OrderDetailPage() {
                         {visibleShipmentExecution?.provider === 'try_oto' ? (
                           <div className="shipment-recovery-actions shipment-return-compact" aria-label="Try OTO return shipment">
                             <strong>Try OTO return shipment</strong>
-                            {visibleShipmentExecution.returnShipment ? (
-                              <>
-                                <span>
-                                  {getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}
-                                  {visibleShipmentExecution.returnShipment.returnOrderId
-                                    ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}`
-                                    : ''}
-                                </span>
-                                {visibleShipmentExecution.returnShipment.trackingNumber ? (
-                                  <div className="summary-row">
-                                    <span>Return tracking</span>
-                                    <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
-                                    {visibleShipmentExecution.returnShipment.trackingUrl ? (
-                                      <a
-                                        className="inline-link"
-                                        href={visibleShipmentExecution.returnShipment.trackingUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                      >
-                                        Open return tracking
-                                      </a>
-                                    ) : null}
-                                  </div>
-                                ) : null}
-                                {visibleShipmentExecution.returnShipment.carrierName ? (
-                                  <div className="summary-row">
-                                    <span>Return carrier</span>
-                                    <strong>{visibleShipmentExecution.returnShipment.carrierName}</strong>
-                                  </div>
-                                ) : null}
-                                {visibleShipmentExecution.returnShipment.barcode ? (
-                                  <div className="summary-row">
-                                    <span>Return barcode</span>
-                                    <strong>{visibleShipmentExecution.returnShipment.barcode}</strong>
-                                  </div>
-                                ) : null}
-                                {visibleShipmentExecution.returnShipment.labelUrl ? (
-                                  <a
-                                    className="inline-link"
-                                    href={visibleShipmentExecution.returnShipment.labelUrl}
-                                    target="_blank"
-                                    rel="noreferrer"
-                                  >
-                                    Open return label PDF
-                                  </a>
-                                ) : (
-                                  <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
-                                )}
-                                {isAdmin ? (
-                                  <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
+	                            {visibleShipmentExecution.returnShipment ? (
+	                              <>
+	                                <div className="return-shipment-compact-grid">
+	                                  <div className="summary-row">
+	                                    <span>Return status</span>
+	                                    <strong>{getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}</strong>
+	                                    {visibleShipmentExecution.returnShipment.returnOrderId ? (
+	                                      <small>{visibleShipmentExecution.returnShipment.returnOrderId}</small>
+	                                    ) : null}
+	                                    {visibleShipmentExecution.returnShipment.carrierName ? (
+	                                      <small>{visibleShipmentExecution.returnShipment.carrierName}</small>
+	                                    ) : null}
+	                                  </div>
+	                                  <div className="summary-row">
+	                                    <span>Return tracking</span>
+	                                    <strong className={visibleShipmentExecution.returnShipment.trackingNumber ? '' : 'muted'}>
+	                                      {visibleShipmentExecution.returnShipment.trackingNumber ?? 'Not available'}
+	                                    </strong>
+	                                    {visibleShipmentExecution.returnShipment.barcode &&
+	                                    visibleShipmentExecution.returnShipment.barcode !== visibleShipmentExecution.returnShipment.trackingNumber ? (
+	                                      <small>Barcode: {visibleShipmentExecution.returnShipment.barcode}</small>
+	                                    ) : null}
+	                                  </div>
+	                                  <div className="summary-row">
+	                                    <span>Tracking link</span>
+	                                    {visibleShipmentExecution.returnShipment.trackingUrl ? (
+	                                      <a
+	                                        className="inline-link"
+	                                        href={visibleShipmentExecution.returnShipment.trackingUrl}
+	                                        target="_blank"
+	                                        rel="noreferrer"
+	                                      >
+	                                        Open return tracking
+	                                      </a>
+	                                    ) : (
+	                                      <strong className="muted">Not available</strong>
+	                                    )}
+	                                  </div>
+	                                  <div className="summary-row">
+	                                    <span>Return label status</span>
+	                                    {visibleShipmentExecution.returnShipment.labelUrl ? (
+	                                      <a
+	                                        className="inline-link"
+	                                        href={visibleShipmentExecution.returnShipment.labelUrl}
+	                                        target="_blank"
+	                                        rel="noreferrer"
+	                                      >
+	                                        Open return label PDF
+	                                      </a>
+	                                    ) : (
+	                                      <>
+	                                        <strong className="muted">Not available</strong>
+	                                        <small>Printable return label unavailable</small>
+	                                      </>
+	                                    )}
+	                                  </div>
+	                                </div>
+	                                {isAdmin ? (
+	                                  <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                                     <strong>Return label discovery</strong>
                                     <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
                                     <div className="order-inline-actions">
@@ -3955,45 +3964,56 @@ export function OrderDetailPage() {
                         </a>
                       </div>
                     ) : null}
-                    {visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
-                      <div className="shipment-recovery-actions" aria-label="Try OTO return shipment">
-                        <strong>Try OTO return shipment</strong>
-                        <span>
-                          {getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}
-                          {visibleShipmentExecution.returnShipment.returnOrderId ? ` · ${visibleShipmentExecution.returnShipment.returnOrderId}` : ''}
-                        </span>
-                        {visibleShipmentExecution.returnShipment.trackingNumber ? (
-                          <div className="summary-row">
-                            <span>Return tracking</span>
-                            <strong>{visibleShipmentExecution.returnShipment.trackingNumber}</strong>
-                            {visibleShipmentExecution.returnShipment.trackingUrl ? (
-                              <a className="inline-link" href={visibleShipmentExecution.returnShipment.trackingUrl} target="_blank" rel="noreferrer">
-                                Open return tracking
-                              </a>
-                            ) : null}
-                          </div>
-                        ) : null}
-                        {visibleShipmentExecution.returnShipment.carrierName ? (
-                          <div className="summary-row">
-                            <span>Return carrier</span>
-                            <strong>{visibleShipmentExecution.returnShipment.carrierName}</strong>
-                          </div>
-                        ) : null}
-                        {visibleShipmentExecution.returnShipment.barcode ? (
-                          <div className="summary-row">
-                            <span>Return barcode</span>
-                            <strong>{visibleShipmentExecution.returnShipment.barcode}</strong>
-                          </div>
-                        ) : null}
-                        {visibleShipmentExecution.returnShipment.labelUrl ? (
-                          <a className="inline-link" href={visibleShipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
-                            Open return label PDF
-                          </a>
-                        ) : (
-                          <span className="muted">{getTryOtoReturnPendingLabel(visibleShipmentExecution.returnShipment)}</span>
-                        )}
-                        {isAdmin ? (
-                          <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
+	                    {visibleShipmentExecution?.provider === 'try_oto' && visibleShipmentExecution.returnShipment ? (
+	                      <div className="shipment-recovery-actions shipment-return-compact" aria-label="Try OTO return shipment">
+	                        <strong>Try OTO return shipment</strong>
+	                        <div className="return-shipment-compact-grid">
+	                          <div className="summary-row">
+	                            <span>Return status</span>
+	                            <strong>{getTryOtoReturnStatusLabel(visibleShipmentExecution.returnShipment)}</strong>
+	                            {visibleShipmentExecution.returnShipment.returnOrderId ? (
+	                              <small>{visibleShipmentExecution.returnShipment.returnOrderId}</small>
+	                            ) : null}
+	                            {visibleShipmentExecution.returnShipment.carrierName ? (
+	                              <small>{visibleShipmentExecution.returnShipment.carrierName}</small>
+	                            ) : null}
+	                          </div>
+	                          <div className="summary-row">
+	                            <span>Return tracking</span>
+	                            <strong className={visibleShipmentExecution.returnShipment.trackingNumber ? '' : 'muted'}>
+	                              {visibleShipmentExecution.returnShipment.trackingNumber ?? 'Not available'}
+	                            </strong>
+	                            {visibleShipmentExecution.returnShipment.barcode &&
+	                            visibleShipmentExecution.returnShipment.barcode !== visibleShipmentExecution.returnShipment.trackingNumber ? (
+	                              <small>Barcode: {visibleShipmentExecution.returnShipment.barcode}</small>
+	                            ) : null}
+	                          </div>
+	                          <div className="summary-row">
+	                            <span>Tracking link</span>
+	                            {visibleShipmentExecution.returnShipment.trackingUrl ? (
+	                              <a className="inline-link" href={visibleShipmentExecution.returnShipment.trackingUrl} target="_blank" rel="noreferrer">
+	                                Open return tracking
+	                              </a>
+	                            ) : (
+	                              <strong className="muted">Not available</strong>
+	                            )}
+	                          </div>
+	                          <div className="summary-row">
+	                            <span>Return label status</span>
+	                            {visibleShipmentExecution.returnShipment.labelUrl ? (
+	                              <a className="inline-link" href={visibleShipmentExecution.returnShipment.labelUrl} target="_blank" rel="noreferrer">
+	                                Open return label PDF
+	                              </a>
+	                            ) : (
+	                              <>
+	                                <strong className="muted">Not available</strong>
+	                                <small>Printable return label unavailable</small>
+	                              </>
+	                            )}
+	                          </div>
+	                        </div>
+	                        {isAdmin ? (
+	                          <div className="shipment-recovery-actions" aria-label="Try OTO return details action">
                             <strong>Return label discovery</strong>
                             <span>Probe Try OTO getReturnDetails for label, AWB, PDF, tracking, and status metadata.</span>
                             <div className="order-inline-actions">

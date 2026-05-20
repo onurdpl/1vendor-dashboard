@@ -2555,7 +2555,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const probeButton = within(probeSection).getByRole('button', { name: 'Probe Shopify return label upload' });
     expect(probeButton).toBeEnabled();
     expect(within(probeSection).getByText('Return label URL').nextElementSibling).toHaveTextContent('missing');
-    expect(await screen.findByText('Use this return tracking code/link for return shipment. Printable return label unavailable.')).toBeInTheDocument();
+    expect(await screen.findByText('Printable return label unavailable')).toBeInTheDocument();
     await user.click(probeButton);
 
     expect(probeShopifyReturnLabelUploadMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961');
@@ -3267,7 +3267,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
     expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Use this return tracking code/link for return shipment. Printable return label unavailable.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Printable return label unavailable')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Open return label PDF' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
@@ -3351,7 +3351,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
     expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Return created. Return tracking code will appear here when available.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Printable return label unavailable')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
     expect(createReturnShipmentLabelMock).not.toHaveBeenCalled();
   });
@@ -3433,7 +3433,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(screen.queryByText('newReturn')).not.toBeInTheDocument();
     expect((await screen.findAllByText(/Return created/)).length).toBeGreaterThan(0);
-    expect((await screen.findAllByText('Return created. Return tracking code will appear here when available.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Printable return label unavailable')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Finalize Try OTO return shipment' })).not.toBeInTheDocument();
   });
 
