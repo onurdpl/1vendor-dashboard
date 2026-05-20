@@ -94,10 +94,51 @@ export type KargonomiClient = Pick<
   | 'getShipment'
 >;
 
+export type KargonomiDestinationLookupClient = Pick<KargonomiHttpClient, 'listStates' | 'listCities'>;
+
 export type KargonomiConfirmShippingPriceInput = {
   shipmentId: string | number;
   shippingProviderId: string | number;
 };
+
+export type KargonomiDestinationAddressInput = {
+  province?: string | null;
+  city?: string | null;
+  district?: string | null;
+  countryId?: string | number | null;
+};
+
+export type KargonomiDestinationResolution =
+  | {
+      ok: true;
+      buyerStateId: string;
+      buyerCityId: string;
+      stateName: string;
+      cityName: string;
+      stateSource: 'province' | 'city';
+      citySource: 'district';
+    }
+  | {
+      ok: false;
+      reason:
+        | 'missing_state_text'
+        | 'missing_district_text'
+        | 'state_lookup_failed'
+        | 'city_lookup_failed'
+        | 'state_unresolved'
+        | 'state_ambiguous'
+        | 'city_unresolved'
+        | 'city_ambiguous';
+      message: string;
+    };
+
+type KargonomiLocationItem = {
+  id: string;
+  name: string;
+};
+
+const stateLookupCache = new Map<string, Promise<KargonomiLocationItem[]>>();
+const cityLookupCache = new Map<string, Promise<KargonomiLocationItem[]>>();
 
 function compactRecord<T extends Record<string, unknown>>(value: T) {
   return Object.fromEntries(
@@ -138,6 +179,175 @@ function readNumber(value: Record<string, unknown>, keys: string[]) {
   }
 
   return null;
+}
+
+function normalizeKargonomiLocationText(value: string | null | undefined) {
+  return (value ?? '')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[çÇ]/g, 'c')
+    .replace(/[ğĞ]/g, 'g')
+    .replace(/[ıİ]/g, 'i')
+    .replace(/[öÖ]/g, 'o')
+    .replace(/[şŞ]/g, 's')
+    .replace(/[üÜ]/g, 'u')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function extractLocationItems(value: unknown, type: 'state' | 'city'): KargonomiLocationItem[] {
+  const list = Array.isArray(value)
+    ? value
+    : isRecord(value)
+      ? (['data', 'items', 'result', 'results', 'states', 'cities'] as const)
+          .map((key) => value[key])
+          .find(Array.isArray) ?? []
+      : [];
+
+  return list.filter(isRecord).flatMap((item) => {
+    const id = readString(item, ['id', `${type}_id`, `${type}Id`, 'value']);
+    const name = readString(item, ['name', 'title', `${type}_name`, `${type}Name`, 'label']);
+    return id && name ? [{ id, name }] : [];
+  });
+}
+
+async function cachedKargonomiStates(
+  client: KargonomiDestinationLookupClient,
+  countryId?: string | number | null,
+) {
+  const key = countryId === undefined || countryId === null || countryId === '' ? 'default' : String(countryId);
+  let pending = stateLookupCache.get(key);
+  if (!pending) {
+    pending = client.listStates(countryId ?? undefined).then((response) => {
+      if (!response.ok) {
+        throw new Error(`Kargonomi states lookup failed with HTTP ${response.status}.`);
+      }
+      return extractLocationItems(response.body, 'state');
+    });
+    stateLookupCache.set(key, pending);
+  }
+  return pending;
+}
+
+async function cachedKargonomiCities(client: KargonomiDestinationLookupClient, stateId: string | number) {
+  const key = String(stateId);
+  let pending = cityLookupCache.get(key);
+  if (!pending) {
+    pending = client.listCities(stateId).then((response) => {
+      if (!response.ok) {
+        throw new Error(`Kargonomi cities lookup failed with HTTP ${response.status}.`);
+      }
+      return extractLocationItems(response.body, 'city');
+    });
+    cityLookupCache.set(key, pending);
+  }
+  return pending;
+}
+
+function findExactLocationMatch(items: KargonomiLocationItem[], text: string) {
+  const normalizedText = normalizeKargonomiLocationText(text);
+  const matches = items.filter((item) => normalizeKargonomiLocationText(item.name) === normalizedText);
+  if (matches.length === 1) {
+    return { status: 'matched' as const, item: matches[0] };
+  }
+  return { status: matches.length > 1 ? ('ambiguous' as const) : ('unresolved' as const) };
+}
+
+export function clearKargonomiLocationLookupCache() {
+  stateLookupCache.clear();
+  cityLookupCache.clear();
+}
+
+export async function resolveKargonomiDestinationAddress(
+  input: KargonomiDestinationAddressInput,
+  client: KargonomiDestinationLookupClient,
+): Promise<KargonomiDestinationResolution> {
+  const stateText = input.province?.trim() || input.city?.trim() || null;
+  const stateSource = input.province?.trim() ? 'province' : 'city';
+  const districtText = input.district?.trim() || null;
+
+  if (!stateText) {
+    return {
+      ok: false,
+      reason: 'missing_state_text',
+      message: 'Kargonomi destination province/city is missing from the order shipping address.',
+    };
+  }
+
+  if (!districtText) {
+    return {
+      ok: false,
+      reason: 'missing_district_text',
+      message: 'Kargonomi destination district is missing from the order shipping address.',
+    };
+  }
+
+  let states: KargonomiLocationItem[];
+  try {
+    states = await cachedKargonomiStates(client, input.countryId);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'state_lookup_failed',
+      message: error instanceof Error ? error.message : 'Kargonomi states lookup failed.',
+    };
+  }
+
+  const stateMatch = findExactLocationMatch(states, stateText);
+  if (stateMatch.status === 'ambiguous') {
+    return {
+      ok: false,
+      reason: 'state_ambiguous',
+      message: `Kargonomi destination state match is ambiguous for "${stateText}".`,
+    };
+  }
+  if (stateMatch.status === 'unresolved' || !stateMatch.item) {
+    return {
+      ok: false,
+      reason: 'state_unresolved',
+      message: `Kargonomi destination state could not be resolved for "${stateText}".`,
+    };
+  }
+
+  let cities: KargonomiLocationItem[];
+  try {
+    cities = await cachedKargonomiCities(client, stateMatch.item.id);
+  } catch (error) {
+    return {
+      ok: false,
+      reason: 'city_lookup_failed',
+      message: error instanceof Error ? error.message : 'Kargonomi cities lookup failed.',
+    };
+  }
+
+  const cityMatch = findExactLocationMatch(cities, districtText);
+  if (cityMatch.status === 'ambiguous') {
+    return {
+      ok: false,
+      reason: 'city_ambiguous',
+      message: `Kargonomi destination city/district match is ambiguous for "${districtText}".`,
+    };
+  }
+  if (cityMatch.status === 'unresolved' || !cityMatch.item) {
+    return {
+      ok: false,
+      reason: 'city_unresolved',
+      message: `Kargonomi destination city/district could not be resolved for "${districtText}".`,
+    };
+  }
+
+  return {
+    ok: true,
+    buyerStateId: stateMatch.item.id,
+    buyerCityId: cityMatch.item.id,
+    stateName: stateMatch.item.name,
+    cityName: cityMatch.item.name,
+    stateSource,
+    citySource: 'district',
+  };
 }
 
 export function buildKargonomiShipmentCreatePayload(input: KargonomiShipmentCreatePayloadInput) {
@@ -476,6 +686,21 @@ export class KargonomiHttpClient {
 
   async getShipment(shipmentId: string | number): Promise<KargonomiRawHttpResponse> {
     return this.request(`/shipments/${encodeURIComponent(String(shipmentId))}`, {
+      method: 'GET',
+    });
+  }
+
+  async listStates(countryId?: string | number): Promise<KargonomiRawHttpResponse> {
+    const suffix = countryId === undefined || countryId === null || String(countryId).trim() === ''
+      ? ''
+      : `/${encodeURIComponent(String(countryId))}`;
+    return this.request(`/states${suffix}`, {
+      method: 'GET',
+    });
+  }
+
+  async listCities(stateId: string | number): Promise<KargonomiRawHttpResponse> {
+    return this.request(`/cities/${encodeURIComponent(String(stateId))}`, {
       method: 'GET',
     });
   }

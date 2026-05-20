@@ -54,6 +54,7 @@ const {
 );
 const { KargoEntegratorAdapter, ShippingProviderExecutionError, TryOtoAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
 const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
+const { clearKargonomiLocationLookupCache } = await import('../backend/src/modules/shipping/kargonomi-provider.adapter.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -176,6 +177,7 @@ describe('shipping execution foundation', () => {
   let storedExecution: ReturnType<typeof buildShipmentExecution>;
 
   beforeEach(() => {
+    clearKargonomiLocationLookupCache();
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.vendorAllocation.update.mockReset();
     prismaMock.vendorShippingConfig.findUnique.mockReset();
@@ -445,6 +447,98 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('resolves Kargonomi destination IDs from order shipping address before shipment create', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: null,
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress1: 'Test Mah. Test Sok. No:1',
+          shippingCity: 'İstanbul',
+          shippingDistrict: 'Kadıköy',
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'kg-1027',
+      trackingNumber: 'KG-TRACK-1027',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+    const kargonomiDestinationClient = {
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 828, name: 'Kadıköy' }] },
+      }),
+    };
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient,
+      },
+    );
+
+    expect(kargonomiDestinationClient.listStates).toHaveBeenCalled();
+    expect(kargonomiDestinationClient.listCities).toHaveBeenCalledWith('34');
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'kargonomi',
+        requestSnapshot: expect.objectContaining({
+          buyer: expect.objectContaining({
+            buyer_state_id: '34',
+            buyer_city_id: '828',
+          }),
+          destinationResolution: expect.objectContaining({
+            source: 'order_shipping_address_lookup',
+            resolved: true,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('blocks Kargonomi before provider call when warehouse ID is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
@@ -497,7 +591,7 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
-  it('blocks Kargonomi before provider call when Kargonomi state or city IDs are missing', async () => {
+  it('blocks Kargonomi before provider call when destination cannot resolve', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'KARGONOMI',
@@ -540,10 +634,105 @@ describe('shipping execution foundation', () => {
           },
           vendorId: 'sporjinal',
           adapter,
+          kargonomiDestinationClient: {
+            listStates: vi.fn().mockResolvedValue({
+              ok: true,
+              status: 200,
+              contentType: 'application/json',
+              body: { data: [] },
+            }),
+            listCities: vi.fn(),
+          },
         },
       ),
-    ).rejects.toThrow('buyer.buyer_state_id');
+    ).rejects.toThrow('Kargonomi destination could not be resolved from the order shipping address.');
     expect(adapter.createShipment).not.toHaveBeenCalled();
+  });
+
+  it('uses Kargonomi fallback buyer IDs only when address lookup cannot resolve', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: {
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(
+      buildAllocation({
+        order: {
+          id: 'order-1',
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 555 111 22 33',
+          shippingAddress1: 'Test Mah. Test Sok. No:1',
+          shippingCity: 'Unknown',
+          shippingDistrict: 'Unknown',
+        },
+      }),
+    );
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'kg-1027',
+      trackingNumber: 'KG-TRACK-1027',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true },
+    });
+
+    await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+        kargonomiDestinationClient: {
+          listStates: vi.fn().mockResolvedValue({
+            ok: true,
+            status: 200,
+            contentType: 'application/json',
+            body: { data: [] },
+          }),
+          listCities: vi.fn(),
+        },
+      },
+    );
+
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          buyer: expect.objectContaining({
+            buyer_state_id: '34',
+            buyer_city_id: '828',
+          }),
+          destinationResolution: expect.objectContaining({
+            source: 'fallback_metadata_after_lookup_failure',
+            resolved: false,
+          }),
+        }),
+      }),
+    );
   });
 
   it('uses Sporjinal Kargo Entegratör warehouse 1774 and cargo integration 2547', async () => {
@@ -1640,7 +1829,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('tr-test-store-001');
   });
 
-  it('reports Kargonomi buyer state and city ids as required readiness fields', async () => {
+  it('does not require Kargonomi fallback buyer IDs for provider readiness', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-kargonomi',
       vendorId: 'sporjinal',
@@ -1684,18 +1873,15 @@ describe('shipping execution foundation', () => {
 
     expect(diagnostics).toMatchObject({
       provider: 'kargonomi',
-      executionReady: false,
+      executionReady: true,
       providerSelected: true,
       warehouseIdConfigured: true,
       defaultDesiConfigured: true,
-      missing: expect.arrayContaining([
-        'VENDOR_KARGONOMI_BUYER_STATE_ID',
-        'VENDOR_KARGONOMI_BUYER_CITY_ID',
-      ]),
+      missing: [],
     });
   });
 
-  it('marks Kargonomi ready when warehouse and buyer location ids are configured', async () => {
+  it('keeps Kargonomi ready when PoC fallback buyer location ids are configured', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-kargonomi',
       vendorId: 'sporjinal',

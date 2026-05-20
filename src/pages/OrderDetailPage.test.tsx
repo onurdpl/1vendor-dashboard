@@ -1351,8 +1351,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
-    const buyerStateInput = await screen.findByLabelText('Kargonomi buyer state ID');
-    const buyerCityInput = await screen.findByLabelText('Kargonomi buyer city ID');
+    const buyerStateInput = await screen.findByLabelText('Fallback Kargonomi buyer state ID (PoC override)');
+    const buyerCityInput = await screen.findByLabelText('Fallback Kargonomi buyer city ID (PoC override)');
     await user.clear(warehouseInput);
     await user.type(warehouseInput, '112668');
     await user.clear(buyerStateInput);

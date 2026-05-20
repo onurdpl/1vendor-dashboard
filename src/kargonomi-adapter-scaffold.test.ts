@@ -9,8 +9,10 @@ import {
   KARGONOMI_ENV_NAMES,
   KARGONOMI_PROVIDER_DISPLAY_NAME,
   KARGONOMI_PROVIDER_KEY,
+  clearKargonomiLocationLookupCache,
   mapKargonomiStatusToInternalStatus,
   parseKargonomiShipment,
+  resolveKargonomiDestinationAddress,
 } from '../backend/src/modules/shipping/kargonomi-provider.adapter.js';
 
 function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
@@ -497,6 +499,9 @@ describe('Kargonomi forward adapter scaffold', () => {
     await client.confirmShippingPrice({ shipmentId: 123, shippingProviderId: 5 });
     await client.getShipmentBarcodePdf(123);
     await client.getShipment(123);
+    await client.listStates();
+    await client.listStates(225);
+    await client.listCities(34);
 
     expect(calls.map((call) => [call.init.method, call.url])).toEqual([
       ['POST', 'https://app.kargonomi.com.tr/api/v1/shipments'],
@@ -504,6 +509,9 @@ describe('Kargonomi forward adapter scaffold', () => {
       ['POST', 'https://app.kargonomi.com.tr/api/v1/confirm-shipping-price'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123/barcode?format=pdf'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/states'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/states/225'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/cities/34'],
     ]);
 
     expect(JSON.parse(String(calls[0].init.body))).toEqual({
@@ -518,6 +526,71 @@ describe('Kargonomi forward adapter scaffold', () => {
       },
     });
     expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=5');
+  });
+
+  it('resolves Turkish destination state and district IDs with case and diacritic normalization', async () => {
+    clearKargonomiLocationLookupCache();
+    const client = {
+      listStates: async () => ({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: async (stateId: string | number) => ({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 828, name: stateId === '34' || stateId === 34 ? 'Kadıköy' : 'Other' }] },
+      }),
+    };
+
+    await expect(
+      resolveKargonomiDestinationAddress(
+        {
+          city: 'ISTANBUL',
+          district: 'KADIKOY',
+        },
+        client,
+      ),
+    ).resolves.toMatchObject({
+      ok: true,
+      buyerStateId: '34',
+      buyerCityId: '828',
+      stateSource: 'city',
+      citySource: 'district',
+    });
+  });
+
+  it('does not guess when Kargonomi district matching is unresolved', async () => {
+    clearKargonomiLocationLookupCache();
+    const client = {
+      listStates: async () => ({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 34, name: 'İstanbul' }] },
+      }),
+      listCities: async () => ({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: 828, name: 'Kadıköy' }] },
+      }),
+    };
+
+    await expect(
+      resolveKargonomiDestinationAddress(
+        {
+          city: 'İstanbul',
+          district: 'Beşiktaş',
+        },
+        client,
+      ),
+    ).resolves.toMatchObject({
+      ok: false,
+      reason: 'city_unresolved',
+    });
   });
 
   it('keeps barcode response as unknown raw provider body', async () => {

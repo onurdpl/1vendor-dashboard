@@ -132,7 +132,14 @@ Shopify mapping notes:
 - Buyer name can be composed from existing Shopify shipping/customer name fields when present.
 - Buyer phone can map from existing Shopify shipping/customer/billing phone fields if available.
 - Buyer address can map from existing Shopify shipping address lines.
-- Kargonomi requires numeric city/state IDs, not city/district free text. Mapping from Shopify city/district text to Kargonomi `state_id` and `city_id` requires either stored vendor/admin mapping or a lookup against `/states/{countryId?}` and `/cities/{stateId}`. Exact matching rules are unknown.
+- Kargonomi requires numeric city/state IDs, not city/district free text.
+- Normal shipment creation should resolve destination IDs from the order shipping address with Kargonomi lookup endpoints:
+  - `GET /states/{countryId?}` for the province/state ID.
+  - `GET /cities/{stateId}` for the district/city ID under the resolved state.
+- The implementation uses exact normalized text matching first and handles Turkish casing/diacritics. It must not guess ambiguous or unresolved locations.
+- Fallback buyer state/city metadata exists only as a PoC/manual override. It is not the normal production path because each order can have a different destination.
+- If destination IDs cannot be resolved from the order and no explicit PoC fallback is configured, Kargonomi shipment creation is blocked before `POST /shipments`.
+- Production still needs ongoing validation against real Shopify address formats and Kargonomi location names.
 
 ### Package / Desi Fields
 
@@ -297,7 +304,7 @@ Implemented / likely adjusted adapter behavior:
   - confirm shipping price called/succeeded
   - barcode fetch called/succeeded
 - Preferred `shipping_provider_id` can be supplied through provider metadata; otherwise `-1` requests automatic cheapest selection.
-- Warehouse and Kargonomi city/state ID mappings are required before provider execution.
+- Warehouse ID is required before provider execution. Buyer state/city IDs are resolved from the order destination; fallback metadata is PoC-only.
 - Webhook signature verification must be implemented with raw-body access before enabling ingest.
 
 Unknown fields needing provider or PoC confirmation:

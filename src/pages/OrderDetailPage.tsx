@@ -599,11 +599,19 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.defaultWarehouseId.trim())) {
     errors.push('Kargonomi warehouse ID must be numeric.');
   }
-  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.kargonomiBuyerStateId.trim())) {
-    errors.push('Kargonomi buyer state ID must be numeric.');
+  if (
+    draft.preferredProvider === 'kargonomi' &&
+    draft.kargonomiBuyerStateId.trim() &&
+    !/^\d+$/.test(draft.kargonomiBuyerStateId.trim())
+  ) {
+    errors.push('Fallback Kargonomi buyer state ID must be numeric.');
   }
-  if (draft.preferredProvider === 'kargonomi' && !/^\d+$/.test(draft.kargonomiBuyerCityId.trim())) {
-    errors.push('Kargonomi buyer city ID must be numeric.');
+  if (
+    draft.preferredProvider === 'kargonomi' &&
+    draft.kargonomiBuyerCityId.trim() &&
+    !/^\d+$/.test(draft.kargonomiBuyerCityId.trim())
+  ) {
+    errors.push('Fallback Kargonomi buyer city ID must be numeric.');
   }
   const defaultDesi = Number(draft.defaultDesi);
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
@@ -642,15 +650,27 @@ function buildShippingConfigUpdate(
   }
 
   if (draft.preferredProvider === 'kargonomi') {
+    const providerMetadata = { ...metadata };
+    delete providerMetadata.kargonomiBuyerStateId;
+    delete providerMetadata.kargonomiBuyerCityId;
+    delete providerMetadata.buyerStateId;
+    delete providerMetadata.buyerCityId;
+    delete providerMetadata.buyer_state_id;
+    delete providerMetadata.buyer_city_id;
+    const fallbackBuyerStateId = draft.kargonomiBuyerStateId.trim();
+    const fallbackBuyerCityId = draft.kargonomiBuyerCityId.trim();
+    if (fallbackBuyerStateId) {
+      providerMetadata.kargonomiBuyerStateId = fallbackBuyerStateId;
+    }
+    if (fallbackBuyerCityId) {
+      providerMetadata.kargonomiBuyerCityId = fallbackBuyerCityId;
+    }
+
     return {
       ...baseUpdate,
       cargoIntegrationId: null,
       defaultWarehouseId: draft.defaultWarehouseId.trim(),
-      providerMetadata: {
-        ...metadata,
-        kargonomiBuyerStateId: draft.kargonomiBuyerStateId.trim(),
-        kargonomiBuyerCityId: draft.kargonomiBuyerCityId.trim(),
-      },
+      providerMetadata,
       warehouses: [
         {
           warehouseId: draft.defaultWarehouseId.trim(),
@@ -2529,7 +2549,7 @@ export function OrderDetailPage() {
             {isKargonomiConfigDraft ? (
               <>
                 <label className="field">
-                  <span>Kargonomi buyer state ID</span>
+                  <span>Fallback Kargonomi buyer state ID (PoC override)</span>
                   <input
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -2543,7 +2563,7 @@ export function OrderDetailPage() {
                   />
                 </label>
                 <label className="field">
-                  <span>Kargonomi buyer city ID</span>
+                  <span>Fallback Kargonomi buyer city ID (PoC override)</span>
                   <input
                     inputMode="numeric"
                     pattern="[0-9]*"
@@ -3870,11 +3890,11 @@ export function OrderDetailPage() {
                               <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
                             </div>
                             <div className="summary-row">
-                              <span>Kargonomi buyer state ID</span>
+                              <span>Kargonomi fallback buyer state ID</span>
                               <strong>{kargonomiBuyerStateId || '—'}</strong>
                             </div>
                             <div className="summary-row">
-                              <span>Kargonomi buyer city ID</span>
+                              <span>Kargonomi fallback buyer city ID</span>
                               <strong>{kargonomiBuyerCityId || '—'}</strong>
                             </div>
                           </>
@@ -4961,11 +4981,11 @@ export function OrderDetailPage() {
                           <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
                         </div>
                         <div className="summary-row">
-                          <span>Kargonomi buyer state ID</span>
+                          <span>Kargonomi fallback buyer state ID</span>
                           <strong>{kargonomiBuyerStateId || '—'}</strong>
                         </div>
                         <div className="summary-row">
-                          <span>Kargonomi buyer city ID</span>
+                          <span>Kargonomi fallback buyer city ID</span>
                           <strong>{kargonomiBuyerCityId || '—'}</strong>
                         </div>
                       </>

@@ -13,6 +13,11 @@ import {
   ShippingProviderExecutionError,
   type ShippingProviderAdapter,
 } from './shipping-provider.adapter.js';
+import {
+  KargonomiHttpClient,
+  resolveKargonomiDestinationAddress,
+  type KargonomiDestinationLookupClient,
+} from './kargonomi-provider.adapter.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
@@ -1226,6 +1231,10 @@ function buildKargonomiBuyer(input: {
   customerName: string | null | undefined;
   customerEmail: string | null | undefined;
   providerMetadata: unknown;
+  resolvedDestination?: {
+    buyerStateId?: string | null;
+    buyerCityId?: string | null;
+  };
   customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
 }) {
   const orderRecord = isRecord(input.order) ? input.order : {};
@@ -1250,6 +1259,7 @@ function buildKargonomiBuyer(input: {
         'shippingStateId',
         'shipping_state_id',
       ]) ??
+      input.resolvedDestination?.buyerStateId ??
       resolveKargonomiAddressId(input.providerMetadata, ['kargonomiBuyerStateId', 'buyerStateId', 'buyer_state_id']),
     buyer_city_id:
       resolveKargonomiAddressId(orderRecord, [
@@ -1259,6 +1269,7 @@ function buildKargonomiBuyer(input: {
         'shippingCityId',
         'shipping_city_id',
       ]) ??
+      input.resolvedDestination?.buyerCityId ??
       resolveKargonomiAddressId(input.providerMetadata, ['kargonomiBuyerCityId', 'buyerCityId', 'buyer_city_id']),
   };
   const missingFields = Object.entries(buyer)
@@ -1269,6 +1280,62 @@ function buildKargonomiBuyer(input: {
     buyer,
     missingFields,
   };
+}
+
+function readKargonomiDestinationText(
+  order: unknown,
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'],
+) {
+  const orderRecord = isRecord(order) ? order : {};
+  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const overrides = normalizeCustomerOverrides(customerOverrides);
+  const province =
+    readString(orderRecord, ['shippingProvince', 'province', 'shippingState', 'state']) ??
+    webhookAddress?.shippingCity ??
+    null;
+  const city = overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null;
+  const district =
+    overrides.district ??
+    readString(orderRecord, [
+      'shippingDistrict',
+      'district',
+      'shippingCounty',
+      'county',
+      'shippingCityArea',
+      'cityArea',
+      'billingDistrict',
+      'billingCounty',
+      'billingCityArea',
+    ]) ??
+    webhookAddress?.shippingDistrict ??
+    readStoredOrderWebhookDistrict(orderRecord) ??
+    null;
+
+  return {
+    province,
+    city,
+    district,
+  };
+}
+
+function hasKargonomiOrderDestinationIds(order: unknown) {
+  const orderRecord = isRecord(order) ? order : {};
+  return Boolean(
+    resolveKargonomiAddressId(orderRecord, [
+      'kargonomiBuyerStateId',
+      'buyerStateId',
+      'buyer_state_id',
+      'shippingStateId',
+      'shipping_state_id',
+    ]) &&
+      resolveKargonomiAddressId(orderRecord, [
+        'kargonomiBuyerCityId',
+        'buyerCityId',
+        'buyer_city_id',
+        'shippingCityId',
+        'shipping_city_id',
+      ]),
+  );
 }
 
 function resolveKargoPaymentType(orderRecord: Record<string, unknown>) {
@@ -1656,14 +1723,10 @@ export async function getShippingProviderReadinessDiagnostics(
 
   if (diagnostics.provider === 'kargonomi') {
     const warehouseIdConfigured = Boolean(resolveKargonomiWarehouseId(config, env));
-    const buyerStateIdConfigured = Boolean(resolveKargonomiBuyerStateId(config.providerMetadata));
-    const buyerCityIdConfigured = Boolean(resolveKargonomiBuyerCityId(config.providerMetadata));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
       !warehouseIdConfigured ? 'VENDOR_KARGONOMI_WAREHOUSE_ID' : null,
-      !buyerStateIdConfigured ? 'VENDOR_KARGONOMI_BUYER_STATE_ID' : null,
-      !buyerCityIdConfigured ? 'VENDOR_KARGONOMI_BUYER_CITY_ID' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
     ].filter((value): value is string => Boolean(value));
 
@@ -1674,8 +1737,6 @@ export async function getShippingProviderReadinessDiagnostics(
         diagnostics.executionReady &&
         configProviderSelected &&
         warehouseIdConfigured &&
-        buyerStateIdConfigured &&
-        buyerCityIdConfigured &&
         defaultDesiConfigured,
       warehouseIdConfigured,
       defaultDesiConfigured,
@@ -3976,6 +4037,7 @@ async function buildShipmentRequestPreview(
   options: {
     vendorId: string;
     env?: AppEnv;
+    kargonomiDestinationClient?: KargonomiDestinationLookupClient;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
@@ -4084,11 +4146,91 @@ async function buildShipmentRequestPreview(
     customerEmail: allocation.order.customerEmail,
     customerOverrides: input.customerOverrides,
   });
+  let kargonomiDestinationResolution: Record<string, unknown> | null = null;
+  let resolvedKargonomiDestination: { buyerStateId?: string | null; buyerCityId?: string | null } | undefined;
+  if (provider === ShippingProvider.KARGONOMI && !hasKargonomiOrderDestinationIds(allocation.order)) {
+    const fallbackStateId = resolveKargonomiBuyerStateId(config.providerMetadata);
+    const fallbackCityId = resolveKargonomiBuyerCityId(config.providerMetadata);
+    const destinationClient =
+      options.kargonomiDestinationClient ??
+      (options.env?.KARGONOMI_BASE_URL && options.env.KARGONOMI_API_TOKEN ? new KargonomiHttpClient(options.env) : null);
+
+    if (destinationClient) {
+      const destination = readKargonomiDestinationText(allocation.order, input.customerOverrides);
+      const resolution = await resolveKargonomiDestinationAddress(destination, destinationClient);
+      if (resolution.ok) {
+        resolvedKargonomiDestination = {
+          buyerStateId: resolution.buyerStateId,
+          buyerCityId: resolution.buyerCityId,
+        };
+        kargonomiDestinationResolution = {
+          source: 'order_shipping_address_lookup',
+          resolved: true,
+          stateSource: resolution.stateSource,
+          citySource: resolution.citySource,
+          buyerStateIdPresent: true,
+          buyerCityIdPresent: true,
+        };
+      } else {
+        kargonomiDestinationResolution = {
+          source: fallbackStateId && fallbackCityId ? 'fallback_metadata_after_lookup_failure' : 'order_shipping_address_lookup',
+          resolved: false,
+          reason: resolution.reason,
+          buyerStateIdPresent: Boolean(fallbackStateId),
+          buyerCityIdPresent: Boolean(fallbackCityId),
+        };
+        if (!fallbackStateId || !fallbackCityId) {
+          throw new Error(
+            [
+              'Kargonomi destination could not be resolved from the order shipping address.',
+              resolution.message,
+              'Missing required shipment fields:',
+              !fallbackStateId ? '- buyer.buyer_state_id' : null,
+              !fallbackCityId ? '- buyer.buyer_city_id' : null,
+              '',
+              'Provider request blocked before create call.',
+            ]
+              .filter((line): line is string => Boolean(line))
+              .join('\n'),
+          );
+        }
+      }
+    } else if (!fallbackStateId || !fallbackCityId) {
+      kargonomiDestinationResolution = {
+        source: 'unavailable_lookup',
+        resolved: false,
+        reason: 'lookup_client_unavailable',
+        buyerStateIdPresent: Boolean(fallbackStateId),
+        buyerCityIdPresent: Boolean(fallbackCityId),
+      };
+      throw new Error(
+        [
+          'Kargonomi destination lookup is unavailable and fallback buyer state/city IDs are not configured.',
+          'Missing required shipment fields:',
+          !fallbackStateId ? '- buyer.buyer_state_id' : null,
+          !fallbackCityId ? '- buyer.buyer_city_id' : null,
+          '',
+          'Provider request blocked before create call.',
+        ]
+          .filter((line): line is string => Boolean(line))
+          .join('\n'),
+      );
+    } else {
+      kargonomiDestinationResolution = {
+        source: 'fallback_metadata',
+        resolved: false,
+        reason: 'lookup_client_unavailable',
+        buyerStateIdPresent: true,
+        buyerCityIdPresent: true,
+      };
+    }
+  }
   const kargonomiBuyer = buildKargonomiBuyer({
     order: allocation.order,
     customerName: allocation.order.customerName,
     customerEmail: allocation.order.customerEmail,
     providerMetadata: config.providerMetadata,
+    resolvedDestination: resolvedKargonomiDestination,
     customerOverrides: input.customerOverrides,
   });
   const missingCustomerFields = [
@@ -4180,6 +4322,11 @@ async function buildShipmentRequestPreview(
           warehouseId: kargonomiWarehouseId,
           shippingProviderId: kargonomiShippingProviderId,
           buyer: kargonomiBuyer.buyer,
+          destinationResolution: kargonomiDestinationResolution ?? {
+            source: hasKargonomiOrderDestinationIds(allocation.order) ? 'order_stored_ids' : 'fallback_metadata',
+            buyerStateIdPresent: Boolean(kargonomiBuyer.buyer.buyer_state_id),
+            buyerCityIdPresent: Boolean(kargonomiBuyer.buyer.buyer_city_id),
+          },
           packages: [
             {
               content: lineItems.map((lineItem) => lineItem.title).join(', ').slice(0, 240),
@@ -4268,6 +4415,7 @@ export async function previewShipmentExecution(
   options: {
     vendorId: string;
     env?: AppEnv;
+    kargonomiDestinationClient?: KargonomiDestinationLookupClient;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   return buildShipmentRequestPreview(input, options);
@@ -4279,11 +4427,13 @@ export async function createShipmentExecution(
     env: AppEnv;
     vendorId: string;
     adapter?: ShippingProviderAdapter;
+    kargonomiDestinationClient?: KargonomiDestinationLookupClient;
   },
 ): Promise<ShipmentExecutionDto> {
   const preview = await buildShipmentRequestPreview(input, {
     vendorId: options.vendorId,
     env: options.env,
+    kargonomiDestinationClient: options.kargonomiDestinationClient,
   });
 
   const allocation = await prisma.vendorAllocation.findUnique({
