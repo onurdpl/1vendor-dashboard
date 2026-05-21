@@ -5374,6 +5374,25 @@ export function OrderDetailPage() {
                           </button>
                           <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
                         </div>
+                        <div className="shipment-recovery-actions" aria-label="Navlungo Create Post probe controls">
+                          <span className="muted">Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.</span>
+                          <label className="field checkbox-field">
+                            <span>I understand this creates one Navlungo test post</span>
+                            <input
+                              type="checkbox"
+                              checked={navlungoCreatePostProbeConfirmed}
+                              onChange={(event) => setNavlungoCreatePostProbeConfirmed(event.target.checked)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void runNavlungoCreatePostProbeMutation(undefined)}
+                            disabled={!navlungoCreatePostProbeConfirmed || isRunningNavlungoCreatePostProbe}
+                          >
+                            {isRunningNavlungoCreatePostProbe ? 'Running Create Post probe...' : 'Run Navlungo Create Post probe'}
+                          </button>
+                        </div>
                         {navlungoAuthError ? (
                           <p className="form-error" role="alert">{navlungoAuthError}</p>
                         ) : null}
@@ -5474,25 +5493,6 @@ export function OrderDetailPage() {
                         </div>
                           </div>
                         ) : null}
-                        <div className="shipment-recovery-actions">
-                          <label className="field checkbox-field">
-                            <span>Confirm Navlungo Create Post probe</span>
-                            <input
-                              type="checkbox"
-                              checked={navlungoCreatePostProbeConfirmed}
-                              onChange={(event) => setNavlungoCreatePostProbeConfirmed(event.target.checked)}
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="button button-secondary"
-                            onClick={() => void runNavlungoCreatePostProbeMutation(undefined)}
-                            disabled={!navlungoCreatePostProbeConfirmed || isRunningNavlungoCreatePostProbe}
-                          >
-                            {isRunningNavlungoCreatePostProbe ? 'Running Create Post probe...' : 'Run Navlungo Create Post probe'}
-                          </button>
-                          <span className="muted">Creates one Navlungo test post. Does not sync Shopify.</span>
-                        </div>
                         {navlungoCreatePostProbeError ? (
                           <p className="form-error" role="alert">{navlungoCreatePostProbeError}</p>
                         ) : null}

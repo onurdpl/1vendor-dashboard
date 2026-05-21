@@ -1556,6 +1556,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
     expect(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Navlungo Create Post probe controls')).toBeInTheDocument();
+    expect(screen.getByText('Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.')).toBeInTheDocument();
+    expect(screen.getByLabelText('I understand this creates one Navlungo test post')).not.toBeChecked();
+    expect(screen.getByRole('button', { name: 'Run Navlungo Create Post probe' })).toBeDisabled();
     expect(screen.getByLabelText('Default barcode format')).toHaveValue('pdf-A6');
     expect(screen.getByText('Username configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
     expect(screen.getByText('Password configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
@@ -1580,10 +1584,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
 
-    expect(screen.getByText('Creates one Navlungo test post. Does not sync Shopify.')).toBeInTheDocument();
     const createPostProbeButton = screen.getByRole('button', { name: 'Run Navlungo Create Post probe' });
     expect(createPostProbeButton).toBeDisabled();
-    await user.click(screen.getByLabelText('Confirm Navlungo Create Post probe'));
+    await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
+    expect(createPostProbeButton).toBeEnabled();
     await user.click(createPostProbeButton);
 
     expect(runtimeDiagnosticsMocks.navlungoCreatePostProbe).toHaveBeenCalledWith({ confirm: 'YES' });
@@ -1607,6 +1611,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {
