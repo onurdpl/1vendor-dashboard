@@ -24,6 +24,8 @@ export type NavlungoCreatePostProbeDiagnostics = {
   requestedCarrierId: number;
   requestedPostType: number;
   requestedBarcodeFormat: string;
+  codPaymentIncluded: boolean;
+  priceIncluded: boolean;
   createPostHttpStatus: number | null;
   createPostContentType: string | null;
   responseShape: { kind: string; topLevelKeys: string[] } | null;
@@ -195,10 +197,9 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
         reference_id: referenceId,
         carrier_id: carrierId,
         post_type: NAVLUNGO_CREATE_POST_PROBE_POST_TYPE,
-        cod_payment_type: '',
         sender: {
           name: 'Navlungo Test Sender',
-          phone: '+90 555 000 00 01',
+          phone: '+90 532 123 45 67',
           email: 'sender.test@example.invalid',
           address: 'Navlungo manual probe sender address',
           country: 'tr',
@@ -208,7 +209,7 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
         },
         recipient: {
           name: 'Navlungo Test Recipient',
-          phone: '+90 555 000 00 02',
+          phone: '+90 532 123 45 68',
           email: 'recipient.test@example.invalid',
           address: 'Navlungo manual probe recipient address',
           country: 'tr',
@@ -219,7 +220,6 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
         post: {
           desi: 1,
           package_count: 1,
-          price: '',
           note: 'Manual Navlungo Create Post probe. Do not fulfill Shopify.',
         },
         barcode_format: getNavlungoCreatePostProbeBarcodeFormat(env),
@@ -263,6 +263,8 @@ function buildPayloadSummary(payload: NavlungoCreatePostPayload, senderAddressId
     carrierId: post.carrier_id,
     postType: post.post_type,
     barcodeFormat: post.barcode_format,
+    codPaymentIncluded: post.cod_payment_type !== undefined,
+    priceIncluded: post.post.price !== undefined,
     senderAddressIdConfigured: Boolean(senderAddressId.trim()),
     senderCity: post.sender.city,
     senderDistrict: post.sender.district,
@@ -305,6 +307,8 @@ export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {
     requestedCarrierId: diagnostics.requestedCarrierId,
     requestedPostType: diagnostics.requestedPostType,
     requestedBarcodeFormat: diagnostics.requestedBarcodeFormat,
+    codPaymentIncluded: diagnostics.codPaymentIncluded,
+    priceIncluded: diagnostics.priceIncluded,
     status: diagnostics.createPostHttpStatus,
     contentType: diagnostics.createPostContentType,
     responseShape: diagnostics.responseShape,
@@ -361,6 +365,8 @@ export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOption
     requestedCarrierId: payload.posts[0].carrier_id,
     requestedPostType: payload.posts[0].post_type,
     requestedBarcodeFormat: payload.posts[0].barcode_format,
+    codPaymentIncluded: payload.posts[0].cod_payment_type !== undefined,
+    priceIncluded: payload.posts[0].post.price !== undefined,
     createPostHttpStatus: createResponse.status,
     createPostContentType: createResponse.contentType,
     ...summary,

@@ -1619,6 +1619,8 @@ export const runtimeServices = {
             requestedCarrierId: 9,
             requestedPostType: 2,
             requestedBarcodeFormat: 'pdf-A6',
+            codPaymentIncluded: false,
+            priceIncluded: false,
             createPostHttpStatus: null,
             createPostContentType: null,
             responseShape: null,

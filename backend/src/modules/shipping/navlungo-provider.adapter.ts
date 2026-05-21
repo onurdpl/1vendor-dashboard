@@ -127,7 +127,7 @@ export type NavlungoCreatePostPayload = {
     reference_id: string;
     carrier_id: number;
     post_type: number;
-    cod_payment_type: number | string;
+    cod_payment_type?: number | string;
     sender: {
       name: string;
       phone: string;
@@ -151,7 +151,7 @@ export type NavlungoCreatePostPayload = {
     post: {
       desi: number;
       package_count: number;
-      price: number | string;
+      price?: number | string;
       note: string;
     };
     barcode_format: string;

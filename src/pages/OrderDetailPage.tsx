@@ -5648,6 +5648,14 @@ export function OrderDetailPage() {
                               <strong>{navlungoCreatePostProbeDiagnostics.requestedBarcodeFormat}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>COD payment included</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.codPaymentIncluded ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Price included</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.priceIncluded ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Response shape</span>
                               <strong>
                                 {navlungoCreatePostProbeDiagnostics.responseShape

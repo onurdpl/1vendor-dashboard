@@ -573,6 +573,9 @@ Current observed deployed Create Post probe result:
 - Operator confirmed first target carrier should be `NAVLUNGO_DEFAULT_CARRIER_ID=9` because this account should use Sürat Kargo.
 - The manual Create Post probe now uses `NAVLUNGO_DEFAULT_CARRIER_ID` and defaults to `9` when the env var is missing.
 - Invalid/non-numeric carrier ids block before provider calls.
+- Normal manual probe payload omits `cod_payment_type` because COD is not being tested.
+- Normal manual probe payload omits `post.price`; docs indicate price is sent when `cod_payment_type` is `1` or `2`.
+- Static test sender/recipient phone values use the documented Turkish spacing style, for example `+90 532 123 45 67`.
 
 ## 16.4. Carrier Diagnostics Probe Status
 

@@ -154,6 +154,20 @@ describe('manual Navlungo Create Post probe', () => {
     expect(payload.posts[0].barcode_format).toBe('pdf-A6');
   });
 
+  it('omits COD and price fields from the normal static test payload', () => {
+    const payload = buildNavlungoCreatePostProbePayload(buildProbeEnv(), () => 1700000000000);
+
+    expect(payload.posts[0]).not.toHaveProperty('cod_payment_type');
+    expect(payload.posts[0].post).not.toHaveProperty('price');
+  });
+
+  it('uses documented Turkish phone formatting in the static test payload', () => {
+    const payload = buildNavlungoCreatePostProbePayload(buildProbeEnv(), () => 1700000000000);
+
+    expect(payload.posts[0].sender.phone).toBe('+90 532 123 45 67');
+    expect(payload.posts[0].recipient.phone).toBe('+90 532 123 45 68');
+  });
+
   it('allows NAVLUNGO_DEFAULT_CARRIER_ID to override the probe carrier', () => {
     const env = buildProbeEnv({ NAVLUNGO_DEFAULT_CARRIER_ID: '10' });
     const payload = buildNavlungoCreatePostProbePayload(env, () => 1700000000000);
@@ -215,7 +229,7 @@ describe('manual Navlungo Create Post probe', () => {
     expect(output).not.toContain('secret-refresh-token');
     expect(output).not.toContain('secret-password');
     expect(output).not.toContain('api-user');
-    expect(output).not.toContain('+90 555 000 00 01');
+    expect(output).not.toContain('+90 532 123 45 67');
     expect(output).not.toContain('sender.test@example.invalid');
     expect(output).not.toContain('recipient.test@example.invalid');
     expect(output).toContain('"postNumber": "NP12345"');
@@ -331,6 +345,8 @@ describe('manual Navlungo Create Post probe', () => {
         requestedCarrierId: 9,
         requestedPostType: 2,
         requestedBarcodeFormat: 'pdf-A6',
+        codPaymentIncluded: false,
+        priceIncluded: false,
         createPostHttpStatus: 201,
         postNumber: 'NP12345',
         trackingUrlPresent: true,
