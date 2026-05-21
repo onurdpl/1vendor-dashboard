@@ -28,6 +28,7 @@
     "shopify:fulfillment-webhooks:register": "npm --prefix backend run shopify:fulfillment-webhooks:register",
     "backend:kargonomi:probe": "npm --prefix backend run kargonomi:probe",
     "kargonomi:lookup-probe": "npm --prefix backend run kargonomi:lookup-probe",
+    "navlungo:create-post-probe": "npm --prefix backend run navlungo:create-post-probe",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"
   },
   "dependencies": {

@@ -497,6 +497,54 @@ Observed auth response shape:
 - The exact live token field inside `data` must be confirmed by rerunning the sanitized auth diagnostic after deployment.
 - Parser support now keeps the documented root shape and also accepts `data.access_token` or `data.token` if present.
 
+## 16.3. Manual Create Post Probe Status
+
+Current probe status:
+
+- Manual-only command exists:
+  - `npm run navlungo:create-post-probe`
+- Guard required:
+  - `NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES`
+- Required env:
+  - `NAVLUNGO_BASE_URL`
+  - `NAVLUNGO_API_USERNAME`
+  - `NAVLUNGO_API_PASSWORD`
+  - `NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID`
+  - `NAVLUNGO_DEFAULT_BARCODE_FORMAT`
+- The probe authenticates with:
+  - `POST /auth/api`
+- The probe creates exactly one clearly marked test post with:
+  - `POST /post/create`
+- The probe does not:
+  - write to the app database
+  - create a local shipment execution
+  - sync Shopify fulfillment
+  - retry automatically
+  - register webhooks
+  - enable Navlungo as a live shipping provider
+
+Sanitized Create Post probe output includes only:
+
+- HTTP status
+- response top-level keys
+- nested `data` keys, when present
+- `post_number` presence/value
+- `reference_id` presence/value
+- `tracking_url` presence boolean
+- `barcode_url` presence boolean
+- carrier field presence
+- provider error/message if returned
+
+The output must never include:
+
+- API username
+- API password
+- access token
+- refresh token
+- full customer PII
+
+Response shape is still pending live probe execution and must be recorded after one intentional test-account run.
+
 ## 17. Critical Unknowns Before Implementation
 
 - Final production base URL.

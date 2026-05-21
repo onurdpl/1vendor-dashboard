@@ -67,6 +67,47 @@ type NavlungoHttpResponse<TBody = unknown> = {
   body: TBody;
 };
 
+export type NavlungoCreatePostPayload = {
+  platform: string;
+  posts: Array<{
+    reference_id: string;
+    carrier_id: number;
+    post_type: number;
+    cod_payment_type: number | string;
+    sender: {
+      name: string;
+      phone: string;
+      email: string;
+      address: string;
+      country: string;
+      city: string;
+      district: string;
+      post_code: string;
+    };
+    recipient: {
+      name: string;
+      phone: string;
+      email: string;
+      address: string;
+      country: string;
+      city: string;
+      district: string;
+      post_code: string;
+    };
+    post: {
+      desi: number;
+      package_count: number;
+      price: number | string;
+      note: string;
+    };
+    barcode_format: string;
+    custom_data_1: string;
+    custom_data_2: string;
+    custom_data_3: string;
+    custom_data_4: string;
+  }>;
+};
+
 export type NavlungoHttpClientOptions = {
   fetchImpl?: typeof fetch;
 };
@@ -135,6 +176,12 @@ function hasTokenLikeKey(record: Record<string, unknown>) {
 function getAuthExpiresIn(root: Record<string, unknown>, data: Record<string, unknown>) {
   const value = root.expires_in ?? data.expires_in;
   return typeof value === 'string' || typeof value === 'number' ? value : null;
+}
+
+export function getNavlungoAccessTokenFromAuthBody(value: unknown) {
+  const body = isRecord(value) ? value : {};
+  const data = isRecord(body.data) ? body.data : {};
+  return getTrimmedString(body, 'access_token') ?? getTrimmedString(data, 'access_token') ?? getTrimmedString(data, 'token');
 }
 
 function summarizeFetchError(error: unknown): NavlungoAuthDiagnostics['fetchError'] {
@@ -224,6 +271,33 @@ export class NavlungoHttpClient {
     };
   }
 
+  async createPost(accessToken: string, payload: NavlungoCreatePostPayload): Promise<NavlungoHttpResponse> {
+    const token = accessToken.trim();
+    if (!token) {
+      throw new Error('Navlungo access token is required for Create Post.');
+    }
+
+    const response = await this.fetchImpl(this.requestUrl('/post/create'), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-localization': 'en',
+      },
+      body: JSON.stringify(payload),
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseNavlungoResponseBody(contentType, responseText),
+    };
+  }
+
   requestUrl(path: string) {
     if (!this.env.NAVLUNGO_BASE_URL) {
       throw new Error('NAVLUNGO_BASE_URL is not configured.');
@@ -299,7 +373,7 @@ export async function runNavlungoAuthDiagnostics(
       },
       expiresInPresent: expiresIn !== null,
       tokenTypePresent: hasNonEmptyString(body, 'token_type') || hasNonEmptyString(data, 'token_type'),
-      tokenReceived: rootAccessToken || dataAccessToken || dataToken,
+      tokenReceived: Boolean(getNavlungoAccessTokenFromAuthBody(response.body)),
       refreshTokenReceived: rootRefreshToken || dataRefreshToken,
       expiresIn,
     };
