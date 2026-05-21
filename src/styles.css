@@ -3665,6 +3665,22 @@ h3 {
   line-height: 1.2;
 }
 
+.orders-table-shipping-pending > strong {
+  color: #92400e;
+}
+
+.orders-table-shipping-blocked > strong {
+  color: #991b1b;
+}
+
+.orders-table-shipping-fulfilled > strong {
+  color: #166534;
+}
+
+.orders-table-shipping-tracking > strong {
+  color: #1d4ed8;
+}
+
 .orders-op-table-v3 .op-action-group {
   justify-content: flex-end;
 }

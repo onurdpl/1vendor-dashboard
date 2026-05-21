@@ -177,6 +177,7 @@ describe('OrdersPage control center', () => {
 
     expect((await screen.findAllByText('#1038')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Customer hidden for vendor scope').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tracking synced').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Try OTO / OTO-TRACK-1038').length).toBeGreaterThan(0);
     expect(screen.queryByText('try_oto / OTO-TRACK-1038')).not.toBeInTheDocument();
     expect(screen.getByText('2 line items')).toBeInTheDocument();

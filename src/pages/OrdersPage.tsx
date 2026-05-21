@@ -68,16 +68,6 @@ function getTrackingLabel(order: OrderSummary | OrderDetail) {
   return 'Tracking pending';
 }
 
-function getTrackingHelper(order: OrderSummary | OrderDetail) {
-  if (order.trackingUrl) {
-    return 'Tracking link available';
-  }
-  if (order.trackingNumber || order.carrier) {
-    return 'Waiting Shopify sync';
-  }
-  return 'Waiting Shopify sync';
-}
-
 function getCustomerLabel(customer?: string | null) {
   const value = customer?.trim();
   const normalized = value?.toLowerCase() ?? '';
@@ -124,16 +114,28 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
 }
 
 function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
-  if (order.fulfillmentStatus === 'Fulfilled' || order.shippingStatus === 'Delivered') {
-    return 'Fulfilled';
+  if (order.allocationStatus === 'vendor_blocked') {
+    return { label: 'Shipment blocked', tone: 'blocked' as const, helper: null };
+  }
+  if (order.allocationStatus === 'pending_reassignment') {
+    return { label: 'Needs review', tone: 'blocked' as const, helper: null };
   }
   if (order.trackingNumber && order.trackingUrl) {
-    return 'Tracking synced';
+    return { label: 'Tracking synced', tone: 'tracking' as const, helper: getTrackingLabel(order) };
   }
   if (order.trackingNumber || order.carrier) {
-    return 'Shopify sync pending';
+    return { label: 'Shopify sync pending', tone: 'tracking' as const, helper: getTrackingLabel(order) };
   }
-  return 'No tracking yet';
+  if (order.shippingStatus === 'Label Created' || order.shippingStatus === 'In Transit') {
+    return { label: 'Provider pending', tone: 'pending' as const, helper: null };
+  }
+  if (order.shippingStatus === 'Awaiting Shipment') {
+    return { label: 'No tracking yet', tone: 'pending' as const, helper: null };
+  }
+  if (order.fulfillmentStatus === 'Fulfilled' || order.shippingStatus === 'Delivered') {
+    return { label: 'Fulfilled', tone: 'fulfilled' as const, helper: null };
+  }
+  return { label: 'Provider pending', tone: 'pending' as const, helper: null };
 }
 
 function getItemInitials(name: string) {
@@ -417,40 +419,45 @@ export function OrdersPage() {
                 columns={['Order', 'Lifecycle', 'Value', 'Shipping', 'Updated', 'Actions']}
                 className="orders-op-table orders-op-table-v3"
               >
-                {filteredOrders.map((order) => (
-                  <OperationalTableRow
-                    key={order.id}
-                    selected={selectedOrderSummary?.id === order.id}
-                    onSelect={() => setSelectedOrderId(order.id)}
-                  >
-                    <span className="orders-table-order-cell">
-                      <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
-                      <small>{getCustomerLabel(order.customer)}</small>
-                      <small>{currentVendor.vendorName} · {order.channel}</small>
-                    </span>
-                    <div className="orders-table-status-cell">
-                      <StatusBadge tone={getStatusTone(getLifecyclePrimaryLabel(order))}>{getLifecyclePrimaryLabel(order)}</StatusBadge>
-                      {getLifecycleSecondaryLabel(order) ? <small>{getLifecycleSecondaryLabel(order)}</small> : null}
-                    </div>
-                    <span>
-                      <strong className="finance-amount-emphasis">{order.amount}</strong>
-                      <small>{getLineItemCount(order)} line items</small>
-                    </span>
-                    <span className="orders-table-shipping-cell">
-                      <strong>{getShippingOperationalLabel(order)}</strong>
-                      <small>{getTrackingLabel(order)}</small>
-                    </span>
-                    <span>
-                      <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
-                      <small>{order.channel}</small>
-                    </span>
-                    <OperationalActionGroup>
-                      <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
-                        Open detail
-                      </Link>
-                    </OperationalActionGroup>
-                  </OperationalTableRow>
-                ))}
+                {filteredOrders.map((order) => {
+                  const lifecyclePrimary = getLifecyclePrimaryLabel(order);
+                  const lifecycleSecondary = getLifecycleSecondaryLabel(order);
+                  const shippingOperational = getShippingOperationalLabel(order);
+                  return (
+                    <OperationalTableRow
+                      key={order.id}
+                      selected={selectedOrderSummary?.id === order.id}
+                      onSelect={() => setSelectedOrderId(order.id)}
+                    >
+                      <span className="orders-table-order-cell">
+                        <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
+                        <small>{getCustomerLabel(order.customer)}</small>
+                        <small>{currentVendor.vendorName} · {order.channel}</small>
+                      </span>
+                      <div className="orders-table-status-cell">
+                        <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
+                        {lifecycleSecondary ? <small>{lifecycleSecondary}</small> : null}
+                      </div>
+                      <span>
+                        <strong className="finance-amount-emphasis">{order.amount}</strong>
+                        <small>{getLineItemCount(order)} line items</small>
+                      </span>
+                      <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
+                        <strong>{shippingOperational.label}</strong>
+                        {shippingOperational.helper ? <small>{shippingOperational.helper}</small> : null}
+                      </span>
+                      <span>
+                        <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
+                        <small>{order.channel}</small>
+                      </span>
+                      <OperationalActionGroup>
+                        <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
+                          Open detail
+                        </Link>
+                      </OperationalActionGroup>
+                    </OperationalTableRow>
+                  );
+                })}
               </OperationalTable>
             )}
           </div>
