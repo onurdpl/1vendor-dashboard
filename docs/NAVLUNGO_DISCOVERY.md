@@ -503,8 +503,12 @@ Current probe status:
 
 - Manual-only command exists:
   - `npm run navlungo:create-post-probe`
+- Admin-only deployed diagnostics endpoint exists for Render environments without shell:
+  - `POST /admin/diagnostics/navlungo/create-post-probe`
 - Guard required:
   - `NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES`
+- UI/API confirmation is also required:
+  - request body `{ "confirm": "YES" }`
 - Required env:
   - `NAVLUNGO_BASE_URL`
   - `NAVLUNGO_API_USERNAME`

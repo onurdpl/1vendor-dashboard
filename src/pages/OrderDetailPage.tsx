@@ -50,7 +50,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
-import type { KargonomiLocationLookupDiagnostics, NavlungoAuthDiagnostics } from '../services/real/diagnostics';
+import type { KargonomiLocationLookupDiagnostics, NavlungoAuthDiagnostics, NavlungoCreatePostProbeDiagnostics } from '../services/real/diagnostics';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -967,6 +967,9 @@ export function OrderDetailPage() {
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
   const [navlungoAuthDiagnostics, setNavlungoAuthDiagnostics] = useState<NavlungoAuthDiagnostics | null>(null);
   const [navlungoAuthError, setNavlungoAuthError] = useState<string | null>(null);
+  const [navlungoCreatePostProbeConfirmed, setNavlungoCreatePostProbeConfirmed] = useState(false);
+  const [navlungoCreatePostProbeDiagnostics, setNavlungoCreatePostProbeDiagnostics] = useState<NavlungoCreatePostProbeDiagnostics | null>(null);
+  const [navlungoCreatePostProbeError, setNavlungoCreatePostProbeError] = useState<string | null>(null);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1180,6 +1183,18 @@ export function OrderDetailPage() {
       },
     },
   );
+  const { mutateAsync: runNavlungoCreatePostProbeMutation, isPending: isRunningNavlungoCreatePostProbe } = useMutationAction(
+    async () => runtimeServices.diagnostics.navlungoCreatePostProbe({ confirm: 'YES' }),
+    {
+      onSuccess: (result) => {
+        setNavlungoCreatePostProbeDiagnostics(result);
+        setNavlungoCreatePostProbeError(null);
+      },
+      onError: (error) => {
+        setNavlungoCreatePostProbeError(error instanceof Error ? error.message : 'Navlungo Create Post probe could not be run.');
+      },
+    },
+  );
 
   useEffect(() => {
     if (vendorShippingConfig) {
@@ -1196,6 +1211,9 @@ export function OrderDetailPage() {
     if (shippingConfigDraft.preferredProvider !== 'navlungo') {
       setNavlungoAuthDiagnostics(null);
       setNavlungoAuthError(null);
+      setNavlungoCreatePostProbeConfirmed(false);
+      setNavlungoCreatePostProbeDiagnostics(null);
+      setNavlungoCreatePostProbeError(null);
     }
   }, [shippingConfigDraft.preferredProvider]);
 
@@ -5454,6 +5472,84 @@ export function OrderDetailPage() {
                           <span>Expires in</span>
                           <strong>{navlungoAuthDiagnostics.expiresIn ?? '—'}</strong>
                         </div>
+                          </div>
+                        ) : null}
+                        <div className="shipment-recovery-actions">
+                          <label className="field checkbox-field">
+                            <span>Confirm Navlungo Create Post probe</span>
+                            <input
+                              type="checkbox"
+                              checked={navlungoCreatePostProbeConfirmed}
+                              onChange={(event) => setNavlungoCreatePostProbeConfirmed(event.target.checked)}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void runNavlungoCreatePostProbeMutation(undefined)}
+                            disabled={!navlungoCreatePostProbeConfirmed || isRunningNavlungoCreatePostProbe}
+                          >
+                            {isRunningNavlungoCreatePostProbe ? 'Running Create Post probe...' : 'Run Navlungo Create Post probe'}
+                          </button>
+                          <span className="muted">Creates one Navlungo test post. Does not sync Shopify.</span>
+                        </div>
+                        {navlungoCreatePostProbeError ? (
+                          <p className="form-error" role="alert">{navlungoCreatePostProbeError}</p>
+                        ) : null}
+                        {navlungoCreatePostProbeDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Create Post probe result">
+                            <div className="summary-row">
+                              <span>Auth HTTP</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.authHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Create Post HTTP</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.createPostHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Response shape</span>
+                              <strong>
+                                {navlungoCreatePostProbeDiagnostics.responseShape
+                                  ? `${navlungoCreatePostProbeDiagnostics.responseShape.kind}${
+                                      navlungoCreatePostProbeDiagnostics.responseShape.topLevelKeys.length
+                                        ? ` · ${navlungoCreatePostProbeDiagnostics.responseShape.topLevelKeys.join(', ')}`
+                                        : ''
+                                    }`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Data keys</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.dataKeys.length ? navlungoCreatePostProbeDiagnostics.dataKeys.join(', ') : '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Post number</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.postNumber ?? (navlungoCreatePostProbeDiagnostics.postNumberPresent ? 'present' : 'missing')}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Reference id</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.referenceId ?? (navlungoCreatePostProbeDiagnostics.referenceIdPresent ? 'present' : 'missing')}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Tracking URL</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.trackingUrlPresent ? 'present' : 'missing'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode URL</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.barcodeUrlPresent ? 'present' : 'missing'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Carrier fields</span>
+                              <strong>
+                                {navlungoCreatePostProbeDiagnostics.carrierIdPresent || navlungoCreatePostProbeDiagnostics.carrierNamePresent
+                                  ? `present${navlungoCreatePostProbeDiagnostics.postCarrierKeys.length ? ` · ${navlungoCreatePostProbeDiagnostics.postCarrierKeys.join(', ')}` : ''}`
+                                  : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider message</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.providerMessage ?? navlungoCreatePostProbeDiagnostics.errorMessage ?? '—'}</strong>
+                            </div>
                           </div>
                         ) : null}
                       </>

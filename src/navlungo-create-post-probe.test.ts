@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { registerDiagnosticsRoutes } from '../backend/src/modules/diagnostics/diagnostics.routes.js';
 import {
   buildNavlungoCreatePostProbePayload,
   runManualNavlungoCreatePostProbe,
@@ -31,6 +32,30 @@ function buildLogger() {
         lines.push(String(value ?? ''));
       },
     },
+  };
+}
+
+function registerCreatePostProbeRoute(env: Record<string, unknown>) {
+  const posts = new Map<string, (request: { authUser?: { role?: string }; body?: { confirm?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+  const app = {
+    get: vi.fn(),
+    post: vi.fn((path: string, ...args: unknown[]) => {
+      const handler = args.at(-1) as (
+        request: { authUser?: { role?: string }; body?: { confirm?: string } },
+        reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      ) => unknown;
+      posts.set(path, handler);
+    }),
+  };
+  registerDiagnosticsRoutes(app as never, env as never);
+  return posts.get('/admin/diagnostics/navlungo/create-post-probe');
+}
+
+function buildReply() {
+  return {
+    code: vi.fn((status: number) => ({
+      send: vi.fn((body: unknown) => ({ status, body })),
+    })),
   };
 }
 
@@ -187,5 +212,76 @@ describe('manual Navlungo Create Post probe', () => {
         safe: 'visible',
       },
     });
+  });
+
+  it('diagnostics endpoint requires env guard before provider calls', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+
+    try {
+      const handler = registerCreatePostProbeRoute(buildProbeEnv({ NAVLUNGO_CREATE_POST_PROBE_CONFIRM: undefined }));
+      const result = await handler?.({ authUser: { role: 'admin' }, body: { confirm: 'YES' } }, buildReply());
+
+      expect(result).toMatchObject({
+        status: 400,
+        body: { message: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.' },
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('diagnostics endpoint requires UI confirmation before provider calls', async () => {
+    const fetchImpl = vi.fn() as unknown as typeof fetch;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+
+    try {
+      const handler = registerCreatePostProbeRoute(buildProbeEnv());
+      const result = await handler?.({ authUser: { role: 'admin' }, body: { confirm: 'NO' } }, buildReply());
+
+      expect(result).toMatchObject({
+        status: 400,
+        body: { message: 'UI confirmation is required before running the Navlungo Create Post probe.' },
+      });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('diagnostics endpoint returns sanitized Create Post probe result', async () => {
+    const { calls, fetchImpl } = buildMockFetch();
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = fetchImpl;
+
+    try {
+      const handler = registerCreatePostProbeRoute(buildProbeEnv());
+      const result = await handler?.({ authUser: { role: 'admin' }, body: { confirm: 'YES' } }, buildReply());
+
+      expect(result).toMatchObject({
+        provider: 'navlungo',
+        dormant: true,
+        authHttpStatus: 200,
+        authTokenReceived: true,
+        createPostHttpStatus: 201,
+        postNumber: 'NP12345',
+        trackingUrlPresent: true,
+        barcodeUrlPresent: true,
+        carrierIdPresent: true,
+        carrierNamePresent: true,
+      });
+      expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+        ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
+        ['POST', 'https://domestic-api.navlungo.com/v2/post/create'],
+      ]);
+      expect(JSON.stringify(result)).not.toContain('secret-access-token');
+      expect(JSON.stringify(result)).not.toContain('secret-password');
+      expect(JSON.stringify(result)).not.toContain('Authorization');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });

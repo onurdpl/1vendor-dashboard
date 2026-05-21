@@ -4,7 +4,7 @@ import {
   type NavlungoCreatePostPayload,
 } from './navlungo-provider.adapter.js';
 
-type ProbeEnv = Record<string, string | undefined>;
+type ProbeEnv = Record<string, unknown>;
 
 type ProbeLogger = Pick<Console, 'log' | 'error'>;
 
@@ -13,6 +13,31 @@ type ProbeOptions = {
   fetchImpl?: typeof fetch;
   logger?: ProbeLogger;
   now?: () => number;
+};
+
+export type NavlungoCreatePostProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  createPostHttpStatus: number | null;
+  createPostContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  dataShape: { kind: string; topLevelKeys: string[] } | null;
+  topLevelKeys: string[];
+  dataKeys: string[];
+  postNumber: string | null;
+  postNumberPresent: boolean;
+  referenceId: string | null;
+  referenceIdPresent: boolean;
+  trackingUrlPresent: boolean;
+  barcodeUrlPresent: boolean;
+  carrierIdPresent: boolean;
+  carrierNamePresent: boolean;
+  postCarrierKeys: string[];
+  providerMessage: string | null;
+  errorMessage: string | null;
 };
 
 export type NavlungoCreatePostProbeValidationResult =
@@ -40,7 +65,7 @@ export function validateNavlungoCreatePostProbeEnv(env: ProbeEnv): NavlungoCreat
     'NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID',
     'NAVLUNGO_DEFAULT_BARCODE_FORMAT',
   ];
-  const missing = required.filter((key) => !env[key]?.trim());
+  const missing = required.filter((key) => typeof env[key] !== 'string' || !(env[key] as string).trim());
   if (missing.length) {
     return {
       ok: false,
@@ -143,7 +168,9 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
           price: '',
           note: 'Manual Navlungo Create Post probe. Do not fulfill Shopify.',
         },
-        barcode_format: env.NAVLUNGO_DEFAULT_BARCODE_FORMAT?.trim() || 'pdf-A6',
+        barcode_format: typeof env.NAVLUNGO_DEFAULT_BARCODE_FORMAT === 'string' && env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
+          ? env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
+          : 'pdf-A6',
         custom_data_1: 'manual_probe',
         custom_data_2: 'no_shopify_sync',
         custom_data_3: 'no_db_write',
@@ -206,40 +233,79 @@ export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {
   logger.log('MANUAL ONLY: Navlungo Create Post probe starting.');
   logger.log('This can create one Navlungo test post. No DB write, Shopify sync, fulfillment, retry, or webhook behavior will run.');
 
+  const diagnostics = await runNavlungoCreatePostProbeDiagnostics(options);
+
+  logger.log(JSON.stringify({
+    label: 'POST /auth/api',
+    status: diagnostics.authHttpStatus,
+    contentType: diagnostics.authContentType,
+    tokenReceived: diagnostics.authTokenReceived,
+  }, null, 2));
+
+  const payload = buildNavlungoCreatePostProbePayload(env, options.now);
+  logger.log(JSON.stringify({
+    label: 'POST /post/create payload summary',
+    ...buildPayloadSummary(payload, typeof env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID === 'string' ? env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID : ''),
+  }, null, 2));
+
+  logger.log(JSON.stringify({
+    label: 'POST /post/create',
+    status: diagnostics.createPostHttpStatus,
+    contentType: diagnostics.createPostContentType,
+    responseShape: diagnostics.responseShape,
+    dataShape: diagnostics.dataShape,
+    topLevelKeys: diagnostics.topLevelKeys,
+    dataKeys: diagnostics.dataKeys,
+    postNumber: diagnostics.postNumber,
+    postNumberPresent: diagnostics.postNumberPresent,
+    referenceId: diagnostics.referenceId,
+    referenceIdPresent: diagnostics.referenceIdPresent,
+    trackingUrlPresent: diagnostics.trackingUrlPresent,
+    barcodeUrlPresent: diagnostics.barcodeUrlPresent,
+    carrierIdPresent: diagnostics.carrierIdPresent,
+    carrierNamePresent: diagnostics.carrierNamePresent,
+    postCarrierKeys: diagnostics.postCarrierKeys,
+    providerMessage: diagnostics.providerMessage,
+    errorMessage: diagnostics.errorMessage,
+  }, null, 2));
+}
+
+export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOptions = {}): Promise<NavlungoCreatePostProbeDiagnostics> {
+  const env = options.env ?? process.env;
+  const validation = validateNavlungoCreatePostProbeEnv(env);
+
+  if (!validation.ok) {
+    throw new Error(validation.reason);
+  }
+
   const client = new NavlungoHttpClient(
     {
-      NAVLUNGO_BASE_URL: env.NAVLUNGO_BASE_URL,
-      NAVLUNGO_API_USERNAME: env.NAVLUNGO_API_USERNAME,
-      NAVLUNGO_API_PASSWORD: env.NAVLUNGO_API_PASSWORD,
+      NAVLUNGO_BASE_URL: typeof env.NAVLUNGO_BASE_URL === 'string' ? env.NAVLUNGO_BASE_URL : undefined,
+      NAVLUNGO_API_USERNAME: typeof env.NAVLUNGO_API_USERNAME === 'string' ? env.NAVLUNGO_API_USERNAME : undefined,
+      NAVLUNGO_API_PASSWORD: typeof env.NAVLUNGO_API_PASSWORD === 'string' ? env.NAVLUNGO_API_PASSWORD : undefined,
     },
     { fetchImpl: options.fetchImpl },
   );
 
   const authResponse = await client.createAuthToken();
   const accessToken = getNavlungoAccessTokenFromAuthBody(authResponse.body);
-  logger.log(JSON.stringify({
-    label: 'POST /auth/api',
-    status: authResponse.status,
-    contentType: authResponse.contentType,
-    responseShape: summarizeShape(authResponse.body),
-    tokenReceived: Boolean(accessToken),
-  }, null, 2));
-
   if (!accessToken) {
     throw new Error('Navlungo auth response did not include a usable access token.');
   }
 
   const payload = buildNavlungoCreatePostProbePayload(env, options.now);
-  logger.log(JSON.stringify({
-    label: 'POST /post/create payload summary',
-    ...buildPayloadSummary(payload, env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID as string),
-  }, null, 2));
-
   const createResponse = await client.createPost(accessToken, payload);
-  logger.log(JSON.stringify({
-    label: 'POST /post/create',
-    status: createResponse.status,
-    contentType: createResponse.contentType,
-    ...summarizeNavlungoCreatePostResponse(createResponse.body),
-  }, null, 2));
+  const summary = summarizeNavlungoCreatePostResponse(createResponse.body);
+
+  return {
+    provider: 'navlungo',
+    dormant: true,
+    authHttpStatus: authResponse.status,
+    authContentType: authResponse.contentType,
+    authTokenReceived: Boolean(accessToken),
+    createPostHttpStatus: createResponse.status,
+    createPostContentType: createResponse.contentType,
+    ...summary,
+    errorMessage: null,
+  };
 }

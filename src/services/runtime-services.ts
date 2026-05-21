@@ -1573,6 +1573,33 @@ export const runtimeServices = {
               cause: null,
             },
           }),
+    navlungoCreatePostProbe: (payload: { confirm: 'YES' }) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.runNavlungoCreatePostProbe(payload.confirm)
+        : Promise.resolve({
+            provider: 'navlungo' as const,
+            dormant: true as const,
+            authHttpStatus: null,
+            authContentType: null,
+            authTokenReceived: false,
+            createPostHttpStatus: null,
+            createPostContentType: null,
+            responseShape: null,
+            dataShape: null,
+            topLevelKeys: [],
+            dataKeys: [],
+            postNumber: null,
+            postNumberPresent: false,
+            referenceId: null,
+            referenceIdPresent: false,
+            trackingUrlPresent: false,
+            barcodeUrlPresent: false,
+            carrierIdPresent: false,
+            carrierNamePresent: false,
+            postCarrierKeys: [],
+            providerMessage: 'Navlungo Create Post probe is available in real API mode only.',
+            errorMessage: null,
+          }),
     replay: (webhookEventId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.replayWebhook(webhookEventId)

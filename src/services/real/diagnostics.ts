@@ -287,6 +287,31 @@ export type NavlungoAuthDiagnostics = {
   fetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
 };
 
+export type NavlungoCreatePostProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  createPostHttpStatus: number | null;
+  createPostContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  dataShape: { kind: string; topLevelKeys: string[] } | null;
+  topLevelKeys: string[];
+  dataKeys: string[];
+  postNumber: string | null;
+  postNumberPresent: boolean;
+  referenceId: string | null;
+  referenceIdPresent: boolean;
+  trackingUrlPresent: boolean;
+  barcodeUrlPresent: boolean;
+  carrierIdPresent: boolean;
+  carrierNamePresent: boolean;
+  postCarrierKeys: string[];
+  providerMessage: string | null;
+  errorMessage: string | null;
+};
+
 export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -312,6 +337,10 @@ export async function runKargonomiLocationLookupDiagnostics() {
 
 export async function runNavlungoAuthDiagnostics() {
   return apiClient.get<NavlungoAuthDiagnostics>('/admin/diagnostics/navlungo/auth');
+}
+
+export async function runNavlungoCreatePostProbe(confirm: 'YES') {
+  return apiClient.post<NavlungoCreatePostProbeDiagnostics>('/admin/diagnostics/navlungo/create-post-probe', { confirm });
 }
 
 export async function replayWebhook(webhookEventId: string) {

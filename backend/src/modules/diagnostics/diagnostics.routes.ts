@@ -14,6 +14,7 @@ import {
 } from './diagnostics.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { runKargonomiLocationLookupDiagnostics } from '../shipping/kargonomi-location-lookup-probe.js';
+import { runNavlungoCreatePostProbeDiagnostics, validateNavlungoCreatePostProbeEnv } from '../shipping/navlungo-create-post-probe.js';
 import { runNavlungoAuthDiagnostics } from '../shipping/navlungo-provider.adapter.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
@@ -106,6 +107,34 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return runNavlungoAuthDiagnostics(env);
+    },
+  );
+
+  app.post<{ Body: { confirm?: string } }>(
+    '/admin/diagnostics/navlungo/create-post-probe',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (request.body?.confirm !== 'YES') {
+        return reply.code(400).send({ message: 'UI confirmation is required before running the Navlungo Create Post probe.' });
+      }
+
+      const validation = validateNavlungoCreatePostProbeEnv(env);
+      if (!validation.ok) {
+        return reply.code(400).send({ message: validation.reason });
+      }
+
+      try {
+        return await runNavlungoCreatePostProbeDiagnostics({ env });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Navlungo Create Post probe failed.';
+        return reply.code(502).send({ message });
+      }
     },
   );
 

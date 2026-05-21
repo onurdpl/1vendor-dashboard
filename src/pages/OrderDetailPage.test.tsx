@@ -30,6 +30,7 @@ const createSupportTicketMock = vi.fn();
 const runtimeDiagnosticsMocks = vi.hoisted(() => ({
   kargonomiLocationLookup: vi.fn(),
   navlungoAuth: vi.fn(),
+  navlungoCreatePostProbe: vi.fn(),
 }));
 
 vi.mock('../config/runtime', () => ({
@@ -44,6 +45,7 @@ vi.mock('../services/runtime-services', () => ({
     diagnostics: {
       kargonomiLocationLookup: () => runtimeDiagnosticsMocks.kargonomiLocationLookup(),
       navlungoAuth: () => runtimeDiagnosticsMocks.navlungoAuth(),
+      navlungoCreatePostProbe: (payload: { confirm: 'YES' }) => runtimeDiagnosticsMocks.navlungoCreatePostProbe(payload),
     },
   },
 }));
@@ -401,6 +403,34 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       refreshTokenReceived: true,
       expiresIn: 86400,
       fetchError: null,
+    });
+    runtimeDiagnosticsMocks.navlungoCreatePostProbe.mockReset();
+    runtimeDiagnosticsMocks.navlungoCreatePostProbe.mockResolvedValue({
+      provider: 'navlungo',
+      dormant: true,
+      authHttpStatus: 200,
+      authContentType: 'application/json',
+      authTokenReceived: true,
+      createPostHttpStatus: 201,
+      createPostContentType: 'application/json',
+      responseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['post_number', 'reference_id', 'tracking_url', 'barcode_url', 'post'],
+      },
+      dataShape: null,
+      topLevelKeys: ['post_number', 'reference_id', 'tracking_url', 'barcode_url', 'post'],
+      dataKeys: [],
+      postNumber: 'NP12345',
+      postNumberPresent: true,
+      referenceId: 'NAVLUNGO-PROBE-1700000000000',
+      referenceIdPresent: true,
+      trackingUrlPresent: true,
+      barcodeUrlPresent: true,
+      carrierIdPresent: true,
+      carrierNamePresent: true,
+      postCarrierKeys: ['carrier_id', 'carrier_name'],
+      providerMessage: null,
+      errorMessage: null,
     });
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue({
@@ -1550,13 +1580,33 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
 
+    expect(screen.getByText('Creates one Navlungo test post. Does not sync Shopify.')).toBeInTheDocument();
+    const createPostProbeButton = screen.getByRole('button', { name: 'Run Navlungo Create Post probe' });
+    expect(createPostProbeButton).toBeDisabled();
+    await user.click(screen.getByLabelText('Confirm Navlungo Create Post probe'));
+    await user.click(createPostProbeButton);
+
+    expect(runtimeDiagnosticsMocks.navlungoCreatePostProbe).toHaveBeenCalledWith({ confirm: 'YES' });
+    expect(await screen.findByLabelText('Navlungo Create Post probe result')).toBeInTheDocument();
+    expect(screen.getByText('Create Post HTTP').closest('.summary-row')).toHaveTextContent('201');
+    expect(screen.getByText('Post number').closest('.summary-row')).toHaveTextContent('NP12345');
+    expect(screen.getByText('Tracking URL').closest('.summary-row')).toHaveTextContent('present');
+    expect(screen.getByText('Barcode URL').closest('.summary-row')).toHaveTextContent('present');
+    expect(screen.getByText('Carrier fields').closest('.summary-row')).toHaveTextContent('carrier_id, carrier_name');
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
+
     await user.selectOptions(providerSelect, 'kargonomi');
 
     await waitFor(() => {
       expect(screen.queryByLabelText('Navlungo auth diagnostic result')).not.toBeInTheDocument();
     });
+    expect(screen.queryByLabelText('Navlungo Create Post probe result')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {
