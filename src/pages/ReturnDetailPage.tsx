@@ -441,9 +441,9 @@ export function ReturnDetailPage() {
       severity: hasReturnShipment ? 'warning' : 'info',
       title: 'Review returned item',
       description: hasReturnShipment
-        ? 'Customer return tracking is available; confirm receipt when the item arrives.'
-        : 'Return receipt has not been marked yet.',
-      recommendedAction: 'Inspect the returned item before recording a vendor decision',
+        ? 'Tracking is available. Confirm receipt when it arrives.'
+        : 'Receipt has not been marked yet.',
+      recommendedAction: 'Inspect item before vendor decision',
       relatedObjectType: 'Return',
       relatedObjectId: returnRequest.id,
       vendor: {
@@ -461,8 +461,8 @@ export function ReturnDetailPage() {
       type: 'return_review',
       severity: 'warning',
       title: 'Complete vendor return review',
-      description: 'The item is marked received and is waiting for a vendor decision.',
-      recommendedAction: 'Approve or reject the return based on the received item',
+      description: 'Item received. Vendor decision is pending.',
+      recommendedAction: 'Approve or reject after inspection',
       relatedObjectType: 'Return',
       relatedObjectId: returnRequest.id,
       vendor: {
@@ -481,8 +481,8 @@ export function ReturnDetailPage() {
       type: 'return_refund',
       severity: 'info',
       title: 'Monitor refund progress',
-      description: 'Refund status is still pending for this return.',
-      recommendedAction: 'Keep return review current so admin can complete refund handling',
+      description: 'Refund status is still pending.',
+      recommendedAction: 'Keep review current for admin refund handling',
       relatedObjectType: 'Return',
       relatedObjectId: returnRequest.id,
       vendor: {
@@ -503,7 +503,7 @@ export function ReturnDetailPage() {
       severity: 'warning',
       title: 'Reply to support request',
       description: waitingReturnSupportTicket.subject,
-      recommendedAction: 'Open support and provide the requested update',
+      recommendedAction: 'Open support and reply',
       relatedObjectType: 'Support ticket',
       relatedObjectId: waitingReturnSupportTicket.id,
       vendor: {
@@ -547,10 +547,9 @@ export function ReturnDetailPage() {
               <div className="return-review-item-list">
                 {returnedItems.map((item) => (
                   <article key={getItemKey(item)} className="return-review-item">
-                    <span className="return-review-item-thumb" aria-hidden="true">↩</span>
                     <div className="return-review-item-main">
                       <strong>{item.name || 'Return item'}</strong>
-                      <span>{getVariantText(item.variantTitle)}</span>
+                      {getVariantText(item.variantTitle) !== '—' ? <span>{getVariantText(item.variantTitle)}</span> : null}
                     </div>
                     <div>
                       <span>SKU</span>
@@ -600,18 +599,81 @@ export function ReturnDetailPage() {
 
         <aside className="return-review-side">
           <OperationalRecommendations
-            title="Suggested next steps"
-            subtitle="Contextual, read-only guidance for this return."
+            title="Operations"
             recommendations={returnRecommendations}
             audience={audience}
           />
 
           <AdminCollaborationNotes contextType="return" contextId={returnRequest.id} currentUser={currentUser} />
 
+          <OperationalTimeline
+            title="Timeline"
+            events={unifiedTimelineEvents}
+            audience={audience}
+          />
+
+          {hasReturnShipment ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Return shipment</p>
+                  <h3>Customer shipment</h3>
+                </div>
+              </div>
+              <div className="return-review-summary-list">
+                <div>
+                  <span>Carrier</span>
+                  <strong>{returnRequest.returnCarrierName ?? 'Not provided'}</strong>
+                </div>
+                <div>
+                  <span>Tracking</span>
+                  {returnRequest.returnTrackingUrl ? (
+                    <a href={returnRequest.returnTrackingUrl} target="_blank" rel="noreferrer">
+                      {returnRequest.returnTrackingNumber ?? 'Open tracking'}
+                    </a>
+                  ) : (
+                    <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>
+                  )}
+                </div>
+              </div>
+            </article>
+          ) : null}
+
+          <article className="return-review-card">
+            <div className="return-review-card-header">
+              <div>
+                <p className="eyebrow">Summary</p>
+                <h3>Return details</h3>
+              </div>
+            </div>
+            <div className="return-review-summary-list">
+              <div>
+                <span>Order number</span>
+                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
+              </div>
+              <div>
+                <span>Requested</span>
+                <strong>{formatDate(returnRequest.date)}</strong>
+              </div>
+              <div>
+                <span>Return status</span>
+                <strong>{getStatusLabel(returnRequest)}</strong>
+              </div>
+              <div>
+                <span>Refund status</span>
+                <strong>{getRefundStatus(returnRequest)}</strong>
+              </div>
+              <div>
+                <span>Vendor</span>
+                <strong>{currentVendor.vendorName}</strong>
+              </div>
+            </div>
+          </article>
+
           <article className="return-review-card return-review-action-card">
             <p className="eyebrow">Next action</p>
             <h3>Vendor review</h3>
-            <p>Internal vendor review only. This does not issue a Shopify refund.</p>
+            <p>Vendor review only. Shopify refund is not issued here.</p>
             <div className="return-review-summary-list return-review-state-list">
               <div>
                 <span>Receipt</span>
@@ -679,71 +741,6 @@ export function ReturnDetailPage() {
               </div>
             ) : null}
           </article>
-
-          {hasReturnShipment ? (
-            <article className="return-review-card">
-              <div className="return-review-card-header">
-                <div>
-                  <p className="eyebrow">Return shipment</p>
-                  <h3>Customer shipment</h3>
-                </div>
-              </div>
-              <div className="return-review-summary-list">
-                <div>
-                  <span>Carrier</span>
-                  <strong>{returnRequest.returnCarrierName ?? 'Not provided'}</strong>
-                </div>
-                <div>
-                  <span>Tracking</span>
-                  {returnRequest.returnTrackingUrl ? (
-                    <a href={returnRequest.returnTrackingUrl} target="_blank" rel="noreferrer">
-                      {returnRequest.returnTrackingNumber ?? 'Open tracking'}
-                    </a>
-                  ) : (
-                    <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>
-                  )}
-                </div>
-              </div>
-            </article>
-          ) : null}
-
-          <article className="return-review-card">
-            <div className="return-review-card-header">
-              <div>
-                <p className="eyebrow">Summary</p>
-                <h3>Return details</h3>
-              </div>
-            </div>
-            <div className="return-review-summary-list">
-              <div>
-                <span>Order number</span>
-                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
-              </div>
-              <div>
-                <span>Requested</span>
-                <strong>{formatDate(returnRequest.date)}</strong>
-              </div>
-              <div>
-                <span>Return status</span>
-                <strong>{getStatusLabel(returnRequest)}</strong>
-              </div>
-              <div>
-                <span>Refund status</span>
-                <strong>{getRefundStatus(returnRequest)}</strong>
-              </div>
-              <div>
-                <span>Vendor</span>
-                <strong>{currentVendor.vendorName}</strong>
-              </div>
-            </div>
-          </article>
-
-          <OperationalTimeline
-            title="Unified activity"
-            subtitle="Return, refund, finance, and support events."
-            events={unifiedTimelineEvents}
-            audience={audience}
-          />
         </aside>
       </div>
       <SupportTicketModal

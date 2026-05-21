@@ -4906,6 +4906,12 @@ h3 {
   z-index: 0;
 }
 
+.return-review-side .operational-timeline-card {
+  grid-column: auto;
+  grid-row: auto;
+  order: initial;
+}
+
 .order-support-card {
   grid-column: 2;
   grid-row: 4;
@@ -5668,8 +5674,8 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-page {
   display: grid;
-  gap: 16px;
-  padding: 22px;
+  gap: 12px;
+  padding: 18px;
 }
 
 .return-review-header {
@@ -5736,15 +5742,15 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 360px);
-  gap: 16px;
+  grid-template-columns: minmax(0, 1.9fr) minmax(340px, 0.82fr);
+  gap: 12px;
   align-items: start;
 }
 
 .return-review-main,
 .return-review-side {
   display: grid;
-  gap: 14px;
+  gap: 10px;
 }
 
 .return-review-side {
@@ -5754,10 +5760,10 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-card {
   display: grid;
-  gap: 12px;
-  padding: 16px;
+  gap: 9px;
+  padding: 12px;
   border: 1px solid #e2e8f0;
-  border-radius: 16px;
+  border-radius: 13px;
   background: #ffffff;
   box-shadow: 0 10px 24px rgba(15, 23, 42, 0.035);
 }
@@ -5773,7 +5779,7 @@ summary.provider-response-heading::-webkit-details-marker {
 .return-review-action-card h3 {
   margin: 0;
   color: #0f172a;
-  font-size: 1rem;
+  font-size: 0.9rem;
   line-height: 1.22;
 }
 
@@ -5784,12 +5790,12 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-item {
   display: grid;
-  grid-template-columns: 42px minmax(190px, 1fr) minmax(84px, 0.45fr) minmax(44px, 0.24fr) minmax(106px, 0.48fr);
-  gap: 12px;
+  grid-template-columns: minmax(190px, 1fr) minmax(84px, 0.45fr) minmax(44px, 0.24fr) minmax(106px, 0.48fr);
+  gap: 10px;
   align-items: center;
-  padding: 10px;
+  padding: 8px 10px;
   border: 1px solid #e2e8f0;
-  border-radius: 13px;
+  border-radius: 11px;
   background: #f8fafc;
 }
 
@@ -5814,64 +5820,64 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-item-main strong {
   color: #0f172a;
-  font-size: 0.88rem;
+  font-size: 0.84rem;
   line-height: 1.25;
 }
 
 .return-review-item-main span,
 .return-review-item > div > span {
-  margin-top: 2px;
+  margin-top: 1px;
   color: #64748b;
-  font-size: 0.73rem;
+  font-size: 0.7rem;
 }
 
 .return-review-item > div > strong {
   color: #0f172a;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 800;
   overflow-wrap: anywhere;
 }
 
 .return-review-reason {
   display: grid;
-  gap: 10px;
+  gap: 8px;
 }
 
 .return-review-reason p {
   margin: 0;
   color: #0f172a;
-  font-size: 0.88rem;
-  line-height: 1.5;
+  font-size: 0.82rem;
+  line-height: 1.4;
 }
 
 .return-review-reason div,
 .return-review-summary-list div {
   display: grid;
   grid-template-columns: minmax(106px, 0.7fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: 8px;
   align-items: start;
 }
 
 .return-review-reason span,
 .return-review-summary-list span {
   color: #64748b;
-  font-size: 0.74rem;
+  font-size: 0.7rem;
 }
 
 .return-review-reason strong,
 .return-review-summary-list strong {
   color: #0f172a;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 800;
-  line-height: 1.35;
+  line-height: 1.28;
   overflow-wrap: anywhere;
 }
 
 .return-review-action-card p {
   margin: 0;
   color: #64748b;
-  font-size: 0.82rem;
-  line-height: 1.45;
+  font-size: 0.76rem;
+  line-height: 1.35;
 }
 
 .return-review-actions {
@@ -5881,10 +5887,10 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .return-review-actions .button {
-  min-height: 34px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  font-size: 0.78rem;
+  min-height: 31px;
+  padding: 6px 9px;
+  border-radius: 9px;
+  font-size: 0.74rem;
 }
 
 .return-review-reject-box {
@@ -5913,12 +5919,12 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .return-review-state-list {
-  margin-top: 4px;
+  margin-top: 2px;
 }
 
 .return-review-summary-list {
   display: grid;
-  gap: 9px;
+  gap: 6px;
 }
 
 .return-review-timeline {
@@ -7743,6 +7749,21 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 900;
 }
 
+.return-review-side .operational-card {
+  gap: 0.42rem;
+  padding: 0.58rem;
+  border-radius: 11px;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
+}
+
+.return-review-side .operational-card-heading h3 {
+  font-size: 0.82rem;
+}
+
+.return-review-side .operational-card-heading span {
+  display: none;
+}
+
 .operational-card-heading span {
   color: #64748b;
   font-size: 0.74rem;
@@ -7752,6 +7773,10 @@ summary.provider-response-heading::-webkit-details-marker {
 .operational-recommendation-list {
   display: grid;
   gap: 0.45rem;
+}
+
+.return-review-side .operational-recommendation-list {
+  gap: 0.32rem;
 }
 
 .operational-recommendation-row {
@@ -7767,6 +7792,12 @@ summary.provider-response-heading::-webkit-details-marker {
   text-decoration: none;
 }
 
+.return-review-side .operational-recommendation-row {
+  gap: 0.4rem;
+  padding: 0.42rem 0.5rem;
+  border-radius: 8px;
+}
+
 .operational-recommendation-row:hover {
   border-color: #bfdbfe;
   background: #f8fbff;
@@ -7776,6 +7807,10 @@ summary.provider-response-heading::-webkit-details-marker {
   display: grid;
   gap: 0.25rem;
   min-width: 0;
+}
+
+.return-review-side .operational-recommendation-copy {
+  gap: 0.14rem;
 }
 
 .operational-recommendation-copy > div {
@@ -7791,6 +7826,17 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.9rem;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.return-review-side .operational-recommendation-copy strong {
+  font-size: 0.78rem;
+}
+
+.return-review-side .operational-recommendation-copy p,
+.return-review-side .operational-recommendation-copy span,
+.return-review-side .operational-recommendation-row small {
+  font-size: 0.68rem;
+  line-height: 1.22;
 }
 
 .operational-recommendation-copy p,
@@ -7820,6 +7866,15 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: 0.6rem minmax(0, 1fr);
   gap: 0.34rem;
   align-items: flex-start;
+}
+
+.return-review-side .unified-operational-timeline {
+  gap: 0.16rem;
+}
+
+.return-review-side .unified-operational-timeline li {
+  grid-template-columns: 0.56rem minmax(0, 1fr);
+  gap: 0.3rem;
 }
 
 .unified-timeline-dot {
@@ -7867,6 +7922,11 @@ summary.provider-response-heading::-webkit-details-marker {
   text-decoration: none;
 }
 
+.return-review-side .unified-timeline-title-row strong,
+.return-review-side .unified-timeline-title-row a {
+  font-size: 0.76rem;
+}
+
 .unified-operational-timeline p {
   margin: 0.02rem 0 0;
   color: #475569;
@@ -7878,6 +7938,15 @@ summary.provider-response-heading::-webkit-details-marker {
   margin-top: 0.04rem;
   color: #64748b;
   font-size: 0.68rem;
+}
+
+.return-review-side .unified-operational-timeline p {
+  font-size: 0.67rem;
+  line-height: 1.22;
+}
+
+.return-review-side .unified-operational-timeline small {
+  font-size: 0.64rem;
 }
 
 .operational-link-list {
