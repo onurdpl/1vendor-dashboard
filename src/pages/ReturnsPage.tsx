@@ -79,10 +79,6 @@ function formatDateParts(value: string | null | undefined) {
   };
 }
 
-function getReturnKind(item: ReturnSummary) {
-  return item.sourceType === 'shopify_return_request' ? 'Return requested' : 'Refunded';
-}
-
 function getRefundStatusLabel(item: ReturnSummary) {
   return item.sourceType === 'shopify_return_request' && !item.sourceShopifyRefundId ? 'Refund pending' : 'Refunded';
 }
@@ -623,10 +619,10 @@ export function ReturnsPage() {
       }
     : null;
   const kpis = [
-    { label: 'Pending review', value: pendingCount, icon: 'P', tone: 'attention' },
-    { label: 'Awaiting shipment', value: approvedCount, icon: 'S', tone: 'info' },
-    { label: 'Refunded', value: processedCount, icon: 'R', tone: 'success' },
-    { label: 'Needs action', value: attentionCount, icon: 'A', tone: attentionCount > 0 ? 'warning' : 'success' },
+    { label: 'Pending review', value: pendingCount, helper: 'Open requests', tone: 'attention' },
+    { label: 'Awaiting shipment', value: approvedCount, helper: 'Approved returns', tone: 'info' },
+    { label: 'Refunded', value: processedCount, helper: 'Completed refunds', tone: 'success' },
+    { label: 'Needs action', value: attentionCount, helper: 'Operational queue', tone: attentionCount > 0 ? 'warning' : 'success' },
   ] as const;
 
   return (
@@ -642,10 +638,10 @@ export function ReturnsPage() {
       <div className="returns-kpi-strip" aria-label="Returns summary">
         {kpis.map((kpi) => (
           <article key={kpi.label} className={`returns-mini-kpi returns-mini-kpi-${kpi.tone}`}>
-            <span className="returns-mini-kpi-icon" aria-hidden="true">{kpi.icon}</span>
             <div>
               <strong>{kpi.value}</strong>
               <span>{kpi.label}</span>
+              <small>{kpi.helper}</small>
             </div>
           </article>
         ))}
@@ -756,7 +752,7 @@ export function ReturnsPage() {
                     <span className="returns-sku-cell">{itemDisplay.sku}</span>
                     <span>
                       <strong>{formatShopifyOrderNumber(item.sourceShopifyOrderNumber)}</strong>
-                      <small>{getReturnKind(item)}</small>
+                      <small>{getVendorName(item.assignedVendorId, vendorLookup)}</small>
                     </span>
                     <span>
                       <StatusBadge tone={getStatusTone(item)}>{getVendorStatusLabel(item)}</StatusBadge>
@@ -794,7 +790,7 @@ export function ReturnsPage() {
         >
           {selectedReturn ? (
             <>
-              <div className="returns-summary-card">
+              <div className="returns-summary-card returns-summary-card-compact">
                 <h4>Summary</h4>
                 <div className="returns-summary-grid-v2">
                   <div>
@@ -846,16 +842,16 @@ export function ReturnsPage() {
 
               <div className="op-panel-section">
                 <h4>Returned items</h4>
-                <div className="return-detail-items">
+                <div className="return-detail-items return-detail-items-compact">
                   {selectedItems.length > 0 ? (
                     selectedItems.map((item) => (
                       <article key={`${item.sku}-${item.title}-${item.variantTitle}`} className="return-detail-item">
-                        <span className="return-item-thumb" aria-hidden="true">
-                          SKU
-                        </span>
-                        <div>
+                        <div className="return-detail-item-copy">
                           <strong>{item.title}</strong>
-                          {item.variantTitle ? <small>{item.variantTitle}</small> : null}
+                          <small>
+                            SKU {getSkuText(item.sku)}
+                            {item.variantTitle ? ` · ${item.variantTitle}` : ''}
+                          </small>
                         </div>
                         <div className="return-detail-item-meta">
                           <span>Qty {item.quantity}</span>
@@ -884,7 +880,7 @@ export function ReturnsPage() {
                 </ol>
               </div>
 
-              <div className="returns-actions-card">
+              <div className="returns-actions-card returns-actions-card-compact">
                 <h4>Actions</h4>
                 <OperationalActionGroup>
                   <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
