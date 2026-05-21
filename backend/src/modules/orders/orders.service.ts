@@ -548,6 +548,12 @@ function buildShipmentProviderResponseSummary(
         webhookWarning: readString(snapshot, ['tryOtoWebhookWarning']),
       }
     : undefined;
+  const validationResponseShape = isRecord(snapshot?.validationResponseShape)
+    ? {
+        kind: readString(snapshot.validationResponseShape, ['kind']) ?? 'unknown',
+        topLevelKeys: readStringArray(snapshot.validationResponseShape.topLevelKeys),
+      }
+    : null;
 
   return {
     httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
@@ -561,6 +567,11 @@ function buildShipmentProviderResponseSummary(
     providerValidationErrors: Array.isArray(snapshot?.providerValidationErrors)
       ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       : [],
+    validationErrorKeys: readStringArray(snapshot?.validationErrorKeys),
+    validationErrorMessages: readStringArray(snapshot?.validationErrorMessages),
+    failedFieldNames: readStringArray(snapshot?.failedFieldNames),
+    providerErrorCode: readString(snapshot, ['providerErrorCode', 'errorCode', 'code']),
+    validationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
     labelPresent: Boolean(execution.labelUrl),

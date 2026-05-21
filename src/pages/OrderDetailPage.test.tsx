@@ -4681,6 +4681,65 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
   });
 
+  it('renders sanitized Navlungo validation fields and messages in admin diagnostics', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'validation_failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 422,
+          providerError: 'Validation Errors',
+          providerValidationErrors: [
+            'errors.recipient.phone validation failed',
+            'The desi field is required.',
+          ],
+          realPathCreatePostHttpStatus: 422,
+          providerCallHttpStatus: 422,
+          validationErrorKeys: ['errors'],
+          failedFieldNames: ['errors.recipient.phone', 'errors.post.desi'],
+          validationErrorMessages: [
+            'errors.recipient.phone validation failed',
+            'The desi field is required.',
+          ],
+          providerErrorCode: 'VALIDATION_ERROR',
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+
+    expect(screen.getAllByText('Navlungo retry diagnostics').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Create Post HTTP').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Validation fields').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('errors.recipient.phone, errors.post.desi').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Validation messages').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('errors.recipient.phone validation failed · The desi field is required.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider error code').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('VALIDATION_ERROR').length).toBeGreaterThan(0);
+    expect(screen.queryByText('+90 532 123 45 68')).not.toBeInTheDocument();
+    expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
+  });
+
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

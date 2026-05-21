@@ -364,6 +364,99 @@ function readStringFromRecord(value: unknown, keys: string[]) {
   return isRecord(value) ? readString(value, keys) : null;
 }
 
+function navlungoValidationPathContainsPii(path: string[]) {
+  return path.some((part) => /name|phone|email|address|password|token|authorization|api[_-]?key/i.test(part));
+}
+
+function sanitizeNavlungoValidationMessage(value: unknown, path: string[] = []) {
+  const raw =
+    typeof value === 'string'
+      ? value
+      : typeof value === 'number' || typeof value === 'boolean'
+        ? String(value)
+        : null;
+  if (!raw?.trim()) {
+    return null;
+  }
+
+  if (navlungoValidationPathContainsPii(path)) {
+    return `${path.join('.')} validation failed`;
+  }
+
+  return raw
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[redacted-phone]')
+    .replace(/(["']?(?:name|phone|email|address|password|token|authorization|api[_-]?key)["']?\s*[:=]\s*)["'][^"']+["']/gi, '$1"[redacted]"')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 240);
+}
+
+function collectNavlungoValidationDiagnostics(
+  value: unknown,
+  path: string[] = [],
+  output: { fields: string[]; messages: string[] } = { fields: [], messages: [] },
+) {
+  if (output.fields.length >= 20 && output.messages.length >= 12) {
+    return output;
+  }
+
+  const message = sanitizeNavlungoValidationMessage(value, path);
+  if (message) {
+    output.messages.push(message);
+    if (path.length) {
+      output.fields.push(path.join('.'));
+    }
+    return output;
+  }
+
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectNavlungoValidationDiagnostics(item, path, output));
+    return output;
+  }
+
+  if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) {
+      if (/token|secret|authorization|bearer|password|api[_-]?key/i.test(key)) {
+        continue;
+      }
+      const nextPath = /^\d+$/.test(key) ? path : [...path, key];
+      collectNavlungoValidationDiagnostics(item, nextPath, output);
+    }
+  }
+
+  return output;
+}
+
+function getNavlungoValidationDiagnostics(body: unknown) {
+  const root = isRecord(body) ? body : {};
+  const data = isRecord(root.data) ? root.data : {};
+  const candidates = {
+    errors: root.errors,
+    validation: root.validation,
+    validation_errors: root.validation_errors,
+    error_details: root.error_details,
+    data_errors: data.errors,
+    data_validation: data.validation,
+    data_validation_errors: data.validation_errors,
+    data_error_details: data.error_details,
+  };
+  const presentCandidates = Object.entries(candidates).filter(([, value]) => value !== undefined && value !== null);
+  const collected = presentCandidates.reduce(
+    (output, [, value]) => collectNavlungoValidationDiagnostics(value, [], output),
+    { fields: [] as string[], messages: [] as string[] },
+  );
+
+  return {
+    validationErrorKeys: presentCandidates.map(([key]) => key),
+    validationErrorMessages: Array.from(new Set(collected.messages)).slice(0, 12),
+    failedFieldNames: Array.from(new Set(collected.fields)).slice(0, 20),
+    providerErrorCode: readString(root, ['code', 'error_code', 'errorCode', 'providerErrorCode']) ??
+      readString(data, ['code', 'error_code', 'errorCode', 'providerErrorCode']),
+    validationResponseShape: summarizeResponseShape(body),
+  };
+}
+
 function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Record<string, unknown>) {
   const post = getNavlungoPostRecord(bodyData);
   return {
@@ -377,6 +470,7 @@ function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Re
     barcodePresent: Boolean(readNavlungoBarcode(bodyData)),
     carrierFieldsPresent: Boolean(readNumberOrString(post, ['carrier_id']) ?? readString(post, ['carrier_name'])),
     providerMessage: readStringFromRecord(response.body, ['message', 'error']),
+    ...getNavlungoValidationDiagnostics(response.body),
   };
 }
 
@@ -813,6 +907,12 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       createPostResponseKeys: createDiagnostics.topLevelKeys,
       createPostDataKeys: createDiagnostics.dataKeys,
       providerMessage: createDiagnostics.providerMessage,
+      validationErrorKeys: createDiagnostics.validationErrorKeys,
+      validationErrorMessages: createDiagnostics.validationErrorMessages,
+      failedFieldNames: createDiagnostics.failedFieldNames,
+      providerErrorCode: createDiagnostics.providerErrorCode,
+      validationResponseShape: createDiagnostics.validationResponseShape,
+      providerValidationErrors: createDiagnostics.validationErrorMessages,
     });
 
     if (!createResponse.ok) {

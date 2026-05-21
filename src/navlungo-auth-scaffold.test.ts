@@ -467,6 +467,119 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(result)).not.toContain('secret-access-token');
   });
 
+  it('captures sanitized Navlungo 422 validation details without exposing PII', async () => {
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: false,
+        message: 'Validation Errors',
+        code: 'VALIDATION_ERROR',
+        errors: {
+          recipient: {
+            phone: ['The recipient phone +90 532 123 45 68 is invalid.'],
+            email: ['recipient@example.test is invalid.'],
+            address: ['Recipient address is invalid.'],
+          },
+          post: {
+            desi: ['The desi field is required.'],
+          },
+        },
+      }), {
+        status: 422,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+
+    let thrown: unknown;
+    try {
+      await adapter.createShipment({
+        allocationId: 'allocation-1',
+        vendorId: 'vendor-1',
+        provider: 'navlungo',
+        requestSnapshot: {
+          platform: 'shopify',
+          posts: [
+            {
+              reference_id: 'REF-422',
+              carrier_id: 9,
+              post_type: 2,
+              sender: {
+                name: 'Sender',
+                phone: '+90 532 123 45 67',
+                email: 'sender@example.test',
+                address: 'Sender address',
+                country: 'tr',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                post_code: '',
+              },
+              recipient: {
+                name: 'Recipient',
+                phone: '+90 532 123 45 68',
+                email: 'recipient@example.test',
+                address: 'Recipient address',
+                country: 'tr',
+                city: 'Istanbul',
+                district: '',
+                post_code: '',
+              },
+              post: {
+                desi: 3,
+                package_count: 1,
+                note: 'Order 1048',
+              },
+              barcode_format: 'pdf-A6',
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('Navlungo Create Post failed with HTTP 422.');
+    const snapshot = (thrown as Error & { responseSnapshot?: Record<string, unknown> }).responseSnapshot;
+    expect(snapshot).toMatchObject({
+      createPostHttpStatus: 422,
+      providerMessage: 'Validation Errors',
+      providerErrorCode: 'VALIDATION_ERROR',
+      validationErrorKeys: ['errors'],
+      failedFieldNames: [
+        'recipient.phone',
+        'recipient.email',
+        'recipient.address',
+        'post.desi',
+      ],
+      validationErrorMessages: [
+        'recipient.phone validation failed',
+        'recipient.email validation failed',
+        'recipient.address validation failed',
+        'The desi field is required.',
+      ],
+      providerValidationErrors: [
+        'recipient.phone validation failed',
+        'recipient.email validation failed',
+        'recipient.address validation failed',
+        'The desi field is required.',
+      ],
+      validationResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['status', 'message', 'code', 'errors'],
+      },
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('secret-access-token');
+    expect(JSON.stringify(snapshot)).not.toContain('+90 532 123 45 68');
+    expect(JSON.stringify(snapshot)).not.toContain('recipient@example.test');
+    expect(JSON.stringify(snapshot)).not.toContain('Recipient address');
+  });
+
   it('authenticates before carrier diagnostics but does not call unknown carrier paths', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {

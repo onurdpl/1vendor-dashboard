@@ -252,6 +252,14 @@ export type OrderShipmentExecutionDto = {
     dryRun: boolean | null;
     disabledGates: string[];
     providerValidationErrors: string[];
+    validationErrorKeys?: string[];
+    validationErrorMessages?: string[];
+    failedFieldNames?: string[];
+    providerErrorCode?: string | null;
+    validationResponseShape?: {
+      kind: string;
+      topLevelKeys: string[];
+    } | null;
     providerShipmentIdPresent: boolean;
     trackingNumberPresent: boolean;
     labelPresent: boolean;

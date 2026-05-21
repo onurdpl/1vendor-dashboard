@@ -2098,6 +2098,12 @@ export function OrderDetailPage() {
     if (visibleShipmentExecution?.provider !== 'navlungo') {
       return null;
     }
+    const hasValidationDiagnostics =
+      summary.realPathCreatePostHttpStatus === 422 ||
+      summary.providerCallHttpStatus === 422 ||
+      Boolean(summary.providerErrorCode) ||
+      Boolean(summary.failedFieldNames?.length) ||
+      Boolean(summary.validationErrorMessages?.length);
 
     return (
       <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Navlungo retry diagnostics">
@@ -2158,6 +2164,28 @@ export function OrderDetailPage() {
             {formatDiagnosticPresence(summary.realPathBarcodePresent)}
           </strong>
         </div>
+        {hasValidationDiagnostics ? (
+          <>
+            <div className="summary-row">
+              <span>Create Post HTTP</span>
+              <strong>{summary.realPathCreatePostHttpStatus ?? summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Validation fields</span>
+              <strong>{summary.failedFieldNames?.length ? summary.failedFieldNames.join(', ') : '—'}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Validation messages</span>
+              <strong>{summary.validationErrorMessages?.length ? summary.validationErrorMessages.join(' · ') : '—'}</strong>
+            </div>
+            {summary.providerErrorCode ? (
+              <div className="summary-row">
+                <span>Provider error code</span>
+                <strong>{summary.providerErrorCode}</strong>
+              </div>
+            ) : null}
+          </>
+        ) : null}
         <div className="summary-row">
           <span>Normalized evidence</span>
           <strong>

@@ -487,6 +487,23 @@ function mapProviderResponseSummary(
   const providerValidationErrors = Array.isArray(snapshot.providerValidationErrors)
     ? snapshot.providerValidationErrors.filter((error): error is string => typeof error === 'string' && error.trim().length > 0)
     : [];
+  const validationErrorKeys = Array.isArray(snapshot.validationErrorKeys)
+    ? snapshot.validationErrorKeys.filter((key): key is string => typeof key === 'string' && key.trim().length > 0)
+    : [];
+  const validationErrorMessages = Array.isArray(snapshot.validationErrorMessages)
+    ? snapshot.validationErrorMessages.filter((message): message is string => typeof message === 'string' && message.trim().length > 0)
+    : [];
+  const failedFieldNames = Array.isArray(snapshot.failedFieldNames)
+    ? snapshot.failedFieldNames.filter((field): field is string => typeof field === 'string' && field.trim().length > 0)
+    : [];
+  const validationResponseShape = isRecord(snapshot.validationResponseShape)
+    ? {
+        kind: readString(snapshot.validationResponseShape, ['kind']) ?? 'unknown',
+        topLevelKeys: Array.isArray(snapshot.validationResponseShape.topLevelKeys)
+          ? snapshot.validationResponseShape.topLevelKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+      }
+    : null;
 
   return {
     httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'statusCode']),
@@ -498,6 +515,11 @@ function mapProviderResponseSummary(
     dryRun: readOptionalBoolean(snapshot, ['dryRun']),
     disabledGates,
     providerValidationErrors,
+    validationErrorKeys,
+    validationErrorMessages,
+    failedFieldNames,
+    providerErrorCode: readString(snapshot, ['providerErrorCode', 'errorCode', 'code']),
+    validationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
     trackingUrlPresent,
