@@ -20,7 +20,7 @@ import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../fe
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
-import { formatTrackingCarrierLabel } from '../lib/shippingDisplay';
+import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -136,6 +136,30 @@ function getShippingOperationalLabel(order: OrderSummary | OrderDetail) {
     return { label: 'Fulfilled', tone: 'fulfilled' as const, helper: null };
   }
   return { label: 'Provider pending', tone: 'pending' as const, helper: null };
+}
+
+function getShopifyFulfillmentRailLabel(order: OrderSummary | OrderDetail) {
+  const detail = order as OrderDetail;
+  if (detail.shopifyFulfillmentSync?.fulfillmentIdPresent || detail.shopifyFulfillmentSync?.status === 'synced') {
+    return 'Synced';
+  }
+  if (order.fulfillmentStatus === 'Fulfilled') {
+    return 'Fulfilled';
+  }
+  if (order.trackingNumber || order.carrier) {
+    return 'Pending';
+  }
+  return 'Not fulfilled';
+}
+
+function getRailProviderLabel(order: OrderSummary | OrderDetail) {
+  const detail = order as OrderDetail;
+  return (
+    formatShippingProviderName(detail.shipmentExecution?.providerCarrierName) ||
+    formatShippingProviderName(detail.shipmentExecution?.provider) ||
+    formatShippingProviderName(order.carrier) ||
+    'Provider pending'
+  );
 }
 
 function getItemInitials(name: string) {
@@ -464,33 +488,42 @@ export function OrdersPage() {
           </div>
 
           <SideDetailPanel
-            eyebrow="Order detail"
-            title={selectedOrder ? `Shopify ${formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber)}` : 'No order selected'}
+            eyebrow={selectedOrder ? currentVendor.vendorName : 'Order detail'}
+            title={selectedOrder ? formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber) : 'No order selected'}
             action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open canonical detail</Link> : null}
           >
           {selectedOrder ? (
+            (() => {
+              const shippingOperational = getShippingOperationalLabel(selectedOrder);
+              const shopifyFulfillmentState = getShopifyFulfillmentRailLabel(selectedOrder);
+              const shipmentExecution = (selectedOrder as OrderDetail).shipmentExecution;
+              const trackingLabel = selectedOrder.trackingNumber
+                ? selectedOrder.trackingNumber
+                : shipmentExecution?.trackingNumber ?? '—';
+              const trackingUrl = selectedOrder.trackingUrl ?? shipmentExecution?.trackingUrl ?? null;
+              const labelUrl = shipmentExecution?.labelUrl ?? null;
+              const warehouseId = shipmentExecution?.warehouseId ?? '—';
+              const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
+
+              return (
             <>
-              <div className="orders-detail-hero">
-                <div>
-                  <span>Order number</span>
-                  <strong>{formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber)}</strong>
+              <div className="orders-detail-rail-header">
+                <div className="orders-detail-rail-badges">
+                  <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{selectedOrder.allocationStatus.replace(/_/g, ' ')}</StatusBadge>
+                  <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
                 </div>
-                <StatusBadge tone={getStatusTone(selectedOrder.status)}>{selectedOrder.status}</StatusBadge>
+                <small>Shopify {selectedOrder.sourceShopifyOrderId}</small>
               </div>
 
-              <div className="op-detail-status-row orders-detail-badges">
-                <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{selectedOrder.allocationStatus.replace(/_/g, ' ')}</StatusBadge>
-                <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
-                <StatusBadge tone={getStatusTone(selectedOrder.shippingStatus)}>{selectedOrder.shippingStatus}</StatusBadge>
+              <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
+                <strong>{selectedOrder.shippingStatus}</strong>
+                <span>{shippingOperational.label}</span>
+                <span>Shopify {shopifyFulfillmentState.toLowerCase()}</span>
               </div>
 
               <section className="orders-detail-card">
                 <h4>Operational summary</h4>
                 <div className="orders-detail-info-grid">
-                  <div>
-                    <span>Vendor</span>
-                    <strong>{currentVendor.vendorName}</strong>
-                  </div>
                   <div>
                     <span>Customer</span>
                     <strong>{getCustomerLabel(selectedOrder.customer)}</strong>
@@ -516,37 +549,30 @@ export function OrdersPage() {
 
               <section className="orders-detail-card">
                 <h4>Fulfillment and shipping</h4>
-                <div className="orders-status-block-grid">
-                  <div className="orders-status-block">
-                    <span>Fulfillment</span>
-                    <strong>{selectedOrder.fulfillmentStatus}</strong>
+                <div className="orders-rail-summary-list">
+                  <div>
+                    <span>Provider</span>
+                    <strong>{getRailProviderLabel(selectedOrder)}</strong>
                   </div>
-                  <div className="orders-status-block">
-                    <span>Shipping</span>
-                    <strong>{selectedOrder.shippingStatus}</strong>
-                  </div>
-                  <div className="orders-status-block">
+                  <div>
                     <span>Tracking</span>
-                    <strong>{getTrackingLabel(selectedOrder)}</strong>
-                    <small>{formatTrackingCarrierLabel(selectedOrder.carrier) ?? 'Carrier pending'}</small>
-                  </div>
-                </div>
-                <div className="orders-detail-info-grid orders-detail-timestamps">
-                  <div>
-                    <span>Fulfilled at</span>
-                    <strong>{formatDate(selectedOrder.fulfilledAt)}</strong>
+                    <strong>{trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
                   </div>
                   <div>
-                    <span>Shipment created</span>
-                    <strong>{formatDate(selectedOrder.shipmentCreatedAt)}</strong>
+                    <span>Warehouse</span>
+                    <strong>{warehouseId}</strong>
                   </div>
                   <div>
-                    <span>Shipment updated</span>
-                    <strong>{formatDate(selectedOrder.shipmentUpdatedAt)}</strong>
+                    <span>Shopify sync</span>
+                    <strong>{shopifyFulfillmentState}</strong>
                   </div>
                   <div>
-                    <span>Tracking URL</span>
-                    <strong>{selectedOrder.trackingUrl ? <a className="inline-link" href={selectedOrder.trackingUrl}>Open tracking</a> : 'Waiting Shopify sync'}</strong>
+                    <span>Label</span>
+                    <strong>{labelUrl ? <a className="inline-link" href={labelUrl}>Open label</a> : 'Unavailable'}</strong>
+                  </div>
+                  <div>
+                    <span>Last update</span>
+                    <strong>{formatDate(lastUpdate)}</strong>
                   </div>
                 </div>
               </section>
@@ -579,21 +605,37 @@ export function OrdersPage() {
                 <TimelineBlock
                   items={[
                     { label: 'Order received', at: formatDate(selectedOrder.date) },
-                    { label: 'Fulfillment status', detail: selectedOrder.fulfillmentStatus },
-                    { label: 'Shipping status', detail: selectedOrder.shippingStatus },
-                    { label: 'Fulfilled', at: formatDate(selectedOrder.fulfilledAt) },
+                    { label: 'Shipment state', detail: shippingOperational.label },
                     { label: selectedOrder.trackingNumber ? 'Tracking synced' : 'Tracking pending', detail: getTrackingLabel(selectedOrder) },
+                    { label: 'Shopify sync', detail: shopifyFulfillmentState },
                   ]}
                 />
               </section>
 
-              <section className="orders-detail-card orders-reconciliation-card">
-                <h4>Reconciliation context</h4>
-                <p className="page-description">
-                  Reconcile from Diagnostics if fulfillment, shipping, or tracking looks stale.
-                </p>
-              </section>
+              <details className="orders-detail-card orders-rail-diagnostics">
+                <summary>Operational diagnostics</summary>
+                <div className="orders-rail-summary-list">
+                  <div>
+                    <span>Fulfillment</span>
+                    <strong>{selectedOrder.fulfillmentStatus}</strong>
+                  </div>
+                  <div>
+                    <span>Shipment created</span>
+                    <strong>{formatDate(selectedOrder.shipmentCreatedAt)}</strong>
+                  </div>
+                  <div>
+                    <span>Tracking source</span>
+                    <strong>{getTrackingLabel(selectedOrder)}</strong>
+                  </div>
+                  <div>
+                    <span>Shopify fulfillment</span>
+                    <strong>{shopifyFulfillmentState}</strong>
+                  </div>
+                </div>
+              </details>
             </>
+              );
+            })()
           ) : (
             <EmptyStatePanel
               title={hasRequestedOrderTarget ? 'Linked order unavailable' : 'Select an order'}
