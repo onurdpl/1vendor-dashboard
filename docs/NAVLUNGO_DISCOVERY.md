@@ -497,6 +497,7 @@ Current adapter status:
   - `data.carrier_tracking_url` or `tracking_url` to tracking URL
   - `data.barcode` to label/barcode availability
   - `data.post.carrier_name`/`carrier_id` to carrier diagnostics
+- Successful Create Post normalization is confirmed for the live/test response shape. `post_number`, `tracking_url`, and `barcode` are treated as valid provider success evidence even if the optional immediate Check Post enrichment fails.
 - Return/reverse shipment is not implemented.
 - Carrier list endpoints remain unknown.
 - Separate Barcode endpoint remains unknown because the docs page did not expose an endpoint path.
@@ -609,6 +610,7 @@ Current observed deployed Create Post probe results:
   - `post.carrier_id` and `post.carrier_name` present
   - provider message: `Your transaction will be successfully created if your wallet balance is sufficient.`
 - This indicates Create Post can provide customer tracking immediately, but barcode handling must use the observed `barcode` field or a confirmed Barcode endpoint contract.
+- Runtime shipment normalization accepts `tracking_url` as a valid shipment tracking signal and uses the observed `barcode` string as the current label/barcode source.
 
 ## 16.4. Check Post And Barcode Diagnostics Probe Status
 

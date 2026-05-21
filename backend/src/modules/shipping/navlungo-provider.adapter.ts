@@ -281,7 +281,20 @@ function getNavlungoResponseData(body: unknown) {
   if (Array.isArray(body.data)) {
     return body.data.find(isRecord) ?? {};
   }
-  return isRecord(body.data) ? body.data : body;
+  const data = isRecord(body.data) ? body.data : body;
+  if (Array.isArray(data.posts)) {
+    return data.posts.find(isRecord) ?? data;
+  }
+  if (Array.isArray(data.results)) {
+    return data.results.find(isRecord) ?? data;
+  }
+  if (isRecord(data.shipment)) {
+    return {
+      ...data,
+      ...data.shipment,
+    };
+  }
+  return data;
 }
 
 function getNavlungoPostRecord(data: Record<string, unknown>) {
@@ -289,8 +302,28 @@ function getNavlungoPostRecord(data: Record<string, unknown>) {
 }
 
 function readNavlungoBarcode(data: Record<string, unknown>) {
-  const barcode = data.barcode;
-  return typeof barcode === 'string' && barcode.trim() ? barcode.trim() : null;
+  return readString(data, ['barcode', 'barcode_url', 'barcodeUrl', 'label_url', 'labelUrl']);
+}
+
+function readNavlungoPostNumber(data: Record<string, unknown>) {
+  return readString(data, ['post_number', 'postNumber', 'post_no', 'postNo', 'reference_number', 'referenceNumber']);
+}
+
+function readNavlungoTrackingNumber(data: Record<string, unknown>) {
+  return readString(data, [
+    'carrier_tracking_code',
+    'carrierTrackingCode',
+    'carrier_post_number',
+    'carrierPostNumber',
+    'tracking_number',
+    'trackingNumber',
+    'tracking_code',
+    'trackingCode',
+  ]);
+}
+
+function readNavlungoTrackingUrl(data: Record<string, unknown>) {
+  return readString(data, ['carrier_tracking_url', 'carrierTrackingUrl', 'tracking_url', 'trackingUrl']);
 }
 
 function mapNavlungoShipmentStatus(value: unknown) {
@@ -339,8 +372,8 @@ function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Re
     contentType: response.contentType,
     topLevelKeys: isRecord(response.body) ? Object.keys(response.body) : [],
     dataKeys: Object.keys(bodyData),
-    postNumberPresent: Boolean(readString(bodyData, ['post_number'])),
-    trackingUrlPresent: Boolean(readString(bodyData, ['tracking_url'])),
+    postNumberPresent: Boolean(readNavlungoPostNumber(bodyData)),
+    trackingUrlPresent: Boolean(readNavlungoTrackingUrl(bodyData)),
     barcodePresent: Boolean(readNavlungoBarcode(bodyData)),
     carrierFieldsPresent: Boolean(readNumberOrString(post, ['carrier_id']) ?? readString(post, ['carrier_name'])),
     providerMessage: readStringFromRecord(response.body, ['message', 'error']),
@@ -358,8 +391,8 @@ function buildCheckPostDiagnostics(response: NavlungoHttpResponse | null, bodyDa
     topLevelKeys: response && isRecord(response.body) ? Object.keys(response.body) : [],
     dataKeys: Object.keys(bodyData),
     statusKeys: Object.keys(status),
-    trackingPresent: Boolean(readString(bodyData, ['carrier_tracking_code', 'carrier_post_number', 'post_number'])),
-    trackingUrlPresent: Boolean(readString(bodyData, ['carrier_tracking_url', 'tracking_url'])),
+    trackingPresent: Boolean(readNavlungoTrackingNumber(bodyData) ?? readNavlungoPostNumber(bodyData)),
+    trackingUrlPresent: Boolean(readNavlungoTrackingUrl(bodyData)),
     barcodePresent: Boolean(readNavlungoBarcode(bodyData)),
     carrierFieldsPresent: Boolean(readNumberOrString(post, ['carrier_id']) ?? readString(post, ['carrier_name'])),
     providerMessage: response ? readStringFromRecord(response.body, ['message', 'error']) : null,
@@ -790,7 +823,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       });
     }
 
-    const postNumber = readString(createData, ['post_number']);
+    const postNumber = readNavlungoPostNumber(createData);
     if (!postNumber) {
       throw new ProviderExecutionError('Navlungo Create Post succeeded but did not return post_number.', {
         ...responseSnapshot,
@@ -820,12 +853,12 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     const createPost = getNavlungoPostRecord(createData);
     const checkPost = getNavlungoPostRecord(checkData);
     const trackingNumber =
-      readString(checkData, ['carrier_tracking_code', 'carrier_post_number']) ??
-      readString(createData, ['carrier_tracking_code', 'carrier_post_number']) ??
+      readNavlungoTrackingNumber(checkData) ??
+      readNavlungoTrackingNumber(createData) ??
       postNumber;
     const trackingUrl =
-      readString(checkData, ['carrier_tracking_url', 'tracking_url']) ??
-      readString(createData, ['carrier_tracking_url', 'tracking_url']);
+      readNavlungoTrackingUrl(checkData) ??
+      readNavlungoTrackingUrl(createData);
     const barcode = readNavlungoBarcode(checkData) ?? readNavlungoBarcode(createData);
     const status = checkData.status ?? createData.status;
     const carrierName =
@@ -847,6 +880,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
         ...responseSnapshot,
         ok: true,
         providerShipmentId: postNumber,
+        providerShipmentIdPresent: true,
         trackingNumberPresent: Boolean(trackingNumber),
         trackingUrlPresent: Boolean(trackingUrl),
         labelUrlPresent: Boolean(barcode),

@@ -2810,7 +2810,13 @@ async function persistProviderShipmentResult(input: {
   result: Awaited<ReturnType<ShippingProviderAdapter['createShipment']>>;
 }) {
   const { allocation, executionId, provider, result } = input;
-  const providerCreated = Boolean(result.providerShipmentId || result.trackingNumber || result.labelUrl);
+  const providerCreated = Boolean(
+    result.providerShipmentId ||
+      result.trackingNumber ||
+      result.trackingUrl ||
+      result.labelUrl ||
+      readString(result.responseSnapshot, ['post_number', 'postNumber', 'providerShipmentId', 'tracking_url', 'trackingUrl', 'barcode']),
+  );
   const status = providerCreated ? mapProviderStatus(result.shipmentStatus === 'pending' ? 'created' : result.shipmentStatus) : ShipmentExecutionStatus.PENDING;
   const shippingVatPercent = SHIPPING_VAT_PERCENT;
   const shippingVat =

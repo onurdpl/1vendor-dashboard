@@ -367,6 +367,106 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(result)).not.toContain('secret-access-token');
   });
 
+  it('treats successful Navlungo Create Post response as shipment success when Check Post fails', async () => {
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (String(url).includes('/post/check/')) {
+        return new Response(JSON.stringify({ status: false, message: 'Temporarily unavailable' }), {
+          status: 503,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: true,
+        message: 'Your transaction will be successfully created if your wallet balance is sufficient.',
+        data: {
+          post_number: 'NP-CREATE-ONLY',
+          reference_id: 'REF-CREATE-ONLY',
+          tracking_url: 'https://domestic.navlungo.test/tracking/NP-CREATE-ONLY',
+          barcode: 'create-barcode-string',
+          post: {
+            carrier_id: 9,
+            carrier_name: 'Sürat Kargo',
+          },
+        },
+      }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+
+    const result = await adapter.createShipment({
+      allocationId: 'allocation-1',
+      vendorId: 'vendor-1',
+      provider: 'navlungo',
+      requestSnapshot: {
+        platform: 'shopify',
+        posts: [
+          {
+            reference_id: 'REF-CREATE-ONLY',
+            carrier_id: 9,
+            post_type: 2,
+            sender: {
+              name: 'Sender',
+              phone: '+90 532 123 45 67',
+              email: 'sender@example.test',
+              address: 'Sender address',
+              country: 'tr',
+              city: 'Istanbul',
+              district: 'Kadikoy',
+              post_code: '',
+            },
+            recipient: {
+              name: 'Recipient',
+              phone: '+90 532 123 45 68',
+              email: 'recipient@example.test',
+              address: 'Recipient address',
+              country: 'tr',
+              city: 'Istanbul',
+              district: '',
+              post_code: '',
+            },
+            post: {
+              desi: 3,
+              package_count: 1,
+              note: 'Order 1048',
+            },
+            barcode_format: 'pdf-A6',
+            custom_data_1: 'alloc-1',
+            custom_data_2: '1048',
+            custom_data_3: 'vendor-1',
+            custom_data_4: '55574',
+          },
+        ],
+      },
+    });
+
+    expect(result).toMatchObject({
+      providerShipmentId: 'NP-CREATE-ONLY',
+      trackingNumber: 'NP-CREATE-ONLY',
+      trackingUrl: 'https://domestic.navlungo.test/tracking/NP-CREATE-ONLY',
+      labelUrl: 'create-barcode-string',
+      shipmentStatus: 'created',
+      responseSnapshot: {
+        ok: true,
+        providerShipmentIdPresent: true,
+        trackingNumberPresent: true,
+        trackingUrlPresent: true,
+        barcodePresent: true,
+        carrierName: 'Sürat Kargo',
+        carrierId: 9,
+        checkPostWarning: 'Navlungo Check Post failed with HTTP 503.',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-access-token');
+  });
+
   it('authenticates before carrier diagnostics but does not call unknown carrier paths', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
