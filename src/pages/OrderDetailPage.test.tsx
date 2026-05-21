@@ -409,6 +409,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       tokenReceived: true,
       refreshTokenReceived: true,
       expiresIn: 86400,
+      authValidationErrorKeys: [],
+      authValidationErrorMessages: [],
+      authFailedFieldNames: [],
       fetchError: null,
     });
     runtimeDiagnosticsMocks.navlungoCarriers.mockReset();
@@ -1736,6 +1739,73 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Run Navlungo carrier diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
+  });
+
+  it('renders Navlungo auth validation fields and messages safely', async () => {
+    const user = userEvent.setup();
+    runtimeDiagnosticsMocks.navlungoAuth.mockResolvedValueOnce({
+      provider: 'navlungo',
+      displayName: 'Navlungo',
+      dormant: true,
+      baseUrlHost: 'domestic-api.navlungo.com',
+      baseUrlPath: '/v2.1',
+      baseUrlParseError: null,
+      usernamePresent: true,
+      passwordPresent: true,
+      authRequestUrl: '/v2.1/auth/api',
+      authHttpStatus: 422,
+      authContentType: 'application/json',
+      responseShapeSummary: {
+        kind: 'json:object',
+        topLevelKeys: ['message', 'status', 'error'],
+      },
+      responseDataShapeSummary: null,
+      tokenKeyPresence: {
+        rootAccessToken: false,
+        dataAccessToken: false,
+        dataToken: false,
+        anyTokenLikeKey: false,
+      },
+      refreshTokenKeyPresence: {
+        rootRefreshToken: false,
+        dataRefreshToken: false,
+      },
+      expiresInPresent: false,
+      tokenTypePresent: false,
+      tokenReceived: false,
+      refreshTokenReceived: false,
+      expiresIn: null,
+      authValidationErrorKeys: ['username', 'password', 'another_field'],
+      authFailedFieldNames: ['username', 'password', 'another_field'],
+      authValidationErrorMessages: [
+        'username validation failed',
+        'password validation failed',
+        'Another field is invalid',
+      ],
+      fetchError: null,
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.selectOptions(await screen.findByLabelText('Provider'), 'navlungo');
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));
+
+    expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
+    expect(screen.getByText('Auth result').closest('.summary-row')).toHaveTextContent('422');
+    expect(screen.getByText('Auth validation fields').closest('.summary-row')).toHaveTextContent('username, password, another_field');
+    expect(screen.getByText('Auth validation messages').closest('.summary-row')).toHaveTextContent(
+      'username validation failed · password validation failed · Another field is invalid',
+    );
+    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {

@@ -57,6 +57,9 @@ export type NavlungoAuthDiagnostics = {
   tokenReceived: boolean;
   refreshTokenReceived: boolean;
   expiresIn: number | string | null;
+  authValidationErrorKeys: string[];
+  authValidationErrorMessages: string[];
+  authFailedFieldNames: string[];
   fetchError: {
     name: string;
     message: string;
@@ -441,7 +444,7 @@ function collectNavlungoValidationDiagnostics(
 
   if (isRecord(value)) {
     for (const [key, item] of Object.entries(value)) {
-      if (/token|secret|authorization|bearer|password|api[_-]?key/i.test(key)) {
+      if (/token|secret|authorization|bearer|api[_-]?key/i.test(key)) {
         continue;
       }
       const nextPath = /^\d+$/.test(key) ? path : [...path, key];
@@ -781,6 +784,9 @@ export async function runNavlungoAuthDiagnostics(
     tokenReceived: false,
     refreshTokenReceived: false,
     expiresIn: null,
+    authValidationErrorKeys: [],
+    authValidationErrorMessages: [],
+    authFailedFieldNames: [],
     fetchError: null,
   };
 
@@ -795,6 +801,7 @@ export async function runNavlungoAuthDiagnostics(
     const rootRefreshToken = hasNonEmptyString(body, 'refresh_token');
     const dataRefreshToken = hasNonEmptyString(data, 'refresh_token');
     const expiresIn = getAuthExpiresIn(body, data);
+    const validationDiagnostics = getNavlungoValidationDiagnostics(response.body);
     return {
       ...base,
       authHttpStatus: response.status,
@@ -816,6 +823,9 @@ export async function runNavlungoAuthDiagnostics(
       tokenReceived: Boolean(getNavlungoAccessTokenFromAuthBody(response.body)),
       refreshTokenReceived: rootRefreshToken || dataRefreshToken,
       expiresIn,
+      authValidationErrorKeys: validationDiagnostics.validationErrorKeys,
+      authValidationErrorMessages: validationDiagnostics.validationErrorMessages,
+      authFailedFieldNames: validationDiagnostics.failedFieldNames,
     };
   } catch (error) {
     return {

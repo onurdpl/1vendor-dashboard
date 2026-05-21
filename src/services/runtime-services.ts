@@ -1568,6 +1568,9 @@ export const runtimeServices = {
             tokenReceived: false,
             refreshTokenReceived: false,
             expiresIn: null,
+            authValidationErrorKeys: [],
+            authValidationErrorMessages: [],
+            authFailedFieldNames: [],
             fetchError: {
               name: 'MockMode',
               message: 'Navlungo auth diagnostics are available in real API mode only.',

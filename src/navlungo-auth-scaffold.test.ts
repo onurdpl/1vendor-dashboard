@@ -205,6 +205,36 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(result)).not.toContain('secret-data-refresh-token');
   });
 
+  it('surfaces auth validation fields from root error object without exposing credentials', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({
+      message: 'Validation Errors',
+      status: false,
+      error: {
+        username: ['Username field is required'],
+        password: ['Password field is required'],
+        another_field: 'Another field is invalid',
+      },
+    }), {
+      status: 422,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+
+    const result = await runNavlungoAuthDiagnostics(buildEnv(), { fetchImpl });
+
+    expect(result).toMatchObject({
+      authHttpStatus: 422,
+      tokenReceived: false,
+      authValidationErrorKeys: ['username', 'password', 'another_field'],
+      authFailedFieldNames: ['username', 'password', 'another_field'],
+      authValidationErrorMessages: [
+        'username validation failed',
+        'password validation failed',
+        'Another field is invalid',
+      ],
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+  });
+
   it('returns network failure diagnostics safely', async () => {
     const fetchImpl = vi.fn().mockRejectedValue(new TypeError('fetch failed')) as unknown as typeof fetch;
 

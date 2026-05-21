@@ -5721,6 +5721,18 @@ export function OrderDetailPage() {
                           </strong>
                         </div>
                         <div className="summary-row">
+                          <span>Auth validation fields</span>
+                          <strong>{navlungoAuthDiagnostics.authFailedFieldNames.length ? navlungoAuthDiagnostics.authFailedFieldNames.join(', ') : '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Auth validation messages</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.authValidationErrorMessages.length
+                              ? navlungoAuthDiagnostics.authValidationErrorMessages.join(' · ')
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
                           <span>Response shape</span>
                           <strong>
                             {navlungoAuthDiagnostics.responseShapeSummary

@@ -284,6 +284,9 @@ export type NavlungoAuthDiagnostics = {
   tokenReceived: boolean;
   refreshTokenReceived: boolean;
   expiresIn: number | string | null;
+  authValidationErrorKeys: string[];
+  authValidationErrorMessages: string[];
+  authFailedFieldNames: string[];
   fetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
 };
 
