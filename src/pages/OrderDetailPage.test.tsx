@@ -4740,6 +4740,58 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
   });
 
+  it('renders Navlungo error-object validation fields and messages in admin diagnostics', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'validation_failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 422,
+          providerError: 'Validation Errors',
+          providerValidationErrors: [
+            'This reference id has already been registered.',
+            'Carrier field is required',
+          ],
+          realPathCreatePostHttpStatus: 422,
+          providerCallHttpStatus: 422,
+          validationErrorKeys: ['posts.0.reference_id', 'posts.0.carrier_id'],
+          failedFieldNames: ['posts.0.reference_id', 'posts.0.carrier_id'],
+          validationErrorMessages: [
+            'This reference id has already been registered.',
+            'Carrier field is required',
+          ],
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+
+    expect(screen.getAllByText('Validation fields').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('posts.0.reference_id, posts.0.carrier_id').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Validation messages').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('This reference id has already been registered. · Carrier field is required').length).toBeGreaterThan(0);
+  });
+
   it('renders Navlungo provider tracking id in admin retry diagnostics', async () => {
     const providerMessage =
       'Execution of ServiceCallout failed. Please report for error resolution with Tracking ID: #35440d91ec90403483413b548ba91844';

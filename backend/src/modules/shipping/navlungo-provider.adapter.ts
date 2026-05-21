@@ -455,7 +455,9 @@ function collectNavlungoValidationDiagnostics(
 function getNavlungoValidationDiagnostics(body: unknown) {
   const root = isRecord(body) ? body : {};
   const data = isRecord(root.data) ? root.data : {};
+  const rootErrorObject = isRecord(root.error) ? root.error : null;
   const candidates = {
+    error: rootErrorObject,
     errors: root.errors,
     validation: root.validation,
     validation_errors: root.validation_errors,
@@ -472,7 +474,9 @@ function getNavlungoValidationDiagnostics(body: unknown) {
   );
 
   return {
-    validationErrorKeys: presentCandidates.map(([key]) => key),
+    validationErrorKeys: rootErrorObject
+      ? Object.keys(rootErrorObject)
+      : presentCandidates.map(([key]) => key),
     validationErrorMessages: Array.from(new Set(collected.messages)).slice(0, 12),
     failedFieldNames: Array.from(new Set(collected.fields)).slice(0, 20),
     providerErrorCode: readString(root, ['code', 'error_code', 'errorCode', 'providerErrorCode']) ??
