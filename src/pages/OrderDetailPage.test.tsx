@@ -2715,7 +2715,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(retryShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961');
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText(/Shipment ke-live-1028 refreshed/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Shipment ke-live-1028 recorded/i)).length).toBeGreaterThan(0);
   });
 
   it('renders Try OTO status refresh action and updates created shipment evidence', async () => {
@@ -4476,6 +4476,80 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(await screen.findByRole('button', { name: 'Retry live shipment' }));
 
     expect(await screen.findByText('Shipping provider execution is not ready. Missing: SHIPPING_EXECUTION_ENABLED.')).toBeInTheDocument();
+  });
+
+  it('renders returned admin Navlungo retry evidence instead of stale pending fallback', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'pending',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: true,
+          dryRun: true,
+          disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+          providerError: 'Provider did not return a shipment id or tracking yet.',
+          providerShipmentIdPresent: false,
+          trackingNumberPresent: false,
+          trackingUrlPresent: false,
+          labelPresent: false,
+          barcodePresent: false,
+        },
+      },
+    });
+    retryShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-ADMIN-1051',
+      trackingNumber: 'NAV-ADMIN-TRACK-1051',
+      trackingUrl: 'https://track.navlungo.test/NAV-ADMIN-1051',
+      labelUrl: 'barcode-string',
+      barcode: 'barcode-string',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        ok: true,
+        dryRun: false,
+        disabledGates: [],
+        providerError: null,
+        providerShipmentIdPresent: true,
+        trackingNumberPresent: true,
+        trackingUrlPresent: true,
+        labelPresent: true,
+        barcodePresent: true,
+      },
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry live shipment' }));
+
+    await waitFor(() => expect(retryShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961'));
+    expect((await screen.findAllByText('Shipment NAV-ADMIN-1051 recorded.')).length).toBeGreaterThan(0);
+    expect(screen.getByText('NAV-ADMIN-TRACK-1051')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-ADMIN-1051');
+    expect(screen.queryByText(/Provider id: pending/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Provider did not return a shipment id or tracking yet/)).not.toBeInTheDocument();
   });
 
   it('calls create shipment endpoint, shows success evidence, and refreshes order detail', async () => {

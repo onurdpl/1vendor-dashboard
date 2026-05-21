@@ -2583,12 +2583,13 @@ export function OrderDetailPage() {
 
     void retryShipmentMutation(shipmentExecution.id)
       .then((shipment) => {
-        showFeedback(
-          shipment.shipmentStatus === 'pending'
-            ? 'Shipment retry recorded. Carrier execution is pending.'
-            : `Shipment ${shipment.providerShipmentId ?? shipment.id} refreshed.`,
-          'success',
-        );
+        const resultState = getShipmentActionResultState(shipment, 'retry');
+        setShipmentActionState({
+          ...resultState,
+          shipment,
+          endpoint: `POST /admin/shipments/${shipmentExecution.id}/retry`,
+        });
+        showFeedback(resultState.message, resultState.tone);
         void refetch();
       })
       .catch((mutationError) => {
@@ -4599,30 +4600,30 @@ export function OrderDetailPage() {
               </div>
             ) : (
               <div className="action-row vendor-blocked-panel">
-                {(isAdmin || canUseFulfillmentActions) && (shipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
+                {(isAdmin || canUseFulfillmentActions) && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt) ? (
                   <div className="tracking-summary-card order-tracking-summary-card">
-                    {shipmentExecution ? (
+                    {visibleShipmentExecution ? (
                       <>
                         <div className="summary-row">
                           <span>Shipment provider</span>
-                          <strong>{formatShippingProviderName(shipmentExecution.provider)}</strong>
+                          <strong>{formatShippingProviderName(visibleShipmentExecution.provider)}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Carrier status</span>
-                          <strong>{getOperationalShipmentStatusLabel(shipmentExecution.shipmentStatus)}</strong>
+                          <strong>{getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus)}</strong>
                         </div>
-                        {shipmentExecution.warehouseId ? (
+                        {visibleShipmentExecution.warehouseId ? (
                           <div className="summary-row">
                             <span>Warehouse</span>
-                            <strong>{shipmentExecution.warehouseId}</strong>
+                            <strong>{visibleShipmentExecution.warehouseId}</strong>
                           </div>
                         ) : null}
                       </>
                     ) : null}
                     <div className="summary-row">
                       <span>Tracking</span>
-                      <strong className={order.trackingNumber || shipmentExecution?.trackingNumber ? '' : 'muted'}>
-                        {getShipmentTrackingNumber(order, shipmentExecution) ?? 'Not available'}
+                      <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
+                        {getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}
                       </strong>
                     </div>
                     <div className="summary-row">
@@ -4631,18 +4632,18 @@ export function OrderDetailPage() {
                     </div>
                     <div className="summary-row">
                       <span>Tracking link</span>
-                      {getShipmentTrackingUrl(order, shipmentExecution) ? (
-                        <a className="inline-link" href={getShipmentTrackingUrl(order, shipmentExecution) || undefined} target="_blank" rel="noreferrer">
+                      {getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
+                        <a className="inline-link" href={getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined} target="_blank" rel="noreferrer">
                           Open tracking
                         </a>
                       ) : (
                         <strong className="muted">Not available</strong>
                       )}
                     </div>
-                    {shipmentExecution?.labelUrl ? (
+                    {visibleShipmentExecution?.labelUrl ? (
                       <div className="summary-row">
                         <span>Label</span>
-                        <a className="inline-link" href={shipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                        <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
                           Open label PDF
                         </a>
                       </div>
