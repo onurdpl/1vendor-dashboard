@@ -383,6 +383,11 @@ function readStringFromRecord(value: unknown, keys: string[]) {
   return isRecord(value) ? readString(value, keys) : null;
 }
 
+function extractNavlungoProviderTrackingId(message: string | null | undefined) {
+  const match = message?.match(/Tracking ID:\s*(#[A-Za-z0-9_-]+)/i);
+  return match?.[1] ?? null;
+}
+
 function navlungoValidationPathContainsPii(path: string[]) {
   return path.some((part) => /name|phone|email|address|password|token|authorization|api[_-]?key/i.test(part));
 }
@@ -478,6 +483,7 @@ function getNavlungoValidationDiagnostics(body: unknown) {
 
 function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Record<string, unknown>) {
   const post = getNavlungoPostRecord(bodyData);
+  const providerMessage = readStringFromRecord(response.body, ['message', 'error']);
   return {
     ok: response.ok,
     status: response.status,
@@ -488,7 +494,8 @@ function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Re
     trackingUrlPresent: Boolean(readNavlungoTrackingUrl(bodyData)),
     barcodePresent: Boolean(readNavlungoBarcode(bodyData)),
     carrierFieldsPresent: Boolean(readNumberOrString(post, ['carrier_id']) ?? readString(post, ['carrier_name'])),
-    providerMessage: readStringFromRecord(response.body, ['message', 'error']),
+    providerMessage,
+    providerTrackingId: extractNavlungoProviderTrackingId(providerMessage),
     ...getNavlungoValidationDiagnostics(response.body),
   };
 }
@@ -933,6 +940,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       validationErrorMessages: createDiagnostics.validationErrorMessages,
       failedFieldNames: createDiagnostics.failedFieldNames,
       providerErrorCode: createDiagnostics.providerErrorCode,
+      providerTrackingId: createDiagnostics.providerTrackingId,
       validationResponseShape: createDiagnostics.validationResponseShape,
       providerValidationErrors: createDiagnostics.validationErrorMessages,
     });

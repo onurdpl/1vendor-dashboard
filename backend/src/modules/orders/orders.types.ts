@@ -256,6 +256,7 @@ export type OrderShipmentExecutionDto = {
     validationErrorMessages?: string[];
     failedFieldNames?: string[];
     providerErrorCode?: string | null;
+    providerTrackingId?: string | null;
     validationResponseShape?: {
       kind: string;
       topLevelKeys: string[];

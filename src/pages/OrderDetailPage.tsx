@@ -2142,6 +2142,14 @@ export function OrderDetailPage() {
           <strong>{summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'}</strong>
         </div>
         <div className="summary-row">
+          <span>Provider message</span>
+          <strong>{summary.providerError || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider tracking ID</span>
+          <strong>{summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
           <span>Real path request</span>
           <strong>
             carrier {summary.realPathRequestedCarrierId ?? '—'} · post {summary.realPathRequestedPostType ?? '—'} · barcode{' '}

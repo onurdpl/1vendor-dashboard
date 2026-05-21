@@ -571,6 +571,7 @@ function buildShipmentProviderResponseSummary(
     validationErrorMessages: readStringArray(snapshot?.validationErrorMessages),
     failedFieldNames: readStringArray(snapshot?.failedFieldNames),
     providerErrorCode: readString(snapshot, ['providerErrorCode', 'errorCode', 'code']),
+    providerTrackingId: readString(snapshot, ['providerTrackingId']),
     validationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),

@@ -580,6 +580,81 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(snapshot)).not.toContain('Recipient address');
   });
 
+  it('extracts Navlungo provider tracking id from 500 provider messages', async () => {
+    const providerMessage =
+      'Execution of ServiceCallout failed. Please report for error resolution with Tracking ID: #35440d91ec90403483413b548ba91844';
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: false,
+        message: providerMessage,
+      }), {
+        status: 500,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+
+    let thrown: unknown;
+    try {
+      await adapter.createShipment({
+        allocationId: 'allocation-1',
+        vendorId: 'vendor-1',
+        provider: 'navlungo',
+        requestSnapshot: {
+          platform: 'shopify',
+          posts: [
+            {
+              reference_id: 'REF-500',
+              carrier_id: 9,
+              post_type: 2,
+              sender: {
+                addressId: 55574,
+              },
+              recipient: {
+                name: 'Recipient',
+                phone: '+90 532 123 45 68',
+                email: 'recipient@example.test',
+                address: 'Recipient address',
+                country: 'tr',
+                city: 'Istanbul',
+                district: '',
+                post_code: '',
+              },
+              post: {
+                desi: 3,
+                package_count: 1,
+                note: 'Order 1048',
+              },
+              barcode_format: 'pdf-A6',
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    expect((thrown as Error).message).toBe('Navlungo Create Post failed with HTTP 500.');
+    const snapshot = (thrown as Error & { responseSnapshot?: Record<string, unknown> }).responseSnapshot;
+    expect(snapshot).toMatchObject({
+      createPostHttpStatus: 500,
+      providerMessage,
+      providerTrackingId: '#35440d91ec90403483413b548ba91844',
+      senderAddressIdPresent: true,
+      senderAddressIdValid: true,
+      senderUsesAddressId: true,
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('secret-access-token');
+    expect(JSON.stringify(snapshot)).not.toContain('recipient@example.test');
+  });
+
   it('authenticates before carrier diagnostics but does not call unknown carrier paths', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {

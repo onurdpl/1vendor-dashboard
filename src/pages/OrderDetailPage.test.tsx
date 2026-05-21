@@ -4740,6 +4740,61 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
   });
 
+  it('renders Navlungo provider tracking id in admin retry diagnostics', async () => {
+    const providerMessage =
+      'Execution of ServiceCallout failed. Please report for error resolution with Tracking ID: #35440d91ec90403483413b548ba91844';
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 500,
+          providerError: providerMessage,
+          realPathCreatePostHttpStatus: 500,
+          providerCallHttpStatus: 500,
+          providerTrackingId: '#35440d91ec90403483413b548ba91844',
+          senderAddressIdPresent: true,
+          senderAddressIdValid: true,
+          senderUsesAddressId: true,
+          realPathRequestedCarrierId: 9,
+          realPathRequestedPostType: 2,
+          realPathRequestedBarcodeFormat: 'pdf-A6',
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+
+    expect(screen.getAllByText('Provider call HTTP').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider message').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(providerMessage).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider tracking ID').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('#35440d91ec90403483413b548ba91844').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('present yes · valid yes · addressId sender yes').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('carrier 9 · post 2 · barcode pdf-A6').length).toBeGreaterThan(0);
+    expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
+  });
+
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

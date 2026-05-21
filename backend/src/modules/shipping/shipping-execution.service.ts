@@ -519,6 +519,7 @@ function mapProviderResponseSummary(
     validationErrorMessages,
     failedFieldNames,
     providerErrorCode: readString(snapshot, ['providerErrorCode', 'errorCode', 'code']),
+    providerTrackingId: readString(snapshot, ['providerTrackingId']),
     validationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
