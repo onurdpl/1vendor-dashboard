@@ -2634,7 +2634,6 @@ export function OrderDetailPage() {
     Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi')) ||
     Boolean(kargonomiOptionDiagnostics?.supportedProviders?.includes('kargonomi')) ||
     Boolean(kargonomiOptionDiagnostics?.providerEnabled);
-  const shouldShowNavlungoProviderOption = isAdmin;
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
   const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
@@ -2671,7 +2670,7 @@ export function OrderDetailPage() {
             <option value="kargo_entegrator">Kargo Entegratör</option>
             {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
             {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
-            {shouldShowNavlungoProviderOption ? <option value="navlungo">Navlungo</option> : null}
+            <option value="navlungo">Navlungo</option>
             <option value="hepsijet">Hepsijet</option>
           </select>
         </label>
