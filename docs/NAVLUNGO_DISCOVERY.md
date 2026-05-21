@@ -109,26 +109,26 @@ Notes:
 
 Official docs examples use `__APIURL__` placeholders.
 
-Official introduction page lists v2 access URLs:
+Uploaded Navlungo HTML docs list the v2.1 access URLs:
 
 ```text
-Test Server: https://domestic-api-qa.navlungo.com/v2/
-Live Server: https://domestic-api.navlungo.com/v2/
+QA: https://domestic-api-qa.navlungo.com/v2.1/
+Prod: https://domestic-api.navlungo.com/v2.1/
 ```
 
-Unknown:
+Implementation notes:
 
-- Final production base URL for v2.1.
-- Whether v2.1 uses the same base URLs as v2.
-- Whether `__APIURL__` should include `/v2/`, `/v2-1/`, or another path for v2.1.
+- This integration targets v2.1, so `NAVLUNGO_BASE_URL` must use the documented `/v2.1/` path.
+- The old `/v2` base URL is deprecated/wrong for this integration and should be treated as a configuration problem.
+- Runtime readiness warns when `NAVLUNGO_BASE_URL` still points at `/v2`.
 
-User-provided Render base URL plan:
+Confirmed Render base URL plan:
 
-- `NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2`
+- `NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2.1/`
 
 Implementation note:
 
-- Confirm the final production base URL with Navlungo before runtime adapter work.
+- Use QA only for explicit test/sandbox work: `https://domestic-api-qa.navlungo.com/v2.1/`.
 - Old Carrtell URLs should not be used as API base URLs unless Navlungo confirms them.
 
 ## 5.1. Environment Variables Planning
@@ -136,7 +136,7 @@ Implementation note:
 Likely required:
 
 ```text
-NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2
+NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2.1/
 NAVLUNGO_API_USERNAME=<Render secret>
 NAVLUNGO_API_PASSWORD=<Render secret>
 NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID=55574
@@ -165,7 +165,7 @@ Notes:
 - Do not hardcode credentials.
 - Do not add these env vars to runtime validation yet.
 - Do not implement token refresh yet.
-- Confirm any mismatch between v2.1 docs and the planned `/v2` base URL before adapter work.
+- `/v2` should not be used for this integration; use the documented `/v2.1/` base URL.
 - If live-only testing charges balance, use one manually selected test order only.
 
 ## 6. Confirmed Forward Shipment Endpoint

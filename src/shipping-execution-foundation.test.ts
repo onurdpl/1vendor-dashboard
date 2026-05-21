@@ -2626,6 +2626,44 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
   });
 
+  it('warns when Navlungo base URL still uses deprecated v2 path', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-navlungo',
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoBarcodeFormat: 'pdf-A6',
+        navlungoCarrierId: '9',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'navlungo',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2/',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      'navlungo',
+      'sporjinal',
+    );
+
+    expect(diagnostics.warnings).toEqual(expect.arrayContaining([
+      'NAVLUNGO_BASE_URL uses deprecated /v2 path. Configure the documented v2.1 base URL.',
+    ]));
+  });
+
   it('reports Navlungo ready from vendor config even when the global provider differs', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',

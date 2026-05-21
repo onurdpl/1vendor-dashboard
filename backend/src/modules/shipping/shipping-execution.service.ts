@@ -1943,9 +1943,24 @@ export function getShippingProviderGateDiagnostics(
                 'Navlungo forward shipment execution is enabled only when explicitly selected.',
                 'Navlungo return/reverse shipment is not implemented.',
                 'Navlungo webhook/status callback ingest is not implemented.',
+                ...(usesDeprecatedNavlungoV2BaseUrl(env.NAVLUNGO_BASE_URL)
+                  ? ['NAVLUNGO_BASE_URL uses deprecated /v2 path. Configure the documented v2.1 base URL.']
+                  : []),
               ]
           : [],
   };
+}
+
+function usesDeprecatedNavlungoV2BaseUrl(baseUrl: string | undefined) {
+  if (!baseUrl?.trim()) {
+    return false;
+  }
+  try {
+    const parsed = new URL(baseUrl);
+    return parsed.pathname.replace(/\/+$/, '') === '/v2';
+  } catch {
+    return false;
+  }
 }
 
 export async function getShippingProviderReadinessDiagnostics(
