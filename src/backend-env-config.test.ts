@@ -141,7 +141,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.KARGONOMI_APP_KEY).toBeUndefined();
   });
 
-  it('parses dormant Navlungo env values without enabling provider selection', () => {
+  it('parses Navlungo env values without switching provider by default', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'hepsijet',
       NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
@@ -163,7 +163,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.NAVLUNGO_DEFAULT_CARRIER_ID).toBe('9');
   });
 
-  it('does not allow Navlungo as a live SHIPPING_PROVIDER yet', () => {
+  it('allows Navlungo as a live SHIPPING_PROVIDER with required credentials', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'navlungo',
       NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
@@ -171,7 +171,18 @@ describe('backend env shipping provider gates', () => {
       NAVLUNGO_API_PASSWORD: 'secret-password',
     });
 
-    expect(() => loadEnv()).toThrow('Invalid SHIPPING_PROVIDER value');
+    expect(loadEnv().SHIPPING_PROVIDER).toBe('navlungo');
+  });
+
+  it('rejects Navlungo provider selection when credentials are missing', () => {
+    resetEnv({
+      SHIPPING_PROVIDER: 'navlungo',
+      NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+      NAVLUNGO_API_USERNAME: 'api-user',
+      NAVLUNGO_API_PASSWORD: undefined,
+    });
+
+    expect(() => loadEnv()).toThrow('NAVLUNGO_API_PASSWORD is required when SHIPPING_PROVIDER=navlungo.');
   });
 
   it('rejects Kargonomi provider selection when the API token is missing', () => {

@@ -235,17 +235,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         return Promise.resolve({
           provider: 'navlungo',
           supportedProviders: ['navlungo'],
-          executionReady: false,
+          executionReady: true,
           sandboxModeEnabled: false,
-          shippingExecutionEnabled: false,
-          providerSelected: false,
-          providerEnabled: false,
+          shippingExecutionEnabled: true,
+          providerSelected: true,
+          providerEnabled: true,
           webhookIngestEnabled: false,
           baseUrlConfigured: true,
           apiKeyConfigured: true,
           cargoIntegrationIdConfigured: false,
           warehouseIdConfigured: true,
-          defaultDesiConfigured: false,
+          defaultDesiConfigured: true,
           packageTypeUsed: '',
           notificationUrlConfigured: false,
           webhookRouteImplemented: false,
@@ -254,14 +254,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           statusSyncSupport: 'not_implemented',
           missing: [],
           deprecatedEnvFallbacks: [],
-          warnings: ['Navlungo is dormant for diagnostics/auth testing only.'],
+          warnings: ['Navlungo forward shipment execution is enabled only when explicitly selected.'],
           navlungo: {
             usernameConfigured: true,
             passwordConfigured: true,
             defaultSenderAddressIdConfigured: true,
             defaultBarcodeFormat: 'pdf-A6',
+            defaultCarrierId: '9',
             authDiagnosticsAvailable: true,
-            runtimeShipmentExecutionEnabled: false,
+            runtimeShipmentExecutionEnabled: true,
             returnReverseImplementation: 'not_implemented',
           },
         });
@@ -1618,7 +1619,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
   });
 
-  it('shows dormant Navlungo diagnostics config without enabling shipment execution', async () => {
+  it('shows Navlungo diagnostics config and allows live provider save', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1649,9 +1650,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByLabelText('Default barcode format')).toHaveValue('pdf-A6');
     expect(screen.getByText('Username configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
     expect(screen.getByText('Password configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
-    expect(screen.getByText('Runtime shipment execution enabled').closest('.shipping-config-readonly')).toHaveTextContent('NO');
+    expect(screen.getByText('Runtime shipment execution enabled').closest('.shipping-config-readonly')).toHaveTextContent('yes');
     expect(screen.getByText('Return/reverse implementation').closest('.shipping-config-readonly')).toHaveTextContent('NOT IMPLEMENTED');
-    expect(screen.getByRole('button', { name: 'Diagnostics only' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save shipping config' })).toBeEnabled();
     expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));

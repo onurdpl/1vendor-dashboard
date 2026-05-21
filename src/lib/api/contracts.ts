@@ -365,13 +365,14 @@ export type ShippingProviderDiagnostics = {
     passwordConfigured: boolean;
     defaultSenderAddressIdConfigured: boolean;
     defaultBarcodeFormat: string | null;
+    defaultCarrierId: string | null;
     authDiagnosticsAvailable: boolean;
     runtimeShipmentExecutionEnabled: boolean;
     returnReverseImplementation: 'not_implemented';
   };
 };
 
-export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'mng' | 'yurtici' | 'aras';
+export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'navlungo' | 'mng' | 'yurtici' | 'aras';
 
 export type VendorShippingWarehouse = {
   id: string;

@@ -89,6 +89,12 @@ const env = {
   TRY_OTO_REFRESH_TOKEN: undefined,
   TRY_OTO_SANDBOX_MODE: false,
   TRY_OTO_WEBHOOK_INGEST_ENABLED: false,
+  NAVLUNGO_BASE_URL: undefined,
+  NAVLUNGO_API_USERNAME: undefined,
+  NAVLUNGO_API_PASSWORD: undefined,
+  NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: undefined,
+  NAVLUNGO_DEFAULT_BARCODE_FORMAT: undefined,
+  NAVLUNGO_DEFAULT_CARRIER_ID: undefined,
 };
 
 function buildAllocation(overrides: Record<string, unknown> = {}) {
@@ -2140,6 +2146,186 @@ describe('shipping execution foundation', () => {
       defaultDesiConfigured: true,
       missing: [],
     });
+  });
+
+  it('reports Navlungo ready when selected with sender address and defaults', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-navlungo',
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoBarcodeFormat: 'pdf-A6',
+        navlungoCarrierId: '9',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-55574',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'NAVLUNGO',
+          warehouseId: '55574',
+          name: 'Navlungo sender address',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'navlungo',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      'navlungo',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'navlungo',
+      executionReady: true,
+      providerSelected: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      missing: [],
+      navlungo: {
+        usernameConfigured: true,
+        passwordConfigured: true,
+        defaultSenderAddressIdConfigured: true,
+        defaultBarcodeFormat: 'pdf-A6',
+        defaultCarrierId: '9',
+        runtimeShipmentExecutionEnabled: true,
+        returnReverseImplementation: 'not_implemented',
+      },
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
+  });
+
+  it('builds a Navlungo Create Post payload and blocks missing recipient fields before provider call', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-navlungo',
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoBarcodeFormat: 'pdf-A6',
+        navlungoCarrierId: '9',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingPostcode: '',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kartal',
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+
+    const preview = await previewShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'navlungo',
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
+        },
+        vendorId: 'sporjinal',
+      },
+    );
+
+    expect(preview).toMatchObject({
+      provider: 'navlungo',
+      warehouseId: '55574',
+      customerFieldsValid: true,
+      payload: {
+        platform: 'shopify',
+        posts: [
+          expect.objectContaining({
+            carrier_id: 9,
+            post_type: 2,
+            barcode_format: 'pdf-A6',
+            recipient: expect.objectContaining({
+              name: 'Test Customer',
+              phone: '+90 555 111 22 33',
+              city: 'Istanbul',
+              district: 'Kartal',
+            }),
+            post: expect.objectContaining({
+              desi: 3,
+              package_count: 1,
+            }),
+          }),
+        ],
+      },
+    });
+    expect(preview.payload.posts[0]).not.toHaveProperty('cod_payment_type');
+    expect(preview.payload.posts[0].post).not.toHaveProperty('price');
+
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          provider: 'navlungo',
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'navlungo',
+            NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+            NAVLUNGO_API_USERNAME: 'api-user',
+            NAVLUNGO_API_PASSWORD: 'secret-password',
+          },
+          vendorId: 'sporjinal',
+          adapter: buildAdapter({ provider: 'NAVLUNGO' as const }),
+        },
+      ),
+    ).rejects.toThrow('recipient.district');
   });
 
   it('keeps Kargonomi ready when PoC fallback buyer location ids are configured', async () => {

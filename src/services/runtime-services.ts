@@ -852,14 +852,15 @@ export const runtimeServices = {
           statusSyncSupport: 'not_implemented' as const,
           missing: ['NAVLUNGO_BASE_URL', 'NAVLUNGO_API_USERNAME', 'NAVLUNGO_API_PASSWORD'],
           deprecatedEnvFallbacks: [],
-          warnings: ['Navlungo is dormant for diagnostics/auth testing only.'],
+          warnings: ['Navlungo forward shipment execution is enabled only when explicitly selected.'],
           navlungo: {
             usernameConfigured: false,
             passwordConfigured: false,
             defaultSenderAddressIdConfigured: false,
             defaultBarcodeFormat: 'pdf-A6',
+            defaultCarrierId: '9',
             authDiagnosticsAvailable: true,
-            runtimeShipmentExecutionEnabled: false,
+            runtimeShipmentExecutionEnabled: true,
             returnReverseImplementation: 'not_implemented' as const,
           },
         };

@@ -118,6 +118,9 @@ function normalizeProvider(provider?: ShippingProviderDto): ShippingProvider {
   if (normalized === 'kargonomi') {
     return ShippingProvider.KARGONOMI;
   }
+  if (normalized === 'navlungo') {
+    return ShippingProvider.NAVLUNGO;
+  }
   if (normalized === 'mng') {
     return ShippingProvider.MNG;
   }
@@ -905,6 +908,41 @@ function resolveKargonomiAddressId(source: unknown, keys: string[]) {
   return readString(source, keys);
 }
 
+function resolveNavlungoSenderAddressId(config: VendorShippingConfigDto, env?: AppEnv) {
+  return (
+    readString(config.providerMetadata, ['navlungoSenderAddressId', 'senderAddressId', 'sender_address_id']) ??
+    selectDefaultWarehouse(config, 'navlungo')?.warehouseId ??
+    config.defaultWarehouseId ??
+    env?.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID ??
+    null
+  );
+}
+
+function resolveNavlungoCarrierId(providerMetadata: unknown, env?: AppEnv) {
+  const value = readString(providerMetadata, ['navlungoCarrierId', 'carrierId', 'carrier_id']) ?? env?.NAVLUNGO_DEFAULT_CARRIER_ID ?? '9';
+  const numeric = Number(value);
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function resolveNavlungoBarcodeFormat(providerMetadata: unknown, env?: AppEnv) {
+  return readString(providerMetadata, ['navlungoBarcodeFormat', 'barcodeFormat', 'barcode_format']) ?? env?.NAVLUNGO_DEFAULT_BARCODE_FORMAT ?? 'pdf-A6';
+}
+
+function normalizeNavlungoPhone(value: string | null | undefined) {
+  const digits = value?.replace(/\D+/g, '') ?? '';
+  const national = digits.startsWith('90') && digits.length === 12
+    ? digits.slice(2)
+    : digits.startsWith('0') && digits.length === 11
+      ? digits.slice(1)
+      : digits.startsWith('5') && digits.length === 10
+        ? digits
+        : digits;
+  if (national.length === 10 && national.startsWith('5')) {
+    return `+90 ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6, 8)} ${national.slice(8, 10)}`;
+  }
+  return value?.trim() || null;
+}
+
 function normalizeKargonomiPhone(value: string | null) {
   if (!value) {
     return null;
@@ -1282,6 +1320,60 @@ function buildKargonomiBuyer(input: {
   };
 }
 
+function buildNavlungoRecipient(input: {
+  order: unknown;
+  customerName: string | null | undefined;
+  customerEmail: string | null | undefined;
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+}) {
+  const orderRecord = isRecord(input.order) ? input.order : {};
+  const webhookAddress = readStoredOrderWebhookAddress(orderRecord);
+  const overrides = normalizeCustomerOverrides(input.customerOverrides);
+  const recipient = {
+    name: overrides.name ?? input.customerName ?? readString(orderRecord, ['customerName', 'name']),
+    phone: normalizeNavlungoPhone(
+      overrides.phone ??
+        readString(orderRecord, ['customerPhone', 'phone', 'shippingPhone', 'billingPhone']) ??
+        webhookAddress?.customerPhone ??
+        readStoredOrderWebhookPhone(orderRecord),
+    ),
+    email: overrides.email ?? input.customerEmail ?? readString(orderRecord, ['customerEmail', 'email']),
+    address: overrides.address ?? composeShipmentAddress(orderRecord) ?? webhookAddress?.shippingAddress ?? null,
+    country: overrides.country ?? readString(orderRecord, ['shippingCountry', 'country']) ?? webhookAddress?.shippingCountry ?? 'tr',
+    city: overrides.city ?? readString(orderRecord, ['shippingCity', 'city']) ?? webhookAddress?.shippingCity ?? null,
+    district:
+      overrides.district ??
+      readString(orderRecord, [
+        'shippingDistrict',
+        'district',
+        'shippingCounty',
+        'county',
+        'shippingCityArea',
+        'cityArea',
+        'billingDistrict',
+        'billingCounty',
+        'billingCityArea',
+      ]) ??
+      webhookAddress?.shippingDistrict ??
+      readStoredOrderWebhookDistrict(orderRecord) ??
+      null,
+    post_code:
+      overrides.postcode ??
+      readString(orderRecord, ['shippingPostcode', 'postcode', 'zip']) ??
+      webhookAddress?.shippingPostcode ??
+      '',
+  };
+  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city', 'district'] as const;
+  const missingFields = requiredFields
+    .filter((key) => !recipient[key])
+    .map((key) => `recipient.${key}`);
+
+  return {
+    recipient,
+    missingFields,
+  };
+}
+
 function readKargonomiDestinationText(
   order: unknown,
   customerOverrides?: CreateShipmentExecutionDto['customerOverrides'],
@@ -1565,12 +1657,16 @@ export function getShippingProviderGateDiagnostics(
   const isKargo = provider === 'kargo_entegrator';
   const isTryOto = provider === 'try_oto';
   const isKargonomi = provider === 'kargonomi';
+  const isNavlungo = provider === 'navlungo';
   const supportedProviders: ShippingProviderDto[] = [
     'kargo_entegrator',
     'hepsijet',
     ...(env.TRY_OTO_ENABLED ? (['try_oto'] as ShippingProviderDto[]) : []),
     ...(env.SHIPPING_PROVIDER === 'kargonomi' || env.KARGONOMI_BASE_URL || env.KARGONOMI_API_TOKEN
       ? (['kargonomi'] as ShippingProviderDto[])
+      : []),
+    ...(env.SHIPPING_PROVIDER === 'navlungo' || env.NAVLUNGO_BASE_URL || env.NAVLUNGO_API_USERNAME || env.NAVLUNGO_API_PASSWORD
+      ? (['navlungo'] as ShippingProviderDto[])
       : []),
   ];
   const providerSelected = env.SHIPPING_PROVIDER === provider;
@@ -1580,21 +1676,27 @@ export function getShippingProviderGateDiagnostics(
       ? env.TRY_OTO_ENABLED
       : isKargonomi
         ? providerSelected
-        : false;
+        : isNavlungo
+          ? providerSelected
+          : false;
   const baseUrlConfigured = isKargo
     ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL)
     : isTryOto
       ? Boolean(env.TRY_OTO_BASE_URL)
       : isKargonomi
         ? Boolean(env.KARGONOMI_BASE_URL)
-        : false;
+        : isNavlungo
+          ? Boolean(env.NAVLUNGO_BASE_URL)
+          : false;
   const apiKeyConfigured = isKargo
     ? Boolean(env.KARGO_ENTEGRATOR_API_KEY)
     : isTryOto
       ? Boolean(env.TRY_OTO_REFRESH_TOKEN)
       : isKargonomi
         ? Boolean(env.KARGONOMI_API_TOKEN)
-        : false;
+        : isNavlungo
+          ? Boolean(env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
+          : false;
   const cargoIntegrationIdConfigured = isKargo ? Boolean(env.KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID) : false;
   const tryOtoWebhookDiagnostics = isTryOto ? getTryOtoWebhookReceiveDiagnostics() : null;
   const packageTypeUsed = DEFAULT_KARGO_PACKAGE_TYPE;
@@ -1609,6 +1711,9 @@ export function getShippingProviderGateDiagnostics(
     isTryOto && !env.TRY_OTO_REFRESH_TOKEN ? 'TRY_OTO_REFRESH_TOKEN' : null,
     isKargonomi && !env.KARGONOMI_BASE_URL ? 'KARGONOMI_BASE_URL' : null,
     isKargonomi && !env.KARGONOMI_API_TOKEN ? 'KARGONOMI_API_TOKEN' : null,
+    isNavlungo && !env.NAVLUNGO_BASE_URL ? 'NAVLUNGO_BASE_URL' : null,
+    isNavlungo && !env.NAVLUNGO_API_USERNAME ? 'NAVLUNGO_API_USERNAME' : null,
+    isNavlungo && !env.NAVLUNGO_API_PASSWORD ? 'NAVLUNGO_API_PASSWORD' : null,
   ].filter((value): value is string => Boolean(value));
 
   return {
@@ -1679,6 +1784,12 @@ export function getShippingProviderGateDiagnostics(
               'Kargonomi forward shipment execution is enabled only when explicitly selected.',
               'Kargonomi return/reverse shipment is not implemented.',
             ]
+          : isNavlungo
+            ? [
+                'Navlungo forward shipment execution is enabled only when explicitly selected.',
+                'Navlungo return/reverse shipment is not implemented.',
+                'Navlungo webhook/status callback ingest is not implemented.',
+              ]
           : [],
   };
 }
@@ -1692,7 +1803,8 @@ export async function getShippingProviderReadinessDiagnostics(
   if (
     (diagnostics.provider !== 'kargo_entegrator' &&
       diagnostics.provider !== 'try_oto' &&
-      diagnostics.provider !== 'kargonomi') ||
+      diagnostics.provider !== 'kargonomi' &&
+      diagnostics.provider !== 'navlungo') ||
     !vendorId
   ) {
     return diagnostics;
@@ -1741,6 +1853,42 @@ export async function getShippingProviderReadinessDiagnostics(
       warehouseIdConfigured,
       defaultDesiConfigured,
       missing,
+    };
+  }
+
+  if (diagnostics.provider === 'navlungo') {
+    const senderAddressIdConfigured = Boolean(resolveNavlungoSenderAddressId(config, env));
+    const carrierIdConfiguredOrDefaulted = Boolean(resolveNavlungoCarrierId(config.providerMetadata, env));
+    const defaultDesiConfigured = Number(config.defaultDesi) > 0;
+    const missing = [
+      ...diagnostics.missing,
+      !senderAddressIdConfigured ? 'VENDOR_NAVLUNGO_SENDER_ADDRESS_ID' : null,
+      !carrierIdConfiguredOrDefaulted ? 'VENDOR_NAVLUNGO_CARRIER_ID' : null,
+      !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
+    ].filter((value): value is string => Boolean(value));
+
+    return {
+      ...diagnostics,
+      providerSelected: configProviderSelected,
+      executionReady:
+        diagnostics.executionReady &&
+        configProviderSelected &&
+        senderAddressIdConfigured &&
+        carrierIdConfiguredOrDefaulted &&
+        defaultDesiConfigured,
+      warehouseIdConfigured: senderAddressIdConfigured,
+      defaultDesiConfigured,
+      missing,
+      navlungo: {
+        usernameConfigured: Boolean(env.NAVLUNGO_API_USERNAME),
+        passwordConfigured: Boolean(env.NAVLUNGO_API_PASSWORD),
+        defaultSenderAddressIdConfigured: senderAddressIdConfigured,
+        defaultBarcodeFormat: resolveNavlungoBarcodeFormat(config.providerMetadata, env),
+        defaultCarrierId: String(resolveNavlungoCarrierId(config.providerMetadata, env) ?? ''),
+        authDiagnosticsAvailable: true,
+        runtimeShipmentExecutionEnabled: true,
+        returnReverseImplementation: 'not_implemented' as const,
+      },
     };
   }
 
@@ -4098,9 +4246,10 @@ async function buildShipmentRequestPreview(
     provider !== ShippingProvider.HEPSIJET &&
     provider !== ShippingProvider.KARGO_ENTEGRATOR &&
     provider !== ShippingProvider.TRY_OTO &&
-    provider !== ShippingProvider.KARGONOMI
+    provider !== ShippingProvider.KARGONOMI &&
+    provider !== ShippingProvider.NAVLUNGO
   ) {
-    throw new Error('Only Hepsijet, Kargo Entegratör, Try OTO, and Kargonomi shipment execution are implemented.');
+    throw new Error('Only Hepsijet, Kargo Entegratör, Try OTO, Kargonomi, and Navlungo shipment execution are implemented.');
   }
   const warehouseConfig =
     provider === ShippingProvider.KARGO_ENTEGRATOR ? requireWarehouseConfig(config, providerDto, options.env) : null;
@@ -4108,6 +4257,17 @@ async function buildShipmentRequestPreview(
     provider === ShippingProvider.KARGONOMI ? resolveKargonomiWarehouseId(config, options.env) : null;
   if (provider === ShippingProvider.KARGONOMI && !kargonomiWarehouseId) {
     throw new Error('Kargonomi warehouse ID is not configured for this vendor.');
+  }
+  const navlungoSenderAddressId =
+    provider === ShippingProvider.NAVLUNGO ? resolveNavlungoSenderAddressId(config, options.env) : null;
+  if (provider === ShippingProvider.NAVLUNGO && !navlungoSenderAddressId) {
+    throw new Error('Navlungo sender address ID is not configured for this vendor.');
+  }
+  const navlungoCarrierId = provider === ShippingProvider.NAVLUNGO
+    ? resolveNavlungoCarrierId(config.providerMetadata, options.env)
+    : null;
+  if (provider === ShippingProvider.NAVLUNGO && !navlungoCarrierId) {
+    throw new Error('Navlungo carrier ID must be numeric.');
   }
   const tryOtoPickupLocationCode = provider === ShippingProvider.TRY_OTO
     ? resolveTryOtoPickupLocationCode(config.providerMetadata)
@@ -4233,6 +4393,12 @@ async function buildShipmentRequestPreview(
     resolvedDestination: resolvedKargonomiDestination,
     customerOverrides: input.customerOverrides,
   });
+  const navlungoRecipient = buildNavlungoRecipient({
+    order: allocation.order,
+    customerName: allocation.order.customerName,
+    customerEmail: allocation.order.customerEmail,
+    customerOverrides: input.customerOverrides,
+  });
   const missingCustomerFields = [
     ...(dummyKargoRequested
       ? kargoCustomer.missingFields
@@ -4240,13 +4406,18 @@ async function buildShipmentRequestPreview(
         ? tryOtoCustomer.missingFields
         : provider === ShippingProvider.KARGONOMI
           ? kargonomiBuyer.missingFields
+          : provider === ShippingProvider.NAVLUNGO
+            ? navlungoRecipient.missingFields
           : [
               customer.name ? null : 'customer.name',
               customer.surname ? null : 'customer.surname',
             ]),
   ].filter((field): field is string => Boolean(field));
   if (
-    (dummyKargoRequested || provider === ShippingProvider.TRY_OTO || provider === ShippingProvider.KARGONOMI) &&
+    (dummyKargoRequested ||
+      provider === ShippingProvider.TRY_OTO ||
+      provider === ShippingProvider.KARGONOMI ||
+      provider === ShippingProvider.NAVLUNGO) &&
     missingCustomerFields.length > 0
   ) {
     throw new Error(
@@ -4286,6 +4457,11 @@ async function buildShipmentRequestPreview(
     /[^A-Za-z0-9_-]/g,
     '',
   );
+  const navlungoReferenceId = `SPJ-${allocation.sourceShopifyOrderNumber ?? allocation.id}-ALLOC-${allocation.id}`.replace(
+    /[^A-Za-z0-9_-]/g,
+    '-',
+  );
+  const navlungoBarcodeFormat = resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
 
   const payload = provider === ShippingProvider.TRY_OTO
     ? {
@@ -4341,6 +4517,38 @@ async function buildShipmentRequestPreview(
             vendor_id: allocation.assignedVendorId,
           },
         }
+    : provider === ShippingProvider.NAVLUNGO
+      ? {
+          platform: 'shopify',
+          posts: [
+            {
+              reference_id: navlungoReferenceId,
+              carrier_id: navlungoCarrierId,
+              post_type: 2,
+              sender: {
+                name: 'Navlungo Sender Address',
+                phone: '+90 532 123 45 67',
+                email: 'sender.test@example.invalid',
+                address: `Configured Navlungo sender address ${navlungoSenderAddressId}`,
+                country: 'tr',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                post_code: '',
+              },
+              recipient: navlungoRecipient.recipient,
+              post: {
+                desi,
+                package_count: 1,
+                note: `Shopify order ${allocation.sourceShopifyOrderNumber ?? allocation.sourceShopifyOrderId ?? allocation.id}`,
+              },
+              barcode_format: navlungoBarcodeFormat,
+              custom_data_1: allocation.id,
+              custom_data_2: allocation.sourceShopifyOrderNumber ?? '',
+              custom_data_3: allocation.assignedVendorId,
+              custom_data_4: navlungoSenderAddressId,
+            },
+          ],
+        }
     : {
         cargo_integration_id: Number.isFinite(numericCargoIntegrationId) ? numericCargoIntegrationId : cargoIntegrationId,
         warehouse_id: Number.isFinite(numericWarehouseId) ? numericWarehouseId : warehouseId,
@@ -4385,6 +4593,8 @@ async function buildShipmentRequestPreview(
         ? tryOtoPickupLocationCode
         : provider === ShippingProvider.KARGONOMI
           ? kargonomiWarehouseId
+          : provider === ShippingProvider.NAVLUNGO
+            ? navlungoSenderAddressId
           : warehouseId,
     desi: toAmountString(desi),
     notificationUrl,
@@ -4406,6 +4616,8 @@ async function buildShipmentRequestPreview(
             ]
           : provider === ShippingProvider.KARGONOMI
             ? ['Kargonomi return/reverse shipment is not implemented.']
+            : provider === ShippingProvider.NAVLUNGO
+              ? ['Navlungo return/reverse shipment is not implemented.']
             : [],
   };
 }

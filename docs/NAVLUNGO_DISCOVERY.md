@@ -4,7 +4,7 @@
 
 This document captures docs-only discovery for a possible Navlungo domestic shipping provider integration.
 
-No runtime provider code has been implemented. Navlungo is not added to live provider selection, shipment execution, return execution, or webhook handling.
+Navlungo forward shipment provider code is now enabled as a controlled PoC behind explicit provider selection and required configuration. Navlungo return/reverse shipment and webhook handling are not implemented.
 
 Sources reviewed:
 
@@ -451,34 +451,54 @@ Future implementation guidance:
   - carrier name: `post.carrier_name`
   - carrier id: `post.carrier_id`
 
-Non-goals for this discovery step:
+Non-goals for this forward PoC step:
 
-- No provider switch.
-- No runtime implementation.
 - No return/reverse implementation.
 - No webhook implementation.
 - No Kargonomi changes.
 - No Try OTO changes.
 
-## 16.1. Dormant Adapter Status
+## 16.1. Forward Adapter PoC Status
 
-Current scaffold status:
+Current adapter status:
 
 - Provider constants exist:
   - key: `navlungo`
   - display name: `Navlungo`
-- Optional env parsing exists for:
+- Env parsing exists for:
   - `NAVLUNGO_BASE_URL`
   - `NAVLUNGO_API_USERNAME`
   - `NAVLUNGO_API_PASSWORD`
   - `NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID`
   - `NAVLUNGO_DEFAULT_BARCODE_FORMAT`
-- A dormant Navlungo adapter scaffold exists.
-- Runtime shipment execution is not enabled yet.
-- Navlungo is not selectable as a live shipping provider.
-- Create Post is not implemented or called.
+  - `NAVLUNGO_DEFAULT_CARRIER_ID`
+- Navlungo can be selected as a live forward shipment provider when:
+  - `SHIPPING_PROVIDER=navlungo`
+  - global `SHIPPING_EXECUTION_ENABLED=true`
+  - Navlungo base URL, username, and password are configured
+  - vendor config selects `navlungo`
+  - sender address ID and default desi are configured
+- Forward adapter flow:
+  - authenticate with `POST /auth/api`
+  - create shipment with `POST /post/create`
+  - immediately probe status with `GET /post/check/{postNumber}` when `post_number` is returned
+- Runtime Create Post payload uses:
+  - `carrier_id` from vendor metadata/env/default `9`
+  - `post_type=2`
+  - `barcode_format` from vendor metadata/env/default `pdf-A6`
+  - no `cod_payment_type`
+  - no `post.price`
+- Current PoC requires a configured sender address ID for readiness, but the reviewed Create Post contract still documents explicit `sender.*` fields. Until the Address Book sender-id contract is confirmed, the runtime payload uses conservative configured/static sender fields and stores the sender address ID in safe reference metadata.
+- Response normalization maps:
+  - `data.post_number` to provider shipment id
+  - `data.carrier_tracking_code` or `post_number` to tracking number
+  - `data.carrier_tracking_url` or `tracking_url` to tracking URL
+  - `data.barcode` to label/barcode availability
+  - `data.post.carrier_name`/`carrier_id` to carrier diagnostics
 - Return/reverse shipment is not implemented.
-- Carrier selection, barcode fetch, Check Post, and webhook ingest are not implemented.
+- Carrier list endpoints remain unknown.
+- Separate Barcode endpoint remains unknown because the docs page did not expose an endpoint path.
+- Webhook/status callback ingest is not implemented.
 
 ## 16.2. Auth Probe Status
 
@@ -542,7 +562,7 @@ Current probe status:
   - sync Shopify fulfillment
   - retry automatically
   - register webhooks
-  - enable Navlungo as a live shipping provider
+  - switch any live provider selection
 
 Sanitized Create Post probe output includes only:
 
@@ -603,9 +623,12 @@ Current probe status:
 - Barcode probe returns:
   - `barcodeEndpointPathKnown=false`
   - `skippedReason=barcode_endpoint_path_unknown`
+- Confirmed by deployed diagnostics:
+  - Check Post works at `GET /post/check/{postNumber}`
+  - Check response `data` keys include `post_number`, `reference_id`, `tracking_url`, `carrier_post_number`, `carrier_tracking_code`, `carrier_tracking_url`, `barcode`, `post`, `status`, and `logs`
+  - `barcode` is returned as a string field
 - Pending verification:
-  - Check Post live response shape for the newly created `post_number`
-  - whether the `barcode` field from Create Post is already sufficient for PDF label retrieval
+  - whether the `barcode` string is always directly usable as the printable label/barcode content
   - exact Barcode endpoint path and required identifier
 
 ## 16.5. Carrier Diagnostics Probe Status
@@ -651,10 +674,9 @@ The output must never include:
 - Token refresh strategy.
 - Exact token lifetime.
 - Carrier endpoint response shape.
-- Create Post real response shape.
-- Whether Create Post returns tracking and barcode URLs immediately in production.
+- Whether Create Post and Check Post response shape is stable across all carriers.
 - Barcode endpoint contract.
-- Check Post response/status lifecycle.
+- Full Check Post status lifecycle.
 - Return Post contract.
 - Webhook support.
 - Multi-vendor / marketplace model.
@@ -669,7 +691,7 @@ The output must never include:
 3. Is v2.1 Beta production-ready?
 4. Is IP allowlist required for a Render/cloud backend?
 5. Do you support return/reverse shipments in production?
-6. Does Create Post return `tracking_url` and `barcode_url` immediately in production?
+6. Does Create Post always return `tracking_url` and/or `barcode` immediately in production?
 7. How do we fetch valid `carrier_id` values for our account?
 8. What are the exact v2.1 carrier list endpoint paths?
 9. Can `carrier_id = 1` be used for automatic/by coverage-area carrier selection in production?

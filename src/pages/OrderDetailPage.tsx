@@ -582,6 +582,7 @@ type ShippingConfigDraft = {
   kargonomiBuyerCityId: string;
   navlungoSenderAddressId: string;
   navlungoBarcodeFormat: string;
+  navlungoCarrierId: string;
 };
 
 const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
@@ -620,6 +621,28 @@ function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
   return typeof raw === 'string' ? raw : '';
 }
 
+function readNavlungoSenderAddressId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw =
+    metadata.navlungoSenderAddressId ??
+    metadata.senderAddressId ??
+    metadata.sender_address_id ??
+    (config?.preferredProvider === 'navlungo' ? config.defaultWarehouseId : null);
+  return typeof raw === 'string' ? raw : '';
+}
+
+function readNavlungoBarcodeFormat(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.navlungoBarcodeFormat ?? metadata.barcodeFormat ?? metadata.barcode_format;
+  return typeof raw === 'string' && raw.trim() ? raw : 'pdf-A6';
+}
+
+function readNavlungoCarrierId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw = metadata.navlungoCarrierId ?? metadata.carrierId ?? metadata.carrier_id;
+  return typeof raw === 'string' ? raw : '9';
+}
+
 function buildSupportCorrelationId(orderId: string, shipmentId?: string | null) {
   return ['support', orderId, shipmentId].filter(Boolean).join(':');
 }
@@ -655,8 +678,9 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     tryOtoOriginCity: readTryOtoOriginCity(config),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
-    navlungoSenderAddressId: '55574',
-    navlungoBarcodeFormat: 'pdf-A6',
+    navlungoSenderAddressId: readNavlungoSenderAddressId(config) || '55574',
+    navlungoBarcodeFormat: readNavlungoBarcodeFormat(config),
+    navlungoCarrierId: readNavlungoCarrierId(config),
   };
 }
 
@@ -666,8 +690,11 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   if (!draft.preferredProvider) {
     errors.push('Provider is required.');
   }
-  if (draft.preferredProvider === 'navlungo') {
-    errors.push('Navlungo is available for diagnostics only. Runtime shipment execution is not enabled.');
+  if (draft.preferredProvider === 'navlungo' && !/^\d+$/.test(draft.navlungoSenderAddressId.trim())) {
+    errors.push('Navlungo sender address ID must be numeric.');
+  }
+  if (draft.preferredProvider === 'navlungo' && !/^\d+$/.test(draft.navlungoCarrierId.trim())) {
+    errors.push('Navlungo carrier ID must be numeric.');
   }
   if (draft.preferredProvider === 'kargo_entegrator') {
     if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
@@ -715,10 +742,6 @@ function buildShippingConfigUpdate(
   draft: ShippingConfigDraft,
   currentConfig?: VendorShippingConfig | null,
 ): VendorShippingConfigUpdate {
-  if (draft.preferredProvider === 'navlungo') {
-    throw new Error('Navlungo is diagnostics-only and cannot be saved as a live shipping provider.');
-  }
-
   const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
   const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
     ?? currentConfig?.warehouses[0];
@@ -772,6 +795,29 @@ function buildShippingConfigUpdate(
           address: existingDefaultWarehouse?.address ?? null,
           isDefault: true,
           provider: 'kargonomi',
+        },
+      ],
+    };
+  }
+
+  if (draft.preferredProvider === 'navlungo') {
+    const providerMetadata = { ...metadata };
+    providerMetadata.navlungoSenderAddressId = draft.navlungoSenderAddressId.trim();
+    providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
+    providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
+
+    return {
+      ...baseUpdate,
+      cargoIntegrationId: null,
+      defaultWarehouseId: draft.navlungoSenderAddressId.trim(),
+      providerMetadata,
+      warehouses: [
+        {
+          warehouseId: draft.navlungoSenderAddressId.trim(),
+          name: existingDefaultWarehouse?.name ?? 'Navlungo sender address',
+          address: existingDefaultWarehouse?.address ?? null,
+          isDefault: true,
+          provider: 'navlungo',
         },
       ],
     };
@@ -2872,6 +2918,20 @@ export function OrderDetailPage() {
               />
             </label>
             <label className="field">
+              <span>Default carrier ID</span>
+              <input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={shippingConfigDraft.navlungoCarrierId}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    navlungoCarrierId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
               <span>Default barcode format</span>
               <select
                 value={shippingConfigDraft.navlungoBarcodeFormat}
@@ -2911,7 +2971,7 @@ export function OrderDetailPage() {
             </div>
             <div className="shipping-config-readonly">
               <span>Runtime shipment execution enabled</span>
-              <strong>NO</strong>
+              <strong>{navlungoOptionDiagnostics?.navlungo?.runtimeShipmentExecutionEnabled ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Return/reverse implementation</span>
@@ -2919,7 +2979,7 @@ export function OrderDetailPage() {
             </div>
             <div className="shipping-config-readonly">
               <span>Create Post execution</span>
-              <strong>disabled</strong>
+              <strong>{navlungoOptionDiagnostics?.executionReady ? 'ready' : 'not ready'}</strong>
             </div>
           </>
         ) : null}
@@ -2970,12 +3030,9 @@ export function OrderDetailPage() {
         </div>
       ) : null}
       <div className="shipping-config-actions">
-        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig || isNavlungoConfigDraft}>
-          {isNavlungoConfigDraft ? 'Diagnostics only' : isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
+        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
+          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
         </button>
-        {isNavlungoConfigDraft ? (
-          <span className="muted">Navlungo cannot be saved as a live shipment provider yet.</span>
-        ) : null}
       </div>
     </form>
   ) : null;

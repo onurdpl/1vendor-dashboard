@@ -38,7 +38,7 @@ export type AppEnv = {
   BIZIMHESAP_ACCESS_TOKEN?: string;
   SHIPPING_EXECUTION_ENABLED: boolean;
   SHIPPING_SANDBOX_MODE: boolean;
-  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi';
+  SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'navlungo';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
   KARGO_ENTEGRATOR_BASE_URL?: string;
@@ -153,12 +153,13 @@ function parseShippingProvider(value: string | undefined): AppEnv['SHIPPING_PROV
     normalized === 'hepsijet' ||
     normalized === 'kargo_entegrator' ||
     normalized === 'try_oto' ||
-    normalized === 'kargonomi'
+    normalized === 'kargonomi' ||
+    normalized === 'navlungo'
   ) {
     return normalized;
   }
 
-  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, try_oto, or kargonomi.');
+  throw new Error('Invalid SHIPPING_PROVIDER value. Expected hepsijet, kargo_entegrator, try_oto, kargonomi, or navlungo.');
 }
 
 function parseCommaList(value: string | undefined) {
@@ -236,6 +237,17 @@ export function loadEnv(): AppEnv {
     }
     if (!kargonomiApiToken) {
       throw new Error('KARGONOMI_API_TOKEN is required when SHIPPING_PROVIDER=kargonomi.');
+    }
+  }
+  if (shippingProvider === 'navlungo') {
+    if (!navlungoBaseUrl) {
+      throw new Error('NAVLUNGO_BASE_URL is required when SHIPPING_PROVIDER=navlungo.');
+    }
+    if (!navlungoApiUsername) {
+      throw new Error('NAVLUNGO_API_USERNAME is required when SHIPPING_PROVIDER=navlungo.');
+    }
+    if (!navlungoApiPassword) {
+      throw new Error('NAVLUNGO_API_PASSWORD is required when SHIPPING_PROVIDER=navlungo.');
     }
   }
 

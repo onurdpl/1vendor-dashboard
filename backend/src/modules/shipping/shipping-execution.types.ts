@@ -3,6 +3,7 @@ export type ShippingProviderDto =
   | 'kargo_entegrator'
   | 'try_oto'
   | 'kargonomi'
+  | 'navlungo'
   | 'mng'
   | 'yurtici'
   | 'aras';
@@ -76,6 +77,16 @@ export type ShippingProviderGateDiagnosticsDto = {
   missing: string[];
   deprecatedEnvFallbacks: string[];
   warnings: string[];
+  navlungo?: {
+    usernameConfigured: boolean;
+    passwordConfigured: boolean;
+    defaultSenderAddressIdConfigured: boolean;
+    defaultBarcodeFormat: string | null;
+    defaultCarrierId: string | null;
+    authDiagnosticsAvailable: boolean;
+    runtimeShipmentExecutionEnabled: boolean;
+    returnReverseImplementation: 'not_implemented';
+  };
 };
 
 export type ShipmentTimelineEventDto = {

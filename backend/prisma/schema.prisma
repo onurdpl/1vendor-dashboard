@@ -107,6 +107,7 @@ enum ShippingProvider {
   KARGO_ENTEGRATOR
   TRY_OTO
   KARGONOMI
+  NAVLUNGO
   MNG
   YURTICI
   ARAS

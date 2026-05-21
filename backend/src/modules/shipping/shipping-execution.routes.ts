@@ -22,7 +22,6 @@ import {
   retryFailedShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
-import { getNavlungoConfigDiagnostics } from './navlungo-provider.adapter.js';
 import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
 
 function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
@@ -240,61 +239,11 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       const query = request.query as { provider?: string; vendorId?: string };
-      if (query.provider === 'navlungo') {
-        const navlungo = getNavlungoConfigDiagnostics(env);
-        return {
-          provider: 'navlungo',
-          supportedProviders: ['navlungo'],
-          executionReady: false,
-          sandboxModeEnabled: false,
-          shippingExecutionEnabled: false,
-          providerSelected: false,
-          providerEnabled: false,
-          webhookIngestEnabled: false,
-          lastWebhookReceived: false,
-          lastWebhookReceivedAt: null,
-          lastWebhookHttpMethod: null,
-          lastWebhookContentType: null,
-          lastWebhookPayloadKeys: [],
-          lastWebhookMatchedShipment: null,
-          lastWebhookMatchStatus: null,
-          lastWebhookMatchedByField: null,
-          lastWebhookStatusValue: null,
-          lastWebhookStatusMapped: null,
-          lastWebhookMappedLocalStatus: null,
-          lastWebhookParseError: null,
-          webhookSignatureVerificationImplemented: false,
-          baseUrlConfigured: navlungo.baseUrlConfigured,
-          apiKeyConfigured: navlungo.usernameConfigured && navlungo.passwordConfigured,
-          cargoIntegrationIdConfigured: false,
-          warehouseIdConfigured: navlungo.defaultSenderAddressIdConfigured,
-          defaultDesiConfigured: false,
-          packageTypeUsed: '',
-          notificationUrlConfigured: false,
-          webhookRouteImplemented: false,
-          receiverAddressAvailability: 'unknown_required',
-          dummyKargoSupport: 'not_implemented',
-          statusSyncSupport: 'not_implemented',
-          missing: navlungo.missing,
-          deprecatedEnvFallbacks: [],
-          warnings: [
-            'Navlungo is dormant for diagnostics/auth testing only.',
-            'Runtime shipment execution is not enabled.',
-            'Return/reverse implementation is not implemented.',
-          ],
-          navlungo: {
-            usernameConfigured: navlungo.usernameConfigured,
-            passwordConfigured: navlungo.passwordConfigured,
-            defaultSenderAddressIdConfigured: navlungo.defaultSenderAddressIdConfigured,
-            defaultBarcodeFormat: navlungo.defaultBarcodeFormat,
-            authDiagnosticsAvailable: true,
-            runtimeShipmentExecutionEnabled: false,
-            returnReverseImplementation: 'not_implemented',
-          },
-        };
-      }
       const provider =
-        query.provider === 'kargo_entegrator' || query.provider === 'try_oto' || query.provider === 'kargonomi'
+        query.provider === 'kargo_entegrator' ||
+        query.provider === 'try_oto' ||
+        query.provider === 'kargonomi' ||
+        query.provider === 'navlungo'
           ? query.provider
           : undefined;
       return getShippingProviderReadinessDiagnostics(env, provider, query.vendorId);
