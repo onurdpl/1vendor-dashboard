@@ -1663,6 +1663,146 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('retries an existing pending Navlungo dry-run shipment through vendor-aware real path config', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'PENDING',
+      responseSnapshot: {
+        ok: true,
+        dryRun: true,
+        provider: 'navlungo',
+        reason: 'Navlungo shipment execution is disabled.',
+        disabledGates: ['SHIPPING_EXECUTION_ENABLED'],
+      },
+    });
+    storedExecution = existing;
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-navlungo-55578',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'NAVLUNGO',
+          warehouseId: '55578',
+          name: 'Navlungo sender address',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: {
+        navlungoSenderAddressId: '55578',
+        navlungoCarrierId: '9',
+        navlungoBarcodeFormat: 'pdf-A6',
+      },
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-DRYRUN-1051',
+      trackingNumber: 'NAV-DRYRUN-1051',
+      trackingUrl: 'https://track.navlungo.test/NAV-DRYRUN-1051',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        realPathProviderCallAttempted: true,
+        realPathCreatePostHttpStatus: 201,
+        realPathRequestedCarrierId: 9,
+        realPathRequestedPostType: 2,
+        realPathRequestedBarcodeFormat: 'pdf-A6',
+        realPathCodPaymentIncluded: false,
+        realPathPriceIncluded: false,
+        realPathPostNumberPresent: true,
+        realPathTrackingUrlPresent: true,
+        realPathBarcodePresent: true,
+        providerShipmentId: 'NAV-DRYRUN-1051',
+        trackingUrlPresent: true,
+        barcode: 'barcode-string',
+      },
+    });
+
+    const result = await retryDryRunShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      actorRole: 'admin',
+      adapter,
+    });
+
+    expect(result).toMatchObject({
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-DRYRUN-1051',
+      trackingNumber: 'NAV-DRYRUN-1051',
+      trackingUrl: 'https://track.navlungo.test/NAV-DRYRUN-1051',
+      labelUrl: 'barcode-string',
+      barcode: 'barcode-string',
+      providerResponseSummary: expect.objectContaining({
+        realPathProviderCallAttempted: true,
+        realPathCreatePostHttpStatus: 201,
+        realPathRequestedCarrierId: 9,
+        realPathRequestedPostType: 2,
+        realPathRequestedBarcodeFormat: 'pdf-A6',
+        realPathCodPaymentIncluded: false,
+        realPathPriceIncluded: false,
+        realPathPostNumberPresent: true,
+        realPathTrackingUrlPresent: true,
+        realPathBarcodePresent: true,
+        realPathPersistedProviderShipmentIdPresent: true,
+        realPathPersistedTrackingUrlPresent: true,
+        realPathPersistedBarcodePresent: true,
+      }),
+    });
+    expect(adapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: 'navlungo',
+        requestSnapshot: expect.objectContaining({
+          posts: [
+            expect.objectContaining({
+              carrier_id: 9,
+              post_type: 2,
+              barcode_format: 'pdf-A6',
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+  });
+
   it('blocks dry-run retry when current Kargo gates are disabled', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-kargo_entegrator-alloc-1',

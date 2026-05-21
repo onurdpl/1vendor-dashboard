@@ -524,6 +524,21 @@ function mapProviderResponseSummary(
     dtoTrackingUrlPresent: trackingUrlPresent,
     dtoBarcodePresent: barcodePresent,
     skipReason: readString(snapshot, ['providerCallSkippedReason', 'skipReason']),
+    realPathProviderCallAttempted: readOptionalBoolean(snapshot, ['realPathProviderCallAttempted']),
+    realPathCreatePostHttpStatus: readNumber(snapshot, ['realPathCreatePostHttpStatus']),
+    realPathRequestedCarrierId:
+      readNumber(snapshot, ['realPathRequestedCarrierId']) ?? readString(snapshot, ['realPathRequestedCarrierId']),
+    realPathRequestedPostType:
+      readNumber(snapshot, ['realPathRequestedPostType']) ?? readString(snapshot, ['realPathRequestedPostType']),
+    realPathRequestedBarcodeFormat: readString(snapshot, ['realPathRequestedBarcodeFormat']),
+    realPathCodPaymentIncluded: readOptionalBoolean(snapshot, ['realPathCodPaymentIncluded']),
+    realPathPriceIncluded: readOptionalBoolean(snapshot, ['realPathPriceIncluded']),
+    realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
+    realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
+    realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
+    realPathPersistedProviderShipmentIdPresent: readOptionalBoolean(snapshot, ['realPathPersistedProviderShipmentIdPresent']),
+    realPathPersistedTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathPersistedTrackingUrlPresent']),
+    realPathPersistedBarcodePresent: readOptionalBoolean(snapshot, ['realPathPersistedBarcodePresent']),
     notificationUrlIncluded: readOptionalBoolean(snapshot, ['notificationUrlIncluded']),
     statusField: readString(snapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
     detectedResponseFormat: readString(snapshot, ['detectedResponseFormat']),
@@ -2987,6 +3002,12 @@ async function persistProviderShipmentResult(input: {
     {
       ...result.responseSnapshot,
       providerStatus: readString(result.responseSnapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
+      persistedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
+      persistedTrackingUrlPresent: Boolean(result.trackingUrl),
+      persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
+      realPathPersistedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
+      realPathPersistedTrackingUrlPresent: Boolean(result.trackingUrl),
+      realPathPersistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
     },
     {
       label: 'Shipment created',
@@ -5036,7 +5057,10 @@ export async function retryDryRunShipmentExecution(
   assertDryRunRetryEligible(existing);
 
   const providerDto = mapProvider(existing.provider);
-  const diagnostics = getShippingProviderGateDiagnostics(options.env, providerDto);
+  const diagnostics =
+    providerDto === 'navlungo'
+      ? await getShippingProviderReadinessDiagnostics(options.env, providerDto, existing.vendorId)
+      : getShippingProviderGateDiagnostics(options.env, providerDto);
   if (!diagnostics.executionReady) {
     const missing = diagnostics.missing.length ? diagnostics.missing.join(', ') : 'provider configuration';
     throw new Error(`Shipping provider execution is not ready. Missing: ${missing}.`);

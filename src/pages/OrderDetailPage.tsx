@@ -2136,6 +2136,29 @@ export function OrderDetailPage() {
           <strong>{summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'}</strong>
         </div>
         <div className="summary-row">
+          <span>Real path request</span>
+          <strong>
+            carrier {summary.realPathRequestedCarrierId ?? '—'} · post {summary.realPathRequestedPostType ?? '—'} · barcode{' '}
+            {summary.realPathRequestedBarcodeFormat || '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Real path flags</span>
+          <strong>
+            COD {formatDiagnosticPresence(summary.realPathCodPaymentIncluded)} · price{' '}
+            {formatDiagnosticPresence(summary.realPathPriceIncluded)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Real path provider result</span>
+          <strong>
+            HTTP {summary.realPathCreatePostHttpStatus ?? '—'} · post{' '}
+            {formatDiagnosticPresence(summary.realPathPostNumberPresent)} · tracking{' '}
+            {formatDiagnosticPresence(summary.realPathTrackingUrlPresent)} · barcode{' '}
+            {formatDiagnosticPresence(summary.realPathBarcodePresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
           <span>Normalized evidence</span>
           <strong>
             id {formatDiagnosticPresence(summary.normalizedProviderShipmentIdPresent)} · tracking{' '}
@@ -2149,6 +2172,14 @@ export function OrderDetailPage() {
             id {formatDiagnosticPresence(summary.persistedProviderShipmentIdPresent)} · tracking{' '}
             {formatDiagnosticPresence(summary.persistedTrackingUrlPresent)} · barcode{' '}
             {formatDiagnosticPresence(summary.persistedBarcodePresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Real path persisted evidence</span>
+          <strong>
+            id {formatDiagnosticPresence(summary.realPathPersistedProviderShipmentIdPresent)} · tracking{' '}
+            {formatDiagnosticPresence(summary.realPathPersistedTrackingUrlPresent)} · barcode{' '}
+            {formatDiagnosticPresence(summary.realPathPersistedBarcodePresent)}
           </strong>
         </div>
         <div className="summary-row">
