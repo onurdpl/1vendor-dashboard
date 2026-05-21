@@ -124,6 +124,40 @@ Implementation note:
 - Do not assume the final production base URL until Navlungo confirms it.
 - Old Carrtell URLs should not be used as API base URLs unless Navlungo confirms them.
 
+## 5.1. Environment Variables Planning
+
+Likely required:
+
+```text
+NAVLUNGO_BASE_URL=<unknown until confirmed>
+NAVLUNGO_API_USERNAME=<Render secret>
+NAVLUNGO_API_PASSWORD=<Render secret>
+```
+
+Likely generated/runtime:
+
+```text
+NAVLUNGO_ACCESS_TOKEN
+NAVLUNGO_REFRESH_TOKEN
+```
+
+Optional/unknown:
+
+```text
+NAVLUNGO_DEFAULT_CARRIER_ID=<unknown>
+NAVLUNGO_DEFAULT_BARCODE_FORMAT=pdf-A6
+NAVLUNGO_PLATFORM=<unknown>
+NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID=<unknown>
+```
+
+Notes:
+
+- Do not hardcode credentials.
+- Do not add these env vars to runtime validation yet.
+- Do not implement token refresh yet.
+- Confirm base URL and API version before adapter work.
+- If live-only testing charges balance, use one manually selected test order only.
+
 ## 6. Confirmed Forward Shipment Endpoint
 
 Confirmed from official v2.1 Create Post docs:
