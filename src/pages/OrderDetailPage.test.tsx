@@ -441,6 +441,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       authHttpStatus: 200,
       authContentType: 'application/json',
       authTokenReceived: true,
+      requestedCarrierId: 9,
+      requestedPostType: 2,
+      requestedBarcodeFormat: 'pdf-A6',
       createPostHttpStatus: 201,
       createPostContentType: 'application/json',
       responseShape: {
@@ -1638,6 +1641,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(runtimeDiagnosticsMocks.navlungoCreatePostProbe).toHaveBeenCalledWith({ confirm: 'YES' });
     expect(await screen.findByLabelText('Navlungo Create Post probe result')).toBeInTheDocument();
     expect(screen.getByText('Create Post HTTP').closest('.summary-row')).toHaveTextContent('201');
+    expect(screen.getByText('Requested carrier id').closest('.summary-row')).toHaveTextContent('9');
+    expect(screen.getByText('Requested post type').closest('.summary-row')).toHaveTextContent('2');
+    expect(screen.getByText('Requested barcode format').closest('.summary-row')).toHaveTextContent('pdf-A6');
     expect(screen.getByText('Post number').closest('.summary-row')).toHaveTextContent('NP12345');
     expect(screen.getByText('Tracking URL').closest('.summary-row')).toHaveTextContent('present');
     expect(screen.getByText('Barcode URL').closest('.summary-row')).toHaveTextContent('present');

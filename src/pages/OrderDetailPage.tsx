@@ -5636,6 +5636,18 @@ export function OrderDetailPage() {
                               <strong>{navlungoCreatePostProbeDiagnostics.createPostHttpStatus ?? '—'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Requested carrier id</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.requestedCarrierId}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Requested post type</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.requestedPostType}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Requested barcode format</span>
+                              <strong>{navlungoCreatePostProbeDiagnostics.requestedBarcodeFormat}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Response shape</span>
                               <strong>
                                 {navlungoCreatePostProbeDiagnostics.responseShape

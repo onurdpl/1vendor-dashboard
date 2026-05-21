@@ -140,6 +140,7 @@ NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2
 NAVLUNGO_API_USERNAME=<Render secret>
 NAVLUNGO_API_PASSWORD=<Render secret>
 NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID=55574
+NAVLUNGO_DEFAULT_CARRIER_ID=9
 NAVLUNGO_DEFAULT_BARCODE_FORMAT=pdf-A6
 ```
 
@@ -153,7 +154,6 @@ NAVLUNGO_REFRESH_TOKEN
 Optional/unknown:
 
 ```text
-NAVLUNGO_DEFAULT_CARRIER_ID=<unknown>
 NAVLUNGO_PLATFORM=<unknown>
 ```
 
@@ -161,6 +161,7 @@ Notes:
 
 - API version target is user-confirmed as `v2.1`.
 - Sender address id for testing is user-confirmed as `55574`.
+- Current Create Post probe target carrier is user-confirmed as `carrier_id = 9` for Sürat Kargo.
 - Do not hardcode credentials.
 - Do not add these env vars to runtime validation yet.
 - Do not implement token refresh yet.
@@ -264,11 +265,15 @@ Unknown:
 Confirmed/observed from Create Post docs:
 
 - `carrier_id` is required.
-- `carrier_id = 1` may mean carrier settings automatic/by coverage area.
+- `carrier_id = 1` means Automatic / By Coverage Area according to the official Create Post table.
 - Observed values:
   - `9` = Sürat Kargo
   - `10` = HepsiJet
   - `11` = Kolay Gelsin
+- The official Create Post sample code uses `carrier_id = 7`, but `7` is not listed in the official carrier table. Do not use `7` unless Navlungo confirms it.
+- Current PoC/manual Create Post probe default:
+  - `NAVLUNGO_DEFAULT_CARRIER_ID=9`
+  - fallback when env is missing: `9`
 - v2.1 docs include Carriers:
   - My Carriers
   - List Carriers
@@ -564,8 +569,10 @@ Current observed deployed Create Post probe result:
 - Auth succeeds.
 - `POST /post/create` reaches Navlungo.
 - Provider returns `400` with: `No price list definition exists for your company and the selected carrier.`
-- Most likely explanation: the static probe `carrier_id` is not configured/valid for this Navlungo account.
-- Do not retry Create Post until a configured carrier id is discovered from the carrier diagnostics probe.
+- Most likely explanation: the old static probe `carrier_id` was not configured/valid for this Navlungo account.
+- Operator confirmed first target carrier should be `NAVLUNGO_DEFAULT_CARRIER_ID=9` because this account should use Sürat Kargo.
+- The manual Create Post probe now uses `NAVLUNGO_DEFAULT_CARRIER_ID` and defaults to `9` when the env var is missing.
+- Invalid/non-numeric carrier ids block before provider calls.
 
 ## 16.4. Carrier Diagnostics Probe Status
 

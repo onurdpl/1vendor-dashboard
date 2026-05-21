@@ -21,6 +21,9 @@ export type NavlungoCreatePostProbeDiagnostics = {
   authHttpStatus: number | null;
   authContentType: string | null;
   authTokenReceived: boolean;
+  requestedCarrierId: number;
+  requestedPostType: number;
+  requestedBarcodeFormat: string;
   createPostHttpStatus: number | null;
   createPostContentType: string | null;
   responseShape: { kind: string; topLevelKeys: string[] } | null;
@@ -55,6 +58,10 @@ export type NavlungoCreatePostProbeGuardDiagnostics = {
   createPostProbeEnvPresent: boolean;
   createPostProbeEnvValueIsYES: boolean;
 };
+
+export const NAVLUNGO_CREATE_POST_PROBE_DEFAULT_CARRIER_ID = 9;
+export const NAVLUNGO_CREATE_POST_PROBE_POST_TYPE = 2;
+export const NAVLUNGO_CREATE_POST_PROBE_DEFAULT_BARCODE_FORMAT = 'pdf-A6';
 
 export function getNavlungoCreatePostProbeGuardDiagnostics(env: ProbeEnv): NavlungoCreatePostProbeGuardDiagnostics {
   const value = env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM;
@@ -91,7 +98,32 @@ export function validateNavlungoCreatePostProbeEnv(env: ProbeEnv): NavlungoCreat
     };
   }
 
+  const carrierId = parseNavlungoCreatePostProbeCarrierId(env);
+  if (!Number.isInteger(carrierId) || carrierId <= 0) {
+    return {
+      ok: false,
+      reason: 'NAVLUNGO_DEFAULT_CARRIER_ID must be a positive numeric carrier id when provided.',
+      diagnostics,
+    };
+  }
+
   return { ok: true };
+}
+
+export function parseNavlungoCreatePostProbeCarrierId(env: ProbeEnv) {
+  const raw = env.NAVLUNGO_DEFAULT_CARRIER_ID;
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return NAVLUNGO_CREATE_POST_PROBE_DEFAULT_CARRIER_ID;
+  }
+
+  const parsed = Number(raw.trim());
+  return Number.isFinite(parsed) ? parsed : Number.NaN;
+}
+
+function getNavlungoCreatePostProbeBarcodeFormat(env: ProbeEnv) {
+  return typeof env.NAVLUNGO_DEFAULT_BARCODE_FORMAT === 'string' && env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
+    ? env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
+    : NAVLUNGO_CREATE_POST_PROBE_DEFAULT_BARCODE_FORMAT;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -151,14 +183,18 @@ export function sanitizeNavlungoProbeOutput(value: unknown): unknown {
 
 export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => number = Date.now): NavlungoCreatePostPayload {
   const referenceId = `NAVLUNGO-PROBE-${now()}`;
+  const carrierId = parseNavlungoCreatePostProbeCarrierId(env);
+  if (!Number.isInteger(carrierId) || carrierId <= 0) {
+    throw new Error('NAVLUNGO_DEFAULT_CARRIER_ID must be a positive numeric carrier id when provided.');
+  }
 
   return {
     platform: 'shopify',
     posts: [
       {
         reference_id: referenceId,
-        carrier_id: 1,
-        post_type: 2,
+        carrier_id: carrierId,
+        post_type: NAVLUNGO_CREATE_POST_PROBE_POST_TYPE,
         cod_payment_type: '',
         sender: {
           name: 'Navlungo Test Sender',
@@ -186,9 +222,7 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
           price: '',
           note: 'Manual Navlungo Create Post probe. Do not fulfill Shopify.',
         },
-        barcode_format: typeof env.NAVLUNGO_DEFAULT_BARCODE_FORMAT === 'string' && env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
-          ? env.NAVLUNGO_DEFAULT_BARCODE_FORMAT.trim()
-          : 'pdf-A6',
+        barcode_format: getNavlungoCreatePostProbeBarcodeFormat(env),
         custom_data_1: 'manual_probe',
         custom_data_2: 'no_shopify_sync',
         custom_data_3: 'no_db_write',
@@ -268,6 +302,9 @@ export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {
 
   logger.log(JSON.stringify({
     label: 'POST /post/create',
+    requestedCarrierId: diagnostics.requestedCarrierId,
+    requestedPostType: diagnostics.requestedPostType,
+    requestedBarcodeFormat: diagnostics.requestedBarcodeFormat,
     status: diagnostics.createPostHttpStatus,
     contentType: diagnostics.createPostContentType,
     responseShape: diagnostics.responseShape,
@@ -321,6 +358,9 @@ export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOption
     authHttpStatus: authResponse.status,
     authContentType: authResponse.contentType,
     authTokenReceived: Boolean(accessToken),
+    requestedCarrierId: payload.posts[0].carrier_id,
+    requestedPostType: payload.posts[0].post_type,
+    requestedBarcodeFormat: payload.posts[0].barcode_format,
     createPostHttpStatus: createResponse.status,
     createPostContentType: createResponse.contentType,
     ...summary,

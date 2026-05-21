@@ -59,6 +59,7 @@ export type AppEnv = {
   NAVLUNGO_API_PASSWORD?: string;
   NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID?: string;
   NAVLUNGO_DEFAULT_BARCODE_FORMAT?: string;
+  NAVLUNGO_DEFAULT_CARRIER_ID?: string;
   NAVLUNGO_CREATE_POST_PROBE_CONFIRM?: string;
 };
 
@@ -226,6 +227,7 @@ export function loadEnv(): AppEnv {
   const navlungoApiPassword = process.env.NAVLUNGO_API_PASSWORD || undefined;
   const navlungoDefaultSenderAddressId = process.env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID || undefined;
   const navlungoDefaultBarcodeFormat = process.env.NAVLUNGO_DEFAULT_BARCODE_FORMAT || undefined;
+  const navlungoDefaultCarrierId = process.env.NAVLUNGO_DEFAULT_CARRIER_ID || undefined;
   const navlungoCreatePostProbeConfirm = process.env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM || undefined;
 
   if (shippingProvider === 'kargonomi') {
@@ -309,6 +311,7 @@ export function loadEnv(): AppEnv {
     NAVLUNGO_API_PASSWORD: navlungoApiPassword,
     NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: navlungoDefaultSenderAddressId,
     NAVLUNGO_DEFAULT_BARCODE_FORMAT: navlungoDefaultBarcodeFormat,
+    NAVLUNGO_DEFAULT_CARRIER_ID: navlungoDefaultCarrierId,
     NAVLUNGO_CREATE_POST_PROBE_CONFIRM: navlungoCreatePostProbeConfirm,
   };
 }

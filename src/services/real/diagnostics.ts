@@ -293,6 +293,9 @@ export type NavlungoCreatePostProbeDiagnostics = {
   authHttpStatus: number | null;
   authContentType: string | null;
   authTokenReceived: boolean;
+  requestedCarrierId: number;
+  requestedPostType: number;
+  requestedBarcodeFormat: string;
   createPostHttpStatus: number | null;
   createPostContentType: string | null;
   responseShape: { kind: string; topLevelKeys: string[] } | null;

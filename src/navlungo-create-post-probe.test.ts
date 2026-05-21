@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { registerDiagnosticsRoutes } from '../backend/src/modules/diagnostics/diagnostics.routes.js';
 import {
   buildNavlungoCreatePostProbePayload,
+  parseNavlungoCreatePostProbeCarrierId,
   runManualNavlungoCreatePostProbe,
   sanitizeNavlungoProbeOutput,
   summarizeNavlungoCreatePostResponse,
@@ -141,6 +142,38 @@ describe('manual Navlungo Create Post probe', () => {
         createPostProbeEnvValueIsYES: true,
       },
     });
+  });
+
+  it('defaults Create Post probe carrier_id to Sürat Kargo when env is missing', () => {
+    const env = buildProbeEnv({ NAVLUNGO_DEFAULT_CARRIER_ID: undefined });
+    const payload = buildNavlungoCreatePostProbePayload(env, () => 1700000000000);
+
+    expect(parseNavlungoCreatePostProbeCarrierId(env)).toBe(9);
+    expect(payload.posts[0].carrier_id).toBe(9);
+    expect(payload.posts[0].post_type).toBe(2);
+    expect(payload.posts[0].barcode_format).toBe('pdf-A6');
+  });
+
+  it('allows NAVLUNGO_DEFAULT_CARRIER_ID to override the probe carrier', () => {
+    const env = buildProbeEnv({ NAVLUNGO_DEFAULT_CARRIER_ID: '10' });
+    const payload = buildNavlungoCreatePostProbePayload(env, () => 1700000000000);
+
+    expect(parseNavlungoCreatePostProbeCarrierId(env)).toBe(10);
+    expect(payload.posts[0].carrier_id).toBe(10);
+  });
+
+  it('fails safely when NAVLUNGO_DEFAULT_CARRIER_ID is invalid', () => {
+    expect(validateNavlungoCreatePostProbeEnv(buildProbeEnv({ NAVLUNGO_DEFAULT_CARRIER_ID: 'surat' }))).toEqual({
+      ok: false,
+      reason: 'NAVLUNGO_DEFAULT_CARRIER_ID must be a positive numeric carrier id when provided.',
+      diagnostics: {
+        createPostProbeEnvPresent: true,
+        createPostProbeEnvValueIsYES: true,
+      },
+    });
+    expect(() => buildNavlungoCreatePostProbePayload(buildProbeEnv({ NAVLUNGO_DEFAULT_CARRIER_ID: 'surat' }))).toThrow(
+      'NAVLUNGO_DEFAULT_CARRIER_ID must be a positive numeric carrier id when provided.',
+    );
   });
 
   it('authenticates before Create Post and sends Authorization bearer token', async () => {
@@ -295,6 +328,9 @@ describe('manual Navlungo Create Post probe', () => {
         dormant: true,
         authHttpStatus: 200,
         authTokenReceived: true,
+        requestedCarrierId: 9,
+        requestedPostType: 2,
+        requestedBarcodeFormat: 'pdf-A6',
         createPostHttpStatus: 201,
         postNumber: 'NP12345',
         trackingUrlPresent: true,
