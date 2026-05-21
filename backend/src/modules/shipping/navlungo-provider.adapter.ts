@@ -60,6 +60,58 @@ export type NavlungoAuthDiagnostics = {
   } | null;
 };
 
+export type NavlungoCarrierDiagnostics = {
+  provider: typeof NAVLUNGO_PROVIDER_KEY;
+  displayName: typeof NAVLUNGO_PROVIDER_DISPLAY_NAME;
+  dormant: true;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  myCarriersRequestUrl: string | null;
+  myCarriersHttpStatus: number | null;
+  myCarriersContentType: string | null;
+  myCarriersResponseShape: {
+    kind: string;
+    topLevelKeys: string[];
+  } | null;
+  myCarriersDataShape: {
+    kind: string;
+    topLevelKeys: string[];
+  } | null;
+  myCarrierCount: number | null;
+  myCarrierSamples: Array<{
+    id: string | number | null;
+    name: string | null;
+    shortName: string | null;
+    activeOrConfigured: boolean | null;
+  }>;
+  listCarriersRequestUrl: string | null;
+  listCarriersHttpStatus: number | null;
+  listCarriersContentType: string | null;
+  listCarriersResponseShape: {
+    kind: string;
+    topLevelKeys: string[];
+  } | null;
+  listCarriersDataShape: {
+    kind: string;
+    topLevelKeys: string[];
+  } | null;
+  listCarrierCount: number | null;
+  listCarrierSamples: Array<{
+    id: string | number | null;
+    name: string | null;
+    shortName: string | null;
+    activeOrConfigured: boolean | null;
+  }>;
+  anyConfiguredCarrier: boolean;
+  providerMessages: string[];
+  fetchError: {
+    name: string;
+    message: string;
+    cause: { name: string; message: string } | string | null;
+  } | null;
+};
+
 type NavlungoHttpResponse<TBody = unknown> = {
   ok: boolean;
   status: number;
@@ -176,6 +228,76 @@ function hasTokenLikeKey(record: Record<string, unknown>) {
 function getAuthExpiresIn(root: Record<string, unknown>, data: Record<string, unknown>) {
   const value = root.expires_in ?? data.expires_in;
   return typeof value === 'string' || typeof value === 'number' ? value : null;
+}
+
+function getStringLike(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function getNumberOrString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'number' || (typeof value === 'string' && value.trim())) {
+      return value;
+    }
+  }
+
+  return null;
+}
+
+function getDataArray(value: unknown) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (isRecord(value) && Array.isArray(value.data)) {
+    return value.data;
+  }
+
+  return [];
+}
+
+function getProviderMessages(value: unknown) {
+  if (!isRecord(value)) {
+    return [];
+  }
+
+  const messages = [value.message, value.error]
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map((item) => item.trim());
+
+  return [...new Set(messages)];
+}
+
+function summarizeCarrierSamples(value: unknown) {
+  return getDataArray(value)
+    .filter(isRecord)
+    .slice(0, 10)
+    .map((carrier) => ({
+      id: getNumberOrString(carrier, ['id', 'carrier_id']),
+      name: getStringLike(carrier, ['carrier_name', 'name']),
+      shortName: getStringLike(carrier, ['short_name', 'slug']),
+      activeOrConfigured: typeof carrier.active === 'boolean'
+        ? carrier.active
+        : typeof carrier.is_active === 'boolean'
+          ? carrier.is_active
+          : null,
+    }));
+}
+
+function summarizeDataShape(value: unknown) {
+  if (!isRecord(value) || !('data' in value)) {
+    return null;
+  }
+
+  return summarizeResponseShape(value.data);
 }
 
 export function getNavlungoAccessTokenFromAuthBody(value: unknown) {
@@ -298,12 +420,130 @@ export class NavlungoHttpClient {
     };
   }
 
+  async getMyCarriers(accessToken: string, limit = 20): Promise<NavlungoHttpResponse> {
+    return this.getCarrierDiagnosticsEndpoint(accessToken, '/carrier/my-carriers', limit);
+  }
+
+  async listCarriers(accessToken: string, limit = 20): Promise<NavlungoHttpResponse> {
+    return this.getCarrierDiagnosticsEndpoint(accessToken, '/carrier/getAll', limit);
+  }
+
+  private async getCarrierDiagnosticsEndpoint(accessToken: string, path: string, limit: number): Promise<NavlungoHttpResponse> {
+    const token = accessToken.trim();
+    if (!token) {
+      throw new Error('Navlungo access token is required for carrier diagnostics.');
+    }
+
+    const url = new URL(this.requestUrl(path));
+    url.searchParams.set('limit', String(limit));
+    const response = await this.fetchImpl(url.toString(), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-localization': 'en',
+      },
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseNavlungoResponseBody(contentType, responseText),
+    };
+  }
+
   requestUrl(path: string) {
     if (!this.env.NAVLUNGO_BASE_URL) {
       throw new Error('NAVLUNGO_BASE_URL is not configured.');
     }
 
     return `${this.env.NAVLUNGO_BASE_URL.replace(/\/$/, '')}${path}`;
+  }
+}
+
+export async function runNavlungoCarrierDiagnostics(
+  env: Pick<AppEnv, 'NAVLUNGO_BASE_URL' | 'NAVLUNGO_API_USERNAME' | 'NAVLUNGO_API_PASSWORD'>,
+  options: NavlungoHttpClientOptions = {},
+): Promise<NavlungoCarrierDiagnostics> {
+  const base: NavlungoCarrierDiagnostics = {
+    provider: NAVLUNGO_PROVIDER_KEY,
+    displayName: NAVLUNGO_PROVIDER_DISPLAY_NAME,
+    dormant: true,
+    authHttpStatus: null,
+    authContentType: null,
+    authTokenReceived: false,
+    myCarriersRequestUrl: '/carrier/my-carriers?limit=20',
+    myCarriersHttpStatus: null,
+    myCarriersContentType: null,
+    myCarriersResponseShape: null,
+    myCarriersDataShape: null,
+    myCarrierCount: null,
+    myCarrierSamples: [],
+    listCarriersRequestUrl: '/carrier/getAll?limit=20',
+    listCarriersHttpStatus: null,
+    listCarriersContentType: null,
+    listCarriersResponseShape: null,
+    listCarriersDataShape: null,
+    listCarrierCount: null,
+    listCarrierSamples: [],
+    anyConfiguredCarrier: false,
+    providerMessages: [],
+    fetchError: null,
+  };
+
+  try {
+    const client = new NavlungoHttpClient(env, options);
+    const authResponse = await client.createAuthToken();
+    const accessToken = getNavlungoAccessTokenFromAuthBody(authResponse.body);
+    if (!accessToken) {
+      return {
+        ...base,
+        authHttpStatus: authResponse.status,
+        authContentType: authResponse.contentType,
+        authTokenReceived: false,
+        providerMessages: getProviderMessages(authResponse.body),
+      };
+    }
+
+    const myCarriers = await client.getMyCarriers(accessToken);
+    const listCarriers = await client.listCarriers(accessToken);
+    const myCarrierSamples = summarizeCarrierSamples(myCarriers.body);
+    const listCarrierSamples = summarizeCarrierSamples(listCarriers.body);
+    const providerMessages = [
+      ...getProviderMessages(authResponse.body),
+      ...getProviderMessages(myCarriers.body),
+      ...getProviderMessages(listCarriers.body),
+    ];
+
+    return {
+      ...base,
+      authHttpStatus: authResponse.status,
+      authContentType: authResponse.contentType,
+      authTokenReceived: true,
+      myCarriersHttpStatus: myCarriers.status,
+      myCarriersContentType: myCarriers.contentType,
+      myCarriersResponseShape: summarizeResponseShape(myCarriers.body),
+      myCarriersDataShape: summarizeDataShape(myCarriers.body),
+      myCarrierCount: getDataArray(myCarriers.body).length,
+      myCarrierSamples,
+      listCarriersHttpStatus: listCarriers.status,
+      listCarriersContentType: listCarriers.contentType,
+      listCarriersResponseShape: summarizeResponseShape(listCarriers.body),
+      listCarriersDataShape: summarizeDataShape(listCarriers.body),
+      listCarrierCount: getDataArray(listCarriers.body).length,
+      listCarrierSamples,
+      anyConfiguredCarrier: myCarrierSamples.length > 0,
+      providerMessages: [...new Set(providerMessages)],
+    };
+  } catch (error) {
+    return {
+      ...base,
+      fetchError: summarizeFetchError(error),
+    };
   }
 }
 

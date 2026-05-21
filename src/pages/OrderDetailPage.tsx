@@ -50,7 +50,12 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
-import type { KargonomiLocationLookupDiagnostics, NavlungoAuthDiagnostics, NavlungoCreatePostProbeDiagnostics } from '../services/real/diagnostics';
+import type {
+  KargonomiLocationLookupDiagnostics,
+  NavlungoAuthDiagnostics,
+  NavlungoCarrierDiagnostics,
+  NavlungoCreatePostProbeDiagnostics,
+} from '../services/real/diagnostics';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -967,6 +972,8 @@ export function OrderDetailPage() {
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
   const [navlungoAuthDiagnostics, setNavlungoAuthDiagnostics] = useState<NavlungoAuthDiagnostics | null>(null);
   const [navlungoAuthError, setNavlungoAuthError] = useState<string | null>(null);
+  const [navlungoCarrierDiagnostics, setNavlungoCarrierDiagnostics] = useState<NavlungoCarrierDiagnostics | null>(null);
+  const [navlungoCarrierError, setNavlungoCarrierError] = useState<string | null>(null);
   const [navlungoCreatePostProbeConfirmed, setNavlungoCreatePostProbeConfirmed] = useState(false);
   const [navlungoCreatePostProbeDiagnostics, setNavlungoCreatePostProbeDiagnostics] = useState<NavlungoCreatePostProbeDiagnostics | null>(null);
   const [navlungoCreatePostProbeError, setNavlungoCreatePostProbeError] = useState<string | null>(null);
@@ -1183,6 +1190,18 @@ export function OrderDetailPage() {
       },
     },
   );
+  const { mutateAsync: runNavlungoCarrierDiagnosticsMutation, isPending: isRunningNavlungoCarrierDiagnostics } = useMutationAction(
+    async () => runtimeServices.diagnostics.navlungoCarriers(),
+    {
+      onSuccess: (result) => {
+        setNavlungoCarrierDiagnostics(result);
+        setNavlungoCarrierError(null);
+      },
+      onError: (error) => {
+        setNavlungoCarrierError(error instanceof Error ? error.message : 'Navlungo carrier diagnostic could not be run.');
+      },
+    },
+  );
   const { mutateAsync: runNavlungoCreatePostProbeMutation, isPending: isRunningNavlungoCreatePostProbe } = useMutationAction(
     async () => runtimeServices.diagnostics.navlungoCreatePostProbe({ confirm: 'YES' }),
     {
@@ -1211,6 +1230,8 @@ export function OrderDetailPage() {
     if (shippingConfigDraft.preferredProvider !== 'navlungo') {
       setNavlungoAuthDiagnostics(null);
       setNavlungoAuthError(null);
+      setNavlungoCarrierDiagnostics(null);
+      setNavlungoCarrierError(null);
       setNavlungoCreatePostProbeConfirmed(false);
       setNavlungoCreatePostProbeDiagnostics(null);
       setNavlungoCreatePostProbeError(null);
@@ -5374,6 +5395,17 @@ export function OrderDetailPage() {
                           </button>
                           <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
                         </div>
+                        <div className="shipment-recovery-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void runNavlungoCarrierDiagnosticsMutation(undefined)}
+                            disabled={isRunningNavlungoCarrierDiagnostics}
+                          >
+                            {isRunningNavlungoCarrierDiagnostics ? 'Running carrier diagnostic...' : 'Run Navlungo carrier diagnostic'}
+                          </button>
+                          <span className="muted">Authenticates, then checks configured and listed carriers. No posts are created.</span>
+                        </div>
                         <div className="shipment-recovery-actions" aria-label="Navlungo Create Post probe controls">
                           <span className="muted">Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.</span>
                           <label className="field checkbox-field">
@@ -5395,6 +5427,9 @@ export function OrderDetailPage() {
                         </div>
                         {navlungoAuthError ? (
                           <p className="form-error" role="alert">{navlungoAuthError}</p>
+                        ) : null}
+                        {navlungoCarrierError ? (
+                          <p className="form-error" role="alert">{navlungoCarrierError}</p>
                         ) : null}
                         {navlungoAuthDiagnostics ? (
                           <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo auth diagnostic result">
@@ -5491,6 +5526,92 @@ export function OrderDetailPage() {
                           <span>Expires in</span>
                           <strong>{navlungoAuthDiagnostics.expiresIn ?? '—'}</strong>
                         </div>
+                          </div>
+                        ) : null}
+                        {navlungoCarrierDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo carrier diagnostic result">
+                            <div className="summary-row">
+                              <span>Auth HTTP</span>
+                              <strong>{navlungoCarrierDiagnostics.authHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Token received</span>
+                              <strong>{navlungoCarrierDiagnostics.authTokenReceived ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>My Carriers HTTP</span>
+                              <strong>{navlungoCarrierDiagnostics.myCarriersHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>My Carriers shape</span>
+                              <strong>
+                                {navlungoCarrierDiagnostics.myCarriersResponseShape
+                                  ? `${navlungoCarrierDiagnostics.myCarriersResponseShape.kind}${
+                                      navlungoCarrierDiagnostics.myCarriersResponseShape.topLevelKeys.length
+                                        ? ` · ${navlungoCarrierDiagnostics.myCarriersResponseShape.topLevelKeys.join(', ')}`
+                                        : ''
+                                    }`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Configured carriers</span>
+                              <strong>{navlungoCarrierDiagnostics.myCarrierCount ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>First configured carriers</span>
+                              <strong>
+                                {navlungoCarrierDiagnostics.myCarrierSamples.length
+                                  ? navlungoCarrierDiagnostics.myCarrierSamples
+                                      .map((carrier) => [carrier.id ?? 'unknown', carrier.name ?? carrier.shortName ?? 'unnamed'].join(' · '))
+                                      .join(', ')
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>List Carriers HTTP</span>
+                              <strong>{navlungoCarrierDiagnostics.listCarriersHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>List Carriers shape</span>
+                              <strong>
+                                {navlungoCarrierDiagnostics.listCarriersResponseShape
+                                  ? `${navlungoCarrierDiagnostics.listCarriersResponseShape.kind}${
+                                      navlungoCarrierDiagnostics.listCarriersResponseShape.topLevelKeys.length
+                                        ? ` · ${navlungoCarrierDiagnostics.listCarriersResponseShape.topLevelKeys.join(', ')}`
+                                        : ''
+                                    }`
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Listed carriers</span>
+                              <strong>{navlungoCarrierDiagnostics.listCarrierCount ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>First listed carriers</span>
+                              <strong>
+                                {navlungoCarrierDiagnostics.listCarrierSamples.length
+                                  ? navlungoCarrierDiagnostics.listCarrierSamples
+                                      .map((carrier) => [carrier.id ?? 'unknown', carrier.name ?? carrier.shortName ?? 'unnamed'].join(' · '))
+                                      .join(', ')
+                                  : '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Configured carrier available</span>
+                              <strong>{navlungoCarrierDiagnostics.anyConfiguredCarrier ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider messages</span>
+                              <strong>{navlungoCarrierDiagnostics.providerMessages.length ? navlungoCarrierDiagnostics.providerMessages.join(' · ') : '—'}</strong>
+                            </div>
+                            {navlungoCarrierDiagnostics.fetchError ? (
+                              <div className="summary-row">
+                                <span>Fetch error</span>
+                                <strong>{`${navlungoCarrierDiagnostics.fetchError.name}: ${navlungoCarrierDiagnostics.fetchError.message}`}</strong>
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                         {navlungoCreatePostProbeError ? (

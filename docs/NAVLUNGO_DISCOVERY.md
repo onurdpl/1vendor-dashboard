@@ -272,6 +272,9 @@ Confirmed/observed from Create Post docs:
 - v2.1 docs include Carriers:
   - My Carriers
   - List Carriers
+- The documented carrier diagnostics paths are:
+  - `GET /carrier/my-carriers`
+  - `GET /carrier/getAll`
 
 Unknown:
 
@@ -548,6 +551,50 @@ The output must never include:
 - full customer PII
 
 Response shape is still pending live probe execution and must be recorded after one intentional test-account run.
+
+Current observed deployed Create Post probe result:
+
+- Auth succeeds.
+- `POST /post/create` reaches Navlungo.
+- Provider returns `400` with: `No price list definition exists for your company and the selected carrier.`
+- Most likely explanation: the static probe `carrier_id` is not configured/valid for this Navlungo account.
+- Do not retry Create Post until a configured carrier id is discovered from the carrier diagnostics probe.
+
+## 16.4. Carrier Diagnostics Probe Status
+
+Current probe status:
+
+- Admin-only endpoint exists:
+  - `GET /admin/diagnostics/navlungo/carriers`
+- The endpoint authenticates first with:
+  - `POST /auth/api`
+- It then calls documented carrier diagnostics endpoints only:
+  - `GET /carrier/my-carriers?limit=20`
+  - `GET /carrier/getAll?limit=20`
+- The probe does not:
+  - call `POST /post/create`
+  - write to the app database
+  - create a local shipment execution
+  - sync Shopify fulfillment
+  - enable Navlungo as a live shipping provider
+
+Sanitized carrier diagnostics output includes only:
+
+- auth HTTP status and token presence boolean
+- carrier endpoint HTTP statuses
+- response shape summaries
+- carrier counts
+- first safe carrier ids/names/short names
+- active/configured presence booleans when present
+- provider messages/errors
+
+The output must never include:
+
+- API username
+- API password
+- access token
+- refresh token
+- customer/order data
 
 ## 17. Critical Unknowns Before Implementation
 

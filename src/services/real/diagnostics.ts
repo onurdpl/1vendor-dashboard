@@ -312,6 +312,32 @@ export type NavlungoCreatePostProbeDiagnostics = {
   errorMessage: string | null;
 };
 
+export type NavlungoCarrierDiagnostics = {
+  provider: 'navlungo';
+  displayName: 'Navlungo';
+  dormant: true;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  myCarriersRequestUrl: string | null;
+  myCarriersHttpStatus: number | null;
+  myCarriersContentType: string | null;
+  myCarriersResponseShape: { kind: string; topLevelKeys: string[] } | null;
+  myCarriersDataShape: { kind: string; topLevelKeys: string[] } | null;
+  myCarrierCount: number | null;
+  myCarrierSamples: Array<{ id: string | number | null; name: string | null; shortName: string | null; activeOrConfigured: boolean | null }>;
+  listCarriersRequestUrl: string | null;
+  listCarriersHttpStatus: number | null;
+  listCarriersContentType: string | null;
+  listCarriersResponseShape: { kind: string; topLevelKeys: string[] } | null;
+  listCarriersDataShape: { kind: string; topLevelKeys: string[] } | null;
+  listCarrierCount: number | null;
+  listCarrierSamples: Array<{ id: string | number | null; name: string | null; shortName: string | null; activeOrConfigured: boolean | null }>;
+  anyConfiguredCarrier: boolean;
+  providerMessages: string[];
+  fetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
+};
+
 export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -337,6 +363,10 @@ export async function runKargonomiLocationLookupDiagnostics() {
 
 export async function runNavlungoAuthDiagnostics() {
   return apiClient.get<NavlungoAuthDiagnostics>('/admin/diagnostics/navlungo/auth');
+}
+
+export async function runNavlungoCarrierDiagnostics() {
+  return apiClient.get<NavlungoCarrierDiagnostics>('/admin/diagnostics/navlungo/carriers');
 }
 
 export async function runNavlungoCreatePostProbe(confirm: 'YES') {

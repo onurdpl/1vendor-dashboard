@@ -9,6 +9,7 @@ import {
   NAVLUNGO_PROVIDER_DISPLAY_NAME,
   NAVLUNGO_PROVIDER_KEY,
   runNavlungoAuthDiagnostics,
+  runNavlungoCarrierDiagnostics,
 } from '../backend/src/modules/shipping/navlungo-provider.adapter.js';
 
 function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
@@ -50,7 +51,7 @@ function buildEnv(overrides: Partial<AppEnv> = {}): AppEnv {
   };
 }
 
-function registerRoute(env: AppEnv) {
+function registerRoute(env: AppEnv, path = '/admin/diagnostics/navlungo/auth') {
   const gets = new Map<string, (request: { authUser?: { role?: string } }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
   const app = {
     get: vi.fn((path: string, ...args: unknown[]) => {
@@ -63,7 +64,7 @@ function registerRoute(env: AppEnv) {
     post: vi.fn(),
   };
   registerDiagnosticsRoutes(app as never, env);
-  return gets.get('/admin/diagnostics/navlungo/auth');
+  return gets.get(path);
 }
 
 function buildReply() {
@@ -248,11 +249,116 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(calls.map((call) => call.url)).toEqual(['https://domestic-api.navlungo.com/v2/auth/api']);
     expect(calls.some((call) => call.url.includes('post/create'))).toBe(false);
   });
+
+  it('authenticates before carrier diagnostics and summarizes carriers safely', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({
+          status: true,
+          message: 'ok',
+          data: { access_token: 'secret-access-token' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      if (String(url).includes('/carrier/my-carriers')) {
+        return new Response(JSON.stringify({
+          status: true,
+          message: 'ok',
+          data: [{ id: 9, carrier_name: 'Sürat Kargo', short_name: 'surat', active: true }],
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify({
+        status: true,
+        message: 'ok',
+        data: [
+          { id: 9, carrier_name: 'Sürat Kargo', short_name: 'surat', active: true },
+          { id: 10, carrier_name: 'HepsiJet', short_name: 'hepsijet', active: true },
+        ],
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const result = await runNavlungoCarrierDiagnostics(buildEnv(), { fetchImpl });
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
+      ['GET', 'https://domestic-api.navlungo.com/v2/carrier/my-carriers?limit=20'],
+      ['GET', 'https://domestic-api.navlungo.com/v2/carrier/getAll?limit=20'],
+    ]);
+    expect(calls[1].init.headers).toMatchObject({
+      Authorization: 'Bearer secret-access-token',
+      'X-localization': 'en',
+    });
+    expect(calls.some((call) => call.url.includes('post/create'))).toBe(false);
+    expect(result).toMatchObject({
+      authHttpStatus: 200,
+      authTokenReceived: true,
+      myCarriersHttpStatus: 200,
+      myCarrierCount: 1,
+      myCarrierSamples: [{ id: 9, name: 'Sürat Kargo', shortName: 'surat', activeOrConfigured: true }],
+      listCarriersHttpStatus: 200,
+      listCarrierCount: 2,
+      anyConfiguredCarrier: true,
+      providerMessages: ['ok'],
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+    expect(JSON.stringify(result)).not.toContain('secret-access-token');
+  });
+
+  it('returns provider carrier errors safely without creating posts', async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ status: false, message: 'Carrier access unavailable', data: [] }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const result = await runNavlungoCarrierDiagnostics(buildEnv(), { fetchImpl });
+
+    expect(calls).toHaveLength(3);
+    expect(calls.some((url) => url.includes('post/create'))).toBe(false);
+    expect(result).toMatchObject({
+      myCarriersHttpStatus: 400,
+      listCarriersHttpStatus: 400,
+      providerMessages: ['Carrier access unavailable'],
+      anyConfiguredCarrier: false,
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-access-token');
+  });
 });
 
 describe('Navlungo auth diagnostics route', () => {
   it('requires admin access', async () => {
     const handler = registerRoute(buildEnv());
+    const result = await handler?.({ authUser: { role: 'vendor' } }, buildReply());
+
+    expect(result).toMatchObject({
+      status: 403,
+      body: { message: 'Forbidden' },
+    });
+  });
+
+  it('requires admin access for carrier diagnostics', async () => {
+    const handler = registerRoute(buildEnv(), '/admin/diagnostics/navlungo/carriers');
     const result = await handler?.({ authUser: { role: 'vendor' } }, buildReply());
 
     expect(result).toMatchObject({
@@ -294,6 +400,47 @@ describe('Navlungo auth diagnostics route', () => {
       expect(JSON.stringify(result)).not.toContain('secret-password');
       expect(JSON.stringify(result)).not.toContain('secret-access-token');
       expect(JSON.stringify(result)).not.toContain('secret-refresh-token');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it('returns sanitized carrier diagnostics without exposing credentials or tokens', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: string[] = [];
+    globalThis.fetch = (async (url: RequestInfo | URL) => {
+      calls.push(String(url));
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ status: true, message: 'ok', data: [{ id: 9, carrier_name: 'Sürat Kargo' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    try {
+      const handler = registerRoute(buildEnv(), '/admin/diagnostics/navlungo/carriers');
+      const result = await handler?.({ authUser: { role: 'admin' } }, buildReply());
+
+      expect(calls).toEqual([
+        'https://domestic-api.navlungo.com/v2/auth/api',
+        'https://domestic-api.navlungo.com/v2/carrier/my-carriers?limit=20',
+        'https://domestic-api.navlungo.com/v2/carrier/getAll?limit=20',
+      ]);
+      expect(result).toMatchObject({
+        provider: 'navlungo',
+        dormant: true,
+        authHttpStatus: 200,
+        myCarriersHttpStatus: 200,
+        listCarriersHttpStatus: 200,
+        myCarrierSamples: [{ id: 9, name: 'Sürat Kargo' }],
+      });
+      expect(JSON.stringify(result)).not.toContain('secret-password');
+      expect(JSON.stringify(result)).not.toContain('secret-access-token');
     } finally {
       globalThis.fetch = originalFetch;
     }

@@ -30,6 +30,7 @@ const createSupportTicketMock = vi.fn();
 const runtimeDiagnosticsMocks = vi.hoisted(() => ({
   kargonomiLocationLookup: vi.fn(),
   navlungoAuth: vi.fn(),
+  navlungoCarriers: vi.fn(),
   navlungoCreatePostProbe: vi.fn(),
 }));
 
@@ -45,6 +46,7 @@ vi.mock('../services/runtime-services', () => ({
     diagnostics: {
       kargonomiLocationLookup: () => runtimeDiagnosticsMocks.kargonomiLocationLookup(),
       navlungoAuth: () => runtimeDiagnosticsMocks.navlungoAuth(),
+      navlungoCarriers: () => runtimeDiagnosticsMocks.navlungoCarriers(),
       navlungoCreatePostProbe: (payload: { confirm: 'YES' }) => runtimeDiagnosticsMocks.navlungoCreatePostProbe(payload),
     },
   },
@@ -402,6 +404,47 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       tokenReceived: true,
       refreshTokenReceived: true,
       expiresIn: 86400,
+      fetchError: null,
+    });
+    runtimeDiagnosticsMocks.navlungoCarriers.mockReset();
+    runtimeDiagnosticsMocks.navlungoCarriers.mockResolvedValue({
+      provider: 'navlungo',
+      displayName: 'Navlungo',
+      dormant: true,
+      authHttpStatus: 200,
+      authContentType: 'application/json',
+      authTokenReceived: true,
+      myCarriersRequestUrl: '/carrier/my-carriers?limit=20',
+      myCarriersHttpStatus: 200,
+      myCarriersContentType: 'application/json',
+      myCarriersResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['status', 'message', 'data'],
+      },
+      myCarriersDataShape: {
+        kind: 'json:array',
+        topLevelKeys: [],
+      },
+      myCarrierCount: 1,
+      myCarrierSamples: [{ id: 9, name: 'Sürat Kargo', shortName: 'surat', activeOrConfigured: true }],
+      listCarriersRequestUrl: '/carrier/getAll?limit=20',
+      listCarriersHttpStatus: 200,
+      listCarriersContentType: 'application/json',
+      listCarriersResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['status', 'message', 'data'],
+      },
+      listCarriersDataShape: {
+        kind: 'json:array',
+        topLevelKeys: [],
+      },
+      listCarrierCount: 2,
+      listCarrierSamples: [
+        { id: 9, name: 'Sürat Kargo', shortName: 'surat', activeOrConfigured: true },
+        { id: 10, name: 'HepsiJet', shortName: 'hepsijet', activeOrConfigured: true },
+      ],
+      anyConfiguredCarrier: true,
+      providerMessages: ['ok'],
       fetchError: null,
     });
     runtimeDiagnosticsMocks.navlungoCreatePostProbe.mockReset();
@@ -1555,6 +1598,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
     expect(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Navlungo carrier diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Navlungo Create Post probe controls')).toBeInTheDocument();
     expect(screen.getByText('Creates one Navlungo test post. Does not sync Shopify or create a local shipment execution.')).toBeInTheDocument();
@@ -1584,6 +1628,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
 
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo carrier diagnostic' }));
+
+    expect(runtimeDiagnosticsMocks.navlungoCarriers).toHaveBeenCalled();
+    expect(await screen.findByLabelText('Navlungo carrier diagnostic result')).toBeInTheDocument();
+    expect(screen.getByText('My Carriers HTTP').closest('.summary-row')).toHaveTextContent('200');
+    expect(screen.getByText('Configured carriers').closest('.summary-row')).toHaveTextContent('1');
+    expect(screen.getByText('First configured carriers').closest('.summary-row')).toHaveTextContent('9 · Sürat Kargo');
+    expect(screen.getByText('List Carriers HTTP').closest('.summary-row')).toHaveTextContent('200');
+    expect(screen.getByText('Listed carriers').closest('.summary-row')).toHaveTextContent('2');
+    expect(screen.getByText('Configured carrier available').closest('.summary-row')).toHaveTextContent('yes');
+    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
+
     const createPostProbeButton = screen.getByRole('button', { name: 'Run Navlungo Create Post probe' });
     expect(createPostProbeButton).toBeDisabled();
     await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
@@ -1607,9 +1664,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => {
       expect(screen.queryByLabelText('Navlungo auth diagnostic result')).not.toBeInTheDocument();
     });
+    expect(screen.queryByLabelText('Navlungo carrier diagnostic result')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Navlungo Create Post probe result')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo carrier diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
   });

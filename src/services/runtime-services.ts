@@ -1573,6 +1573,38 @@ export const runtimeServices = {
               cause: null,
             },
           }),
+    navlungoCarriers: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.runNavlungoCarrierDiagnostics()
+        : Promise.resolve({
+            provider: 'navlungo' as const,
+            displayName: 'Navlungo' as const,
+            dormant: true as const,
+            authHttpStatus: null,
+            authContentType: null,
+            authTokenReceived: false,
+            myCarriersRequestUrl: '/carrier/my-carriers?limit=20',
+            myCarriersHttpStatus: null,
+            myCarriersContentType: null,
+            myCarriersResponseShape: null,
+            myCarriersDataShape: null,
+            myCarrierCount: null,
+            myCarrierSamples: [],
+            listCarriersRequestUrl: '/carrier/getAll?limit=20',
+            listCarriersHttpStatus: null,
+            listCarriersContentType: null,
+            listCarriersResponseShape: null,
+            listCarriersDataShape: null,
+            listCarrierCount: null,
+            listCarrierSamples: [],
+            anyConfiguredCarrier: false,
+            providerMessages: ['Navlungo carrier diagnostics are available in real API mode only.'],
+            fetchError: {
+              name: 'MockMode',
+              message: 'Navlungo carrier diagnostics are available in real API mode only.',
+              cause: null,
+            },
+          }),
     navlungoCreatePostProbe: (payload: { confirm: 'YES' }) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.runNavlungoCreatePostProbe(payload.confirm)
