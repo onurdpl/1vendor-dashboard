@@ -1363,6 +1363,131 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('lets vendor retry reach Navlungo stale recovery for pending rows without provider evidence', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'PENDING',
+      responseSnapshot: {
+        provider: 'navlungo',
+        ok: false,
+        providerError: 'Provider did not return a shipment id or tracking yet.',
+      },
+    });
+    storedExecution = existing;
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-navlungo-55578',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'NAVLUNGO',
+          warehouseId: '55578',
+          name: 'Navlungo sender address',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: {
+        navlungoSenderAddressId: '55578',
+        navlungoCarrierId: '9',
+        navlungoBarcodeFormat: 'pdf-A6',
+      },
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-RETRY-1048',
+      trackingNumber: 'NAV-RETRY-TRACK-1048',
+      trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1048',
+      labelUrl: 'retry-barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        providerShipmentId: 'NAV-RETRY-1048',
+        trackingNumberPresent: true,
+        trackingUrlPresent: true,
+        barcode: 'retry-barcode-string',
+        carrierName: 'Sürat Kargo',
+      },
+    });
+
+    const result = await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'navlungo',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result).toMatchObject({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-RETRY-1048',
+      trackingNumber: 'NAV-RETRY-TRACK-1048',
+      trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1048',
+      labelUrl: 'retry-barcode-string',
+      barcode: 'retry-barcode-string',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-navlungo-alloc-1' },
+        data: expect.objectContaining({
+          responseSnapshot: expect.objectContaining({
+            retryEndpointUsed: '/shipments/:id/retry',
+            existingExecutionId: 'shipment-navlungo-alloc-1',
+            existingProvider: 'navlungo',
+            existingStatus: 'pending',
+            existingHasProviderEvidence: false,
+            staleRecoveryAttempted: true,
+            providerCallAttempted: true,
+            persistedProviderShipmentIdPresent: true,
+            persistedTrackingUrlPresent: true,
+            persistedBarcodePresent: true,
+          }),
+        }),
+      }),
+    );
+  });
+
   it('does not call the provider again when an existing pending dry-run shipment is present', async () => {
     const existing = buildShipmentExecution({
       provider: 'KARGO_ENTEGRATOR',

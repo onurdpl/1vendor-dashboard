@@ -2154,6 +2154,14 @@ function assertFailedRetryEligible(execution: ShipmentExecution) {
   }
 }
 
+function canRetryStaleNavlungoExecution(execution: ShipmentExecution) {
+  return (
+    execution.provider === ShippingProvider.NAVLUNGO &&
+    !hasPersistedShipmentEvidence(execution) &&
+    (execution.shipmentStatus === ShipmentExecutionStatus.PENDING || execution.shipmentStatus === ShipmentExecutionStatus.FAILED)
+  );
+}
+
 function hasPersistedShipmentEvidence(execution: ShipmentExecution) {
   return Boolean(execution.providerShipmentId || execution.trackingNumber || execution.trackingUrl || execution.labelUrl);
 }
@@ -4732,10 +4740,8 @@ export async function createShipmentExecution(
     },
   });
   if (existing) {
-    if (
-      provider === ShippingProvider.NAVLUNGO &&
-      !hasPersistedShipmentEvidence(existing) &&
-      (existing.shipmentStatus === ShipmentExecutionStatus.PENDING || existing.shipmentStatus === ShipmentExecutionStatus.FAILED)
+  if (
+      canRetryStaleNavlungoExecution(existing)
     ) {
       const recoveredEvidence = readNavlungoSnapshotEvidence(existing.responseSnapshot);
       if (recoveredEvidence) {
@@ -5052,7 +5058,10 @@ export async function retryFailedShipmentExecution(
     throw new Error('Shipment execution not found.');
   }
 
-  assertFailedRetryEligible(existing);
+  const retryingStaleNavlungo = canRetryStaleNavlungoExecution(existing);
+  if (!retryingStaleNavlungo) {
+    assertFailedRetryEligible(existing);
+  }
 
   const providerDto = mapProvider(existing.provider);
   const diagnostics = getShippingProviderGateDiagnostics(options.env, providerDto);
@@ -5098,10 +5107,23 @@ export async function retryFailedShipmentExecution(
     throw new Error('Allocation could not be found for the selected shipment execution.');
   }
 
-  const retrySnapshot = appendTimelineEvent(existing.responseSnapshot, {
+  const retrySnapshot = appendTimelineEvent(
+    {
+      ...(isRecord(existing.responseSnapshot) ? existing.responseSnapshot : {}),
+      retryEndpointUsed: '/shipments/:id/retry',
+      existingExecutionId: existing.id,
+      existingProvider: mapProvider(existing.provider),
+      existingStatus: mapStatus(existing.shipmentStatus),
+      existingHasProviderEvidence: hasPersistedShipmentEvidence(existing),
+      staleRecoveryAttempted: retryingStaleNavlungo,
+      providerCallAttempted: false,
+      providerCallSkippedReason: null,
+    },
+    {
     label: 'Retry attempted',
     status: 'pending',
-  });
+    },
+  );
   const requestSnapshot = applyExistingTryOtoOrderReference(existing, preview.payload);
   await prisma.shipmentExecution.update({
     where: {
@@ -5142,7 +5164,22 @@ export async function retryFailedShipmentExecution(
       executionId: existing.id,
       allocation,
       provider,
-      result,
+      result: {
+        ...result,
+        responseSnapshot: {
+          ...result.responseSnapshot,
+          retryEndpointUsed: '/shipments/:id/retry',
+          existingExecutionId: existing.id,
+          existingProvider: mapProvider(existing.provider),
+          existingStatus: mapStatus(existing.shipmentStatus),
+          existingHasProviderEvidence: hasPersistedShipmentEvidence(existing),
+          staleRecoveryAttempted: retryingStaleNavlungo,
+          providerCallAttempted: true,
+          persistedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
+          persistedTrackingUrlPresent: Boolean(result.trackingUrl),
+          persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
+        },
+      },
     });
   } catch (error) {
     if (provider === ShippingProvider.TRY_OTO) {

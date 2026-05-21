@@ -2469,6 +2469,68 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
+  it('renders returned Navlungo retry shipment evidence without waiting for order refetch', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'pending',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          providerError: 'Provider did not return a shipment id or tracking yet.',
+          providerShipmentIdPresent: false,
+          trackingNumberPresent: false,
+          labelPresent: false,
+          barcodePresent: false,
+        },
+      },
+    });
+    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-RETRY-1048',
+      trackingNumber: 'NAV-TRACK-1048',
+      trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1048',
+      labelUrl: 'barcode-string',
+      barcode: 'barcode-string',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Retry shipment' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: undefined,
+      }),
+    );
+    expect(await screen.findByText('Shipment NAV-RETRY-1048 recorded.')).toBeInTheDocument();
+    expect(screen.getByText('NAV-TRACK-1048')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-RETRY-1048');
+  });
+
   it('does not expose failed shipment recovery when provider identifiers already exist', async () => {
     getOrderMock.mockResolvedValueOnce({
       ...orderWithShipmentSummary,
