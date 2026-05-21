@@ -126,7 +126,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
 
       const validation = validateNavlungoCreatePostProbeEnv(env);
       if (!validation.ok) {
-        return reply.code(400).send({ message: validation.reason });
+        return reply.code(400).send({ message: validation.reason, diagnostics: validation.diagnostics });
       }
 
       try {

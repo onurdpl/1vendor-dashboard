@@ -45,16 +45,33 @@ export type NavlungoCreatePostProbeValidationResult =
   | {
       ok: false;
       reason: string;
+      diagnostics: NavlungoCreatePostProbeGuardDiagnostics;
     };
 
 const SENSITIVE_KEY_PATTERN = /token|secret|authorization|password|username/i;
 const PII_KEY_PATTERN = /phone|email|address|name/i;
 
+export type NavlungoCreatePostProbeGuardDiagnostics = {
+  createPostProbeEnvPresent: boolean;
+  createPostProbeEnvValueIsYES: boolean;
+};
+
+export function getNavlungoCreatePostProbeGuardDiagnostics(env: ProbeEnv): NavlungoCreatePostProbeGuardDiagnostics {
+  const value = env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM;
+  const trimmedValue = typeof value === 'string' ? value.trim() : '';
+  return {
+    createPostProbeEnvPresent: Boolean(trimmedValue),
+    createPostProbeEnvValueIsYES: trimmedValue === 'YES',
+  };
+}
+
 export function validateNavlungoCreatePostProbeEnv(env: ProbeEnv): NavlungoCreatePostProbeValidationResult {
-  if (env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM !== 'YES') {
+  const diagnostics = getNavlungoCreatePostProbeGuardDiagnostics(env);
+  if (!diagnostics.createPostProbeEnvValueIsYES) {
     return {
       ok: false,
       reason: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.',
+      diagnostics,
     };
   }
 
@@ -70,6 +87,7 @@ export function validateNavlungoCreatePostProbeEnv(env: ProbeEnv): NavlungoCreat
     return {
       ok: false,
       reason: `${missing.join(', ')} required for the manual Navlungo Create Post probe.`,
+      diagnostics,
     };
   }
 

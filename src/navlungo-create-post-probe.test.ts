@@ -103,7 +103,26 @@ describe('manual Navlungo Create Post probe', () => {
     expect(validateNavlungoCreatePostProbeEnv(buildProbeEnv({ NAVLUNGO_CREATE_POST_PROBE_CONFIRM: undefined }))).toEqual({
       ok: false,
       reason: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.',
+      diagnostics: {
+        createPostProbeEnvPresent: false,
+        createPostProbeEnvValueIsYES: false,
+      },
     });
+  });
+
+  it('intentionally rejects lowercase create post probe confirmation', () => {
+    expect(validateNavlungoCreatePostProbeEnv(buildProbeEnv({ NAVLUNGO_CREATE_POST_PROBE_CONFIRM: 'yes' }))).toEqual({
+      ok: false,
+      reason: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.',
+      diagnostics: {
+        createPostProbeEnvPresent: true,
+        createPostProbeEnvValueIsYES: false,
+      },
+    });
+  });
+
+  it('accepts whitespace-trimmed YES confirmation', () => {
+    expect(validateNavlungoCreatePostProbeEnv(buildProbeEnv({ NAVLUNGO_CREATE_POST_PROBE_CONFIRM: ' YES ' }))).toEqual({ ok: true });
   });
 
   it('refuses to run without required credentials and config', () => {
@@ -117,6 +136,10 @@ describe('manual Navlungo Create Post probe', () => {
       ok: false,
       reason:
         'NAVLUNGO_API_USERNAME, NAVLUNGO_API_PASSWORD, NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID required for the manual Navlungo Create Post probe.',
+      diagnostics: {
+        createPostProbeEnvPresent: true,
+        createPostProbeEnvValueIsYES: true,
+      },
     });
   });
 
@@ -225,7 +248,13 @@ describe('manual Navlungo Create Post probe', () => {
 
       expect(result).toMatchObject({
         status: 400,
-        body: { message: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.' },
+        body: {
+          message: 'NAVLUNGO_CREATE_POST_PROBE_CONFIRM=YES is required for the manual Navlungo Create Post probe.',
+          diagnostics: {
+            createPostProbeEnvPresent: false,
+            createPostProbeEnvValueIsYES: false,
+          },
+        },
       });
       expect(fetchImpl).not.toHaveBeenCalled();
     } finally {
