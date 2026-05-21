@@ -1499,6 +1499,31 @@ export const runtimeServices = {
             citiesShapeSummary: null,
             firstCityNames: [],
           }),
+    navlungoAuth: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realDiagnostics.runNavlungoAuthDiagnostics()
+        : Promise.resolve({
+            provider: 'navlungo' as const,
+            displayName: 'Navlungo' as const,
+            dormant: true as const,
+            baseUrlHost: 'domestic-api.navlungo.com',
+            baseUrlPath: '/v2',
+            baseUrlParseError: null,
+            usernamePresent: false,
+            passwordPresent: false,
+            authRequestUrl: '/v2/auth/api',
+            authHttpStatus: null,
+            authContentType: null,
+            responseShapeSummary: null,
+            tokenReceived: false,
+            refreshTokenReceived: false,
+            expiresIn: null,
+            fetchError: {
+              name: 'MockMode',
+              message: 'Navlungo auth diagnostics are available in real API mode only.',
+              cause: null,
+            },
+          }),
     replay: (webhookEventId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realDiagnostics.replayWebhook(webhookEventId)

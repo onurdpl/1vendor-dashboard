@@ -255,6 +255,25 @@ export type KargonomiLocationLookupDiagnostics = {
   firstCityNames: string[];
 };
 
+export type NavlungoAuthDiagnostics = {
+  provider: 'navlungo';
+  displayName: 'Navlungo';
+  dormant: true;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  baseUrlParseError: string | null;
+  usernamePresent: boolean;
+  passwordPresent: boolean;
+  authRequestUrl: string | null;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  responseShapeSummary: { kind: string; topLevelKeys: string[] } | null;
+  tokenReceived: boolean;
+  refreshTokenReceived: boolean;
+  expiresIn: number | string | null;
+  fetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
+};
+
 export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
@@ -276,6 +295,10 @@ export async function getReconciliationDiagnostics() {
 
 export async function runKargonomiLocationLookupDiagnostics() {
   return apiClient.get<KargonomiLocationLookupDiagnostics>('/admin/diagnostics/kargonomi/location-lookup');
+}
+
+export async function runNavlungoAuthDiagnostics() {
+  return apiClient.get<NavlungoAuthDiagnostics>('/admin/diagnostics/navlungo/auth');
 }
 
 export async function replayWebhook(webhookEventId: string) {

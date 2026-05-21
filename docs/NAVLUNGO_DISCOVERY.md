@@ -420,9 +420,9 @@ Do not recommend replacing Kargonomi or Try OTO based on this discovery alone.
 Future implementation guidance:
 
 - Existing shipping provider abstraction should be reused.
-- Navlungo should be added later as a separate adapter.
+- Navlungo should remain a separate adapter.
 - Provider key/display should be handled separately:
-  - key: unknown until implementation decision
+  - key: `navlungo`
   - display name: `Navlungo`
 - Forward shipment adapter likely maps existing order/vendor/shipping data to `POST post/create`.
 - Sender data could map from vendor warehouse config or Address Book after its contract is confirmed.
@@ -442,6 +442,48 @@ Non-goals for this discovery step:
 - No webhook implementation.
 - No Kargonomi changes.
 - No Try OTO changes.
+
+## 16.1. Dormant Adapter Status
+
+Current scaffold status:
+
+- Provider constants exist:
+  - key: `navlungo`
+  - display name: `Navlungo`
+- Optional env parsing exists for:
+  - `NAVLUNGO_BASE_URL`
+  - `NAVLUNGO_API_USERNAME`
+  - `NAVLUNGO_API_PASSWORD`
+  - `NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID`
+  - `NAVLUNGO_DEFAULT_BARCODE_FORMAT`
+- A dormant Navlungo adapter scaffold exists.
+- Runtime shipment execution is not enabled yet.
+- Navlungo is not selectable as a live shipping provider.
+- Create Post is not implemented or called.
+- Return/reverse shipment is not implemented.
+- Carrier selection, barcode fetch, Check Post, and webhook ingest are not implemented.
+
+## 16.2. Auth Probe Status
+
+Current diagnostics status:
+
+- Admin-only diagnostics endpoint exists:
+  - `GET /admin/diagnostics/navlungo/auth`
+- The endpoint calls only:
+  - `POST /auth/api`
+- The endpoint returns sanitized diagnostics only:
+  - base URL host/path
+  - username/password presence booleans
+  - auth HTTP status
+  - response shape summary
+  - token presence booleans
+  - `expires_in`, when present
+  - fetch/network error diagnostics
+- The endpoint never returns:
+  - password
+  - access token
+  - refresh token
+- The auth probe does not create shipments, write to the DB, or use customer/order data.
 
 ## 17. Critical Unknowns Before Implementation
 

@@ -50,7 +50,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
-import type { KargonomiLocationLookupDiagnostics } from '../services/real/diagnostics';
+import type { KargonomiLocationLookupDiagnostics, NavlungoAuthDiagnostics } from '../services/real/diagnostics';
 
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
@@ -952,6 +952,8 @@ export function OrderDetailPage() {
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [kargonomiLookupDiagnostics, setKargonomiLookupDiagnostics] = useState<KargonomiLocationLookupDiagnostics | null>(null);
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
+  const [navlungoAuthDiagnostics, setNavlungoAuthDiagnostics] = useState<NavlungoAuthDiagnostics | null>(null);
+  const [navlungoAuthError, setNavlungoAuthError] = useState<string | null>(null);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1143,6 +1145,18 @@ export function OrderDetailPage() {
       },
       onError: (error) => {
         setKargonomiLookupError(error instanceof Error ? error.message : 'Kargonomi lookup diagnostic could not be run.');
+      },
+    },
+  );
+  const { mutateAsync: runNavlungoAuthDiagnosticsMutation, isPending: isRunningNavlungoAuthDiagnostics } = useMutationAction(
+    async () => runtimeServices.diagnostics.navlungoAuth(),
+    {
+      onSuccess: (result) => {
+        setNavlungoAuthDiagnostics(result);
+        setNavlungoAuthError(null);
+      },
+      onError: (error) => {
+        setNavlungoAuthError(error instanceof Error ? error.message : 'Navlungo auth diagnostic could not be run.');
       },
     },
   );
@@ -5226,6 +5240,73 @@ export function OrderDetailPage() {
                         </div>
                       </>
                     )}
+                    <div className="shipment-recovery-actions">
+                      <button
+                        type="button"
+                        className="button button-secondary"
+                        onClick={() => void runNavlungoAuthDiagnosticsMutation(undefined)}
+                        disabled={isRunningNavlungoAuthDiagnostics}
+                      >
+                        {isRunningNavlungoAuthDiagnostics ? 'Running auth...' : 'Run Navlungo auth diagnostic'}
+                      </button>
+                      <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
+                    </div>
+                    {navlungoAuthError ? (
+                      <p className="form-error" role="alert">{navlungoAuthError}</p>
+                    ) : null}
+                    {navlungoAuthDiagnostics ? (
+                      <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo auth diagnostic result">
+                        <div className="summary-row">
+                          <span>Base URL</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.baseUrlHost ?? '—'}
+                            {navlungoAuthDiagnostics.baseUrlPath ? navlungoAuthDiagnostics.baseUrlPath : ''}
+                          </strong>
+                        </div>
+                        {navlungoAuthDiagnostics.baseUrlParseError ? (
+                          <div className="summary-row">
+                            <span>Base URL parse error</span>
+                            <strong>{navlungoAuthDiagnostics.baseUrlParseError}</strong>
+                          </div>
+                        ) : null}
+                        <div className="summary-row">
+                          <span>Username configured</span>
+                          <strong>{navlungoAuthDiagnostics.usernamePresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Password configured</span>
+                          <strong>{navlungoAuthDiagnostics.passwordPresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Auth result</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.fetchError
+                              ? `${navlungoAuthDiagnostics.fetchError.name}: ${navlungoAuthDiagnostics.fetchError.message}`
+                              : navlungoAuthDiagnostics.authHttpStatus ?? '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Response shape</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.responseShapeSummary
+                              ? `${navlungoAuthDiagnostics.responseShapeSummary.kind}${
+                                  navlungoAuthDiagnostics.responseShapeSummary.topLevelKeys.length
+                                    ? ` · ${navlungoAuthDiagnostics.responseShapeSummary.topLevelKeys.join(', ')}`
+                                    : ''
+                                }`
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Token received</span>
+                          <strong>{navlungoAuthDiagnostics.tokenReceived ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Expires in</span>
+                          <strong>{navlungoAuthDiagnostics.expiresIn ?? '—'}</strong>
+                        </div>
+                      </div>
+                    ) : null}
                     <div className="summary-row">
                       <span>Default desi configured</span>
                       <strong>{shippingProviderDiagnostics.defaultDesiConfigured ? 'yes' : 'no'}</strong>

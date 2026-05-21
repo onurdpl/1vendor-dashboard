@@ -54,6 +54,11 @@ export type AppEnv = {
   KARGONOMI_API_TOKEN?: string;
   KARGONOMI_APP_KEY?: string;
   KARGONOMI_DEFAULT_WAREHOUSE_ID?: string;
+  NAVLUNGO_BASE_URL?: string;
+  NAVLUNGO_API_USERNAME?: string;
+  NAVLUNGO_API_PASSWORD?: string;
+  NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID?: string;
+  NAVLUNGO_DEFAULT_BARCODE_FORMAT?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -215,6 +220,11 @@ export function loadEnv(): AppEnv {
   const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
   const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
+  const navlungoBaseUrl = process.env.NAVLUNGO_BASE_URL || undefined;
+  const navlungoApiUsername = process.env.NAVLUNGO_API_USERNAME || undefined;
+  const navlungoApiPassword = process.env.NAVLUNGO_API_PASSWORD || undefined;
+  const navlungoDefaultSenderAddressId = process.env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID || undefined;
+  const navlungoDefaultBarcodeFormat = process.env.NAVLUNGO_DEFAULT_BARCODE_FORMAT || undefined;
 
   if (shippingProvider === 'kargonomi') {
     if (!kargonomiBaseUrl) {
@@ -292,5 +302,10 @@ export function loadEnv(): AppEnv {
     KARGONOMI_API_TOKEN: kargonomiApiToken,
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
     KARGONOMI_DEFAULT_WAREHOUSE_ID: kargonomiDefaultWarehouseId,
+    NAVLUNGO_BASE_URL: navlungoBaseUrl,
+    NAVLUNGO_API_USERNAME: navlungoApiUsername,
+    NAVLUNGO_API_PASSWORD: navlungoApiPassword,
+    NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: navlungoDefaultSenderAddressId,
+    NAVLUNGO_DEFAULT_BARCODE_FORMAT: navlungoDefaultBarcodeFormat,
   };
 }

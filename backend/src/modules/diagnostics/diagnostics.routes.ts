@@ -14,6 +14,7 @@ import {
 } from './diagnostics.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { runKargonomiLocationLookupDiagnostics } from '../shipping/kargonomi-location-lookup-probe.js';
+import { runNavlungoAuthDiagnostics } from '../shipping/navlungo-provider.adapter.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -91,6 +92,20 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       return runKargonomiLocationLookupDiagnostics(env);
+    },
+  );
+
+  app.get(
+    '/admin/diagnostics/navlungo/auth',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return runNavlungoAuthDiagnostics(env);
     },
   );
 
