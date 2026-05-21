@@ -27,11 +27,24 @@ const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 const createSupportTicketMock = vi.fn();
+const runtimeDiagnosticsMocks = vi.hoisted(() => ({
+  kargonomiLocationLookup: vi.fn(),
+  navlungoAuth: vi.fn(),
+}));
 
 vi.mock('../config/runtime', () => ({
   runtimeConfig: {
     apiMode: 'real',
     apiBaseUrl: 'http://localhost:4000',
+  },
+}));
+
+vi.mock('../services/runtime-services', () => ({
+  runtimeServices: {
+    diagnostics: {
+      kargonomiLocationLookup: () => runtimeDiagnosticsMocks.kargonomiLocationLookup(),
+      navlungoAuth: () => runtimeDiagnosticsMocks.navlungoAuth(),
+    },
   },
 }));
 
@@ -210,6 +223,41 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     getOrderMock.mockResolvedValue(orderWithShipmentSummary);
     getShippingProviderDiagnosticsMock.mockReset();
     getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) => {
+      if (options?.provider === 'navlungo') {
+        return Promise.resolve({
+          provider: 'navlungo',
+          supportedProviders: ['navlungo'],
+          executionReady: false,
+          sandboxModeEnabled: false,
+          shippingExecutionEnabled: false,
+          providerSelected: false,
+          providerEnabled: false,
+          webhookIngestEnabled: false,
+          baseUrlConfigured: true,
+          apiKeyConfigured: true,
+          cargoIntegrationIdConfigured: false,
+          warehouseIdConfigured: true,
+          defaultDesiConfigured: false,
+          packageTypeUsed: '',
+          notificationUrlConfigured: false,
+          webhookRouteImplemented: false,
+          receiverAddressAvailability: 'unknown_required',
+          dummyKargoSupport: 'not_implemented',
+          statusSyncSupport: 'not_implemented',
+          missing: [],
+          deprecatedEnvFallbacks: [],
+          warnings: ['Navlungo is dormant for diagnostics/auth testing only.'],
+          navlungo: {
+            usernameConfigured: true,
+            passwordConfigured: true,
+            defaultSenderAddressIdConfigured: true,
+            defaultBarcodeFormat: 'pdf-A6',
+            authDiagnosticsAvailable: true,
+            runtimeShipmentExecutionEnabled: false,
+            returnReverseImplementation: 'not_implemented',
+          },
+        });
+      }
       if (options?.provider === 'try_oto') {
         return Promise.resolve({
           provider: 'try_oto',
@@ -287,6 +335,29 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         deprecatedEnvFallbacks: [],
         warnings: ['Live carrier execution is not enabled or verified.'],
       });
+    });
+    runtimeDiagnosticsMocks.kargonomiLocationLookup.mockReset();
+    runtimeDiagnosticsMocks.navlungoAuth.mockReset();
+    runtimeDiagnosticsMocks.navlungoAuth.mockResolvedValue({
+      provider: 'navlungo',
+      displayName: 'Navlungo',
+      dormant: true,
+      baseUrlHost: 'domestic-api.navlungo.com',
+      baseUrlPath: '/v2',
+      baseUrlParseError: null,
+      usernamePresent: true,
+      passwordPresent: true,
+      authRequestUrl: '/v2/auth/api',
+      authHttpStatus: 200,
+      authContentType: 'application/json',
+      responseShapeSummary: {
+        kind: 'json:object',
+        topLevelKeys: ['token_type', 'expires_in', 'access_token', 'refresh_token'],
+      },
+      tokenReceived: true,
+      refreshTokenReceived: true,
+      expiresIn: 86400,
+      fetchError: null,
     });
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue({
@@ -1119,7 +1190,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
-    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(5));
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
   });
 
@@ -1385,6 +1456,44 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+  });
+
+  it('shows dormant Navlungo diagnostics config without enabling shipment execution', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const providerSelect = await screen.findByLabelText('Provider');
+    expect(screen.getByRole('option', { name: 'Navlungo' })).toBeInTheDocument();
+    await user.selectOptions(providerSelect, 'navlungo');
+
+    expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
+    expect(screen.getByLabelText('Default barcode format')).toHaveValue('pdf-A6');
+    expect(screen.getByText('Username configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
+    expect(screen.getByText('Password configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
+    expect(screen.getByText('Runtime shipment execution enabled').closest('.shipping-config-readonly')).toHaveTextContent('NO');
+    expect(screen.getByText('Return/reverse implementation').closest('.shipping-config-readonly')).toHaveTextContent('NOT IMPLEMENTED');
+    expect(screen.getByRole('button', { name: 'Diagnostics only' })).toBeDisabled();
+    expect(updateVendorShippingConfigMock).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));
+
+    expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
+    expect(screen.getByText('domestic-api.navlungo.com/v2')).toBeInTheDocument();
+    expect(screen.getByText('Auth result').closest('.summary-row')).toHaveTextContent('200');
+    expect(screen.getByText('Token received').closest('.summary-row')).toHaveTextContent('yes');
+    expect(screen.getByText('Expires in').closest('.summary-row')).toHaveTextContent('86400');
+    expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
+    expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {

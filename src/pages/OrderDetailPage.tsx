@@ -561,8 +561,10 @@ function formatShopifyCarrierForShipment(shipment?: ShipmentExecution | null, fa
   return fallbackCarrier?.trim() || (shipment ? formatShippingProviderName(shipment.provider) : '');
 }
 
+type ShippingConfigDraftProvider = ShippingProvider | 'navlungo';
+
 type ShippingConfigDraft = {
-  preferredProvider: ShippingProvider;
+  preferredProvider: ShippingConfigDraftProvider;
   cargoIntegrationId: string;
   defaultWarehouseId: string;
   defaultDesi: string;
@@ -571,6 +573,8 @@ type ShippingConfigDraft = {
   tryOtoOriginCity: string;
   kargonomiBuyerStateId: string;
   kargonomiBuyerCityId: string;
+  navlungoSenderAddressId: string;
+  navlungoBarcodeFormat: string;
 };
 
 const TRY_OTO_AUTO_REFRESH_DELAYS_MS = [30_000, 90_000, 180_000] as const;
@@ -644,6 +648,8 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     tryOtoOriginCity: readTryOtoOriginCity(config),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
+    navlungoSenderAddressId: '55574',
+    navlungoBarcodeFormat: 'pdf-A6',
   };
 }
 
@@ -652,6 +658,9 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
 
   if (!draft.preferredProvider) {
     errors.push('Provider is required.');
+  }
+  if (draft.preferredProvider === 'navlungo') {
+    errors.push('Navlungo is available for diagnostics only. Runtime shipment execution is not enabled.');
   }
   if (draft.preferredProvider === 'kargo_entegrator') {
     if (!/^\d+$/.test(draft.cargoIntegrationId.trim())) {
@@ -699,6 +708,10 @@ function buildShippingConfigUpdate(
   draft: ShippingConfigDraft,
   currentConfig?: VendorShippingConfig | null,
 ): VendorShippingConfigUpdate {
+  if (draft.preferredProvider === 'navlungo') {
+    throw new Error('Navlungo is diagnostics-only and cannot be saved as a live shipping provider.');
+  }
+
   const metadata = isRecord(currentConfig?.providerMetadata) ? currentConfig.providerMetadata : {};
   const existingDefaultWarehouse = currentConfig?.warehouses.find((warehouse) => warehouse.isDefault)
     ?? currentConfig?.warehouses[0];
@@ -1002,6 +1015,13 @@ export function OrderDetailPage() {
   const { data: kargonomiOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('kargonomi', currentVendor.vendorId),
     () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi' }),
+    {
+      enabled: authContextReady && isAdmin,
+    },
+  );
+  const { data: navlungoOptionDiagnostics } = useQueryResource(
+    queryKeys.admin.shipments.providerConfig('navlungo', currentVendor.vendorId),
+    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'navlungo' }),
     {
       enabled: authContextReady && isAdmin,
     },
@@ -2601,6 +2621,7 @@ export function OrderDetailPage() {
   const isKargoConfigDraft = shippingConfigDraft.preferredProvider === 'kargo_entegrator';
   const isTryOtoConfigDraft = shippingConfigDraft.preferredProvider === 'try_oto';
   const isKargonomiConfigDraft = shippingConfigDraft.preferredProvider === 'kargonomi';
+  const isNavlungoConfigDraft = shippingConfigDraft.preferredProvider === 'navlungo';
   const shouldShowTryOtoProviderOption =
     vendorShippingConfig?.preferredProvider === 'try_oto' ||
     shippingProviderDiagnostics?.provider === 'try_oto' ||
@@ -2613,6 +2634,7 @@ export function OrderDetailPage() {
     Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi')) ||
     Boolean(kargonomiOptionDiagnostics?.supportedProviders?.includes('kargonomi')) ||
     Boolean(kargonomiOptionDiagnostics?.providerEnabled);
+  const shouldShowNavlungoProviderOption = isAdmin;
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
   const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
@@ -2642,13 +2664,14 @@ export function OrderDetailPage() {
             onChange={(event) =>
               setShippingConfigDraft((current) => ({
                 ...current,
-                preferredProvider: event.target.value as ShippingProvider,
+                preferredProvider: event.target.value as ShippingConfigDraftProvider,
               }))
             }
           >
             <option value="kargo_entegrator">Kargo Entegratör</option>
             {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
             {shouldShowKargonomiProviderOption ? <option value="kargonomi">Kargonomi</option> : null}
+            {shouldShowNavlungoProviderOption ? <option value="navlungo">Navlungo</option> : null}
             <option value="hepsijet">Hepsijet</option>
           </select>
         </label>
@@ -2746,6 +2769,73 @@ export function OrderDetailPage() {
             </label>
           </>
         ) : null}
+        {isNavlungoConfigDraft ? (
+          <>
+            <label className="field">
+              <span>Navlungo sender address ID</span>
+              <input
+                inputMode="numeric"
+                value={shippingConfigDraft.navlungoSenderAddressId}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    navlungoSenderAddressId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Default barcode format</span>
+              <select
+                value={shippingConfigDraft.navlungoBarcodeFormat}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    navlungoBarcodeFormat: event.target.value,
+                  }))
+                }
+              >
+                <option value="pdf-A6">pdf-A6</option>
+                <option value="pdf-A5">pdf-A5</option>
+                <option value="pdf-A6Y">pdf-A6Y</option>
+                <option value="pdf-A7">pdf-A7</option>
+                <option value="html">html</option>
+              </select>
+            </label>
+            <div className="shipping-config-readonly">
+              <span>Base URL configured</span>
+              <strong>{navlungoOptionDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Username configured</span>
+              <strong>{navlungoOptionDiagnostics?.navlungo?.usernameConfigured ? 'yes' : 'no'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Password configured</span>
+              <strong>{navlungoOptionDiagnostics?.navlungo?.passwordConfigured ? 'yes' : 'no'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Sender address configured</span>
+              <strong>{navlungoOptionDiagnostics?.navlungo?.defaultSenderAddressIdConfigured ? 'yes' : 'no'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Auth diagnostics available</span>
+              <strong>{navlungoOptionDiagnostics?.navlungo?.authDiagnosticsAvailable ? 'yes' : 'no'}</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Runtime shipment execution enabled</span>
+              <strong>NO</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Return/reverse implementation</span>
+              <strong>NOT IMPLEMENTED</strong>
+            </div>
+            <div className="shipping-config-readonly">
+              <span>Create Post execution</span>
+              <strong>disabled</strong>
+            </div>
+          </>
+        ) : null}
         <label className="field">
           <span>Default desi</span>
           <input
@@ -2793,9 +2883,12 @@ export function OrderDetailPage() {
         </div>
       ) : null}
       <div className="shipping-config-actions">
-        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig}>
-          {isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
+        <button type="submit" className="button button-secondary" disabled={isSavingShippingConfig || isNavlungoConfigDraft}>
+          {isNavlungoConfigDraft ? 'Diagnostics only' : isSavingShippingConfig ? 'Saving...' : 'Save shipping config'}
         </button>
+        {isNavlungoConfigDraft ? (
+          <span className="muted">Navlungo cannot be saved as a live shipment provider yet.</span>
+        ) : null}
       </div>
     </form>
   ) : null;

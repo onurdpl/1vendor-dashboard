@@ -325,8 +325,8 @@ export type ShipmentCustomerField =
 export type ShipmentCustomerOverrides = Partial<Record<ShipmentCustomerField, string>>;
 
 export type ShippingProviderDiagnostics = {
-  provider: ShippingProvider;
-  supportedProviders?: ShippingProvider[];
+  provider: ShippingProvider | 'navlungo';
+  supportedProviders?: Array<ShippingProvider | 'navlungo'>;
   executionReady: boolean;
   sandboxModeEnabled?: boolean;
   shippingExecutionEnabled: boolean;
@@ -360,6 +360,15 @@ export type ShippingProviderDiagnostics = {
   missing: string[];
   deprecatedEnvFallbacks?: string[];
   warnings?: string[];
+  navlungo?: {
+    usernameConfigured: boolean;
+    passwordConfigured: boolean;
+    defaultSenderAddressIdConfigured: boolean;
+    defaultBarcodeFormat: string | null;
+    authDiagnosticsAvailable: boolean;
+    runtimeShipmentExecutionEnabled: boolean;
+    returnReverseImplementation: 'not_implemented';
+  };
 };
 
 export type ShippingProvider = 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'mng' | 'yurtici' | 'aras';

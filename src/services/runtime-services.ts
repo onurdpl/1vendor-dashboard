@@ -824,9 +824,45 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: ShippingProvider = 'kargo_entegrator') {
+    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: ShippingProvider | 'navlungo' = 'kargo_entegrator') {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getShippingProviderDiagnostics(provider, { vendorId });
+      }
+
+      if (provider === 'navlungo') {
+        return {
+          provider: 'navlungo' as const,
+          supportedProviders: ['navlungo' as const],
+          executionReady: false,
+          sandboxModeEnabled: false,
+          shippingExecutionEnabled: false,
+          providerSelected: false,
+          providerEnabled: false,
+          webhookIngestEnabled: false,
+          baseUrlConfigured: false,
+          apiKeyConfigured: false,
+          cargoIntegrationIdConfigured: false,
+          warehouseIdConfigured: false,
+          defaultDesiConfigured: false,
+          packageTypeUsed: '',
+          notificationUrlConfigured: false,
+          webhookRouteImplemented: false,
+          receiverAddressAvailability: 'unknown_required' as const,
+          dummyKargoSupport: 'not_implemented' as const,
+          statusSyncSupport: 'not_implemented' as const,
+          missing: ['NAVLUNGO_BASE_URL', 'NAVLUNGO_API_USERNAME', 'NAVLUNGO_API_PASSWORD'],
+          deprecatedEnvFallbacks: [],
+          warnings: ['Navlungo is dormant for diagnostics/auth testing only.'],
+          navlungo: {
+            usernameConfigured: false,
+            passwordConfigured: false,
+            defaultSenderAddressIdConfigured: false,
+            defaultBarcodeFormat: 'pdf-A6',
+            authDiagnosticsAvailable: true,
+            runtimeShipmentExecutionEnabled: false,
+            returnReverseImplementation: 'not_implemented' as const,
+          },
+        };
       }
 
       return {

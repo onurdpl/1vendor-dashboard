@@ -88,7 +88,7 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 }
 
 export async function getShippingProviderDiagnostics(
-  options: { vendorId?: string | null; provider?: ShippingProvider | null } = {},
+  options: { vendorId?: string | null; provider?: ShippingProvider | 'navlungo' | null } = {},
 ) {
   return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined, options.provider ?? undefined);
 }
