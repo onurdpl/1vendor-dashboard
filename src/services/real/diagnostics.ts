@@ -301,6 +301,7 @@ export type NavlungoCreatePostProbeDiagnostics = {
   requestedBarcodeFormat: string;
   codPaymentIncluded: boolean;
   priceIncluded: boolean;
+  requestSummary: NavlungoCreatePostRequestSummary;
   createPostHttpStatus: number | null;
   createPostContentType: string | null;
   responseShape: { kind: string; topLevelKeys: string[] } | null;
@@ -322,6 +323,34 @@ export type NavlungoCreatePostProbeDiagnostics = {
   postCarrierKeys: string[];
   providerMessage: string | null;
   errorMessage: string | null;
+};
+
+export type NavlungoCreatePostRequestSummary = {
+  baseUrl: string | null;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  endpointPath: string;
+  method: string;
+  headerKeys: string[];
+  topLevelBodyKeys: string[];
+  postKeys: string[];
+  senderKeys: string[];
+  recipientKeys: string[];
+  postPayloadKeys: string[];
+  barcodeFormatPresent: boolean;
+  barcodeFormatType: string | null;
+  codPaymentTypePresent: boolean;
+  codPaymentType: string | null;
+  postPricePresent: boolean;
+  postPriceType: string | null;
+  requestedCarrierId: number | string | null;
+  requestedPostType: number | string | null;
+  senderUsesAddressId: boolean;
+  senderFullObjectKeysPresent: boolean;
+  customData1Present: boolean;
+  customData2Present: boolean;
+  customData3Present: boolean;
+  customData4Present: boolean;
 };
 
 export type NavlungoCheckPostProbeDiagnostics = {

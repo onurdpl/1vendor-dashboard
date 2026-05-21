@@ -222,6 +222,37 @@ function renderOrderDetail() {
   );
 }
 
+function buildNavlungoRequestSummary(overrides: Partial<NonNullable<NonNullable<OrderDetail['shipmentExecution']>['providerResponseSummary']>['navlungoRequestSummary']> = {}) {
+  return {
+    baseUrl: 'domestic-api.navlungo.com/v2',
+    baseUrlHost: 'domestic-api.navlungo.com',
+    baseUrlPath: '/v2',
+    endpointPath: '/post/create',
+    method: 'POST',
+    headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+    topLevelBodyKeys: ['platform', 'posts'],
+    postKeys: ['barcode_format', 'carrier_id', 'custom_data_1', 'custom_data_2', 'custom_data_3', 'custom_data_4', 'post', 'post_type', 'recipient', 'reference_id', 'sender'],
+    senderKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+    recipientKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+    postPayloadKeys: ['desi', 'note', 'package_count'],
+    barcodeFormatPresent: true,
+    barcodeFormatType: 'string',
+    codPaymentTypePresent: false,
+    codPaymentType: null,
+    postPricePresent: false,
+    postPriceType: null,
+    requestedCarrierId: 9,
+    requestedPostType: 2,
+    senderUsesAddressId: false,
+    senderFullObjectKeysPresent: true,
+    customData1Present: true,
+    customData2Present: true,
+    customData3Present: true,
+    customData4Present: true,
+    ...overrides,
+  };
+}
+
 describe('OrderDetailPage shipment provider response visibility', () => {
   beforeEach(() => {
     cleanup();
@@ -454,6 +485,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       requestedBarcodeFormat: 'pdf-A6',
       codPaymentIncluded: false,
       priceIncluded: false,
+      requestSummary: buildNavlungoRequestSummary(),
       createPostHttpStatus: 201,
       createPostContentType: 'application/json',
       responseShape: {
@@ -4934,6 +4966,80 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('posts.0.reference_id, posts.0.carrier_id').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Validation messages').length).toBeGreaterThan(0);
     expect(screen.getAllByText('This reference id has already been registered. · Carrier field is required').length).toBeGreaterThan(0);
+  });
+
+  it('compares sanitized Navlungo probe and real retry request shapes without exposing PII', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 500,
+          providerError: 'Execution of ServiceCallout failed',
+          providerTrackingId: '#e41c3430fb2d4e9c98bd023a94d29a60',
+          realPathCreatePostHttpStatus: 500,
+          providerCallHttpStatus: 500,
+          realPathRequestedCarrierId: 9,
+          realPathRequestedPostType: 2,
+          realPathRequestedBarcodeFormat: 'pdf-A6',
+          realPathCodPaymentIncluded: true,
+          realPathPriceIncluded: true,
+          navlungoRequestSummary: buildNavlungoRequestSummary({
+            senderKeys: ['addressId'],
+            senderUsesAddressId: true,
+            senderFullObjectKeysPresent: false,
+            codPaymentTypePresent: true,
+            codPaymentType: 'number',
+            postPricePresent: true,
+            postPriceType: 'number',
+          }),
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.selectOptions(await screen.findByLabelText('Provider'), 'navlungo');
+    await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo Create Post probe' }));
+
+    const diff = await screen.findByLabelText('Navlungo probe retry request diff');
+    expect(within(diff).getByText('Response summary').closest('.summary-row')).toHaveTextContent(
+      'probe HTTP 201 · real HTTP 500 · tracking ID #e41c3430fb2d4e9c98bd023a94d29a60',
+    );
+    expect(within(diff).getByText('sender keys').closest('.summary-row')).toHaveTextContent(
+      'different · probe: address, city, country, district, email, name, phone, post_code · real: addressId',
+    );
+    expect(within(diff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('different · probe: no · real: yes');
+    expect(within(diff).getByText('cod_payment_type').closest('.summary-row')).toHaveTextContent(
+      'different · probe: missing · — · real: present · number',
+    );
+    expect(within(diff).getByText('post.price').closest('.summary-row')).toHaveTextContent(
+      'different · probe: missing · — · real: present · number',
+    );
+    expect(screen.queryByText('+90 532 123 45 68')).not.toBeInTheDocument();
+    expect(screen.queryByText('recipient.test@example.invalid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Navlungo Test Recipient')).not.toBeInTheDocument();
+    expect(screen.queryByText('Navlungo manual probe recipient address')).not.toBeInTheDocument();
   });
 
   it('renders Navlungo provider tracking id in admin retry diagnostics', async () => {

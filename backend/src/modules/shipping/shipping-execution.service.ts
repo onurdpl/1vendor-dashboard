@@ -465,6 +465,40 @@ function readOptionalBoolean(value: unknown, keys: string[]) {
   return null;
 }
 
+function mapNavlungoRequestSummary(value: unknown): NonNullable<ShipmentExecutionDto['providerResponseSummary']>['navlungoRequestSummary'] {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    baseUrl: readString(value, ['baseUrl']),
+    baseUrlHost: readString(value, ['baseUrlHost']),
+    baseUrlPath: readString(value, ['baseUrlPath']),
+    endpointPath: readString(value, ['endpointPath']) ?? '—',
+    method: readString(value, ['method']) ?? '—',
+    headerKeys: readStringArray(value.headerKeys),
+    topLevelBodyKeys: readStringArray(value.topLevelBodyKeys),
+    postKeys: readStringArray(value.postKeys),
+    senderKeys: readStringArray(value.senderKeys),
+    recipientKeys: readStringArray(value.recipientKeys),
+    postPayloadKeys: readStringArray(value.postPayloadKeys),
+    barcodeFormatPresent: Boolean(value.barcodeFormatPresent),
+    barcodeFormatType: readString(value, ['barcodeFormatType']),
+    codPaymentTypePresent: Boolean(value.codPaymentTypePresent),
+    codPaymentType: readString(value, ['codPaymentType']),
+    postPricePresent: Boolean(value.postPricePresent),
+    postPriceType: readString(value, ['postPriceType']),
+    requestedCarrierId: readNumber(value, ['requestedCarrierId']) ?? readString(value, ['requestedCarrierId']),
+    requestedPostType: readNumber(value, ['requestedPostType']) ?? readString(value, ['requestedPostType']),
+    senderUsesAddressId: Boolean(value.senderUsesAddressId),
+    senderFullObjectKeysPresent: Boolean(value.senderFullObjectKeysPresent),
+    customData1Present: Boolean(value.customData1Present),
+    customData2Present: Boolean(value.customData2Present),
+    customData3Present: Boolean(value.customData3Present),
+    customData4Present: Boolean(value.customData4Present),
+  };
+}
+
 function mapProviderResponseSummary(
   execution: ShipmentExecution & { shippingCostLinked?: boolean },
   snapshot: Record<string, unknown>,
@@ -575,6 +609,7 @@ function mapProviderResponseSummary(
     selectedEnvironment: readString(snapshot, ['selectedEnvironment']),
     requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
     providerMode: readString(snapshot, ['providerMode']),
+    navlungoRequestSummary: mapNavlungoRequestSummary(snapshot.navlungoRequestSummary),
     providerApiCallAttempted: readOptionalBoolean(snapshot, ['providerApiCallAttempted']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:

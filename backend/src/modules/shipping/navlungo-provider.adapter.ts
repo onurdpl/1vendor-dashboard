@@ -173,6 +173,34 @@ export type NavlungoCreatePostPayload = {
   }>;
 };
 
+export type NavlungoCreatePostRequestSummary = {
+  baseUrl: string | null;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  endpointPath: '/post/create';
+  method: 'POST';
+  headerKeys: string[];
+  topLevelBodyKeys: string[];
+  postKeys: string[];
+  senderKeys: string[];
+  recipientKeys: string[];
+  postPayloadKeys: string[];
+  barcodeFormatPresent: boolean;
+  barcodeFormatType: string | null;
+  codPaymentTypePresent: boolean;
+  codPaymentType: string | null;
+  postPricePresent: boolean;
+  postPriceType: string | null;
+  requestedCarrierId: number | string | null;
+  requestedPostType: number | string | null;
+  senderUsesAddressId: boolean;
+  senderFullObjectKeysPresent: boolean;
+  customData1Present: boolean;
+  customData2Present: boolean;
+  customData3Present: boolean;
+  customData4Present: boolean;
+};
+
 export type NavlungoHttpClientOptions = {
   fetchImpl?: typeof fetch;
 };
@@ -195,6 +223,59 @@ function parseNavlungoResponseBody(contentType: string, responseText: string): u
   } catch {
     return responseText;
   }
+}
+
+function safeValueType(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+  return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function sortedRecordKeys(value: unknown) {
+  return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+export function summarizeNavlungoCreatePostRequest(
+  payload: NavlungoCreatePostPayload,
+  env: Partial<Pick<AppEnv, 'NAVLUNGO_BASE_URL'>> = {},
+): NavlungoCreatePostRequestSummary {
+  const baseUrl = parseBaseUrl(env.NAVLUNGO_BASE_URL);
+  const post = payload.posts[0] as NavlungoCreatePostPayload['posts'][number] | undefined;
+  const sender = post?.sender;
+  const recipient = post?.recipient;
+  const postPayload = post?.post;
+  const senderKeys = sortedRecordKeys(sender);
+  const recipientKeys = sortedRecordKeys(recipient);
+  const postPayloadKeys = sortedRecordKeys(postPayload);
+
+  return {
+    baseUrl: baseUrl.host ? `${baseUrl.host}${baseUrl.path ?? ''}` : null,
+    baseUrlHost: baseUrl.host,
+    baseUrlPath: baseUrl.path,
+    endpointPath: '/post/create',
+    method: 'POST',
+    headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+    topLevelBodyKeys: sortedRecordKeys(payload),
+    postKeys: sortedRecordKeys(post),
+    senderKeys,
+    recipientKeys,
+    postPayloadKeys,
+    barcodeFormatPresent: post?.barcode_format !== undefined,
+    barcodeFormatType: safeValueType(post?.barcode_format),
+    codPaymentTypePresent: post?.cod_payment_type !== undefined,
+    codPaymentType: safeValueType(post?.cod_payment_type),
+    postPricePresent: postPayload?.price !== undefined,
+    postPriceType: safeValueType(postPayload?.price),
+    requestedCarrierId: post?.carrier_id ?? null,
+    requestedPostType: post?.post_type ?? null,
+    senderUsesAddressId: isRecord(sender) && 'addressId' in sender,
+    senderFullObjectKeysPresent: senderKeys.some((key) => key !== 'addressId'),
+    customData1Present: post?.custom_data_1 !== undefined,
+    customData2Present: post?.custom_data_2 !== undefined,
+    customData3Present: post?.custom_data_3 !== undefined,
+    customData4Present: post?.custom_data_4 !== undefined,
+  };
 }
 
 function summarizeResponseShape(value: unknown): NavlungoAuthDiagnostics['responseShapeSummary'] {
@@ -904,6 +985,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       senderAddressIdPresent: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderAddressIdValid: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderUsesAddressId: isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender,
+      navlungoRequestSummary: summarizeNavlungoCreatePostRequest(payload, this.env),
     };
 
     let accessToken: string | null = null;

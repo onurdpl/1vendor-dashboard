@@ -11,6 +11,7 @@ import {
   summarizeNavlungoCreatePostResponse,
   validateNavlungoCreatePostProbeEnv,
 } from '../backend/src/modules/shipping/navlungo-create-post-probe.js';
+import { summarizeNavlungoCreatePostRequest } from '../backend/src/modules/shipping/navlungo-provider.adapter.js';
 
 function buildProbeEnv(overrides: Record<string, string | undefined> = {}) {
   return {
@@ -238,6 +239,61 @@ describe('manual Navlungo Create Post probe', () => {
       'X-localization': 'en',
     });
     expect(calls[1].init.body).toEqual(JSON.stringify(buildNavlungoCreatePostProbePayload(buildProbeEnv(), () => 1700000000000)));
+  });
+
+  it('summarizes Create Post request shape without exposing PII or secrets', () => {
+    const payload = buildNavlungoCreatePostProbePayload(buildProbeEnv(), () => 1700000000000);
+    const summary = summarizeNavlungoCreatePostRequest(payload, { NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2' });
+    const serialized = JSON.stringify(summary);
+
+    expect(summary).toMatchObject({
+      baseUrl: 'domestic-api.navlungo.com/v2',
+      endpointPath: '/post/create',
+      method: 'POST',
+      headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+      topLevelBodyKeys: ['platform', 'posts'],
+      requestedCarrierId: 9,
+      requestedPostType: 2,
+      senderUsesAddressId: false,
+      senderFullObjectKeysPresent: true,
+      codPaymentTypePresent: false,
+      postPricePresent: false,
+    });
+    expect(summary.senderKeys).toEqual(['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code']);
+    expect(summary.recipientKeys).toEqual(['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code']);
+    expect(summary.postPayloadKeys).toEqual(['desi', 'note', 'package_count']);
+    expect(serialized).not.toContain('secret-password');
+    expect(serialized).not.toContain('api-user');
+    expect(serialized).not.toContain('+90 532 123 45 67');
+    expect(serialized).not.toContain('sender.test@example.invalid');
+    expect(serialized).not.toContain('recipient.test@example.invalid');
+    expect(serialized).not.toContain('Navlungo Test Sender');
+    expect(serialized).not.toContain('Navlungo Test Recipient');
+    expect(serialized).not.toContain('Navlungo manual probe sender address');
+    expect(serialized).not.toContain('NAVLUNGO-PROBE-1700000000000');
+  });
+
+  it('returns Create Post probe request summary for comparing against real retry shape', async () => {
+    const { fetchImpl } = buildMockFetch();
+    const { runNavlungoCreatePostProbeDiagnostics } = await import('../backend/src/modules/shipping/navlungo-create-post-probe.js');
+
+    const diagnostics = await runNavlungoCreatePostProbeDiagnostics({
+      env: buildProbeEnv(),
+      fetchImpl,
+      now: () => 1700000000000,
+    });
+
+    expect(diagnostics.requestSummary).toMatchObject({
+      endpointPath: '/post/create',
+      requestedCarrierId: 9,
+      requestedPostType: 2,
+      senderUsesAddressId: false,
+      senderFullObjectKeysPresent: true,
+      codPaymentTypePresent: false,
+      postPricePresent: false,
+    });
+    expect(JSON.stringify(diagnostics.requestSummary)).not.toContain('secret-access-token');
+    expect(JSON.stringify(diagnostics.requestSummary)).not.toContain('recipient.test@example.invalid');
   });
 
   it('does not expose token, password, username, or PII in output', async () => {
@@ -482,6 +538,11 @@ describe('manual Navlungo Create Post probe', () => {
         requestedBarcodeFormat: 'pdf-A6',
         codPaymentIncluded: false,
         priceIncluded: false,
+        requestSummary: {
+          headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+          endpointPath: '/post/create',
+          senderUsesAddressId: false,
+        },
         createPostHttpStatus: 201,
         postNumber: 'NP12345',
         trackingUrlPresent: true,
@@ -499,7 +560,7 @@ describe('manual Navlungo Create Post probe', () => {
       ]);
       expect(JSON.stringify(result)).not.toContain('secret-access-token');
       expect(JSON.stringify(result)).not.toContain('secret-password');
-      expect(JSON.stringify(result)).not.toContain('Authorization');
+      expect(JSON.stringify(result)).not.toContain('Bearer');
     } finally {
       globalThis.fetch = originalFetch;
     }

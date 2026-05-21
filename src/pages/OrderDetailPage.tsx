@@ -241,6 +241,90 @@ function getShipmentActionEvidenceSummary(actionState: ShipmentActionState) {
     : getShipmentEvidenceSummary(actionState.shipment);
 }
 
+type NavlungoRequestSummary = NonNullable<NonNullable<ShipmentExecution['providerResponseSummary']>['navlungoRequestSummary']>;
+
+type NavlungoRequestDiffRow = {
+  label: string;
+  same: boolean;
+  probe: string;
+  real: string;
+};
+
+function formatNavlungoRequestSummaryValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value.length ? value.join(', ') : '—';
+  }
+  if (typeof value === 'boolean') {
+    return value ? 'yes' : 'no';
+  }
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+  return String(value);
+}
+
+function compareNavlungoRequestField(
+  label: string,
+  probeValue: unknown,
+  realValue: unknown,
+): NavlungoRequestDiffRow {
+  const probe = formatNavlungoRequestSummaryValue(probeValue);
+  const real = formatNavlungoRequestSummaryValue(realValue);
+  return {
+    label,
+    probe,
+    real,
+    same: probe === real,
+  };
+}
+
+function formatNavlungoFormatField(summary: NavlungoRequestSummary, presentKey: 'barcodeFormatPresent' | 'codPaymentTypePresent' | 'postPricePresent', typeKey: 'barcodeFormatType' | 'codPaymentType' | 'postPriceType') {
+  return `${summary[presentKey] ? 'present' : 'missing'} · ${summary[typeKey] ?? '—'}`;
+}
+
+function buildNavlungoRequestDiff(
+  probe?: NavlungoRequestSummary | null,
+  real?: NavlungoRequestSummary | null,
+): NavlungoRequestDiffRow[] {
+  if (!probe || !real) {
+    return [];
+  }
+
+  return [
+    compareNavlungoRequestField('Base URL', probe.baseUrl, real.baseUrl),
+    compareNavlungoRequestField('Endpoint', `${probe.method} ${probe.endpointPath}`, `${real.method} ${real.endpointPath}`),
+    compareNavlungoRequestField('Header keys', probe.headerKeys, real.headerKeys),
+    compareNavlungoRequestField('Body keys', probe.topLevelBodyKeys, real.topLevelBodyKeys),
+    compareNavlungoRequestField('posts[0] keys', probe.postKeys, real.postKeys),
+    compareNavlungoRequestField('sender keys', probe.senderKeys, real.senderKeys),
+    compareNavlungoRequestField('recipient keys', probe.recipientKeys, real.recipientKeys),
+    compareNavlungoRequestField('post keys', probe.postPayloadKeys, real.postPayloadKeys),
+    compareNavlungoRequestField(
+      'barcode_format',
+      formatNavlungoFormatField(probe, 'barcodeFormatPresent', 'barcodeFormatType'),
+      formatNavlungoFormatField(real, 'barcodeFormatPresent', 'barcodeFormatType'),
+    ),
+    compareNavlungoRequestField(
+      'cod_payment_type',
+      formatNavlungoFormatField(probe, 'codPaymentTypePresent', 'codPaymentType'),
+      formatNavlungoFormatField(real, 'codPaymentTypePresent', 'codPaymentType'),
+    ),
+    compareNavlungoRequestField(
+      'post.price',
+      formatNavlungoFormatField(probe, 'postPricePresent', 'postPriceType'),
+      formatNavlungoFormatField(real, 'postPricePresent', 'postPriceType'),
+    ),
+    compareNavlungoRequestField('carrier_id', probe.requestedCarrierId, real.requestedCarrierId),
+    compareNavlungoRequestField('post_type', probe.requestedPostType, real.requestedPostType),
+    compareNavlungoRequestField('sender uses addressId', probe.senderUsesAddressId, real.senderUsesAddressId),
+    compareNavlungoRequestField('sender full object keys', probe.senderFullObjectKeysPresent, real.senderFullObjectKeysPresent),
+    compareNavlungoRequestField('custom_data_1', probe.customData1Present, real.customData1Present),
+    compareNavlungoRequestField('custom_data_2', probe.customData2Present, real.customData2Present),
+    compareNavlungoRequestField('custom_data_3', probe.customData3Present, real.customData3Present),
+    compareNavlungoRequestField('custom_data_4', probe.customData4Present, real.customData4Present),
+  ];
+}
+
 function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
   if (!isReturnShipmentActionEndpoint(actionState.endpoint) && isShipmentExecutionNeedsReview(actionState.shipment)) {
     return 'Shipment needs review. Provider did not return a shipment id or tracking yet.';
@@ -2104,6 +2188,10 @@ export function OrderDetailPage() {
       Boolean(summary.providerErrorCode) ||
       Boolean(summary.failedFieldNames?.length) ||
       Boolean(summary.validationErrorMessages?.length);
+    const requestDiffRows = buildNavlungoRequestDiff(
+      navlungoCreatePostProbeDiagnostics?.requestSummary,
+      summary.navlungoRequestSummary,
+    );
 
     return (
       <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Navlungo retry diagnostics">
@@ -2163,6 +2251,83 @@ export function OrderDetailPage() {
             {formatDiagnosticPresence(summary.realPathPriceIncluded)}
           </strong>
         </div>
+        {summary.navlungoRequestSummary ? (
+          <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo real retry request summary">
+            <summary className="provider-response-heading">
+              <strong>Real retry request shape</strong>
+              <span>Field names, types, and booleans only</span>
+            </summary>
+            <div className="summary-row">
+              <span>Base URL</span>
+              <strong>{summary.navlungoRequestSummary.baseUrl ?? '—'}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Endpoint</span>
+              <strong>{`${summary.navlungoRequestSummary.method} ${summary.navlungoRequestSummary.endpointPath}`}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Header keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.headerKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Body keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.topLevelBodyKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>posts[0] keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.postKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>sender keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.senderKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>recipient keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.recipientKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>post keys</span>
+              <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.postPayloadKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>custom data</span>
+              <strong>
+                1 {formatDiagnosticPresence(summary.navlungoRequestSummary.customData1Present)} · 2{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.customData2Present)} · 3{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.customData3Present)} · 4{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.customData4Present)}
+              </strong>
+            </div>
+          </details>
+        ) : null}
+        {requestDiffRows.length ? (
+          <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo probe retry request diff">
+            <summary className="provider-response-heading">
+              <strong>Probe vs real request diff</strong>
+              <span>Sanitized shape comparison</span>
+            </summary>
+            <div className="summary-row">
+              <span>Response summary</span>
+              <strong>
+                probe HTTP {navlungoCreatePostProbeDiagnostics?.createPostHttpStatus ?? '—'} · real HTTP{' '}
+                {summary.realPathCreatePostHttpStatus ?? summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'} · tracking ID{' '}
+                {summary.providerTrackingId || '—'}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>Real provider message</span>
+              <strong>{summary.providerError || '—'}</strong>
+            </div>
+            {requestDiffRows.map((row) => (
+              <div className="summary-row" key={row.label}>
+                <span>{row.label}</span>
+                <strong>
+                  {row.same ? 'same' : 'different'} · probe: {row.probe} · real: {row.real}
+                </strong>
+              </div>
+            ))}
+          </details>
+        ) : null}
         <div className="summary-row">
           <span>Sender address ID</span>
           <strong>
@@ -5926,6 +6091,42 @@ export function OrderDetailPage() {
                               <span>Price included</span>
                               <strong>{navlungoCreatePostProbeDiagnostics.priceIncluded ? 'yes' : 'no'}</strong>
                             </div>
+                            <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo Create Post probe request summary">
+                              <summary className="provider-response-heading">
+                                <strong>Probe request shape</strong>
+                                <span>Field names, types, and booleans only</span>
+                              </summary>
+                              <div className="summary-row">
+                                <span>Base URL</span>
+                                <strong>{navlungoCreatePostProbeDiagnostics.requestSummary.baseUrl ?? '—'}</strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>Endpoint</span>
+                                <strong>
+                                  {`${navlungoCreatePostProbeDiagnostics.requestSummary.method} ${navlungoCreatePostProbeDiagnostics.requestSummary.endpointPath}`}
+                                </strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>Header keys</span>
+                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.headerKeys)}</strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>Body keys</span>
+                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.topLevelBodyKeys)}</strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>sender keys</span>
+                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.senderKeys)}</strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>recipient keys</span>
+                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.recipientKeys)}</strong>
+                              </div>
+                              <div className="summary-row">
+                                <span>post keys</span>
+                                <strong>{formatNavlungoRequestSummaryValue(navlungoCreatePostProbeDiagnostics.requestSummary.postPayloadKeys)}</strong>
+                              </div>
+                            </details>
                             <div className="summary-row">
                               <span>Response shape</span>
                               <strong>

@@ -11,6 +11,34 @@ export type AllocationBlockReason =
   | 'damaged_inventory'
   | 'fulfillment_issue';
 
+export type NavlungoCreatePostRequestSummary = {
+  baseUrl: string | null;
+  baseUrlHost: string | null;
+  baseUrlPath: string | null;
+  endpointPath: string;
+  method: string;
+  headerKeys: string[];
+  topLevelBodyKeys: string[];
+  postKeys: string[];
+  senderKeys: string[];
+  recipientKeys: string[];
+  postPayloadKeys: string[];
+  barcodeFormatPresent: boolean;
+  barcodeFormatType: string | null;
+  codPaymentTypePresent: boolean;
+  codPaymentType: string | null;
+  postPricePresent: boolean;
+  postPriceType: string | null;
+  requestedCarrierId: number | string | null;
+  requestedPostType: number | string | null;
+  senderUsesAddressId: boolean;
+  senderFullObjectKeysPresent: boolean;
+  customData1Present: boolean;
+  customData2Present: boolean;
+  customData3Present: boolean;
+  customData4Present: boolean;
+};
+
 export type ShipmentExecution = {
   id: string;
   allocationId: string;
@@ -257,6 +285,7 @@ export type ShipmentExecution = {
     selectedEnvironment?: string | null;
     requestTargetHostname?: string | null;
     providerMode?: string | null;
+    navlungoRequestSummary?: NavlungoCreatePostRequestSummary | null;
     providerApiCallAttempted?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;

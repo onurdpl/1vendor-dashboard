@@ -1,7 +1,9 @@
 import {
   getNavlungoAccessTokenFromAuthBody,
   NavlungoHttpClient,
+  summarizeNavlungoCreatePostRequest,
   type NavlungoCreatePostPayload,
+  type NavlungoCreatePostRequestSummary,
 } from './navlungo-provider.adapter.js';
 
 type ProbeEnv = Record<string, unknown>;
@@ -26,6 +28,7 @@ export type NavlungoCreatePostProbeDiagnostics = {
   requestedBarcodeFormat: string;
   codPaymentIncluded: boolean;
   priceIncluded: boolean;
+  requestSummary: NavlungoCreatePostRequestSummary;
   createPostHttpStatus: number | null;
   createPostContentType: string | null;
   responseShape: { kind: string; topLevelKeys: string[] } | null;
@@ -334,29 +337,6 @@ export function summarizeNavlungoCheckPostResponse(body: unknown) {
   };
 }
 
-function buildPayloadSummary(payload: NavlungoCreatePostPayload, senderAddressId: string) {
-  const post = payload.posts[0];
-  const sender = post.sender;
-  const senderUsesAddressId = 'addressId' in sender;
-  return {
-    platform: payload.platform,
-    referenceId: post.reference_id,
-    carrierId: post.carrier_id,
-    postType: post.post_type,
-    barcodeFormat: post.barcode_format,
-    codPaymentIncluded: post.cod_payment_type !== undefined,
-    priceIncluded: post.post.price !== undefined,
-    senderAddressIdConfigured: Boolean(senderAddressId.trim()),
-    senderUsesAddressId,
-    senderCity: senderUsesAddressId ? null : sender.city,
-    senderDistrict: senderUsesAddressId ? null : sender.district,
-    recipientCity: post.recipient.city,
-    recipientDistrict: post.recipient.district,
-    packageCount: post.post.package_count,
-    desi: post.post.desi,
-  };
-}
-
 export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {}) {
   const env = options.env ?? process.env;
   const logger = options.logger ?? console;
@@ -381,7 +361,9 @@ export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {
   const payload = buildNavlungoCreatePostProbePayload(env, options.now);
   logger.log(JSON.stringify({
     label: 'POST /post/create payload summary',
-    ...buildPayloadSummary(payload, typeof env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID === 'string' ? env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID : ''),
+    ...summarizeNavlungoCreatePostRequest(payload, {
+      NAVLUNGO_BASE_URL: typeof env.NAVLUNGO_BASE_URL === 'string' ? env.NAVLUNGO_BASE_URL : undefined,
+    }),
   }, null, 2));
 
   logger.log(JSON.stringify({
@@ -441,6 +423,9 @@ export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOption
   const payload = buildNavlungoCreatePostProbePayload(env, options.now);
   const createResponse = await client.createPost(accessToken, payload);
   const summary = summarizeNavlungoCreatePostResponse(createResponse.body);
+  const requestSummary = summarizeNavlungoCreatePostRequest(payload, {
+    NAVLUNGO_BASE_URL: typeof env.NAVLUNGO_BASE_URL === 'string' ? env.NAVLUNGO_BASE_URL : undefined,
+  });
 
   return {
     provider: 'navlungo',
@@ -453,6 +438,7 @@ export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOption
     requestedBarcodeFormat: payload.posts[0].barcode_format,
     codPaymentIncluded: payload.posts[0].cod_payment_type !== undefined,
     priceIncluded: payload.posts[0].post.price !== undefined,
+    requestSummary,
     createPostHttpStatus: createResponse.status,
     createPostContentType: createResponse.contentType,
     ...summary,
