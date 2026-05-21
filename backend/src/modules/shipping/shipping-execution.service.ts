@@ -1967,6 +1967,7 @@ export async function getShippingProviderReadinessDiagnostics(
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
+      !configProviderSelected ? 'VENDOR_PROVIDER_SELECTION' : null,
       !senderAddressIdConfigured ? 'VENDOR_NAVLUNGO_SENDER_ADDRESS_ID' : null,
       !carrierIdConfiguredOrDefaulted ? 'VENDOR_NAVLUNGO_CARRIER_ID' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
@@ -5169,7 +5170,7 @@ export async function retryFailedShipmentExecution(
   }
 
   const providerDto = mapProvider(existing.provider);
-  const diagnostics = getShippingProviderGateDiagnostics(options.env, providerDto);
+  const diagnostics = await getShippingProviderReadinessDiagnostics(options.env, providerDto, existing.vendorId);
   if (!diagnostics.executionReady) {
     const missing = diagnostics.missing.length ? diagnostics.missing.join(', ') : 'provider configuration';
     throw new Error(`Shipping provider execution is not ready. Missing: ${missing}.`);

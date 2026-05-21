@@ -2534,6 +2534,46 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('55574');
   });
 
+  it('reports a precise Navlungo readiness reason when vendor config selects another provider', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-kargo',
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGO_ENTEGRATOR',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: '2547',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: 18,
+      providerMetadata: null,
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      'navlungo',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'navlungo',
+      executionReady: false,
+      providerSelected: false,
+      missing: expect.arrayContaining(['VENDOR_PROVIDER_SELECTION']),
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
+    expect(JSON.stringify(diagnostics)).not.toContain('2547');
+    expect(JSON.stringify(diagnostics)).not.toContain('1774');
+  });
+
   it('builds a Navlungo Create Post payload and blocks missing recipient fields before provider call', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
