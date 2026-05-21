@@ -2094,6 +2094,81 @@ export function OrderDetailPage() {
     );
   }
 
+  function renderNavlungoRetryDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
+    if (visibleShipmentExecution?.provider !== 'navlungo') {
+      return null;
+    }
+
+    return (
+      <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Navlungo retry diagnostics">
+        <summary className="provider-response-heading">
+          <strong>Navlungo retry diagnostics</strong>
+          <span>Safe vendor create/retry trace</span>
+        </summary>
+        <div className="summary-row">
+          <span>Endpoint used</span>
+          <strong>{summary.endpointUsed || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Existing execution</span>
+          <strong>{summary.executionId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider/status at retry</span>
+          <strong>
+            {summary.providerAtExecution || '—'} · {summary.existingStatus || '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Before retry evidence</span>
+          <strong>{formatDiagnosticPresence(summary.hasProviderEvidenceBefore)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Stale recovery attempted</span>
+          <strong>{formatDiagnosticPresence(summary.staleRecoveryAttempted)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider call attempted</span>
+          <strong>{formatDiagnosticPresence(summary.providerCallAttempted)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider call HTTP</span>
+          <strong>{summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Normalized evidence</span>
+          <strong>
+            id {formatDiagnosticPresence(summary.normalizedProviderShipmentIdPresent)} · tracking{' '}
+            {formatDiagnosticPresence(summary.normalizedTrackingUrlPresent)} · barcode{' '}
+            {formatDiagnosticPresence(summary.normalizedBarcodePresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Persisted evidence</span>
+          <strong>
+            id {formatDiagnosticPresence(summary.persistedProviderShipmentIdPresent)} · tracking{' '}
+            {formatDiagnosticPresence(summary.persistedTrackingUrlPresent)} · barcode{' '}
+            {formatDiagnosticPresence(summary.persistedBarcodePresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>DTO evidence</span>
+          <strong>
+            id {formatDiagnosticPresence(summary.dtoProviderShipmentIdPresent)} · tracking{' '}
+            {formatDiagnosticPresence(summary.dtoTrackingUrlPresent)} · barcode{' '}
+            {formatDiagnosticPresence(summary.dtoBarcodePresent)}
+          </strong>
+        </div>
+        {summary.skipReason ? (
+          <div className="summary-row">
+            <span>Skip reason</span>
+            <strong>{summary.skipReason}</strong>
+          </div>
+        ) : null}
+      </details>
+    );
+  }
+
   function renderTryOtoFinalizationDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
     const diagnostics = summary.tryOtoFinalization;
     if (!diagnostics) {
@@ -4101,6 +4176,7 @@ export function OrderDetailPage() {
                             </div>
                             {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
                             {renderKargonomiExecutionDiagnostics(shipmentProviderSummary)}
+                            {renderNavlungoRetryDiagnostics(shipmentProviderSummary)}
                             {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                             <div className="summary-row">
                               <span>Status field</span>
@@ -5025,6 +5101,7 @@ export function OrderDetailPage() {
                         </div>
                         {renderShipmentPayloadDiagnostics(shipmentProviderSummary)}
                         {renderKargonomiExecutionDiagnostics(shipmentProviderSummary)}
+                        {renderNavlungoRetryDiagnostics(shipmentProviderSummary)}
                         {renderTryOtoFinalizationDiagnostics(shipmentProviderSummary)}
                         {shipmentProviderSummary.tryOtoFinalization?.lastWebhookReceivedAt ||
                         shipmentProviderSummary.tryOtoFinalization?.lastWebhookMatchStatus ||

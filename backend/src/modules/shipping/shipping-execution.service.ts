@@ -192,9 +192,15 @@ function readNumber(value: Record<string, unknown> | null, keys: string[]) {
   }
 
   for (const key of keys) {
-    const numeric = Number(value[key]);
-    if (Number.isFinite(numeric)) {
-      return numeric;
+    const raw = value[key];
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return raw;
+    }
+    if (typeof raw === 'string' && raw.trim()) {
+      const numeric = Number(raw);
+      if (Number.isFinite(numeric)) {
+        return numeric;
+      }
     }
   }
 
@@ -444,6 +450,104 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
   };
 }
 
+function readOptionalBoolean(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'boolean') {
+      return raw;
+    }
+  }
+
+  return null;
+}
+
+function mapProviderResponseSummary(
+  execution: ShipmentExecution & { shippingCostLinked?: boolean },
+  snapshot: Record<string, unknown>,
+  barcode: string | null,
+): ShipmentExecutionDto['providerResponseSummary'] {
+  const providerError = readString(snapshot, [
+    'providerError',
+    'providerMessage',
+    'errorMessage',
+    'message',
+    'error',
+    'reason',
+    'providerCallSkippedReason',
+  ]);
+  const trackingUrlPresent = Boolean(execution.trackingUrl);
+  const barcodePresent = Boolean(barcode);
+  const disabledGates = Array.isArray(snapshot.disabledGates)
+    ? snapshot.disabledGates.filter((gate): gate is string => typeof gate === 'string')
+    : [];
+  const providerValidationErrors = Array.isArray(snapshot.providerValidationErrors)
+    ? snapshot.providerValidationErrors.filter((error): error is string => typeof error === 'string' && error.trim().length > 0)
+    : [];
+
+  return {
+    httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'statusCode']),
+    ok: readOptionalBoolean(snapshot, ['ok', 'success']),
+    contentType: readString(snapshot, ['contentType']),
+    parsedBodyType: readString(snapshot, ['parsedBodyType']),
+    responseKeys: Object.keys(snapshot).filter((key) => !['body', 'request', 'payload'].includes(key)).sort(),
+    providerError,
+    dryRun: readOptionalBoolean(snapshot, ['dryRun']),
+    disabledGates,
+    providerValidationErrors,
+    providerShipmentIdPresent: Boolean(execution.providerShipmentId),
+    trackingNumberPresent: Boolean(execution.trackingNumber),
+    trackingUrlPresent,
+    labelPresent: Boolean(execution.labelUrl),
+    barcodePresent,
+    endpointUsed: readString(snapshot, ['retryEndpointUsed', 'endpointUsed']),
+    executionId: readString(snapshot, ['existingExecutionId', 'executionId']),
+    providerAtExecution: readString(snapshot, ['existingProvider', 'providerAtExecution', 'provider']),
+    existingStatus: readString(snapshot, ['existingStatus']),
+    hasProviderEvidenceBefore: readOptionalBoolean(snapshot, ['existingHasProviderEvidence']),
+    staleRecoveryAttempted: readOptionalBoolean(snapshot, ['staleRecoveryAttempted']),
+    providerCallAttempted: readOptionalBoolean(snapshot, ['providerCallAttempted']),
+    providerCallHttpStatus: readNumber(snapshot, ['providerCallHttpStatus', 'createPostHttpStatus', 'httpStatus', 'statusCode']),
+    normalizedProviderShipmentIdPresent: readOptionalBoolean(snapshot, [
+      'normalizedProviderShipmentIdPresent',
+      'providerShipmentIdPresent',
+    ]),
+    normalizedTrackingUrlPresent: readOptionalBoolean(snapshot, ['normalizedTrackingUrlPresent', 'trackingUrlPresent']),
+    normalizedBarcodePresent: readOptionalBoolean(snapshot, ['normalizedBarcodePresent', 'barcodePresent']),
+    persistedProviderShipmentIdPresent: readOptionalBoolean(snapshot, ['persistedProviderShipmentIdPresent']),
+    persistedTrackingUrlPresent: readOptionalBoolean(snapshot, ['persistedTrackingUrlPresent']),
+    persistedBarcodePresent: readOptionalBoolean(snapshot, ['persistedBarcodePresent']),
+    dtoProviderShipmentIdPresent: Boolean(execution.providerShipmentId),
+    dtoTrackingUrlPresent: trackingUrlPresent,
+    dtoBarcodePresent: barcodePresent,
+    skipReason: readString(snapshot, ['providerCallSkippedReason', 'skipReason']),
+    notificationUrlIncluded: readOptionalBoolean(snapshot, ['notificationUrlIncluded']),
+    statusField: readString(snapshot, ['statusField', 'shipmentStatus', 'cargoStatus']),
+    detectedResponseFormat: readString(snapshot, ['detectedResponseFormat']),
+    responseSnippet: readString(snapshot, ['responseSnippet']),
+    authHeaderMode: readString(snapshot, ['authHeaderMode']),
+    requestId: readString(snapshot, ['requestId']),
+    requestPath: readString(snapshot, ['requestPath']),
+    selectedEnvironment: readString(snapshot, ['selectedEnvironment']),
+    requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
+    providerMode: readString(snapshot, ['providerMode']),
+    providerApiCallAttempted: readOptionalBoolean(snapshot, ['providerApiCallAttempted']),
+    lastProviderStage: readString(snapshot, ['lastProviderStage']),
+    createShipmentCalled:
+      readOptionalBoolean(snapshot, ['createShipmentCalled']) ??
+      readOptionalBoolean(snapshot, ['createShipmentDraftCalled']),
+    priceComparisonCalled: readOptionalBoolean(snapshot, ['priceComparisonCalled']),
+    confirmShippingPriceCalled: readOptionalBoolean(snapshot, ['confirmShippingPriceCalled']),
+    getShipmentCalled:
+      readOptionalBoolean(snapshot, ['getShipmentCalled']) ??
+      readOptionalBoolean(snapshot, ['getShipmentAfterConfirmCalled']),
+    barcodeFetchCalled: readOptionalBoolean(snapshot, ['barcodeFetchCalled']),
+  };
+}
+
 function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinked?: boolean }): ShipmentExecutionDto {
   const snapshot = readSnapshot(execution);
   const providerStatus = readString(snapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']);
@@ -481,6 +585,7 @@ function mapShipmentExecution(execution: ShipmentExecution & { shippingCostLinke
     trackingAssigned: Boolean(execution.trackingNumber),
     returnShipment: mapReturnShipment(snapshot),
     timeline,
+    providerResponseSummary: mapProviderResponseSummary(execution, snapshot, barcode),
     createdAt: execution.createdAt.toISOString(),
     updatedAt: execution.updatedAt.toISOString(),
   };
@@ -5175,6 +5280,10 @@ export async function retryFailedShipmentExecution(
           existingHasProviderEvidence: hasPersistedShipmentEvidence(existing),
           staleRecoveryAttempted: retryingStaleNavlungo,
           providerCallAttempted: true,
+          providerCallHttpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus', 'statusCode']),
+          normalizedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
+          normalizedTrackingUrlPresent: Boolean(result.trackingUrl),
+          normalizedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
           persistedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
           persistedTrackingUrlPresent: Boolean(result.trackingUrl),
           persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),

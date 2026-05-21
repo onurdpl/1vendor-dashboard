@@ -1465,6 +1465,26 @@ describe('shipping execution foundation', () => {
       trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1048',
       labelUrl: 'retry-barcode-string',
       barcode: 'retry-barcode-string',
+      providerResponseSummary: expect.objectContaining({
+        endpointUsed: '/shipments/:id/retry',
+        executionId: 'shipment-navlungo-alloc-1',
+        providerAtExecution: 'navlungo',
+        existingStatus: 'pending',
+        hasProviderEvidenceBefore: false,
+        staleRecoveryAttempted: true,
+        providerCallAttempted: true,
+        providerCallHttpStatus: null,
+        normalizedProviderShipmentIdPresent: true,
+        normalizedTrackingUrlPresent: true,
+        normalizedBarcodePresent: true,
+        persistedProviderShipmentIdPresent: true,
+        persistedTrackingUrlPresent: true,
+        persistedBarcodePresent: true,
+        dtoProviderShipmentIdPresent: true,
+        dtoTrackingUrlPresent: true,
+        dtoBarcodePresent: true,
+        skipReason: null,
+      }),
     });
     expect(adapter.createShipment).toHaveBeenCalledTimes(1);
     expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
