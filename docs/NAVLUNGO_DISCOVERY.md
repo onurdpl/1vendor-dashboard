@@ -416,7 +416,9 @@ No webhook implementation should be added until this is confirmed.
 Confirmed/observed differences:
 
 - Navlungo Create Post uses text city/district fields in the request.
+- Navlungo district is optional for the forward shipment PoC. If Shopify provides a district, it can be forwarded as text; if it is missing, the adapter must not block solely for district.
 - Kargonomi requires numeric `buyer_state_id` and `buyer_city_id`, which caused lookup/network blockers.
+- The shipment-only District override remains Kargonomi-specific because it feeds Kargonomi's numeric state/city lookup flow.
 - Navlungo may avoid Kargonomi's destination ID lookup blocker.
 - Navlungo Create Post sample appears to return `tracking_url` and `barcode_url` directly.
 - Navlungo docs include Create Return Post, Carriers, Address Book, and Barcode, which is a stronger discovery signal than Kargonomi for return, carrier, and label workflows.

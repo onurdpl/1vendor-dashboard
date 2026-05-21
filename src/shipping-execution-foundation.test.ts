@@ -2307,25 +2307,56 @@ describe('shipping execution foundation', () => {
         shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
       },
     }));
-    await expect(
-      createShipmentExecution(
-        {
-          allocationId: 'alloc-1',
-          provider: 'navlungo',
+    const navlungoAdapter = buildAdapter({ provider: 'NAVLUNGO' as const });
+    navlungoAdapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-1028',
+      trackingNumber: 'NAV-1028',
+      trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: { ok: true, postNumberPresent: true },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'navlungo',
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
         },
-        {
-          env: {
-            ...env,
-            SHIPPING_PROVIDER: 'navlungo',
-            NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
-            NAVLUNGO_API_USERNAME: 'api-user',
-            NAVLUNGO_API_PASSWORD: 'secret-password',
-          },
-          vendorId: 'sporjinal',
-          adapter: buildAdapter({ provider: 'NAVLUNGO' as const }),
-        },
-      ),
-    ).rejects.toThrow('recipient.district');
+        vendorId: 'sporjinal',
+        adapter: navlungoAdapter,
+      },
+    );
+
+    expect(navlungoAdapter.createShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          posts: [
+            expect.objectContaining({
+              recipient: expect.objectContaining({
+                city: 'Istanbul',
+                district: null,
+              }),
+            }),
+          ],
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      provider: 'navlungo',
+      providerShipmentId: 'NAV-1028',
+      shipmentStatus: 'created',
+    });
   });
 
   it('keeps Kargonomi ready when PoC fallback buyer location ids are configured', async () => {

@@ -1363,7 +1363,7 @@ function buildNavlungoRecipient(input: {
       webhookAddress?.shippingPostcode ??
       '',
   };
-  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city', 'district'] as const;
+  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city'] as const;
   const missingFields = requiredFields
     .filter((key) => !recipient[key])
     .map((key) => `recipient.${key}`);

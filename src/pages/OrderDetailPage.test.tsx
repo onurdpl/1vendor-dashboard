@@ -4582,6 +4582,43 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
+  it('does not render shipment-only District for Navlungo district messages', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'validation_failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          providerError: 'Missing required shipment fields:\n- recipient.district\n\nProvider request blocked before create call.',
+          providerValidationErrors: ['recipient.district is required'],
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+
+    expect(screen.queryByText('Complete shipment-only fields')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
+  });
+
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

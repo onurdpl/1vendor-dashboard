@@ -972,13 +972,22 @@ function getShipmentRetryBlockedReason(
   return null;
 }
 
-function getMissingShipmentCustomerFields(message: string): ShipmentCustomerField[] {
+function getMissingShipmentCustomerFields(message: string, provider?: string | null): ShipmentCustomerField[] {
   const allowedFields = new Set(Object.keys(SHIPMENT_CUSTOMER_FIELD_LABELS));
   const fields = Array.from(message.matchAll(/customer\.([a-zA-Z0-9_]+)/g))
     .map((match) => match[1])
     .filter((field): field is ShipmentCustomerField => Boolean(field && allowedFields.has(field)));
   const normalizedMessage = message.toLocaleLowerCase('tr-TR');
-  if (/\bdistrict\b/.test(normalizedMessage) || normalizedMessage.includes('ilçe') || normalizedMessage.includes('ilce')) {
+  const isKargonomiLocationMessage =
+    provider === 'kargonomi' ||
+    normalizedMessage.includes('kargonomi') ||
+    normalizedMessage.includes('buyer.buyer_state_id') ||
+    normalizedMessage.includes('buyer.buyer_city_id');
+  const isLegacyKargoDistrictMessage = provider === 'kargo_entegrator' || provider === 'hepsijet';
+  if (
+    (isKargonomiLocationMessage || isLegacyKargoDistrictMessage) &&
+    (/\bdistrict\b/.test(normalizedMessage) || normalizedMessage.includes('ilçe') || normalizedMessage.includes('ilce'))
+  ) {
     fields.push('district');
   }
   return Array.from(new Set(fields));
@@ -1359,10 +1368,12 @@ export function OrderDetailPage() {
       ? [
           ...(shipmentProviderSummary?.providerValidationErrors ?? []),
           shipmentProviderSummary?.providerError ?? '',
-        ].flatMap((message) => getMissingShipmentCustomerFields(message))
+        ].flatMap((message) => getMissingShipmentCustomerFields(message, visibleShipmentExecution?.provider))
       : [];
   const actionMissingShipmentCustomerFields =
-    shipmentActionState?.tone === 'error' ? getMissingShipmentCustomerFields(shipmentActionState.message) : [];
+    shipmentActionState?.tone === 'error'
+      ? getMissingShipmentCustomerFields(shipmentActionState.message, visibleShipmentExecution?.provider)
+      : [];
   const missingShipmentCustomerFields = Array.from(
     new Set([...actionMissingShipmentCustomerFields, ...providerMissingShipmentCustomerFields]),
   );
