@@ -414,37 +414,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       authHttpStatus: 200,
       authContentType: 'application/json',
       authTokenReceived: true,
-      myCarriersRequestUrl: '/carrier/my-carriers?limit=20',
-      myCarriersHttpStatus: 200,
-      myCarriersContentType: 'application/json',
-      myCarriersResponseShape: {
-        kind: 'json:object',
-        topLevelKeys: ['status', 'message', 'data'],
-      },
-      myCarriersDataShape: {
-        kind: 'json:array',
-        topLevelKeys: [],
-      },
-      myCarrierCount: 1,
-      myCarrierSamples: [{ id: 9, name: 'Sürat Kargo', shortName: 'surat', activeOrConfigured: true }],
-      listCarriersRequestUrl: '/carrier/getAll?limit=20',
-      listCarriersHttpStatus: 200,
-      listCarriersContentType: 'application/json',
-      listCarriersResponseShape: {
-        kind: 'json:object',
-        topLevelKeys: ['status', 'message', 'data'],
-      },
-      listCarriersDataShape: {
-        kind: 'json:array',
-        topLevelKeys: [],
-      },
-      listCarrierCount: 2,
-      listCarrierSamples: [
-        { id: 9, name: 'Sürat Kargo', shortName: 'surat', activeOrConfigured: true },
-        { id: 10, name: 'HepsiJet', shortName: 'hepsijet', activeOrConfigured: true },
-      ],
-      anyConfiguredCarrier: true,
-      providerMessages: ['ok'],
+      carrierEndpointPathsKnown: false,
+      skippedReason: 'carrier_endpoint_paths_unknown',
+      myCarriersRequestUrl: null,
+      myCarriersHttpStatus: null,
+      myCarriersContentType: null,
+      myCarriersResponseShape: null,
+      myCarriersDataShape: null,
+      myCarrierCount: null,
+      myCarrierSamples: [],
+      listCarriersRequestUrl: null,
+      listCarriersHttpStatus: null,
+      listCarriersContentType: null,
+      listCarriersResponseShape: null,
+      listCarriersDataShape: null,
+      listCarrierCount: null,
+      listCarrierSamples: [],
+      anyConfiguredCarrier: false,
+      providerMessages: ['Navlungo carrier endpoint paths are unknown. Official carrier pages do not expose request paths.'],
       fetchError: null,
     });
     runtimeDiagnosticsMocks.navlungoCreatePostProbe.mockReset();
@@ -1632,12 +1619,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(runtimeDiagnosticsMocks.navlungoCarriers).toHaveBeenCalled();
     expect(await screen.findByLabelText('Navlungo carrier diagnostic result')).toBeInTheDocument();
-    expect(screen.getByText('My Carriers HTTP').closest('.summary-row')).toHaveTextContent('200');
-    expect(screen.getByText('Configured carriers').closest('.summary-row')).toHaveTextContent('1');
-    expect(screen.getByText('First configured carriers').closest('.summary-row')).toHaveTextContent('9 · Sürat Kargo');
-    expect(screen.getByText('List Carriers HTTP').closest('.summary-row')).toHaveTextContent('200');
-    expect(screen.getByText('Listed carriers').closest('.summary-row')).toHaveTextContent('2');
-    expect(screen.getByText('Configured carrier available').closest('.summary-row')).toHaveTextContent('yes');
+    expect(screen.getByText('Carrier endpoint paths known').closest('.summary-row')).toHaveTextContent('no');
+    expect(screen.getByText('Skipped reason').closest('.summary-row')).toHaveTextContent('carrier_endpoint_paths_unknown');
+    expect(screen.getByText('My Carriers HTTP').closest('.summary-row')).toHaveTextContent('—');
+    expect(screen.getByText('Configured carriers').closest('.summary-row')).toHaveTextContent('—');
+    expect(screen.getByText('List Carriers HTTP').closest('.summary-row')).toHaveTextContent('—');
+    expect(screen.getByText('Listed carriers').closest('.summary-row')).toHaveTextContent('—');
+    expect(screen.getByText('Configured carrier available').closest('.summary-row')).toHaveTextContent('no');
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
 

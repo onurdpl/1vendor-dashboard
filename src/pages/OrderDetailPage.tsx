@@ -5539,6 +5539,14 @@ export function OrderDetailPage() {
                               <strong>{navlungoCarrierDiagnostics.authTokenReceived ? 'yes' : 'no'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Carrier endpoint paths known</span>
+                              <strong>{navlungoCarrierDiagnostics.carrierEndpointPathsKnown ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Skipped reason</span>
+                              <strong>{navlungoCarrierDiagnostics.skippedReason ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>My Carriers HTTP</span>
                               <strong>{navlungoCarrierDiagnostics.myCarriersHttpStatus ?? '—'}</strong>
                             </div>

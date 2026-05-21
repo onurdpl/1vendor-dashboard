@@ -272,12 +272,19 @@ Confirmed/observed from Create Post docs:
 - v2.1 docs include Carriers:
   - My Carriers
   - List Carriers
-- The documented carrier diagnostics paths are:
+- Re-review on 2026-05-21 found the official English page HTML for both carrier pages renders only the page heading and an empty paragraph:
+  - `https://domestic-docs.navlungo.com/en/v2-1/carriers/my-carriers`
+  - `https://domestic-docs.navlungo.com/en/v2-1/carriers/list-carriers`
+- Exact carrier endpoint paths are therefore **unknown**.
+- Previously attempted guessed paths returned `404`:
   - `GET /carrier/my-carriers`
   - `GET /carrier/getAll`
+- Provider response said: `The route v2/carrier/my-carriers could not be found.`
 
 Unknown:
 
+- Exact My Carriers endpoint path.
+- Exact List Carriers endpoint path.
 - Full carrier list response shape.
 - Whether carrier IDs are stable per account/environment.
 - Whether `carrier_id = 1` is safe for production automatic selection.
@@ -568,10 +575,10 @@ Current probe status:
   - `GET /admin/diagnostics/navlungo/carriers`
 - The endpoint authenticates first with:
   - `POST /auth/api`
-- It then calls documented carrier diagnostics endpoints only:
-  - `GET /carrier/my-carriers?limit=20`
-  - `GET /carrier/getAll?limit=20`
+- Carrier endpoint paths are currently **unknown** because the official carrier pages do not expose method/path blocks in the page HTML.
+- The endpoint does **not** call carrier-list paths until Navlungo confirms the exact paths.
 - The probe does not:
+  - call guessed carrier endpoints
   - call `POST /post/create`
   - write to the app database
   - create a local shipment execution
@@ -581,11 +588,9 @@ Current probe status:
 Sanitized carrier diagnostics output includes only:
 
 - auth HTTP status and token presence boolean
-- carrier endpoint HTTP statuses
-- response shape summaries
-- carrier counts
-- first safe carrier ids/names/short names
-- active/configured presence booleans when present
+- carrier endpoint path known yes/no
+- skipped reason when paths are unknown
+- carrier endpoint HTTP statuses, response shape summaries, counts, and safe carrier ids/names only after exact paths are confirmed
 - provider messages/errors
 
 The output must never include:
@@ -625,11 +630,12 @@ The output must never include:
 5. Do you support return/reverse shipments in production?
 6. Does Create Post return `tracking_url` and `barcode_url` immediately in production?
 7. How do we fetch valid `carrier_id` values for our account?
-8. Can `carrier_id = 1` be used for automatic/by coverage-area carrier selection in production?
-9. Are webhooks/status callbacks supported?
-10. Can one account manage multiple sender addresses/warehouses?
-11. Can one account support a marketplace/multi-vendor flow?
-12. What is the exact token lifetime, given the docs text says 8 hours but sample response says `expires_in = 86400`?
-13. How should `refresh_token` be used, if at all?
-14. What is the exact Get Barcode endpoint contract and response shape?
-15. What does `post_type = 4` mean?
+8. What are the exact v2.1 carrier list endpoint paths?
+9. Can `carrier_id = 1` be used for automatic/by coverage-area carrier selection in production?
+10. Are webhooks/status callbacks supported?
+11. Can one account manage multiple sender addresses/warehouses?
+12. Can one account support a marketplace/multi-vendor flow?
+13. What is the exact token lifetime, given the docs text says 8 hours but sample response says `expires_in = 86400`?
+14. How should `refresh_token` be used, if at all?
+15. What is the exact Get Barcode endpoint contract and response shape?
+16. What does `post_type = 4` mean?

@@ -319,6 +319,8 @@ export type NavlungoCarrierDiagnostics = {
   authHttpStatus: number | null;
   authContentType: string | null;
   authTokenReceived: boolean;
+  carrierEndpointPathsKnown: boolean;
+  skippedReason: string | null;
   myCarriersRequestUrl: string | null;
   myCarriersHttpStatus: number | null;
   myCarriersContentType: string | null;
