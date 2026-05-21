@@ -1782,7 +1782,7 @@ export function getShippingProviderGateDiagnostics(
       : isKargonomi
         ? providerSelected
         : isNavlungo
-          ? providerSelected
+          ? Boolean(env.NAVLUNGO_BASE_URL && env.NAVLUNGO_API_USERNAME && env.NAVLUNGO_API_PASSWORD)
           : false;
   const baseUrlConfigured = isKargo
     ? Boolean(env.KARGO_ENTEGRATOR_BASE_URL)

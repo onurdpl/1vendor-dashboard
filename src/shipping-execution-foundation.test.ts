@@ -1446,7 +1446,7 @@ describe('shipping execution foundation', () => {
     const result = await retryFailedShipmentExecution(existing.id, {
       env: {
         ...env,
-        SHIPPING_PROVIDER: 'navlungo',
+        SHIPPING_PROVIDER: 'kargonomi',
         SHIPPING_EXECUTION_ENABLED: true,
         NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
         NAVLUNGO_API_USERNAME: 'api-user',
@@ -2484,6 +2484,54 @@ describe('shipping execution foundation', () => {
       },
     });
     expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
+  });
+
+  it('reports Navlungo ready from vendor config even when the global provider differs', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      id: 'ship-config-navlungo',
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoBarcodeFormat: 'pdf-A6',
+        navlungoCarrierId: '9',
+      },
+      createdAt: new Date('2026-05-15T10:00:00.000Z'),
+      updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      warehouses: [],
+    });
+
+    const diagnostics = await getShippingProviderReadinessDiagnostics(
+      {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      'navlungo',
+      'sporjinal',
+    );
+
+    expect(diagnostics).toMatchObject({
+      provider: 'navlungo',
+      executionReady: true,
+      providerSelected: true,
+      providerEnabled: true,
+      baseUrlConfigured: true,
+      apiKeyConfigured: true,
+      warehouseIdConfigured: true,
+      defaultDesiConfigured: true,
+      missing: [],
+    });
+    expect(JSON.stringify(diagnostics)).not.toContain('secret-password');
+    expect(JSON.stringify(diagnostics)).not.toContain('55574');
   });
 
   it('builds a Navlungo Create Post payload and blocks missing recipient fields before provider call', async () => {
