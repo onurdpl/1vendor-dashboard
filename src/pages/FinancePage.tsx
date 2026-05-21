@@ -1321,17 +1321,17 @@ export function FinancePage() {
                 </div>
               </div>
 
-              <OperationalLinkCards
-                title="Related records"
-                subtitle="Order, return, and support context for this finance row."
-                links={financeCrossLinks}
-                audience={isAdmin ? 'admin' : 'vendor'}
-              />
-
               <OperationalTimeline
                 title="Operational timeline"
                 subtitle="Finance and support activity for this row."
                 events={financeTimelineEvents}
+                audience={isAdmin ? 'admin' : 'vendor'}
+              />
+
+              <OperationalLinkCards
+                title="Related records"
+                subtitle="Order, return, and support context for this finance row."
+                links={financeCrossLinks}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
 
