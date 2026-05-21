@@ -47,8 +47,11 @@ Confirmed from official docs navigation:
 Unknown:
 
 - Whether v2.1 Beta is production-ready.
-- Whether production integration should use v2 or v2.1.
 - Whether v2 and v2.1 differ in endpoint base paths, payloads, response shapes, or production support guarantees.
+
+Confirmed user-provided implementation target:
+
+- API version target for the next PoC/planning step: `v2.1`.
 
 ## 3. Authentication
 
@@ -119,9 +122,13 @@ Unknown:
 - Whether v2.1 uses the same base URLs as v2.
 - Whether `__APIURL__` should include `/v2/`, `/v2-1/`, or another path for v2.1.
 
+User-provided Render base URL plan:
+
+- `NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2`
+
 Implementation note:
 
-- Do not assume the final production base URL until Navlungo confirms it.
+- Confirm the final production base URL with Navlungo before runtime adapter work.
 - Old Carrtell URLs should not be used as API base URLs unless Navlungo confirms them.
 
 ## 5.1. Environment Variables Planning
@@ -129,9 +136,11 @@ Implementation note:
 Likely required:
 
 ```text
-NAVLUNGO_BASE_URL=<unknown until confirmed>
+NAVLUNGO_BASE_URL=https://domestic-api.navlungo.com/v2
 NAVLUNGO_API_USERNAME=<Render secret>
 NAVLUNGO_API_PASSWORD=<Render secret>
+NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID=55574
+NAVLUNGO_DEFAULT_BARCODE_FORMAT=pdf-A6
 ```
 
 Likely generated/runtime:
@@ -145,17 +154,17 @@ Optional/unknown:
 
 ```text
 NAVLUNGO_DEFAULT_CARRIER_ID=<unknown>
-NAVLUNGO_DEFAULT_BARCODE_FORMAT=pdf-A6
 NAVLUNGO_PLATFORM=<unknown>
-NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID=<unknown>
 ```
 
 Notes:
 
+- API version target is user-confirmed as `v2.1`.
+- Sender address id for testing is user-confirmed as `55574`.
 - Do not hardcode credentials.
 - Do not add these env vars to runtime validation yet.
 - Do not implement token refresh yet.
-- Confirm base URL and API version before adapter work.
+- Confirm any mismatch between v2.1 docs and the planned `/v2` base URL before adapter work.
 - If live-only testing charges balance, use one manually selected test order only.
 
 ## 6. Confirmed Forward Shipment Endpoint
