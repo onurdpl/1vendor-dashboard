@@ -329,10 +329,12 @@ Create Post docs state:
 - For `barcode_format = html`, Base64 type will be returned.
 - Create Post sample returns `barcode_url`.
 - v2.1 docs include Barcode > Get Barcode.
+- Re-review on 2026-05-21 found the official English `Barcode > Get Barcode` page renders only the heading and does not expose method/path/identifier requirements.
 
 Unknown:
 
 - Exact Get Barcode endpoint request path and parameters.
+- Whether Get Barcode uses `post_number`, `reference_id`, or another identifier.
 - Whether Get Barcode returns raw file, URL, Base64, or JSON envelope.
 - Whether `barcode_url` is returned for PDF formats only or all formats.
 - Whether generated barcode is immediately available after Create Post.
@@ -562,13 +564,11 @@ The output must never include:
 - refresh token
 - full customer PII
 
-Response shape is still pending live probe execution and must be recorded after one intentional test-account run.
-
-Current observed deployed Create Post probe result:
+Current observed deployed Create Post probe results:
 
 - Auth succeeds.
 - `POST /post/create` reaches Navlungo.
-- Provider returns `400` with: `No price list definition exists for your company and the selected carrier.`
+- Previous provider response returned `400` with: `No price list definition exists for your company and the selected carrier.`
 - Most likely explanation: the old static probe `carrier_id` was not configured/valid for this Navlungo account.
 - Operator confirmed first target carrier should be `NAVLUNGO_DEFAULT_CARRIER_ID=9` because this account should use Sürat Kargo.
 - The manual Create Post probe now uses `NAVLUNGO_DEFAULT_CARRIER_ID` and defaults to `9` when the env var is missing.
@@ -576,8 +576,39 @@ Current observed deployed Create Post probe result:
 - Normal manual probe payload omits `cod_payment_type` because COD is not being tested.
 - Normal manual probe payload omits `post.price`; docs indicate price is sent when `cod_payment_type` is `1` or `2`.
 - Static test sender/recipient phone values use the documented Turkish spacing style, for example `+90 532 123 45 67`.
+- Later deployed Create Post probe succeeded with HTTP `201`.
+- Observed success response shape:
+  - top-level keys: `status`, `message`, `data`
+  - data keys: `post_number`, `reference_id`, `tracking_url`, `barcode`, `post`
+  - `post_number` present
+  - `tracking_url` present
+  - `barcode` field present
+  - `barcode_url` missing
+  - `post.carrier_id` and `post.carrier_name` present
+  - provider message: `Your transaction will be successfully created if your wallet balance is sufficient.`
+- This indicates Create Post can provide customer tracking immediately, but barcode handling must use the observed `barcode` field or a confirmed Barcode endpoint contract.
 
-## 16.4. Carrier Diagnostics Probe Status
+## 16.4. Check Post And Barcode Diagnostics Probe Status
+
+Current probe status:
+
+- Admin-only Check Post endpoint exists:
+  - `POST /admin/diagnostics/navlungo/check-post`
+- It authenticates first and then calls the exact documented Check Post endpoint:
+  - `GET /post/check/{postNumber}`
+- Check Post uses the `post_number` returned by the successful Create Post probe.
+- Admin-only Barcode endpoint exists:
+  - `POST /admin/diagnostics/navlungo/barcode`
+- Barcode probe is gated by `post_number`, but it does not call Navlungo because the official Barcode > Get Barcode page does not expose an endpoint path or identifier contract.
+- Barcode probe returns:
+  - `barcodeEndpointPathKnown=false`
+  - `skippedReason=barcode_endpoint_path_unknown`
+- Pending verification:
+  - Check Post live response shape for the newly created `post_number`
+  - whether the `barcode` field from Create Post is already sufficient for PDF label retrieval
+  - exact Barcode endpoint path and required identifier
+
+## 16.5. Carrier Diagnostics Probe Status
 
 Current probe status:
 

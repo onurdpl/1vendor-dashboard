@@ -53,7 +53,9 @@ import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/s
 import type {
   KargonomiLocationLookupDiagnostics,
   NavlungoAuthDiagnostics,
+  NavlungoBarcodeProbeDiagnostics,
   NavlungoCarrierDiagnostics,
+  NavlungoCheckPostProbeDiagnostics,
   NavlungoCreatePostProbeDiagnostics,
 } from '../services/real/diagnostics';
 
@@ -977,6 +979,10 @@ export function OrderDetailPage() {
   const [navlungoCreatePostProbeConfirmed, setNavlungoCreatePostProbeConfirmed] = useState(false);
   const [navlungoCreatePostProbeDiagnostics, setNavlungoCreatePostProbeDiagnostics] = useState<NavlungoCreatePostProbeDiagnostics | null>(null);
   const [navlungoCreatePostProbeError, setNavlungoCreatePostProbeError] = useState<string | null>(null);
+  const [navlungoCheckPostProbeDiagnostics, setNavlungoCheckPostProbeDiagnostics] = useState<NavlungoCheckPostProbeDiagnostics | null>(null);
+  const [navlungoCheckPostProbeError, setNavlungoCheckPostProbeError] = useState<string | null>(null);
+  const [navlungoBarcodeProbeDiagnostics, setNavlungoBarcodeProbeDiagnostics] = useState<NavlungoBarcodeProbeDiagnostics | null>(null);
+  const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1208,9 +1214,37 @@ export function OrderDetailPage() {
       onSuccess: (result) => {
         setNavlungoCreatePostProbeDiagnostics(result);
         setNavlungoCreatePostProbeError(null);
+        setNavlungoCheckPostProbeDiagnostics(null);
+        setNavlungoCheckPostProbeError(null);
+        setNavlungoBarcodeProbeDiagnostics(null);
+        setNavlungoBarcodeProbeError(null);
       },
       onError: (error) => {
         setNavlungoCreatePostProbeError(error instanceof Error ? error.message : 'Navlungo Create Post probe could not be run.');
+      },
+    },
+  );
+  const { mutateAsync: runNavlungoCheckPostProbeMutation, isPending: isRunningNavlungoCheckPostProbe } = useMutationAction(
+    async (postNumber: string) => runtimeServices.diagnostics.navlungoCheckPostProbe({ postNumber }),
+    {
+      onSuccess: (result) => {
+        setNavlungoCheckPostProbeDiagnostics(result);
+        setNavlungoCheckPostProbeError(null);
+      },
+      onError: (error) => {
+        setNavlungoCheckPostProbeError(error instanceof Error ? error.message : 'Navlungo Check Post probe could not be run.');
+      },
+    },
+  );
+  const { mutateAsync: runNavlungoBarcodeProbeMutation, isPending: isRunningNavlungoBarcodeProbe } = useMutationAction(
+    async (postNumber: string) => runtimeServices.diagnostics.navlungoBarcodeProbe({ postNumber }),
+    {
+      onSuccess: (result) => {
+        setNavlungoBarcodeProbeDiagnostics(result);
+        setNavlungoBarcodeProbeError(null);
+      },
+      onError: (error) => {
+        setNavlungoBarcodeProbeError(error instanceof Error ? error.message : 'Navlungo Barcode probe could not be run.');
       },
     },
   );
@@ -1235,6 +1269,10 @@ export function OrderDetailPage() {
       setNavlungoCreatePostProbeConfirmed(false);
       setNavlungoCreatePostProbeDiagnostics(null);
       setNavlungoCreatePostProbeError(null);
+      setNavlungoCheckPostProbeDiagnostics(null);
+      setNavlungoCheckPostProbeError(null);
+      setNavlungoBarcodeProbeDiagnostics(null);
+      setNavlungoBarcodeProbeError(null);
     }
   }, [shippingConfigDraft.preferredProvider]);
 
@@ -5688,6 +5726,14 @@ export function OrderDetailPage() {
                               <strong>{navlungoCreatePostProbeDiagnostics.barcodeUrlPresent ? 'present' : 'missing'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Barcode field</span>
+                              <strong>
+                                {navlungoCreatePostProbeDiagnostics.barcodePresent
+                                  ? `present${navlungoCreatePostProbeDiagnostics.barcodeType ? ` · ${navlungoCreatePostProbeDiagnostics.barcodeType}` : ''}`
+                                  : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Carrier fields</span>
                               <strong>
                                 {navlungoCreatePostProbeDiagnostics.carrierIdPresent || navlungoCreatePostProbeDiagnostics.carrierNamePresent
@@ -5698,6 +5744,114 @@ export function OrderDetailPage() {
                             <div className="summary-row">
                               <span>Provider message</span>
                               <strong>{navlungoCreatePostProbeDiagnostics.providerMessage ?? navlungoCreatePostProbeDiagnostics.errorMessage ?? '—'}</strong>
+                            </div>
+                            {navlungoCreatePostProbeDiagnostics.postNumber ? (
+                              <div className="shipment-recovery-actions">
+                                <span className="muted">Last probe post_number: {navlungoCreatePostProbeDiagnostics.postNumber}</span>
+                                <button
+                                  type="button"
+                                  className="button button-secondary"
+                                  onClick={() => void runNavlungoCheckPostProbeMutation(navlungoCreatePostProbeDiagnostics.postNumber!)}
+                                  disabled={isRunningNavlungoCheckPostProbe}
+                                >
+                                  {isRunningNavlungoCheckPostProbe ? 'Running Check Post...' : 'Run Navlungo Check Post probe'}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button button-secondary"
+                                  onClick={() => void runNavlungoBarcodeProbeMutation(navlungoCreatePostProbeDiagnostics.postNumber!)}
+                                  disabled={isRunningNavlungoBarcodeProbe}
+                                >
+                                  {isRunningNavlungoBarcodeProbe ? 'Running Barcode probe...' : 'Run Navlungo Barcode probe'}
+                                </button>
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {navlungoCheckPostProbeError ? (
+                          <p className="form-error" role="alert">{navlungoCheckPostProbeError}</p>
+                        ) : null}
+                        {navlungoCheckPostProbeDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Check Post probe result">
+                            <div className="summary-row">
+                              <span>Post number</span>
+                              <strong>{navlungoCheckPostProbeDiagnostics.postNumber}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Check Post HTTP</span>
+                              <strong>{navlungoCheckPostProbeDiagnostics.checkPostHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Data keys</span>
+                              <strong>{navlungoCheckPostProbeDiagnostics.dataKeys.length ? navlungoCheckPostProbeDiagnostics.dataKeys.join(', ') : '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Status</span>
+                              <strong>{navlungoCheckPostProbeDiagnostics.statusName ?? navlungoCheckPostProbeDiagnostics.statusCode ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Tracking fields</span>
+                              <strong>
+                                {[
+                                  navlungoCheckPostProbeDiagnostics.trackingUrlPresent ? 'tracking_url' : null,
+                                  navlungoCheckPostProbeDiagnostics.carrierTrackingUrlPresent ? 'carrier_tracking_url' : null,
+                                ].filter(Boolean).join(', ') || '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode field</span>
+                              <strong>
+                                {navlungoCheckPostProbeDiagnostics.barcodePresent
+                                  ? `present${navlungoCheckPostProbeDiagnostics.barcodeType ? ` · ${navlungoCheckPostProbeDiagnostics.barcodeType}` : ''}`
+                                  : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Carrier fields</span>
+                              <strong>
+                                {navlungoCheckPostProbeDiagnostics.carrierIdPresent || navlungoCheckPostProbeDiagnostics.carrierNamePresent ? 'present' : 'missing'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider message</span>
+                              <strong>{navlungoCheckPostProbeDiagnostics.providerMessage ?? navlungoCheckPostProbeDiagnostics.errorMessage ?? '—'}</strong>
+                            </div>
+                          </div>
+                        ) : null}
+                        {navlungoBarcodeProbeError ? (
+                          <p className="form-error" role="alert">{navlungoBarcodeProbeError}</p>
+                        ) : null}
+                        {navlungoBarcodeProbeDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo Barcode probe result">
+                            <div className="summary-row">
+                              <span>Post number</span>
+                              <strong>{navlungoBarcodeProbeDiagnostics.postNumber}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode endpoint path known</span>
+                              <strong>{navlungoBarcodeProbeDiagnostics.barcodeEndpointPathKnown ? 'yes' : 'no'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Skipped reason</span>
+                              <strong>{navlungoBarcodeProbeDiagnostics.skippedReason}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode HTTP</span>
+                              <strong>{navlungoBarcodeProbeDiagnostics.barcodeHttpStatus ?? '—'}</strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Barcode field/url/base64</span>
+                              <strong>
+                                {[
+                                  navlungoBarcodeProbeDiagnostics.barcodeFieldPresent ? 'field' : null,
+                                  navlungoBarcodeProbeDiagnostics.barcodeUrlPresent ? 'url' : null,
+                                  navlungoBarcodeProbeDiagnostics.barcodeBase64Present ? 'base64' : null,
+                                ].filter(Boolean).join(', ') || '—'}
+                              </strong>
+                            </div>
+                            <div className="summary-row">
+                              <span>Provider message</span>
+                              <strong>{navlungoBarcodeProbeDiagnostics.providerMessage ?? navlungoBarcodeProbeDiagnostics.errorMessage ?? '—'}</strong>
                             </div>
                           </div>
                         ) : null}

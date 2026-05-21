@@ -32,6 +32,8 @@ const runtimeDiagnosticsMocks = vi.hoisted(() => ({
   navlungoAuth: vi.fn(),
   navlungoCarriers: vi.fn(),
   navlungoCreatePostProbe: vi.fn(),
+  navlungoCheckPostProbe: vi.fn(),
+  navlungoBarcodeProbe: vi.fn(),
 }));
 
 vi.mock('../config/runtime', () => ({
@@ -48,6 +50,8 @@ vi.mock('../services/runtime-services', () => ({
       navlungoAuth: () => runtimeDiagnosticsMocks.navlungoAuth(),
       navlungoCarriers: () => runtimeDiagnosticsMocks.navlungoCarriers(),
       navlungoCreatePostProbe: (payload: { confirm: 'YES' }) => runtimeDiagnosticsMocks.navlungoCreatePostProbe(payload),
+      navlungoCheckPostProbe: (payload: { postNumber: string }) => runtimeDiagnosticsMocks.navlungoCheckPostProbe(payload),
+      navlungoBarcodeProbe: (payload: { postNumber: string }) => runtimeDiagnosticsMocks.navlungoBarcodeProbe(payload),
     },
   },
 }));
@@ -461,10 +465,56 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       referenceIdPresent: true,
       trackingUrlPresent: true,
       barcodeUrlPresent: true,
+      barcodePresent: true,
+      barcodeType: 'string',
       carrierIdPresent: true,
+      carrierId: 9,
       carrierNamePresent: true,
+      carrierName: 'Sürat Kargo',
       postCarrierKeys: ['carrier_id', 'carrier_name'],
       providerMessage: null,
+      errorMessage: null,
+    });
+    runtimeDiagnosticsMocks.navlungoCheckPostProbe.mockReset();
+    runtimeDiagnosticsMocks.navlungoCheckPostProbe.mockResolvedValue({
+      provider: 'navlungo',
+      dormant: true,
+      postNumber: 'NP12345',
+      authHttpStatus: 200,
+      authContentType: 'application/json',
+      authTokenReceived: true,
+      checkPostHttpStatus: 200,
+      checkPostContentType: 'application/json',
+      responseShape: { kind: 'json:object', topLevelKeys: ['status', 'message', 'data'] },
+      dataShape: { kind: 'json:object', topLevelKeys: ['post_number', 'tracking_url', 'barcode', 'post', 'status'] },
+      dataKeys: ['post_number', 'tracking_url', 'barcode', 'post', 'status'],
+      statusKeys: ['status_code', 'status_name'],
+      postNumberPresent: true,
+      trackingUrlPresent: true,
+      carrierTrackingUrlPresent: false,
+      barcodePresent: true,
+      barcodeType: 'string',
+      carrierIdPresent: true,
+      carrierNamePresent: true,
+      statusCode: 1,
+      statusName: 'To be Picked Up',
+      providerMessage: null,
+      errorMessage: null,
+    });
+    runtimeDiagnosticsMocks.navlungoBarcodeProbe.mockReset();
+    runtimeDiagnosticsMocks.navlungoBarcodeProbe.mockResolvedValue({
+      provider: 'navlungo',
+      dormant: true,
+      postNumber: 'NP12345',
+      barcodeEndpointPathKnown: false,
+      skippedReason: 'barcode_endpoint_path_unknown',
+      barcodeHttpStatus: null,
+      barcodeContentType: null,
+      responseShape: null,
+      barcodeFieldPresent: false,
+      barcodeUrlPresent: false,
+      barcodeBase64Present: false,
+      providerMessage: 'Official Navlungo Barcode > Get Barcode page does not expose an endpoint path in the reviewed HTML.',
       errorMessage: null,
     });
     getVendorShippingConfigMock.mockReset();
@@ -1651,7 +1701,23 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Post number').closest('.summary-row')).toHaveTextContent('NP12345');
     expect(screen.getByText('Tracking URL').closest('.summary-row')).toHaveTextContent('present');
     expect(screen.getByText('Barcode URL').closest('.summary-row')).toHaveTextContent('present');
+    expect(screen.getByText('Barcode field').closest('.summary-row')).toHaveTextContent('present');
     expect(screen.getByText('Carrier fields').closest('.summary-row')).toHaveTextContent('carrier_id, carrier_name');
+    expect(screen.getByText('Last probe post_number: NP12345')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Navlungo Check Post probe' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Run Navlungo Barcode probe' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo Check Post probe' }));
+    expect(runtimeDiagnosticsMocks.navlungoCheckPostProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });
+    expect(await screen.findByLabelText('Navlungo Check Post probe result')).toBeInTheDocument();
+    expect(screen.getByText('Check Post HTTP').closest('.summary-row')).toHaveTextContent('200');
+    expect(screen.getByText('Status').closest('.summary-row')).toHaveTextContent('To be Picked Up');
+
+    await user.click(screen.getByRole('button', { name: 'Run Navlungo Barcode probe' }));
+    expect(runtimeDiagnosticsMocks.navlungoBarcodeProbe).toHaveBeenCalledWith({ postNumber: 'NP12345' });
+    const barcodeProbeResult = await screen.findByLabelText('Navlungo Barcode probe result');
+    expect(within(barcodeProbeResult).getByText('Barcode endpoint path known').closest('.summary-row')).toHaveTextContent('no');
+    expect(within(barcodeProbeResult).getByText('Skipped reason').closest('.summary-row')).toHaveTextContent('barcode_endpoint_path_unknown');
     expect(createShipmentExecutionMock).not.toHaveBeenCalled();
     expect(submitFulfillmentTrackingMock).not.toHaveBeenCalled();
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();

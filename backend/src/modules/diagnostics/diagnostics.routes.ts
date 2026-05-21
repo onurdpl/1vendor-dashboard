@@ -14,7 +14,12 @@ import {
 } from './diagnostics.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { runKargonomiLocationLookupDiagnostics } from '../shipping/kargonomi-location-lookup-probe.js';
-import { runNavlungoCreatePostProbeDiagnostics, validateNavlungoCreatePostProbeEnv } from '../shipping/navlungo-create-post-probe.js';
+import {
+  runNavlungoBarcodeProbeDiagnostics,
+  runNavlungoCheckPostProbeDiagnostics,
+  runNavlungoCreatePostProbeDiagnostics,
+  validateNavlungoCreatePostProbeEnv,
+} from '../shipping/navlungo-create-post-probe.js';
 import { runNavlungoAuthDiagnostics, runNavlungoCarrierDiagnostics } from '../shipping/navlungo-provider.adapter.js';
 
 export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
@@ -149,6 +154,47 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         const message = error instanceof Error ? error.message : 'Navlungo Create Post probe failed.';
         return reply.code(502).send({ message });
       }
+    },
+  );
+
+  app.post<{ Body: { postNumber?: string } }>(
+    '/admin/diagnostics/navlungo/check-post',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!request.body?.postNumber?.trim()) {
+        return reply.code(400).send({ message: 'postNumber is required for the Navlungo Check Post probe.' });
+      }
+
+      try {
+        return await runNavlungoCheckPostProbeDiagnostics({ env, postNumber: request.body.postNumber });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Navlungo Check Post probe failed.';
+        return reply.code(502).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Body: { postNumber?: string } }>(
+    '/admin/diagnostics/navlungo/barcode',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!request.body?.postNumber?.trim()) {
+        return reply.code(400).send({ message: 'postNumber is required for the Navlungo Barcode probe.' });
+      }
+
+      return runNavlungoBarcodeProbeDiagnostics(request.body.postNumber);
     },
   );
 

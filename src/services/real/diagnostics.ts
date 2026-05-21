@@ -310,9 +310,55 @@ export type NavlungoCreatePostProbeDiagnostics = {
   referenceIdPresent: boolean;
   trackingUrlPresent: boolean;
   barcodeUrlPresent: boolean;
+  barcodePresent: boolean;
+  barcodeType: string | null;
+  carrierIdPresent: boolean;
+  carrierId: string | number | null;
+  carrierNamePresent: boolean;
+  carrierName: string | null;
+  postCarrierKeys: string[];
+  providerMessage: string | null;
+  errorMessage: string | null;
+};
+
+export type NavlungoCheckPostProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  postNumber: string;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  checkPostHttpStatus: number | null;
+  checkPostContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  dataShape: { kind: string; topLevelKeys: string[] } | null;
+  dataKeys: string[];
+  statusKeys: string[];
+  postNumberPresent: boolean;
+  trackingUrlPresent: boolean;
+  carrierTrackingUrlPresent: boolean;
+  barcodePresent: boolean;
+  barcodeType: string | null;
   carrierIdPresent: boolean;
   carrierNamePresent: boolean;
-  postCarrierKeys: string[];
+  statusCode: string | number | null;
+  statusName: string | null;
+  providerMessage: string | null;
+  errorMessage: string | null;
+};
+
+export type NavlungoBarcodeProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  postNumber: string;
+  barcodeEndpointPathKnown: boolean;
+  skippedReason: 'barcode_endpoint_path_unknown';
+  barcodeHttpStatus: number | null;
+  barcodeContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  barcodeFieldPresent: boolean;
+  barcodeUrlPresent: boolean;
+  barcodeBase64Present: boolean;
   providerMessage: string | null;
   errorMessage: string | null;
 };
@@ -378,6 +424,14 @@ export async function runNavlungoCarrierDiagnostics() {
 
 export async function runNavlungoCreatePostProbe(confirm: 'YES') {
   return apiClient.post<NavlungoCreatePostProbeDiagnostics>('/admin/diagnostics/navlungo/create-post-probe', { confirm });
+}
+
+export async function runNavlungoCheckPostProbe(postNumber: string) {
+  return apiClient.post<NavlungoCheckPostProbeDiagnostics>('/admin/diagnostics/navlungo/check-post', { postNumber });
+}
+
+export async function runNavlungoBarcodeProbe(postNumber: string) {
+  return apiClient.post<NavlungoBarcodeProbeDiagnostics>('/admin/diagnostics/navlungo/barcode', { postNumber });
 }
 
 export async function replayWebhook(webhookEventId: string) {

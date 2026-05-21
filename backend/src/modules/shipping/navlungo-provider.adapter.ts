@@ -364,6 +364,36 @@ export class NavlungoHttpClient {
     };
   }
 
+  async checkPost(accessToken: string, postNumber: string): Promise<NavlungoHttpResponse> {
+    const token = accessToken.trim();
+    const identifier = postNumber.trim();
+    if (!token) {
+      throw new Error('Navlungo access token is required for Check Post.');
+    }
+    if (!identifier) {
+      throw new Error('Navlungo post number is required for Check Post.');
+    }
+
+    const response = await this.fetchImpl(this.requestUrl(`/post/check/${encodeURIComponent(identifier)}`), {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-localization': 'en',
+      },
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseNavlungoResponseBody(contentType, responseText),
+    };
+  }
+
   requestUrl(path: string) {
     if (!this.env.NAVLUNGO_BASE_URL) {
       throw new Error('NAVLUNGO_BASE_URL is not configured.');

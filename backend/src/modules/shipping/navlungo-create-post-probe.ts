@@ -38,9 +38,55 @@ export type NavlungoCreatePostProbeDiagnostics = {
   referenceIdPresent: boolean;
   trackingUrlPresent: boolean;
   barcodeUrlPresent: boolean;
+  barcodePresent: boolean;
+  barcodeType: string | null;
+  carrierIdPresent: boolean;
+  carrierId: string | number | null;
+  carrierNamePresent: boolean;
+  carrierName: string | null;
+  postCarrierKeys: string[];
+  providerMessage: string | null;
+  errorMessage: string | null;
+};
+
+export type NavlungoCheckPostProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  postNumber: string;
+  authHttpStatus: number | null;
+  authContentType: string | null;
+  authTokenReceived: boolean;
+  checkPostHttpStatus: number | null;
+  checkPostContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  dataShape: { kind: string; topLevelKeys: string[] } | null;
+  dataKeys: string[];
+  statusKeys: string[];
+  postNumberPresent: boolean;
+  trackingUrlPresent: boolean;
+  carrierTrackingUrlPresent: boolean;
+  barcodePresent: boolean;
+  barcodeType: string | null;
   carrierIdPresent: boolean;
   carrierNamePresent: boolean;
-  postCarrierKeys: string[];
+  statusCode: string | number | null;
+  statusName: string | null;
+  providerMessage: string | null;
+  errorMessage: string | null;
+};
+
+export type NavlungoBarcodeProbeDiagnostics = {
+  provider: 'navlungo';
+  dormant: true;
+  postNumber: string;
+  barcodeEndpointPathKnown: boolean;
+  skippedReason: 'barcode_endpoint_path_unknown';
+  barcodeHttpStatus: number | null;
+  barcodeContentType: string | null;
+  responseShape: { kind: string; topLevelKeys: string[] } | null;
+  barcodeFieldPresent: boolean;
+  barcodeUrlPresent: boolean;
+  barcodeBase64Present: boolean;
   providerMessage: string | null;
   errorMessage: string | null;
 };
@@ -141,6 +187,11 @@ function readString(value: unknown, key: string) {
   return typeof field === 'string' && field.trim() ? field.trim() : null;
 }
 
+function readNumberOrString(value: unknown, key: string) {
+  const field = isRecord(value) ? value[key] : null;
+  return typeof field === 'string' || typeof field === 'number' ? field : null;
+}
+
 function responseKeys(value: unknown) {
   return isRecord(value) ? Object.keys(value) : [];
 }
@@ -235,6 +286,7 @@ export function buildNavlungoCreatePostProbePayload(env: ProbeEnv, now: () => nu
 export function summarizeNavlungoCreatePostResponse(body: unknown) {
   const data = isRecord(body) && Array.isArray(body.data) ? body.data[0] : readRecord(body, 'data');
   const responseRoot = isRecord(data) ? data : body;
+  const responseRecord = isRecord(responseRoot) ? responseRoot : {};
   const post = readRecord(responseRoot, 'post');
 
   return {
@@ -248,9 +300,36 @@ export function summarizeNavlungoCreatePostResponse(body: unknown) {
     referenceIdPresent: Boolean(readString(responseRoot, 'reference_id')),
     trackingUrlPresent: Boolean(readString(responseRoot, 'tracking_url')),
     barcodeUrlPresent: Boolean(readString(responseRoot, 'barcode_url')),
+    barcodePresent: responseRecord.barcode !== null && responseRecord.barcode !== undefined,
+    barcodeType: responseRecord.barcode === null || responseRecord.barcode === undefined ? null : Array.isArray(responseRecord.barcode) ? 'array' : typeof responseRecord.barcode,
+    carrierIdPresent: post ? post.carrier_id !== null && post.carrier_id !== undefined : false,
+    carrierId: post ? readNumberOrString(post, 'carrier_id') : null,
+    carrierNamePresent: Boolean(post ? readString(post, 'carrier_name') : null),
+    carrierName: post ? readString(post, 'carrier_name') : null,
+    postCarrierKeys: post ? responseKeys(post).filter((key) => key.toLowerCase().includes('carrier')) : [],
+    providerMessage: readString(body, 'message') ?? readString(body, 'error'),
+  };
+}
+
+export function summarizeNavlungoCheckPostResponse(body: unknown) {
+  const data = readRecord(body, 'data');
+  const post = readRecord(data, 'post');
+  const status = readRecord(data, 'status');
+
+  return {
+    responseShape: summarizeShape(body),
+    dataShape: data ? summarizeShape(data) : null,
+    dataKeys: data ? responseKeys(data) : [],
+    statusKeys: status ? responseKeys(status) : [],
+    postNumberPresent: Boolean(data ? readString(data, 'post_number') : null),
+    trackingUrlPresent: Boolean(data ? readString(data, 'tracking_url') : null),
+    carrierTrackingUrlPresent: Boolean(data ? readString(data, 'carrier_tracking_url') : null),
+    barcodePresent: data ? data.barcode !== null && data.barcode !== undefined : false,
+    barcodeType: data && data.barcode !== null && data.barcode !== undefined ? (Array.isArray(data.barcode) ? 'array' : typeof data.barcode) : null,
     carrierIdPresent: post ? post.carrier_id !== null && post.carrier_id !== undefined : false,
     carrierNamePresent: Boolean(post ? readString(post, 'carrier_name') : null),
-    postCarrierKeys: post ? responseKeys(post).filter((key) => key.toLowerCase().includes('carrier')) : [],
+    statusCode: status ? readNumberOrString(status, 'status_code') : null,
+    statusName: status ? readString(status, 'status_name') : null,
     providerMessage: readString(body, 'message') ?? readString(body, 'error'),
   };
 }
@@ -321,8 +400,12 @@ export async function runManualNavlungoCreatePostProbe(options: ProbeOptions = {
     referenceIdPresent: diagnostics.referenceIdPresent,
     trackingUrlPresent: diagnostics.trackingUrlPresent,
     barcodeUrlPresent: diagnostics.barcodeUrlPresent,
+    barcodePresent: diagnostics.barcodePresent,
+    barcodeType: diagnostics.barcodeType,
     carrierIdPresent: diagnostics.carrierIdPresent,
+    carrierId: diagnostics.carrierId,
     carrierNamePresent: diagnostics.carrierNamePresent,
+    carrierName: diagnostics.carrierName,
     postCarrierKeys: diagnostics.postCarrierKeys,
     providerMessage: diagnostics.providerMessage,
     errorMessage: diagnostics.errorMessage,
@@ -370,6 +453,68 @@ export async function runNavlungoCreatePostProbeDiagnostics(options: ProbeOption
     createPostHttpStatus: createResponse.status,
     createPostContentType: createResponse.contentType,
     ...summary,
+    errorMessage: null,
+  };
+}
+
+export async function runNavlungoCheckPostProbeDiagnostics(options: ProbeOptions & { postNumber: string }): Promise<NavlungoCheckPostProbeDiagnostics> {
+  const env = options.env ?? process.env;
+  const postNumber = options.postNumber.trim();
+  if (!postNumber) {
+    throw new Error('postNumber is required for the Navlungo Check Post probe.');
+  }
+
+  const client = new NavlungoHttpClient(
+    {
+      NAVLUNGO_BASE_URL: typeof env.NAVLUNGO_BASE_URL === 'string' ? env.NAVLUNGO_BASE_URL : undefined,
+      NAVLUNGO_API_USERNAME: typeof env.NAVLUNGO_API_USERNAME === 'string' ? env.NAVLUNGO_API_USERNAME : undefined,
+      NAVLUNGO_API_PASSWORD: typeof env.NAVLUNGO_API_PASSWORD === 'string' ? env.NAVLUNGO_API_PASSWORD : undefined,
+    },
+    { fetchImpl: options.fetchImpl },
+  );
+
+  const authResponse = await client.createAuthToken();
+  const accessToken = getNavlungoAccessTokenFromAuthBody(authResponse.body);
+  if (!accessToken) {
+    throw new Error('Navlungo auth response did not include a usable access token.');
+  }
+
+  const checkResponse = await client.checkPost(accessToken, postNumber);
+  const summary = summarizeNavlungoCheckPostResponse(checkResponse.body);
+
+  return {
+    provider: 'navlungo',
+    dormant: true,
+    postNumber,
+    authHttpStatus: authResponse.status,
+    authContentType: authResponse.contentType,
+    authTokenReceived: Boolean(accessToken),
+    checkPostHttpStatus: checkResponse.status,
+    checkPostContentType: checkResponse.contentType,
+    ...summary,
+    errorMessage: null,
+  };
+}
+
+export function runNavlungoBarcodeProbeDiagnostics(postNumber: string): NavlungoBarcodeProbeDiagnostics {
+  const normalizedPostNumber = postNumber.trim();
+  if (!normalizedPostNumber) {
+    throw new Error('postNumber is required for the Navlungo Barcode probe.');
+  }
+
+  return {
+    provider: 'navlungo',
+    dormant: true,
+    postNumber: normalizedPostNumber,
+    barcodeEndpointPathKnown: false,
+    skippedReason: 'barcode_endpoint_path_unknown',
+    barcodeHttpStatus: null,
+    barcodeContentType: null,
+    responseShape: null,
+    barcodeFieldPresent: false,
+    barcodeUrlPresent: false,
+    barcodeBase64Present: false,
+    providerMessage: 'Official Navlungo Barcode > Get Barcode page does not expose an endpoint path in the reviewed HTML.',
     errorMessage: null,
   };
 }

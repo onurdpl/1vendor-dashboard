@@ -3,8 +3,11 @@ import { registerDiagnosticsRoutes } from '../backend/src/modules/diagnostics/di
 import {
   buildNavlungoCreatePostProbePayload,
   parseNavlungoCreatePostProbeCarrierId,
+  runNavlungoBarcodeProbeDiagnostics,
+  runNavlungoCheckPostProbeDiagnostics,
   runManualNavlungoCreatePostProbe,
   sanitizeNavlungoProbeOutput,
+  summarizeNavlungoCheckPostResponse,
   summarizeNavlungoCreatePostResponse,
   validateNavlungoCreatePostProbeEnv,
 } from '../backend/src/modules/shipping/navlungo-create-post-probe.js';
@@ -81,11 +84,35 @@ function buildMockFetch() {
       });
     }
 
+    if (String(url).includes('/post/check/')) {
+      return new Response(JSON.stringify({
+        status: true,
+        message: null,
+        data: {
+          post_number: 'NP12345',
+          tracking_url: 'https://track.example.test/check/NP12345',
+          barcode: 'https://barcode.example.test/NP12345.pdf',
+          post: {
+            carrier_id: 9,
+            carrier_name: 'Sürat Kargo',
+          },
+          status: {
+            status_code: 1,
+            status_name: 'To be Picked Up',
+          },
+        },
+      }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+
     return new Response(JSON.stringify({
       post_number: 'NP12345',
       reference_id: 'NAVLUNGO-PROBE-1700000000000',
       tracking_url: 'https://track.example.test/check/NP12345',
       barcode_url: 'https://barcode.example.test/NP12345.pdf',
+      barcode: 'https://barcode.example.test/NP12345.pdf',
       post: {
         carrier_id: 9,
         carrier_name: 'Sürat Kargo',
@@ -235,6 +262,7 @@ describe('manual Navlungo Create Post probe', () => {
     expect(output).toContain('"postNumber": "NP12345"');
     expect(output).toContain('"trackingUrlPresent": true');
     expect(output).toContain('"barcodeUrlPresent": true');
+    expect(output).toContain('"barcodePresent": true');
   });
 
   it('captures post number, tracking, barcode, and carrier presence', () => {
@@ -244,6 +272,7 @@ describe('manual Navlungo Create Post probe', () => {
         reference_id: 'REF-1',
         tracking_url: 'https://track.example.test/check/NP12345',
         barcode_url: 'https://barcode.example.test/NP12345.pdf',
+        barcode: 'https://barcode.example.test/NP12345.pdf',
         post: {
           carrier_id: 9,
           carrier_name: 'Sürat Kargo',
@@ -256,9 +285,115 @@ describe('manual Navlungo Create Post probe', () => {
       referenceIdPresent: true,
       trackingUrlPresent: true,
       barcodeUrlPresent: true,
+      barcodePresent: true,
+      barcodeType: 'string',
+      carrierIdPresent: true,
+      carrierId: 9,
+      carrierNamePresent: true,
+      carrierName: 'Sürat Kargo',
+      postCarrierKeys: ['carrier_id', 'carrier_name'],
+    });
+  });
+
+  it('captures live-style data wrapped Create Post response fields', () => {
+    expect(
+      summarizeNavlungoCreatePostResponse({
+        status: true,
+        message: 'Your transaction will be successfully created if your wallet balance is sufficient.',
+        data: {
+          post_number: 'NP12345',
+          reference_id: 'REF-1',
+          tracking_url: 'https://track.example.test/check/NP12345',
+          barcode: 'https://barcode.example.test/NP12345.pdf',
+          post: {
+            carrier_id: 9,
+            carrier_name: 'Sürat Kargo',
+          },
+        },
+      }),
+    ).toMatchObject({
+      dataKeys: ['post_number', 'reference_id', 'tracking_url', 'barcode', 'post'],
+      postNumber: 'NP12345',
+      trackingUrlPresent: true,
+      barcodeUrlPresent: false,
+      barcodePresent: true,
+      carrierId: 9,
+      carrierName: 'Sürat Kargo',
+      providerMessage: 'Your transaction will be successfully created if your wallet balance is sufficient.',
+    });
+  });
+
+  it('summarizes Check Post response fields safely', () => {
+    expect(
+      summarizeNavlungoCheckPostResponse({
+        status: true,
+        message: null,
+        data: {
+          post_number: 'NP12345',
+          tracking_url: 'https://track.example.test/check/NP12345',
+          carrier_tracking_url: 'https://carrier.example.test/NP12345',
+          barcode: 'https://barcode.example.test/NP12345.pdf',
+          post: {
+            carrier_id: 9,
+            carrier_name: 'Sürat Kargo',
+          },
+          status: {
+            status_code: 1,
+            status_name: 'To be Picked Up',
+          },
+        },
+      }),
+    ).toMatchObject({
+      postNumberPresent: true,
+      trackingUrlPresent: true,
+      carrierTrackingUrlPresent: true,
+      barcodePresent: true,
+      barcodeType: 'string',
       carrierIdPresent: true,
       carrierNamePresent: true,
-      postCarrierKeys: ['carrier_id', 'carrier_name'],
+      statusCode: 1,
+      statusName: 'To be Picked Up',
+    });
+  });
+
+  it('Check Post probe uses returned post_number and does not create posts', async () => {
+    const { calls, fetchImpl } = buildMockFetch();
+
+    const result = await runNavlungoCheckPostProbeDiagnostics({
+      env: buildProbeEnv(),
+      fetchImpl,
+      postNumber: 'NP12345',
+    });
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
+      ['GET', 'https://domestic-api.navlungo.com/v2/post/check/NP12345'],
+    ]);
+    expect(calls.some((call) => call.url.includes('post/create'))).toBe(false);
+    expect(result).toMatchObject({
+      postNumber: 'NP12345',
+      checkPostHttpStatus: 200,
+      trackingUrlPresent: true,
+      barcodePresent: true,
+      carrierIdPresent: true,
+      carrierNamePresent: true,
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-access-token');
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+  });
+
+  it('Barcode probe is gated by post_number and does not guess endpoint path', () => {
+    expect(() => runNavlungoBarcodeProbeDiagnostics('')).toThrow('postNumber is required for the Navlungo Barcode probe.');
+    expect(runNavlungoBarcodeProbeDiagnostics('NP12345')).toMatchObject({
+      provider: 'navlungo',
+      dormant: true,
+      postNumber: 'NP12345',
+      barcodeEndpointPathKnown: false,
+      skippedReason: 'barcode_endpoint_path_unknown',
+      barcodeHttpStatus: null,
+      barcodeFieldPresent: false,
+      barcodeUrlPresent: false,
+      barcodeBase64Present: false,
     });
   });
 
@@ -351,8 +486,12 @@ describe('manual Navlungo Create Post probe', () => {
         postNumber: 'NP12345',
         trackingUrlPresent: true,
         barcodeUrlPresent: true,
+        barcodePresent: true,
+        barcodeType: 'string',
         carrierIdPresent: true,
+        carrierId: 9,
         carrierNamePresent: true,
+        carrierName: 'Sürat Kargo',
       });
       expect(calls.map((call) => [call.init.method, call.url])).toEqual([
         ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
