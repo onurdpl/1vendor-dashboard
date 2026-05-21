@@ -1239,6 +1239,130 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
   });
 
+  it('reuses stale Navlungo execution row and persists successful provider fields on vendor create', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        error: 'Provider did not return a shipment id or tracking yet.',
+      },
+    });
+    storedExecution = existing;
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-navlungo-55578',
+          configId: 'shipping-config-sporjinal',
+          vendorId: 'sporjinal',
+          provider: 'NAVLUNGO',
+          warehouseId: '55578',
+          name: 'Navlungo sender address',
+          address: null,
+          isDefault: true,
+          metadata: null,
+          createdAt: new Date('2026-05-15T10:00:00.000Z'),
+          updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      ],
+      providerMetadata: {
+        navlungoSenderAddressId: '55578',
+        navlungoCarrierId: '9',
+        navlungoBarcodeFormat: 'pdf-A6',
+      },
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-POST-1048',
+      trackingNumber: 'NAV-TRACK-1048',
+      trackingUrl: 'https://track.navlungo.test/NAV-POST-1048',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        providerShipmentId: 'NAV-POST-1048',
+        trackingNumberPresent: true,
+        trackingUrlPresent: true,
+        barcode: 'barcode-string',
+        carrierName: 'Sürat Kargo',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'navlungo',
+          SHIPPING_EXECUTION_ENABLED: true,
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(result).toMatchObject({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-POST-1048',
+      trackingNumber: 'NAV-TRACK-1048',
+      trackingUrl: 'https://track.navlungo.test/NAV-POST-1048',
+      labelUrl: 'barcode-string',
+      barcode: 'barcode-string',
+    });
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-navlungo-alloc-1' },
+        data: expect.objectContaining({
+          providerShipmentId: 'NAV-POST-1048',
+          trackingNumber: 'NAV-TRACK-1048',
+          trackingUrl: 'https://track.navlungo.test/NAV-POST-1048',
+          labelUrl: 'barcode-string',
+          shipmentStatus: 'CREATED',
+        }),
+      }),
+    );
+  });
+
   it('does not call the provider again when an existing pending dry-run shipment is present', async () => {
     const existing = buildShipmentExecution({
       provider: 'KARGO_ENTEGRATOR',

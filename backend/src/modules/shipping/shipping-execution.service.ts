@@ -2154,6 +2154,53 @@ function assertFailedRetryEligible(execution: ShipmentExecution) {
   }
 }
 
+function hasPersistedShipmentEvidence(execution: ShipmentExecution) {
+  return Boolean(execution.providerShipmentId || execution.trackingNumber || execution.trackingUrl || execution.labelUrl);
+}
+
+function getRecordField(value: unknown, key: string) {
+  return isRecord(value) ? value[key] : undefined;
+}
+
+function readNavlungoSnapshotEvidence(snapshot: unknown) {
+  const data = getRecordField(snapshot, 'data');
+  const post = getRecordField(data, 'post') ?? getRecordField(snapshot, 'post');
+  const providerShipmentId =
+    readString(snapshot, ['providerShipmentId', 'post_number', 'postNumber']) ??
+    readString(data, ['post_number', 'postNumber']);
+  const trackingNumber =
+    readString(snapshot, ['trackingNumber', 'carrier_tracking_code', 'carrierTrackingCode', 'carrier_post_number', 'carrierPostNumber']) ??
+    readString(data, ['carrier_tracking_code', 'carrierTrackingCode', 'carrier_post_number', 'carrierPostNumber']) ??
+    providerShipmentId;
+  const trackingUrl =
+    readString(snapshot, ['trackingUrl', 'carrier_tracking_url', 'carrierTrackingUrl', 'tracking_url', 'trackingUrl']) ??
+    readString(data, ['carrier_tracking_url', 'carrierTrackingUrl', 'tracking_url', 'trackingUrl']);
+  const labelUrl =
+    readString(snapshot, ['labelUrl', 'barcode', 'barcode_url', 'barcodeUrl']) ??
+    readString(data, ['barcode', 'barcode_url', 'barcodeUrl']);
+  const carrierName = readString(post, ['carrier_name', 'carrierName']);
+  const carrierId = readString(post, ['carrier_id', 'carrierId']);
+  const status = getRecordField(data, 'status') ?? getRecordField(snapshot, 'statusField') ?? getRecordField(snapshot, 'status');
+
+  if (!providerShipmentId && !trackingNumber && !trackingUrl && !labelUrl) {
+    return null;
+  }
+
+  return {
+    providerShipmentId,
+    trackingNumber,
+    trackingUrl,
+    labelUrl,
+    carrierName,
+    carrierId,
+    statusField: isRecord(status)
+      ? readString(status, ['status_name', 'statusName', 'name']) ?? readString(status, ['status_code', 'statusCode', 'code'])
+      : typeof status === 'string'
+        ? status
+        : null,
+  };
+}
+
 function getWebhookData(payload: unknown) {
   if (!isRecord(payload)) {
     return {};
@@ -4685,6 +4732,94 @@ export async function createShipmentExecution(
     },
   });
   if (existing) {
+    if (
+      provider === ShippingProvider.NAVLUNGO &&
+      !hasPersistedShipmentEvidence(existing) &&
+      (existing.shipmentStatus === ShipmentExecutionStatus.PENDING || existing.shipmentStatus === ShipmentExecutionStatus.FAILED)
+    ) {
+      const recoveredEvidence = readNavlungoSnapshotEvidence(existing.responseSnapshot);
+      if (recoveredEvidence) {
+        return persistProviderShipmentResult({
+          executionId: existing.id,
+          allocation,
+          provider,
+          result: {
+            providerShipmentId: recoveredEvidence.providerShipmentId,
+            trackingNumber: recoveredEvidence.trackingNumber,
+            trackingUrl: recoveredEvidence.trackingUrl,
+            labelUrl: recoveredEvidence.labelUrl,
+            shipmentStatus: 'created',
+            shippingCost: null,
+            shippingVat: null,
+            currency: 'TRY',
+            responseSnapshot: {
+              ...(isRecord(existing.responseSnapshot) ? existing.responseSnapshot : {}),
+              ok: true,
+              providerShipmentId: recoveredEvidence.providerShipmentId,
+              trackingNumberPresent: Boolean(recoveredEvidence.trackingNumber),
+              trackingUrlPresent: Boolean(recoveredEvidence.trackingUrl),
+              labelUrlPresent: Boolean(recoveredEvidence.labelUrl),
+              barcodePresent: Boolean(recoveredEvidence.labelUrl),
+              barcode: recoveredEvidence.labelUrl,
+              carrierName: recoveredEvidence.carrierName,
+              carrierId: recoveredEvidence.carrierId,
+              statusField: recoveredEvidence.statusField,
+              navlungoPersistenceRecovery: true,
+              lastProviderResponseAt: new Date().toISOString(),
+            },
+          },
+        });
+      }
+
+      const retrySnapshot = appendTimelineEvent(existing.responseSnapshot, {
+        label: 'Retry attempted',
+        status: 'pending',
+      });
+      const requestSnapshot = preview.payload;
+      await prisma.shipmentExecution.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          shipmentStatus: ShipmentExecutionStatus.PENDING,
+          desi: Number(preview.desi),
+          cargoIntegrationId: preview.cargoIntegrationId,
+          warehouseId: preview.warehouseId,
+          requestSnapshot: requestSnapshot as Prisma.InputJsonValue,
+          responseSnapshot: retrySnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      try {
+        const adapter = options.adapter ?? createShippingProviderAdapter(options.env, providerDto);
+        logKargoExecutionModeSelection(input, preview, options.env);
+        const result = await adapter.createShipment({
+          allocationId: allocation.id,
+          vendorId: allocation.assignedVendorId,
+          provider: providerDto,
+          requestSnapshot,
+        });
+        return persistProviderShipmentResult({
+          executionId: existing.id,
+          allocation,
+          provider,
+          result,
+        });
+      } catch (error) {
+        const failed = await prisma.shipmentExecution.update({
+          where: {
+            id: existing.id,
+          },
+          data: {
+            shipmentStatus: ShipmentExecutionStatus.FAILED,
+            responseSnapshot: buildProviderFailureSnapshot(error, provider, retrySnapshot),
+          },
+        });
+
+        return mapShipmentExecution(failed);
+      }
+    }
+
     return getShipmentExecutionById(existing.id, options.vendorId) as Promise<ShipmentExecutionDto>;
   }
 
