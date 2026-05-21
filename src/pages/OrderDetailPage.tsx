@@ -5390,6 +5390,50 @@ export function OrderDetailPage() {
                           </strong>
                         </div>
                         <div className="summary-row">
+                          <span>Data shape</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.responseDataShapeSummary
+                              ? `${navlungoAuthDiagnostics.responseDataShapeSummary.kind}${
+                                  navlungoAuthDiagnostics.responseDataShapeSummary.topLevelKeys.length
+                                    ? ` · ${navlungoAuthDiagnostics.responseDataShapeSummary.topLevelKeys.join(', ')}`
+                                    : ''
+                                }`
+                              : '—'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Access token field</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.tokenKeyPresence.rootAccessToken
+                              ? 'root.access_token'
+                              : navlungoAuthDiagnostics.tokenKeyPresence.dataAccessToken
+                                ? 'data.access_token'
+                                : navlungoAuthDiagnostics.tokenKeyPresence.dataToken
+                                  ? 'data.token'
+                                  : navlungoAuthDiagnostics.tokenKeyPresence.anyTokenLikeKey
+                                    ? 'other token-like key'
+                                    : 'not present'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Refresh token field</span>
+                          <strong>
+                            {navlungoAuthDiagnostics.refreshTokenKeyPresence.rootRefreshToken
+                              ? 'root.refresh_token'
+                              : navlungoAuthDiagnostics.refreshTokenKeyPresence.dataRefreshToken
+                                ? 'data.refresh_token'
+                                : 'not present'}
+                          </strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>token_type present</span>
+                          <strong>{navlungoAuthDiagnostics.tokenTypePresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>expires_in present</span>
+                          <strong>{navlungoAuthDiagnostics.expiresInPresent ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
                           <span>Token received</span>
                           <strong>{navlungoAuthDiagnostics.tokenReceived ? 'yes' : 'no'}</strong>
                         </div>

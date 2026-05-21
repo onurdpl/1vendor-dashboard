@@ -352,8 +352,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       authContentType: 'application/json',
       responseShapeSummary: {
         kind: 'json:object',
+        topLevelKeys: ['status', 'message', 'data'],
+      },
+      responseDataShapeSummary: {
+        kind: 'json:object',
         topLevelKeys: ['token_type', 'expires_in', 'access_token', 'refresh_token'],
       },
+      tokenKeyPresence: {
+        rootAccessToken: false,
+        dataAccessToken: true,
+        dataToken: false,
+        anyTokenLikeKey: true,
+      },
+      refreshTokenKeyPresence: {
+        rootRefreshToken: false,
+        dataRefreshToken: true,
+      },
+      expiresInPresent: true,
+      tokenTypePresent: true,
       tokenReceived: true,
       refreshTokenReceived: true,
       expiresIn: 86400,
@@ -1490,6 +1506,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
     expect(screen.getByText('domestic-api.navlungo.com/v2')).toBeInTheDocument();
     expect(screen.getByText('Auth result').closest('.summary-row')).toHaveTextContent('200');
+    expect(screen.getByText('Response shape').closest('.summary-row')).toHaveTextContent('status, message, data');
+    expect(screen.getByText('Data shape').closest('.summary-row')).toHaveTextContent('access_token');
+    expect(screen.getByText('Access token field').closest('.summary-row')).toHaveTextContent('data.access_token');
+    expect(screen.getByText('Refresh token field').closest('.summary-row')).toHaveTextContent('data.refresh_token');
+    expect(screen.getByText('token_type present').closest('.summary-row')).toHaveTextContent('yes');
+    expect(screen.getByText('expires_in present').closest('.summary-row')).toHaveTextContent('yes');
     expect(screen.getByText('Token received').closest('.summary-row')).toHaveTextContent('yes');
     expect(screen.getByText('Expires in').closest('.summary-row')).toHaveTextContent('86400');
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();

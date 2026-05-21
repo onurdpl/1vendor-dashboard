@@ -142,10 +142,71 @@ describe('Navlungo dormant auth scaffold', () => {
         kind: 'json:object',
         topLevelKeys: ['token_type', 'expires_in', 'access_token', 'refresh_token'],
       },
+      responseDataShapeSummary: null,
+      tokenKeyPresence: {
+        rootAccessToken: true,
+        dataAccessToken: false,
+        dataToken: false,
+        anyTokenLikeKey: true,
+      },
+      refreshTokenKeyPresence: {
+        rootRefreshToken: true,
+        dataRefreshToken: false,
+      },
+      expiresInPresent: true,
+      tokenTypePresent: true,
     });
     expect(JSON.stringify(result)).not.toContain('secret-password');
     expect(JSON.stringify(result)).not.toContain('secret-access-token');
     expect(JSON.stringify(result)).not.toContain('secret-refresh-token');
+  });
+
+  it('detects live-style data-wrapped auth tokens without exposing token values', async () => {
+    const fetchImpl = (async () => new Response(JSON.stringify({
+      status: true,
+      message: 'Success',
+      data: {
+        token_type: 'Bearer',
+        expires_in: 86400,
+        access_token: 'secret-data-access-token',
+        refresh_token: 'secret-data-refresh-token',
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as typeof fetch;
+
+    const result = await runNavlungoAuthDiagnostics(buildEnv(), { fetchImpl });
+
+    expect(result).toMatchObject({
+      authHttpStatus: 200,
+      responseShapeSummary: {
+        kind: 'json:object',
+        topLevelKeys: ['status', 'message', 'data'],
+      },
+      responseDataShapeSummary: {
+        kind: 'json:object',
+        topLevelKeys: ['token_type', 'expires_in', 'access_token', 'refresh_token'],
+      },
+      tokenKeyPresence: {
+        rootAccessToken: false,
+        dataAccessToken: true,
+        dataToken: false,
+        anyTokenLikeKey: true,
+      },
+      refreshTokenKeyPresence: {
+        rootRefreshToken: false,
+        dataRefreshToken: true,
+      },
+      expiresInPresent: true,
+      tokenTypePresent: true,
+      tokenReceived: true,
+      refreshTokenReceived: true,
+      expiresIn: 86400,
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+    expect(JSON.stringify(result)).not.toContain('secret-data-access-token');
+    expect(JSON.stringify(result)).not.toContain('secret-data-refresh-token');
   });
 
   it('returns network failure diagnostics safely', async () => {
@@ -157,6 +218,12 @@ describe('Navlungo dormant auth scaffold', () => {
       authRequestUrl: '/v2/auth/api',
       authHttpStatus: null,
       tokenReceived: false,
+      tokenKeyPresence: {
+        rootAccessToken: false,
+        dataAccessToken: false,
+        dataToken: false,
+        anyTokenLikeKey: false,
+      },
       fetchError: {
         name: 'TypeError',
         message: 'fetch failed',
@@ -216,6 +283,13 @@ describe('Navlungo auth diagnostics route', () => {
         passwordPresent: true,
         authHttpStatus: 200,
         tokenReceived: true,
+        responseDataShapeSummary: null,
+        tokenKeyPresence: {
+          rootAccessToken: true,
+          dataAccessToken: false,
+          dataToken: false,
+          anyTokenLikeKey: true,
+        },
       });
       expect(JSON.stringify(result)).not.toContain('secret-password');
       expect(JSON.stringify(result)).not.toContain('secret-access-token');

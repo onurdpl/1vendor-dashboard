@@ -34,6 +34,22 @@ export type NavlungoAuthDiagnostics = {
     kind: string;
     topLevelKeys: string[];
   } | null;
+  responseDataShapeSummary: {
+    kind: string;
+    topLevelKeys: string[];
+  } | null;
+  tokenKeyPresence: {
+    rootAccessToken: boolean;
+    dataAccessToken: boolean;
+    dataToken: boolean;
+    anyTokenLikeKey: boolean;
+  };
+  refreshTokenKeyPresence: {
+    rootRefreshToken: boolean;
+    dataRefreshToken: boolean;
+  };
+  expiresInPresent: boolean;
+  tokenTypePresent: boolean;
   tokenReceived: boolean;
   refreshTokenReceived: boolean;
   expiresIn: number | string | null;
@@ -101,6 +117,24 @@ function summarizeResponseShape(value: unknown): NavlungoAuthDiagnostics['respon
     kind: typeof value,
     topLevelKeys: [],
   };
+}
+
+function getTrimmedString(record: Record<string, unknown>, key: string) {
+  const value = record[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function hasNonEmptyString(record: Record<string, unknown>, key: string) {
+  return getTrimmedString(record, key) !== null;
+}
+
+function hasTokenLikeKey(record: Record<string, unknown>) {
+  return Object.keys(record).some((key) => key.toLowerCase().includes('token'));
+}
+
+function getAuthExpiresIn(root: Record<string, unknown>, data: Record<string, unknown>) {
+  const value = root.expires_in ?? data.expires_in;
+  return typeof value === 'string' || typeof value === 'number' ? value : null;
 }
 
 function summarizeFetchError(error: unknown): NavlungoAuthDiagnostics['fetchError'] {
@@ -217,6 +251,19 @@ export async function runNavlungoAuthDiagnostics(
     authHttpStatus: null,
     authContentType: null,
     responseShapeSummary: null,
+    responseDataShapeSummary: null,
+    tokenKeyPresence: {
+      rootAccessToken: false,
+      dataAccessToken: false,
+      dataToken: false,
+      anyTokenLikeKey: false,
+    },
+    refreshTokenKeyPresence: {
+      rootRefreshToken: false,
+      dataRefreshToken: false,
+    },
+    expiresInPresent: false,
+    tokenTypePresent: false,
     tokenReceived: false,
     refreshTokenReceived: false,
     expiresIn: null,
@@ -227,19 +274,40 @@ export async function runNavlungoAuthDiagnostics(
     const client = new NavlungoHttpClient(env, options);
     const response = await client.createAuthToken();
     const body = isRecord(response.body) ? response.body : {};
+    const data = isRecord(body.data) ? body.data : {};
+    const rootAccessToken = hasNonEmptyString(body, 'access_token');
+    const dataAccessToken = hasNonEmptyString(data, 'access_token');
+    const dataToken = hasNonEmptyString(data, 'token');
+    const rootRefreshToken = hasNonEmptyString(body, 'refresh_token');
+    const dataRefreshToken = hasNonEmptyString(data, 'refresh_token');
+    const expiresIn = getAuthExpiresIn(body, data);
     return {
       ...base,
       authHttpStatus: response.status,
       authContentType: response.contentType,
       responseShapeSummary: summarizeResponseShape(response.body),
-      tokenReceived: typeof body.access_token === 'string' && Boolean(body.access_token.trim()),
-      refreshTokenReceived: typeof body.refresh_token === 'string' && Boolean(body.refresh_token.trim()),
-      expiresIn: typeof body.expires_in === 'string' || typeof body.expires_in === 'number' ? body.expires_in : null,
+      responseDataShapeSummary: isRecord(body.data) ? summarizeResponseShape(body.data) : null,
+      tokenKeyPresence: {
+        rootAccessToken,
+        dataAccessToken,
+        dataToken,
+        anyTokenLikeKey: hasTokenLikeKey(body) || hasTokenLikeKey(data),
+      },
+      refreshTokenKeyPresence: {
+        rootRefreshToken,
+        dataRefreshToken,
+      },
+      expiresInPresent: expiresIn !== null,
+      tokenTypePresent: hasNonEmptyString(body, 'token_type') || hasNonEmptyString(data, 'token_type'),
+      tokenReceived: rootAccessToken || dataAccessToken || dataToken,
+      refreshTokenReceived: rootRefreshToken || dataRefreshToken,
+      expiresIn,
     };
   } catch (error) {
     return {
       ...base,
       responseShapeSummary: null,
+      responseDataShapeSummary: null,
       fetchError: summarizeFetchError(error),
     };
   }

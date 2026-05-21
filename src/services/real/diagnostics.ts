@@ -268,6 +268,19 @@ export type NavlungoAuthDiagnostics = {
   authHttpStatus: number | null;
   authContentType: string | null;
   responseShapeSummary: { kind: string; topLevelKeys: string[] } | null;
+  responseDataShapeSummary: { kind: string; topLevelKeys: string[] } | null;
+  tokenKeyPresence: {
+    rootAccessToken: boolean;
+    dataAccessToken: boolean;
+    dataToken: boolean;
+    anyTokenLikeKey: boolean;
+  };
+  refreshTokenKeyPresence: {
+    rootRefreshToken: boolean;
+    dataRefreshToken: boolean;
+  };
+  expiresInPresent: boolean;
+  tokenTypePresent: boolean;
   tokenReceived: boolean;
   refreshTokenReceived: boolean;
   expiresIn: number | string | null;

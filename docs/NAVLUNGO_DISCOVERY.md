@@ -476,7 +476,9 @@ Current diagnostics status:
   - username/password presence booleans
   - auth HTTP status
   - response shape summary
+  - nested `data` shape summary, when present
   - token presence booleans
+  - token-like key location booleans (`root.access_token`, `data.access_token`, `data.token`)
   - `expires_in`, when present
   - fetch/network error diagnostics
 - The endpoint never returns:
@@ -484,6 +486,16 @@ Current diagnostics status:
   - access token
   - refresh token
 - The auth probe does not create shipments, write to the DB, or use customer/order data.
+
+Observed auth response shape:
+
+- Official docs still show token fields at the response root.
+- Deployed diagnostics observed HTTP 200 with top-level keys:
+  - `status`
+  - `message`
+  - `data`
+- The exact live token field inside `data` must be confirmed by rerunning the sanitized auth diagnostic after deployment.
+- Parser support now keeps the documented root shape and also accepts `data.access_token` or `data.token` if present.
 
 ## 17. Critical Unknowns Before Implementation
 
