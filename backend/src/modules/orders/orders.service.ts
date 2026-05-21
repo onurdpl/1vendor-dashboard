@@ -588,6 +588,9 @@ function buildShipmentProviderResponseSummary(
     providerMode: readString(snapshot, ['providerMode']),
     providerApiCallAttempted:
       typeof snapshot?.providerApiCallAttempted === 'boolean' ? snapshot.providerApiCallAttempted : null,
+    senderAddressIdPresent: typeof snapshot?.senderAddressIdPresent === 'boolean' ? snapshot.senderAddressIdPresent : null,
+    senderAddressIdValid: typeof snapshot?.senderAddressIdValid === 'boolean' ? snapshot.senderAddressIdValid : null,
+    senderUsesAddressId: typeof snapshot?.senderUsesAddressId === 'boolean' ? snapshot.senderUsesAddressId : null,
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
       typeof snapshot?.createShipmentCalled === 'boolean'

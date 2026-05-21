@@ -336,6 +336,8 @@ export function summarizeNavlungoCheckPostResponse(body: unknown) {
 
 function buildPayloadSummary(payload: NavlungoCreatePostPayload, senderAddressId: string) {
   const post = payload.posts[0];
+  const sender = post.sender;
+  const senderUsesAddressId = 'addressId' in sender;
   return {
     platform: payload.platform,
     referenceId: post.reference_id,
@@ -345,8 +347,9 @@ function buildPayloadSummary(payload: NavlungoCreatePostPayload, senderAddressId
     codPaymentIncluded: post.cod_payment_type !== undefined,
     priceIncluded: post.post.price !== undefined,
     senderAddressIdConfigured: Boolean(senderAddressId.trim()),
-    senderCity: post.sender.city,
-    senderDistrict: post.sender.district,
+    senderUsesAddressId,
+    senderCity: senderUsesAddressId ? null : sender.city,
+    senderDistrict: senderUsesAddressId ? null : sender.district,
     recipientCity: post.recipient.city,
     recipientDistrict: post.recipient.district,
     packageCount: post.post.package_count,

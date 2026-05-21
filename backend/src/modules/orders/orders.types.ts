@@ -275,6 +275,9 @@ export type OrderShipmentExecutionDto = {
     requestTargetHostname?: string | null;
     providerMode?: string | null;
     providerApiCallAttempted?: boolean | null;
+    senderAddressIdPresent?: boolean | null;
+    senderAddressIdValid?: boolean | null;
+    senderUsesAddressId?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;
     priceComparisonCalled?: boolean | null;

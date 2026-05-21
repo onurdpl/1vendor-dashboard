@@ -2156,6 +2156,14 @@ export function OrderDetailPage() {
           </strong>
         </div>
         <div className="summary-row">
+          <span>Sender address ID</span>
+          <strong>
+            present {formatDiagnosticPresence(summary.senderAddressIdPresent)} · valid{' '}
+            {formatDiagnosticPresence(summary.senderAddressIdValid)} · addressId sender{' '}
+            {formatDiagnosticPresence(summary.senderUsesAddressId)}
+          </strong>
+        </div>
+        <div className="summary-row">
           <span>Real path provider result</span>
           <strong>
             HTTP {summary.realPathCreatePostHttpStatus ?? '—'} · post{' '}

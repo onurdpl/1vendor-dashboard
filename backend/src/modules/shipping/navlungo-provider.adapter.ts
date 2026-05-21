@@ -132,16 +132,20 @@ export type NavlungoCreatePostPayload = {
     carrier_id: number;
     post_type: number;
     cod_payment_type?: number | string;
-    sender: {
-      name: string;
-      phone: string;
-      email: string;
-      address: string;
-      country: string;
-      city: string;
-      district: string;
-      post_code: string;
-    };
+    sender:
+      | {
+          addressId: number;
+        }
+      | {
+          name: string;
+          phone: string;
+          email: string;
+          address: string;
+          country: string;
+          city: string;
+          district: string;
+          post_code: string;
+        };
     recipient: {
       name: string;
       phone: string;
@@ -358,6 +362,21 @@ function parsePositiveInteger(value: unknown, fallback: number) {
   }
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : Number.NaN;
+}
+
+function readSenderAddressId(sender: unknown) {
+  if (!isRecord(sender)) {
+    return null;
+  }
+  const value = sender.addressId;
+  if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+  }
+  return null;
 }
 
 function readStringFromRecord(value: unknown, keys: string[]) {
@@ -861,6 +880,9 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       requestedBarcodeFormat: payload.posts?.[0]?.barcode_format ?? null,
       codPaymentIncluded: Boolean(payload.posts?.[0]?.cod_payment_type),
       priceIncluded: payload.posts?.[0]?.post?.price !== undefined,
+      senderAddressIdPresent: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
+      senderAddressIdValid: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
+      senderUsesAddressId: isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender,
     };
 
     let accessToken: string | null = null;

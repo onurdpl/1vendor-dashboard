@@ -219,6 +219,7 @@ Notes:
 
 - `reference_id` is documented as not required, but must be unique if sent. The sample validation error says already-registered `reference_id` is rejected.
 - `carrier_id`, `post_type`, sender fields, recipient fields, `post.desi`, and `post.package_count` are documented as required.
+- Runtime validation confirmed that Standard/Same Day shipments require the configured sender address number as `posts.0.sender.addressId`. A `422` validation error for `posts.0.sender.addressId` means the configured Navlungo sender address ID is missing, invalid, or was not sent in the real shipment payload.
 - Phone examples specify format like `+90 532 123 45 67`.
 - `post.price` is sent when `cod_payment_type` is `1` or `2`.
 
@@ -487,10 +488,11 @@ Current adapter status:
 - Runtime Create Post payload uses:
   - `carrier_id` from vendor metadata/env/default `9`
   - `post_type=2`
+  - `sender: { addressId: <configured Navlungo sender address ID> }`
   - `barcode_format` from vendor metadata/env/default `pdf-A6`
   - no `cod_payment_type`
   - no `post.price`
-- Current PoC requires a configured sender address ID for readiness, but the reviewed Create Post contract still documents explicit `sender.*` fields. Until the Address Book sender-id contract is confirmed, the runtime payload uses conservative configured/static sender fields and stores the sender address ID in safe reference metadata.
+- Current PoC requires a configured positive numeric sender address ID for readiness. Real shipment payloads use only `sender.addressId` and do not send full sender name, phone, email, or address fields.
 - Response normalization maps:
   - `data.post_number` to provider shipment id
   - `data.carrier_tracking_code` or `post_number` to tracking number

@@ -555,6 +555,9 @@ function mapProviderResponseSummary(
     realPathRequestedBarcodeFormat: readString(snapshot, ['realPathRequestedBarcodeFormat']),
     realPathCodPaymentIncluded: readOptionalBoolean(snapshot, ['realPathCodPaymentIncluded']),
     realPathPriceIncluded: readOptionalBoolean(snapshot, ['realPathPriceIncluded']),
+    senderAddressIdPresent: readOptionalBoolean(snapshot, ['senderAddressIdPresent']),
+    senderAddressIdValid: readOptionalBoolean(snapshot, ['senderAddressIdValid']),
+    senderUsesAddressId: readOptionalBoolean(snapshot, ['senderUsesAddressId']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -1058,6 +1061,14 @@ function resolveNavlungoSenderAddressId(config: VendorShippingConfigDto, env?: A
     env?.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID ??
     null
   );
+}
+
+function parseNavlungoSenderAddressId(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+  const numeric = Number(value.trim());
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
 function resolveNavlungoCarrierId(providerMetadata: unknown, env?: AppEnv) {
@@ -1999,13 +2010,16 @@ export async function getShippingProviderReadinessDiagnostics(
   }
 
   if (diagnostics.provider === 'navlungo') {
-    const senderAddressIdConfigured = Boolean(resolveNavlungoSenderAddressId(config, env));
+    const senderAddressId = resolveNavlungoSenderAddressId(config, env);
+    const senderAddressIdConfigured = Boolean(senderAddressId);
+    const senderAddressIdValid = Boolean(parseNavlungoSenderAddressId(senderAddressId));
     const carrierIdConfiguredOrDefaulted = Boolean(resolveNavlungoCarrierId(config.providerMetadata, env));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
       !configProviderSelected ? 'VENDOR_PROVIDER_SELECTION' : null,
       !senderAddressIdConfigured ? 'VENDOR_NAVLUNGO_SENDER_ADDRESS_ID' : null,
+      senderAddressIdConfigured && !senderAddressIdValid ? 'VENDOR_NAVLUNGO_SENDER_ADDRESS_ID_NUMERIC' : null,
       !carrierIdConfiguredOrDefaulted ? 'VENDOR_NAVLUNGO_CARRIER_ID' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
     ].filter((value): value is string => Boolean(value));
@@ -2017,6 +2031,7 @@ export async function getShippingProviderReadinessDiagnostics(
         diagnostics.executionReady &&
         configProviderSelected &&
         senderAddressIdConfigured &&
+        senderAddressIdValid &&
         carrierIdConfiguredOrDefaulted &&
         defaultDesiConfigured,
       warehouseIdConfigured: senderAddressIdConfigured,
@@ -2026,6 +2041,7 @@ export async function getShippingProviderReadinessDiagnostics(
         usernameConfigured: Boolean(env.NAVLUNGO_API_USERNAME),
         passwordConfigured: Boolean(env.NAVLUNGO_API_PASSWORD),
         defaultSenderAddressIdConfigured: senderAddressIdConfigured,
+        defaultSenderAddressIdValid: senderAddressIdValid,
         defaultBarcodeFormat: resolveNavlungoBarcodeFormat(config.providerMetadata, env),
         defaultCarrierId: String(resolveNavlungoCarrierId(config.providerMetadata, env) ?? ''),
         authDiagnosticsAvailable: true,
@@ -4473,6 +4489,11 @@ async function buildShipmentRequestPreview(
   if (provider === ShippingProvider.NAVLUNGO && !navlungoSenderAddressId) {
     throw new Error('Navlungo sender address ID is not configured for this vendor.');
   }
+  const navlungoSenderAddressNumericId =
+    provider === ShippingProvider.NAVLUNGO ? parseNavlungoSenderAddressId(navlungoSenderAddressId) : null;
+  if (provider === ShippingProvider.NAVLUNGO && !navlungoSenderAddressNumericId) {
+    throw new Error('Navlungo sender address ID must be a positive numeric addressId.');
+  }
   const navlungoCarrierId = provider === ShippingProvider.NAVLUNGO
     ? resolveNavlungoCarrierId(config.providerMetadata, options.env)
     : null;
@@ -4736,14 +4757,7 @@ async function buildShipmentRequestPreview(
               carrier_id: navlungoCarrierId,
               post_type: 2,
               sender: {
-                name: 'Navlungo Sender Address',
-                phone: '+90 532 123 45 67',
-                email: 'sender.test@example.invalid',
-                address: `Configured Navlungo sender address ${navlungoSenderAddressId}`,
-                country: 'tr',
-                city: 'Istanbul',
-                district: 'Kadikoy',
-                post_code: '',
+                addressId: navlungoSenderAddressNumericId,
               },
               recipient: navlungoRecipient.recipient,
               post: {

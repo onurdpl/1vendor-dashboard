@@ -81,6 +81,7 @@ export type ShippingProviderGateDiagnosticsDto = {
     usernameConfigured: boolean;
     passwordConfigured: boolean;
     defaultSenderAddressIdConfigured: boolean;
+    defaultSenderAddressIdValid?: boolean;
     defaultBarcodeFormat: string | null;
     defaultCarrierId: string | null;
     authDiagnosticsAvailable: boolean;
@@ -315,6 +316,9 @@ export type ShipmentExecutionDto = {
     realPathRequestedBarcodeFormat?: string | null;
     realPathCodPaymentIncluded?: boolean | null;
     realPathPriceIncluded?: boolean | null;
+    senderAddressIdPresent?: boolean | null;
+    senderAddressIdValid?: boolean | null;
+    senderUsesAddressId?: boolean | null;
     realPathPostNumberPresent?: boolean | null;
     realPathTrackingUrlPresent?: boolean | null;
     realPathBarcodePresent?: boolean | null;

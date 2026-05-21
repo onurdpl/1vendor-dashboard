@@ -237,6 +237,9 @@ export type ShipmentExecution = {
     realPathRequestedBarcodeFormat?: string | null;
     realPathCodPaymentIncluded?: boolean | null;
     realPathPriceIncluded?: boolean | null;
+    senderAddressIdPresent?: boolean | null;
+    senderAddressIdValid?: boolean | null;
+    senderUsesAddressId?: boolean | null;
     realPathPostNumberPresent?: boolean | null;
     realPathTrackingUrlPresent?: boolean | null;
     realPathBarcodePresent?: boolean | null;
@@ -404,6 +407,7 @@ export type ShippingProviderDiagnostics = {
     usernameConfigured: boolean;
     passwordConfigured: boolean;
     defaultSenderAddressIdConfigured: boolean;
+    defaultSenderAddressIdValid?: boolean;
     defaultBarcodeFormat: string | null;
     defaultCarrierId: string | null;
     authDiagnosticsAvailable: boolean;
