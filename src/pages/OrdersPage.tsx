@@ -198,7 +198,9 @@ export function OrdersPage() {
   const [searchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
+  const currentUser = appReadiness.currentUser;
   const authContextReady = appReadiness.ready;
+  const isAdmin = currentUser?.role === 'admin';
   const { data: orders, isLoading, isError, error, diagnostics } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     () => listOrders({ vendorId: currentVendor.vendorId }),
@@ -504,6 +506,22 @@ export function OrdersPage() {
               const labelUrl = shipmentExecution?.labelUrl ?? null;
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
+              const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
+                { label: 'Order received', at: formatDate(selectedOrder.date) },
+              ];
+              if (selectedOrder.shipmentCreatedAt) {
+                timelineItems.push({ label: 'Shipment created', at: formatDate(selectedOrder.shipmentCreatedAt) });
+              }
+              if (selectedOrder.trackingNumber) {
+                timelineItems.push({ label: 'Tracking assigned', detail: getTrackingLabel(selectedOrder) });
+              }
+              if (shopifyFulfillmentState === 'Synced' || selectedOrder.fulfilledAt) {
+                timelineItems.push({
+                  label: 'Fulfillment synced',
+                  at: selectedOrder.fulfilledAt ? formatDate(selectedOrder.fulfilledAt) : undefined,
+                  detail: shopifyFulfillmentState,
+                });
+              }
 
               return (
             <>
@@ -512,7 +530,6 @@ export function OrdersPage() {
                   <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{selectedOrder.allocationStatus.replace(/_/g, ' ')}</StatusBadge>
                   <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
                 </div>
-                <small>Shopify {selectedOrder.sourceShopifyOrderId}</small>
               </div>
 
               <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
@@ -520,32 +537,6 @@ export function OrdersPage() {
                 <span>{shippingOperational.label}</span>
                 <span>Shopify {shopifyFulfillmentState.toLowerCase()}</span>
               </div>
-
-              <section className="orders-detail-card">
-                <h4>Operational summary</h4>
-                <div className="orders-detail-info-grid">
-                  <div>
-                    <span>Customer</span>
-                    <strong>{getCustomerLabel(selectedOrder.customer)}</strong>
-                  </div>
-                  <div>
-                    <span>Allocation</span>
-                    <strong>{selectedOrder.id}</strong>
-                  </div>
-                  <div>
-                    <span>Shopify ID</span>
-                    <strong>{selectedOrder.sourceShopifyOrderId}</strong>
-                  </div>
-                  <div>
-                    <span>Updated</span>
-                    <strong>{formatDate(selectedOrder.shipmentUpdatedAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date)}</strong>
-                  </div>
-                  <div>
-                    <span>Source</span>
-                    <strong>{selectedOrder.channel}</strong>
-                  </div>
-                </div>
-              </section>
 
               <section className="orders-detail-card">
                 <h4>Fulfillment and shipping</h4>
@@ -557,10 +548,6 @@ export function OrdersPage() {
                   <div>
                     <span>Tracking</span>
                     <strong>{trackingUrl ? <a className="inline-link" href={trackingUrl}>Open tracking</a> : trackingLabel}</strong>
-                  </div>
-                  <div>
-                    <span>Warehouse</span>
-                    <strong>{warehouseId}</strong>
                   </div>
                   <div>
                     <span>Shopify sync</span>
@@ -602,37 +589,40 @@ export function OrdersPage() {
 
               <section className="orders-detail-card">
                 <h4>Operational timeline</h4>
-                <TimelineBlock
-                  items={[
-                    { label: 'Order received', at: formatDate(selectedOrder.date) },
-                    { label: 'Shipment state', detail: shippingOperational.label },
-                    { label: selectedOrder.trackingNumber ? 'Tracking synced' : 'Tracking pending', detail: getTrackingLabel(selectedOrder) },
-                    { label: 'Shopify sync', detail: shopifyFulfillmentState },
-                  ]}
-                />
+                <TimelineBlock items={timelineItems} />
               </section>
 
-              <details className="orders-detail-card orders-rail-diagnostics">
-                <summary>Operational diagnostics</summary>
-                <div className="orders-rail-summary-list">
-                  <div>
-                    <span>Fulfillment</span>
-                    <strong>{selectedOrder.fulfillmentStatus}</strong>
+              {isAdmin ? (
+                <details className="orders-detail-card orders-rail-diagnostics">
+                  <summary>Internal metadata</summary>
+                  <div className="orders-rail-summary-list">
+                    <div>
+                      <span>Allocation</span>
+                      <strong>{selectedOrder.id}</strong>
+                    </div>
+                    <div>
+                      <span>Shopify ID</span>
+                      <strong>{selectedOrder.sourceShopifyOrderId}</strong>
+                    </div>
+                    <div>
+                      <span>Customer scope</span>
+                      <strong>{getCustomerLabel(selectedOrder.customer)}</strong>
+                    </div>
+                    <div>
+                      <span>Warehouse</span>
+                      <strong>{warehouseId}</strong>
+                    </div>
+                    <div>
+                      <span>Source</span>
+                      <strong>{selectedOrder.channel}</strong>
+                    </div>
+                    <div>
+                      <span>Tracking source</span>
+                      <strong>{getTrackingLabel(selectedOrder)}</strong>
+                    </div>
                   </div>
-                  <div>
-                    <span>Shipment created</span>
-                    <strong>{formatDate(selectedOrder.shipmentCreatedAt)}</strong>
-                  </div>
-                  <div>
-                    <span>Tracking source</span>
-                    <strong>{getTrackingLabel(selectedOrder)}</strong>
-                  </div>
-                  <div>
-                    <span>Shopify fulfillment</span>
-                    <strong>{shopifyFulfillmentState}</strong>
-                  </div>
-                </div>
-              </details>
+                </details>
+              ) : null}
             </>
               );
             })()

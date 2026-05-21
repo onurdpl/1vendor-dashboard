@@ -184,6 +184,27 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('0 line items')).not.toBeInTheDocument();
   });
 
+  it('hides internal order metadata from the vendor operational rail', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('Fulfillment and shipping')).toBeInTheDocument();
+    expect(screen.queryByText('Internal metadata')).not.toBeInTheDocument();
+    expect(screen.queryByText(orderDetail.sourceShopifyOrderId)).not.toBeInTheDocument();
+    expect(screen.queryByText(orderDetail.id)).not.toBeInTheDocument();
+  });
+
   it('waits for auth and vendor readiness before calling the orders API', () => {
     window.localStorage.clear();
     listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
