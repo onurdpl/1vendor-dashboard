@@ -4807,6 +4807,7 @@ async function buildShipmentRequestPreview(
               reference_id: navlungoReferenceId,
               carrier_id: navlungoCarrierId,
               post_type: 2,
+              cod_payment_type: '',
               sender: {
                 addressId: navlungoSenderAddressNumericId,
               },
@@ -4814,7 +4815,8 @@ async function buildShipmentRequestPreview(
               post: {
                 desi,
                 package_count: 1,
-                note: `Shopify order ${allocation.sourceShopifyOrderNumber ?? allocation.sourceShopifyOrderId ?? allocation.id}`,
+                price: '',
+                note: '',
               },
               barcode_format: navlungoBarcodeFormat,
               custom_data_1: allocation.id,

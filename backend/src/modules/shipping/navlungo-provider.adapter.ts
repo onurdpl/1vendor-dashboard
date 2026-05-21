@@ -229,6 +229,9 @@ function safeValueType(value: unknown) {
   if (value === null || value === undefined) {
     return null;
   }
+  if (typeof value === 'string' && value.length === 0) {
+    return 'string-empty';
+  }
   return Array.isArray(value) ? 'array' : typeof value;
 }
 
@@ -980,7 +983,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       requestedCarrierId: payload.posts?.[0]?.carrier_id ?? null,
       requestedPostType: payload.posts?.[0]?.post_type ?? null,
       requestedBarcodeFormat: payload.posts?.[0]?.barcode_format ?? null,
-      codPaymentIncluded: Boolean(payload.posts?.[0]?.cod_payment_type),
+      codPaymentIncluded: payload.posts?.[0]?.cod_payment_type !== undefined,
       priceIncluded: payload.posts?.[0]?.post?.price !== undefined,
       senderAddressIdPresent: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderAddressIdValid: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
@@ -1116,7 +1119,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
         realPathRequestedCarrierId: payload.posts?.[0]?.carrier_id ?? null,
         realPathRequestedPostType: payload.posts?.[0]?.post_type ?? null,
         realPathRequestedBarcodeFormat: payload.posts?.[0]?.barcode_format ?? null,
-        realPathCodPaymentIncluded: Boolean(payload.posts?.[0]?.cod_payment_type),
+        realPathCodPaymentIncluded: payload.posts?.[0]?.cod_payment_type !== undefined,
         realPathPriceIncluded: payload.posts?.[0]?.post?.price !== undefined,
         realPathPostNumberPresent: Boolean(postNumber),
         realPathTrackingUrlPresent: Boolean(trackingUrl),

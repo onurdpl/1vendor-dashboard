@@ -1738,8 +1738,8 @@ describe('shipping execution foundation', () => {
         realPathRequestedCarrierId: 9,
         realPathRequestedPostType: 2,
         realPathRequestedBarcodeFormat: 'pdf-A6',
-        realPathCodPaymentIncluded: false,
-        realPathPriceIncluded: false,
+        realPathCodPaymentIncluded: true,
+        realPathPriceIncluded: true,
         realPathPostNumberPresent: true,
         realPathTrackingUrlPresent: true,
         realPathBarcodePresent: true,
@@ -1776,8 +1776,8 @@ describe('shipping execution foundation', () => {
         realPathRequestedCarrierId: 9,
         realPathRequestedPostType: 2,
         realPathRequestedBarcodeFormat: 'pdf-A6',
-        realPathCodPaymentIncluded: false,
-        realPathPriceIncluded: false,
+        realPathCodPaymentIncluded: true,
+        realPathPriceIncluded: true,
         realPathPostNumberPresent: true,
         realPathTrackingUrlPresent: true,
         realPathBarcodePresent: true,
@@ -1794,7 +1794,11 @@ describe('shipping execution foundation', () => {
             expect.objectContaining({
               carrier_id: 9,
               post_type: 2,
+              cod_payment_type: '',
               barcode_format: 'pdf-A6',
+              post: expect.objectContaining({
+                price: '',
+              }),
             }),
           ],
         }),
@@ -2875,8 +2879,11 @@ describe('shipping execution foundation', () => {
         ],
       },
     });
-    expect(preview.payload.posts[0]).not.toHaveProperty('cod_payment_type');
-    expect(preview.payload.posts[0].post).not.toHaveProperty('price');
+    expect(preview.payload.posts[0]).toHaveProperty('cod_payment_type', '');
+    expect(preview.payload.posts[0].cod_payment_type).not.toBe(1);
+    expect(preview.payload.posts[0].cod_payment_type).not.toBe(2);
+    expect(preview.payload.posts[0].post).toHaveProperty('price', '');
+    expect(preview.payload.posts[0].post).toHaveProperty('note', '');
     expect(preview.payload.posts[0].sender).not.toHaveProperty('name');
     expect(preview.payload.posts[0].sender).not.toHaveProperty('phone');
     expect(preview.payload.posts[0].sender).not.toHaveProperty('email');

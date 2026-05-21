@@ -273,6 +273,21 @@ describe('manual Navlungo Create Post probe', () => {
     expect(serialized).not.toContain('NAVLUNGO-PROBE-1700000000000');
   });
 
+  it('summarizes empty optional Create Post fields as present string-empty values', () => {
+    const payload = buildNavlungoCreatePostProbePayload(buildProbeEnv(), () => 1700000000000);
+    payload.posts[0].cod_payment_type = '';
+    payload.posts[0].post.price = '';
+
+    const summary = summarizeNavlungoCreatePostRequest(payload, { NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2' });
+
+    expect(summary).toMatchObject({
+      codPaymentTypePresent: true,
+      codPaymentType: 'string-empty',
+      postPricePresent: true,
+      postPriceType: 'string-empty',
+    });
+  });
+
   it('returns Create Post probe request summary for comparing against real retry shape', async () => {
     const { fetchImpl } = buildMockFetch();
     const { runNavlungoCreatePostProbeDiagnostics } = await import('../backend/src/modules/shipping/navlungo-create-post-probe.js');
