@@ -337,6 +337,33 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       });
     });
     runtimeDiagnosticsMocks.kargonomiLocationLookup.mockReset();
+    runtimeDiagnosticsMocks.kargonomiLocationLookup.mockResolvedValue({
+      baseUrlHost: 'app.kargonomi.com.tr',
+      baseUrlPath: '/api/v1',
+      baseUrlParseError: null,
+      tokenPresent: true,
+      statesRequestUrl: '/states/1',
+      statesHttpStatus: 200,
+      statesFetchError: null,
+      statesContentType: 'application/json',
+      statesShapeSummary: {
+        kind: 'json:array',
+        itemCount: 2,
+        topLevelKeys: [],
+      },
+      firstStateNames: ['İstanbul', 'Ankara'],
+      istanbulStateId: '34',
+      citiesRequestUrl: '/cities/34',
+      citiesHttpStatus: 200,
+      citiesFetchError: null,
+      citiesContentType: 'application/json',
+      citiesShapeSummary: {
+        kind: 'json:array',
+        itemCount: 2,
+        topLevelKeys: [],
+      },
+      firstCityNames: ['Kartal', 'Kadıköy'],
+    });
     runtimeDiagnosticsMocks.navlungoAuth.mockReset();
     runtimeDiagnosticsMocks.navlungoAuth.mockResolvedValue({
       provider: 'navlungo',
@@ -1440,6 +1467,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
     const buyerStateInput = await screen.findByLabelText('Fallback Kargonomi buyer state ID (PoC override)');
     const buyerCityInput = await screen.findByLabelText('Fallback Kargonomi buyer city ID (PoC override)');
+    expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     await user.clear(warehouseInput);
     await user.type(warehouseInput, '112668');
     await user.clear(buyerStateInput);
@@ -1490,9 +1519,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const providerSelect = await screen.findByLabelText('Provider');
     expect(screen.getByRole('option', { name: 'Navlungo' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
     await user.selectOptions(providerSelect, 'navlungo');
 
     expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
+    expect(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
     expect(screen.getByLabelText('Default barcode format')).toHaveValue('pdf-A6');
     expect(screen.getByText('Username configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
     expect(screen.getByText('Password configured').closest('.shipping-config-readonly')).toHaveTextContent('yes');
@@ -1516,6 +1549,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Expires in').closest('.summary-row')).toHaveTextContent('86400');
     expect(screen.queryByText('secret-password')).not.toBeInTheDocument();
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
+
+    await user.selectOptions(providerSelect, 'kargonomi');
+
+    await waitFor(() => {
+      expect(screen.queryByLabelText('Navlungo auth diagnostic result')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
   });
 
   it('renders Kargonomi label and hides Try OTO-only return/status controls for Kargonomi shipments', async () => {

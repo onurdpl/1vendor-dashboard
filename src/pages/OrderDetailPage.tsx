@@ -1188,6 +1188,17 @@ export function OrderDetailPage() {
     }
   }, [vendorShippingConfig]);
 
+  useEffect(() => {
+    if (shippingConfigDraft.preferredProvider !== 'kargonomi') {
+      setKargonomiLookupDiagnostics(null);
+      setKargonomiLookupError(null);
+    }
+    if (shippingConfigDraft.preferredProvider !== 'navlungo') {
+      setNavlungoAuthDiagnostics(null);
+      setNavlungoAuthError(null);
+    }
+  }, [shippingConfigDraft.preferredProvider]);
+
   const isVendorAssignedOwner =
     currentUser?.role === 'vendor' && !!order && currentUser.vendorAccess.includes(order.assignedVendorId);
   const canReportIssue =
@@ -5222,11 +5233,11 @@ export function OrderDetailPage() {
                           <strong>{tryOtoOriginCity ? 'yes' : 'no'}</strong>
                         </div>
                       </>
-                    ) : shippingProviderDiagnostics.provider === 'kargonomi' ? (
+                    ) : isKargonomiConfigDraft ? (
                       <>
                         <div className="summary-row">
                           <span>Kargonomi warehouse configured</span>
-                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                          <strong>{(kargonomiOptionDiagnostics ?? shippingProviderDiagnostics).warehouseIdConfigured ? 'yes' : 'no'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Kargonomi fallback buyer state ID</span>
@@ -5332,22 +5343,24 @@ export function OrderDetailPage() {
                         </div>
                       </>
                     )}
-                    <div className="shipment-recovery-actions">
-                      <button
-                        type="button"
-                        className="button button-secondary"
-                        onClick={() => void runNavlungoAuthDiagnosticsMutation(undefined)}
-                        disabled={isRunningNavlungoAuthDiagnostics}
-                      >
-                        {isRunningNavlungoAuthDiagnostics ? 'Running auth...' : 'Run Navlungo auth diagnostic'}
-                      </button>
-                      <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
-                    </div>
-                    {navlungoAuthError ? (
-                      <p className="form-error" role="alert">{navlungoAuthError}</p>
-                    ) : null}
-                    {navlungoAuthDiagnostics ? (
-                      <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo auth diagnostic result">
+                    {isNavlungoConfigDraft ? (
+                      <>
+                        <div className="shipment-recovery-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            onClick={() => void runNavlungoAuthDiagnosticsMutation(undefined)}
+                            disabled={isRunningNavlungoAuthDiagnostics}
+                          >
+                            {isRunningNavlungoAuthDiagnostics ? 'Running auth...' : 'Run Navlungo auth diagnostic'}
+                          </button>
+                          <span className="muted">Dormant admin-only check. Calls only Navlungo auth and never creates shipments.</span>
+                        </div>
+                        {navlungoAuthError ? (
+                          <p className="form-error" role="alert">{navlungoAuthError}</p>
+                        ) : null}
+                        {navlungoAuthDiagnostics ? (
+                          <div className="provider-response-summary admin-diagnostics-panel" aria-label="Navlungo auth diagnostic result">
                         <div className="summary-row">
                           <span>Base URL</span>
                           <strong>
@@ -5441,7 +5454,9 @@ export function OrderDetailPage() {
                           <span>Expires in</span>
                           <strong>{navlungoAuthDiagnostics.expiresIn ?? '—'}</strong>
                         </div>
-                      </div>
+                          </div>
+                        ) : null}
+                      </>
                     ) : null}
                     <div className="summary-row">
                       <span>Default desi configured</span>
