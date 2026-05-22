@@ -363,6 +363,7 @@ export function ReturnDetailPage() {
         title="Return unavailable"
         description={error ?? 'The selected return could not be loaded.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
         actionNode={
           <Link className="button button-secondary" to="/returns">
             Back to returns

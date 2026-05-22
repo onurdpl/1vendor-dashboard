@@ -1,6 +1,6 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DataStatePanel } from './DataStatePanel';
 import type { ApiErrorDiagnostics } from '../lib/api';
 
@@ -57,5 +57,29 @@ describe('DataStatePanel diagnostics', () => {
     );
 
     expect(screen.queryByText('Diagnostics')).not.toBeInTheDocument();
+  });
+
+  it('renders a local retry action without replacing navigation actions', () => {
+    const retry = vi.fn();
+
+    render(
+      <MemoryRouter>
+        <DataStatePanel
+          tone="error"
+          eyebrow="Orders"
+          title="Orders unavailable"
+          description="Unable to load orders."
+          diagnostics={diagnostics}
+          onRetry={retry}
+          actionLabel="Back to orders"
+          actionTo="/orders"
+        />
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+
+    expect(retry).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('link', { name: 'Back to orders' })).toHaveAttribute('href', '/orders');
   });
 });

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { DataStatePanel } from './components/DataStatePanel';
 import { AppShell } from './components/AppShell';
@@ -57,6 +57,14 @@ const loadingFallback = (
   />
 );
 
+function resilientRoute(routeName: string, node: ReactNode) {
+  return (
+    <ErrorBoundary routeName={routeName} eyebrow={routeName} title="This section could not load">
+      <Suspense fallback={loadingFallback}>{node}</Suspense>
+    </ErrorBoundary>
+  );
+}
+
 export default function App() {
   const startupIssues = runtimeConfig.startupIssues ?? [];
 
@@ -84,14 +92,12 @@ export default function App() {
             </ErrorBoundary>
           }
         >
-          <Route path="/" element={<DashboardPage />} />
+          <Route path="/" element={resilientRoute('Dashboard', <DashboardPage />)} />
           <Route
             path="/orders"
             element={
               <RequirePermission permission="orders:read">
-                <Suspense fallback={loadingFallback}>
-                  <OrdersPage />
-                </Suspense>
+                {resilientRoute('Orders', <OrdersPage />)}
               </RequirePermission>
             }
           />
@@ -99,9 +105,7 @@ export default function App() {
             path="/orders/:orderId"
             element={
               <RequirePermission permission="orders:read">
-                <Suspense fallback={loadingFallback}>
-                  <OrderDetailPage />
-                </Suspense>
+                {resilientRoute('Order detail', <OrderDetailPage />)}
               </RequirePermission>
             }
           />
@@ -109,9 +113,7 @@ export default function App() {
             path="/admin/operations"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <AdminOperationsQueuePage />
-                </Suspense>
+                {resilientRoute('Operations', <AdminOperationsQueuePage />)}
               </RequirePermission>
             }
           />
@@ -119,9 +121,7 @@ export default function App() {
             path="/admin/diagnostics"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <AdminDiagnosticsPage />
-                </Suspense>
+                {resilientRoute('Diagnostics', <AdminDiagnosticsPage />)}
               </RequirePermission>
             }
           />
@@ -129,9 +129,7 @@ export default function App() {
             path="/admin/support"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <AdminSupportTicketsPage />
-                </Suspense>
+                {resilientRoute('Admin support', <AdminSupportTicketsPage />)}
               </RequirePermission>
             }
           />
@@ -139,9 +137,7 @@ export default function App() {
             path="/admin/support/analytics"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <AdminSupportAnalyticsPage />
-                </Suspense>
+                {resilientRoute('Support analytics', <AdminSupportAnalyticsPage />)}
               </RequirePermission>
             }
           />
@@ -149,9 +145,7 @@ export default function App() {
             path="/admin/support/:ticketId"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <SupportTicketDetailPage />
-                </Suspense>
+                {resilientRoute('Support ticket', <SupportTicketDetailPage />)}
               </RequirePermission>
             }
           />
@@ -159,9 +153,7 @@ export default function App() {
             path="/admin/orders/:shopifyOrderId"
             element={
               <RequirePermission permission="orders:write">
-                <Suspense fallback={loadingFallback}>
-                  <AdminShopifyOrderPage />
-                </Suspense>
+                {resilientRoute('Shopify order', <AdminShopifyOrderPage />)}
               </RequirePermission>
             }
           />
@@ -169,9 +161,7 @@ export default function App() {
             path="/returns"
             element={
               <RequirePermission permission="returns:read">
-                <Suspense fallback={loadingFallback}>
-                  <ReturnsPage />
-                </Suspense>
+                {resilientRoute('Returns', <ReturnsPage />)}
               </RequirePermission>
             }
           />
@@ -179,9 +169,7 @@ export default function App() {
             path="/returns/:returnId"
             element={
               <RequirePermission permission="returns:read">
-                <Suspense fallback={loadingFallback}>
-                  <ReturnDetailPage />
-                </Suspense>
+                {resilientRoute('Return detail', <ReturnDetailPage />)}
               </RequirePermission>
             }
           />
@@ -189,9 +177,7 @@ export default function App() {
             path="/finance"
             element={
               <RequirePermission permission="finance:read">
-                <Suspense fallback={loadingFallback}>
-                  <FinancePage />
-                </Suspense>
+                {resilientRoute('Finance', <FinancePage />)}
               </RequirePermission>
             }
           />
@@ -199,9 +185,7 @@ export default function App() {
             path="/automation"
             element={
               <RequirePermission permission="automation:read">
-                <Suspense fallback={loadingFallback}>
-                  <AutomationPage />
-                </Suspense>
+                {resilientRoute('Automation', <AutomationPage />)}
               </RequirePermission>
             }
           />
@@ -209,9 +193,7 @@ export default function App() {
             path="/support/inbox"
             element={
               <RequirePermission permission="orders:read">
-                <Suspense fallback={loadingFallback}>
-                  <VendorInboxPage />
-                </Suspense>
+                {resilientRoute('Inbox', <VendorInboxPage />)}
               </RequirePermission>
             }
           />
@@ -219,9 +201,7 @@ export default function App() {
             path="/support"
             element={
               <RequirePermission permission="orders:read">
-                <Suspense fallback={loadingFallback}>
-                  <VendorSupportTicketsPage />
-                </Suspense>
+                {resilientRoute('Support', <VendorSupportTicketsPage />)}
               </RequirePermission>
             }
           />
@@ -229,9 +209,7 @@ export default function App() {
             path="/support/:ticketId"
             element={
               <RequirePermission permission="orders:read">
-                <Suspense fallback={loadingFallback}>
-                  <SupportTicketDetailPage />
-                </Suspense>
+                {resilientRoute('Support ticket', <SupportTicketDetailPage />)}
               </RequirePermission>
             }
           />

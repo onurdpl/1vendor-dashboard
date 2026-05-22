@@ -201,7 +201,7 @@ export function OrdersPage() {
   const currentUser = appReadiness.currentUser;
   const authContextReady = appReadiness.ready;
   const isAdmin = currentUser?.role === 'admin';
-  const { data: orders, isLoading, isError, error, diagnostics } = useQueryResource(
+  const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     () => listOrders({ vendorId: currentVendor.vendorId }),
     { enabled: authContextReady },
@@ -347,6 +347,7 @@ export function OrdersPage() {
         title="Orders unavailable"
         description={error ?? 'Unable to load orders.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
       />
     );
   }

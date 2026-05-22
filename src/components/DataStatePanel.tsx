@@ -10,6 +10,8 @@ type DataStatePanelProps = {
   actionLabel?: string;
   actionTo?: string;
   actionNode?: ReactNode;
+  onRetry?: () => void;
+  retryLabel?: string;
   diagnostics?: ApiErrorDiagnostics | null;
 };
 
@@ -21,6 +23,8 @@ export function DataStatePanel({
   actionLabel,
   actionTo,
   actionNode,
+  onRetry,
+  retryLabel = 'Retry',
   diagnostics,
 }: DataStatePanelProps) {
   const showDiagnostics = tone === 'error' && diagnostics;
@@ -71,14 +75,19 @@ export function DataStatePanel({
             </details>
           ) : null}
         </div>
-        {actionNode || (actionLabel && actionTo) ? (
+        {actionNode || onRetry || (actionLabel && actionTo) ? (
           <div className="state-actions">
-            {actionNode ??
-              (actionLabel && actionTo ? (
-                <Link className="button button-secondary" to={actionTo}>
-                  {actionLabel}
-                </Link>
-              ) : null)}
+            {onRetry ? (
+              <button type="button" className="button button-secondary" onClick={onRetry}>
+                {retryLabel}
+              </button>
+            ) : null}
+            {actionLabel && actionTo ? (
+              <Link className="button button-secondary" to={actionTo}>
+                {actionLabel}
+              </Link>
+            ) : null}
+            {actionNode}
           </div>
         ) : null}
       </div>

@@ -55,7 +55,11 @@ function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'norma
   return 'neutral' as const;
 }
 
-function getStatusTone(status: string) {
+function getStatusTone(status?: string | null) {
+  if (!status) {
+    return 'neutral' as const;
+  }
+
   const normalized = status.toLowerCase();
   if (normalized === 'failed' || normalized === 'dead_letter_ready' || normalized === 'permanently_failed') {
     return 'danger' as const;
@@ -69,11 +73,15 @@ function getStatusTone(status: string) {
   return 'attention' as const;
 }
 
-function canRetryOperationalJob(status: string) {
-  return ['failed', 'retry_scheduled', 'dead_letter_ready'].includes(status.toLowerCase());
+function canRetryOperationalJob(status?: string | null) {
+  return ['failed', 'retry_scheduled', 'dead_letter_ready'].includes((status ?? '').toLowerCase());
 }
 
-function formatWebhookTopic(topic: string) {
+function formatWebhookTopic(topic?: string | null) {
+  if (!topic) {
+    return 'Unknown topic';
+  }
+
   return topic
     .split('/')
     .map((part) => toTitleCaseLabel(part))
@@ -711,10 +719,18 @@ export function AdminDiagnosticsPage() {
                 </MetadataGroup>
               ) : null}
               <MetadataGroup title="Affected entities">
-                <MetadataRow label="Shopify order" value={selectedWebhook.affectedEntities.shopifyOrderNumber ?? selectedWebhook.affectedEntities.shopifyOrderId ?? selectedWebhook.relatedShopifyOrderId ?? 'Not synced'} />
-                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities.shopifyReturnId ?? 'Not synced'} />
-                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities.shopifyRefundId ?? 'Not synced'} />
-                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities.shopifyFulfillmentId ?? 'Not synced'} />
+                <MetadataRow
+                  label="Shopify order"
+                  value={
+                    selectedWebhook.affectedEntities?.shopifyOrderNumber ??
+                    selectedWebhook.affectedEntities?.shopifyOrderId ??
+                    selectedWebhook.relatedShopifyOrderId ??
+                    'Not synced'
+                  }
+                />
+                <MetadataRow label="Shopify return" value={selectedWebhook.affectedEntities?.shopifyReturnId ?? 'Not synced'} />
+                <MetadataRow label="Shopify refund" value={selectedWebhook.affectedEntities?.shopifyRefundId ?? 'Not synced'} />
+                <MetadataRow label="Shopify fulfillment" value={selectedWebhook.affectedEntities?.shopifyFulfillmentId ?? 'Not synced'} />
                 <MetadataRow label="Received At" value={formatDate(selectedWebhook.receivedAt)} />
                 <MetadataRow label="Processed At" value={formatDate(selectedWebhook.processedAt)} />
               </MetadataGroup>

@@ -131,6 +131,12 @@ export function VendorInboxPage() {
         eyebrow="Inbox"
         title="Communication center unavailable"
         description={firstError}
+        onRetry={() => {
+          void supportQuery.refetch();
+          void ordersQuery.refetch();
+          void returnsQuery.refetch();
+          void financeQuery.refetch();
+        }}
       />
     );
   }

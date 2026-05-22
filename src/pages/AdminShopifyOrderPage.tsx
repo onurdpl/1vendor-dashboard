@@ -34,7 +34,7 @@ export function AdminShopifyOrderPage() {
       },
     },
   );
-  const { data: breakdown, isLoading, isError, error, diagnostics } = useQueryResource(
+  const { data: breakdown, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
     () => {
       if (!shopifyOrderId) {
@@ -67,6 +67,7 @@ export function AdminShopifyOrderPage() {
         title="Breakdown unavailable"
         description={error ?? 'The requested Shopify order could not be loaded.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
         actionLabel="Back to orders"
         actionTo="/orders"
       />

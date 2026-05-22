@@ -880,6 +880,7 @@ export function FinancePage() {
         title="Finance unavailable"
         description={error ?? 'The financial overview could not be loaded.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
       />
     );
   }

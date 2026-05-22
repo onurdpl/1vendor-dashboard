@@ -3,6 +3,10 @@ import React from 'react';
 
 type ErrorBoundaryProps = {
   children: ReactNode;
+  routeName?: string;
+  eyebrow?: string;
+  title?: string;
+  description?: string;
 };
 
 type ErrorBoundaryState = {
@@ -19,11 +23,21 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error(error, info);
+    console.error('[client-render-error]', {
+      routeName: this.props.routeName ?? 'unknown',
+      message: error.message,
+      componentStack: info.componentStack,
+    });
+  }
+
+  componentDidUpdate(previousProps: ErrorBoundaryProps) {
+    if (this.state.hasError && previousProps.routeName !== this.props.routeName) {
+      this.setState({ hasError: false });
+    }
   }
 
   handleRetry = () => {
-    window.location.reload();
+    this.setState({ hasError: false });
   };
 
   render() {
@@ -32,17 +46,17 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
         <section className="dashboard state-workspace">
           <div className="hero-card operational-card state-card state-error">
             <div className="state-copy">
-              <p className="eyebrow">Dashboard recovery</p>
+              <p className="eyebrow">{this.props.eyebrow ?? 'Section recovery'}</p>
               <div className="state-title-row">
-                <h2>Something went wrong</h2>
+                <h2>{this.props.title ?? 'This section could not load'}</h2>
               </div>
               <p className="page-description">
-                An unexpected rendering error stopped this dashboard section. Reload to recover.
+                {this.props.description ?? 'An unexpected rendering error stopped this section. Retry without reloading the whole workspace.'}
               </p>
             </div>
             <div className="state-actions">
               <button type="button" className="button button-primary" onClick={this.handleRetry}>
-                Reload dashboard
+                Retry section
               </button>
             </div>
           </div>

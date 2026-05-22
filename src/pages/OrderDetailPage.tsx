@@ -3799,6 +3799,7 @@ export function OrderDetailPage() {
         title="Order unavailable"
         description={error ?? 'The selected order could not be loaded.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
         actionLabel="Back to orders"
         actionTo="/orders"
       />

@@ -436,6 +436,7 @@ export function SupportTicketDetailPage() {
         title="Support ticket unavailable"
         description={error ?? 'Unable to load support ticket.'}
         diagnostics={diagnostics}
+        onRetry={() => void refetch()}
       />
     );
   }

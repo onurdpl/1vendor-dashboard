@@ -366,6 +366,7 @@ export function DashboardPage() {
           title="Operational overview unavailable"
           description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
           diagnostics={diagnostics}
+          onRetry={() => void refetchDashboard()}
         />
         {message ? <ActionFeedback tone={tone} message={message} /> : null}
       </section>
