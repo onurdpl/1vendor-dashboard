@@ -8,6 +8,7 @@ export type ShippingProviderCreateInput = {
   vendorId: string;
   provider: ShippingProviderDto;
   requestSnapshot: Record<string, unknown>;
+  endpointPath?: string | null;
   retryContext?: {
     isRetry?: boolean;
     existingOrderId?: string | null;
@@ -43,6 +44,7 @@ export type ShippingProviderReturnCreateInput = {
   deliveryOptionId?: string | null;
   packageWeight?: number | null;
   requestSnapshot?: Record<string, unknown>;
+  endpointPath?: string | null;
 };
 
 export type ShippingProviderReturnCreateResult = {

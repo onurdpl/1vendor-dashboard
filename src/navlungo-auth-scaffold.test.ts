@@ -104,6 +104,88 @@ describe('Navlungo dormant auth scaffold', () => {
     );
   });
 
+  it('can send return pickup diagnostics to the documented post return endpoint', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ status: true, data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (String(url).includes('/post/check/')) {
+        return new Response(JSON.stringify({ status: true, data: { post_number: 'RET123', barcode: 'barcode-string' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        status: true,
+        message: 'Created',
+        data: {
+          post_number: 'RET123',
+          tracking_url: 'https://track.example.test/RET123',
+          barcode: 'barcode-string',
+          post: { carrier_id: 9, carrier_name: 'Sürat Kargo' },
+        },
+      }), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+
+    const result = await adapter.createReturnShipment({
+      orderId: 'return-1',
+      items: [],
+      endpointPath: '/post/return',
+      requestSnapshot: {
+        platform: 'shopify',
+        posts: [
+          {
+            reference_id: 'RT-1054-ABC123',
+            carrier_id: 9,
+            post_type: 3,
+            cod_payment_type: '',
+            sender: {
+              name: 'Sender',
+              phone: '+90 532 123 45 67',
+              email: 'sender@example.test',
+              address: 'Sender address',
+              country: 'tr',
+              city: 'Istanbul',
+              district: 'Kadikoy',
+              post_code: '',
+            },
+            recipient: { addressId: 55574 },
+            post: { desi: 3, package_count: 1, price: '', note: '' },
+            barcode_format: 'pdf-A5',
+            custom_data_1: '1054',
+            custom_data_2: 'return-1',
+            custom_data_3: '23391502673',
+            custom_data_4: 'navlungo-return',
+          },
+        ],
+      },
+    });
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
+      ['POST', 'https://domestic-api.navlungo.com/v2/post/return'],
+      ['GET', 'https://domestic-api.navlungo.com/v2/post/check/RET123'],
+    ]);
+    expect(result.responseSnapshot).toMatchObject({
+      flow: 'return_pickup',
+      navlungoReturnPickupSucceeded: true,
+      navlungoRequestSummary: expect.objectContaining({
+        endpointPath: '/post/return',
+        requestedPostType: 3,
+      }),
+    });
+    expect(JSON.stringify(result)).not.toContain('secret-access-token');
+  });
+
   it('uses configured base URL and does not expose credentials in auth diagnostics', async () => {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {

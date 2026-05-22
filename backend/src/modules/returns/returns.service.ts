@@ -10,6 +10,7 @@ import {
 import {
   summarizeNavlungoCreatePostRequest,
   type NavlungoCreatePostPayload,
+  type NavlungoCreatePostEndpointPath,
 } from '../shipping/navlungo-provider.adapter.js';
 import type { ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 
@@ -34,6 +35,7 @@ export type NavlungoReturnPickupInput = {
   autoCreate?: boolean;
   apiVersionOverride?: 'current' | 'v2' | 'v2.1';
   carrierOverride?: 'current' | '9' | '10';
+  endpointPathOverride?: NavlungoCreatePostEndpointPath;
   diagnosticConfirm?: 'YES';
   customerOverrides?: {
     name?: string;
@@ -272,24 +274,36 @@ function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
   ]) ?? 'pdf-A5';
 }
 
-function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride']) {
+function resolveNavlungoDiagnosticEndpointPath(
+  endpointPathOverride: NavlungoReturnPickupInput['endpointPathOverride'],
+): NavlungoCreatePostEndpointPath {
+  return endpointPathOverride === '/post/return' ? '/post/return' : '/post/create';
+}
+
+function resolveNavlungoDiagnosticBaseUrl(
+  env: AppEnv,
+  apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride'],
+  endpointPathOverride: NavlungoReturnPickupInput['endpointPathOverride'],
+) {
   const selectedVersion = apiVersionOverride === 'v2' || apiVersionOverride === 'v2.1' ? apiVersionOverride : 'current';
   const baseUrl = env.NAVLUNGO_BASE_URL?.trim();
+  const endpointPath = resolveNavlungoDiagnosticEndpointPath(endpointPathOverride);
   if (!baseUrl || selectedVersion === 'current') {
-    let resolvedProviderPath = '/post/create';
+    let resolvedProviderPath: string = endpointPath;
     if (baseUrl) {
       try {
-        resolvedProviderPath = `${new URL(baseUrl).pathname.replace(/\/$/, '') || ''}/post/create`;
+        resolvedProviderPath = `${new URL(baseUrl).pathname.replace(/\/$/, '') || ''}${endpointPath}`;
       } catch {
-        resolvedProviderPath = '/post/create';
+        resolvedProviderPath = endpointPath;
       }
     }
     return {
       env,
       versionTried: selectedVersion,
+      endpointPath,
       baseUrlOverride: null,
       resolvedProviderPath,
-      resolvedProviderUrl: baseUrl ? `${baseUrl.replace(/\/$/, '')}/post/create` : null,
+      resolvedProviderUrl: baseUrl ? `${baseUrl.replace(/\/$/, '')}${endpointPath}` : null,
     };
   }
 
@@ -303,16 +317,18 @@ function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: Navlu
         NAVLUNGO_BASE_URL: nextBaseUrl,
       },
       versionTried: selectedVersion,
+      endpointPath,
       baseUrlOverride: nextBaseUrl,
-      resolvedProviderPath: `/${selectedVersion}/post/create`,
-      resolvedProviderUrl: `${nextBaseUrl}/post/create`,
+      resolvedProviderPath: `/${selectedVersion}${endpointPath}`,
+      resolvedProviderUrl: `${nextBaseUrl}${endpointPath}`,
     };
   } catch {
     return {
       env,
       versionTried: selectedVersion,
+      endpointPath,
       baseUrlOverride: null,
-      resolvedProviderPath: '/post/create',
+      resolvedProviderPath: endpointPath,
       resolvedProviderUrl: null,
     };
   }
@@ -934,6 +950,7 @@ function buildNavlungoReturnPickupPayload(input: {
   env: AppEnv;
   customerOverrides?: NavlungoReturnPickupInput['customerOverrides'];
   carrierOverride?: NavlungoReturnPickupInput['carrierOverride'];
+  endpointPath?: NavlungoCreatePostEndpointPath;
 }) {
   const order = input.record.vendorAllocation.order;
   const overrides = input.customerOverrides ?? {};
@@ -997,7 +1014,7 @@ function buildNavlungoReturnPickupPayload(input: {
     payload,
     missingFields,
     referenceId,
-    summary: summarizeNavlungoCreatePostRequest(payload, input.env),
+    summary: summarizeNavlungoCreatePostRequest(payload, input.env, input.endpointPath),
     recipientAddressIdValid: Boolean(recipientAddressId),
   };
 }
@@ -1040,11 +1057,12 @@ export async function createNavlungoReturnPickupForReturn(
     input.apiVersionOverride === 'v2' ||
     input.apiVersionOverride === 'v2.1' ||
     input.carrierOverride === '9' ||
-    input.carrierOverride === '10';
+    input.carrierOverride === '10' ||
+    input.endpointPathOverride === '/post/return';
   if (diagnosticOverrideRequested && input.dryRun !== true && input.diagnosticConfirm !== 'YES') {
     throw new ReturnReviewError('Explicit confirmation is required for Navlungo return pickup diagnostic live create.', 400);
   }
-  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, input.apiVersionOverride);
+  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, input.apiVersionOverride, input.endpointPathOverride);
   const savedCompletion = readNavlungoReturnPickupCompletion(record.returnProviderSnapshot);
   const built = buildNavlungoReturnPickupPayload({
     record,
@@ -1052,12 +1070,13 @@ export async function createNavlungoReturnPickupForReturn(
     env: requestBase.env,
     customerOverrides: mergeNavlungoReturnPickupCompletion(savedCompletion, input.customerOverrides),
     carrierOverride: input.carrierOverride,
+    endpointPath: requestBase.endpointPath,
   });
   const attemptedAt = new Date().toISOString();
   const diagnostics = {
     provider: 'navlungo',
     flow: 'return_pickup',
-    endpoint: '/post/create',
+    endpoint: requestBase.endpointPath,
     dryRun: input.dryRun === true,
     navlungoReturnAutoCreateAttempted: input.autoCreate === true && input.dryRun !== true,
     navlungoReturnAutoCreateSkippedReason: null,
@@ -1071,6 +1090,7 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnRequestedCarrierId: built.summary.requestedCarrierId,
     navlungoReturnRequestedPostType: built.summary.requestedPostType,
     navlungoReturnEndpointVersionTried: requestBase.versionTried,
+    navlungoReturnEndpointPathTried: requestBase.endpointPath,
     navlungoReturnResolvedProviderPath: requestBase.resolvedProviderPath,
     navlungoReturnResolvedProviderUrl: requestBase.resolvedProviderUrl,
     navlungoReturnBaseUrlOverrideApplied: Boolean(requestBase.baseUrlOverride),
@@ -1114,6 +1134,7 @@ export async function createNavlungoReturnPickupForReturn(
       orderId: record.id,
       items: [],
       requestSnapshot: built.payload as unknown as Record<string, unknown>,
+      endpointPath: requestBase.endpointPath,
     });
     const providerSnapshot = {
       ...diagnostics,

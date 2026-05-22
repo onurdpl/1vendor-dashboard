@@ -39,6 +39,7 @@ type NavlungoReturnPickupBody = {
   dryRun?: boolean;
   apiVersionOverride?: 'current' | 'v2' | 'v2.1';
   carrierOverride?: 'current' | '9' | '10';
+  endpointPathOverride?: '/post/create' | '/post/return';
   diagnosticConfirm?: 'YES';
   customerOverrides?: {
     name?: string;
@@ -215,6 +216,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
           customerOverrides: request.body?.customerOverrides,
           apiVersionOverride: request.body?.apiVersionOverride,
           carrierOverride: request.body?.carrierOverride,
+          endpointPathOverride: request.body?.endpointPathOverride,
           diagnosticConfirm: request.body?.diagnosticConfirm,
         });
       } catch (error) {

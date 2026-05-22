@@ -464,6 +464,8 @@ export function ReturnDetailPage() {
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const [navlungoReturnPickupApiVersionOverride, setNavlungoReturnPickupApiVersionOverride] = useState<'current' | 'v2' | 'v2.1'>('current');
   const [navlungoReturnPickupCarrierOverride, setNavlungoReturnPickupCarrierOverride] = useState<'current' | '9' | '10'>('current');
+  const [navlungoReturnPickupEndpointPathOverride, setNavlungoReturnPickupEndpointPathOverride] =
+    useState<'/post/create' | '/post/return'>('/post/create');
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
   const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
@@ -551,6 +553,7 @@ export function ReturnDetailPage() {
       dryRun?: boolean;
       apiVersionOverride?: 'current' | 'v2' | 'v2.1';
       carrierOverride?: 'current' | '9' | '10';
+      endpointPathOverride?: '/post/create' | '/post/return';
       diagnosticConfirm?: 'YES';
     }) => {
       if (!returnId) {
@@ -573,6 +576,7 @@ export function ReturnDetailPage() {
           setNavlungoReturnPickupLiveConfirmed(false);
           setNavlungoReturnPickupApiVersionOverride('current');
           setNavlungoReturnPickupCarrierOverride('current');
+          setNavlungoReturnPickupEndpointPathOverride('/post/create');
         }
       },
       onError: (error) => {
@@ -858,6 +862,7 @@ export function ReturnDetailPage() {
   const navlungoReturnRequestedPostType =
     returnProviderSnapshot.navlungoReturnRequestedPostType ?? navlungoReturnRequestSummary?.requestedPostType ?? null;
   const navlungoReturnEndpointVersionTried = readSnapshotString(returnProviderSnapshot, 'navlungoReturnEndpointVersionTried');
+  const navlungoReturnEndpointPathTried = readSnapshotString(returnProviderSnapshot, 'navlungoReturnEndpointPathTried');
   const navlungoReturnResolvedProviderPath = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderPath');
   const navlungoReturnResolvedProviderUrl = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderUrl');
   const navlungoReturnProviderMessage =
@@ -1458,6 +1463,10 @@ export function ReturnDetailPage() {
                   <strong>{navlungoReturnEndpointVersionTried ?? '—'}</strong>
                 </div>
                 <div>
+                  <span>Endpoint path tried</span>
+                  <strong>{navlungoReturnEndpointPathTried ?? '—'}</strong>
+                </div>
+                <div>
                   <span>Resolved provider path</span>
                   <strong>{navlungoReturnResolvedProviderPath ?? '—'}</strong>
                 </div>
@@ -1769,6 +1778,18 @@ export function ReturnDetailPage() {
                             <option value="10">10 - HepsiJet</option>
                           </select>
                         </label>
+                        <label>
+                          <span>Endpoint path</span>
+                          <select
+                            value={navlungoReturnPickupEndpointPathOverride}
+                            onChange={(event) =>
+                              setNavlungoReturnPickupEndpointPathOverride(event.target.value as '/post/create' | '/post/return')
+                            }
+                          >
+                            <option value="/post/create">/post/create</option>
+                            <option value="/post/return">/post/return</option>
+                          </select>
+                        </label>
                       </div>
                     ) : null}
                     <label className="checkbox-row">
@@ -1793,6 +1814,7 @@ export function ReturnDetailPage() {
                             dryRun: false,
                             apiVersionOverride: navlungoReturnPickupApiVersionOverride,
                             carrierOverride: navlungoReturnPickupCarrierOverride,
+                            endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
                             diagnosticConfirm: navlungoReturnPickupLiveConfirmed ? 'YES' : undefined,
                           })
                           .catch(() => undefined)

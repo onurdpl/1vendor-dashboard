@@ -26,6 +26,7 @@ export async function createNavlungoReturnPickup(
     dryRun?: boolean;
     apiVersionOverride?: 'current' | 'v2' | 'v2.1';
     carrierOverride?: 'current' | '9' | '10';
+    endpointPathOverride?: '/post/create' | '/post/return';
     diagnosticConfirm?: 'YES';
     customerOverrides?: Record<string, string | undefined>;
   } = {},

@@ -1229,6 +1229,7 @@ export const runtimeServices = {
         dryRun?: boolean;
         apiVersionOverride?: 'current' | 'v2' | 'v2.1';
         carrierOverride?: 'current' | '9' | '10';
+        endpointPathOverride?: '/post/create' | '/post/return';
         diagnosticConfirm?: 'YES';
         customerOverrides?: Record<string, string | undefined>;
       } = {},
@@ -1251,7 +1252,7 @@ export const runtimeServices = {
             navlungoReturnPickupSucceeded: false,
             navlungoReturnPickupMissingFields: [],
             navlungoReturnPickupPayloadSummary: {
-              endpointPath: '/post/create',
+              endpointPath: input.endpointPathOverride ?? '/post/create',
               method: 'POST',
               senderKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
               recipientKeys: ['addressId'],

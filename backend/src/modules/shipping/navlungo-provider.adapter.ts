@@ -3,6 +3,7 @@ import type {
   ShippingProviderAdapter,
   ShippingProviderCreateInput,
   ShippingProviderCreateResult,
+  ShippingProviderReturnCreateInput,
   ShippingProviderReturnCreateResult,
   ShippingProviderUpdateInput,
 } from './shipping-provider.adapter.js';
@@ -222,11 +223,13 @@ export type NavlungoDetailedCheckPostPayload = {
   limit: number;
 };
 
+export type NavlungoCreatePostEndpointPath = '/post/create' | '/post/return';
+
 export type NavlungoCreatePostRequestSummary = {
   baseUrl: string | null;
   baseUrlHost: string | null;
   baseUrlPath: string | null;
-  endpointPath: '/post/create';
+  endpointPath: NavlungoCreatePostEndpointPath;
   method: 'POST';
   headerKeys: string[];
   topLevelBodyKeys: string[];
@@ -334,6 +337,7 @@ function sortedRecordKeys(value: unknown) {
 export function summarizeNavlungoCreatePostRequest(
   payload: NavlungoCreatePostPayload,
   env: Partial<Pick<AppEnv, 'NAVLUNGO_BASE_URL'>> = {},
+  endpointPath: NavlungoCreatePostEndpointPath = '/post/create',
 ): NavlungoCreatePostRequestSummary {
   const baseUrl = parseBaseUrl(env.NAVLUNGO_BASE_URL);
   const post = payload.posts[0] as NavlungoCreatePostPayload['posts'][number] | undefined;
@@ -349,7 +353,7 @@ export function summarizeNavlungoCreatePostRequest(
     baseUrl: baseUrl.host ? `${baseUrl.host}${baseUrl.path ?? ''}` : null,
     baseUrlHost: baseUrl.host,
     baseUrlPath: baseUrl.path,
-    endpointPath: '/post/create',
+    endpointPath,
     method: 'POST',
     headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
     topLevelBodyKeys: sortedRecordKeys(payload),
@@ -392,6 +396,10 @@ export function summarizeNavlungoCreatePostRequest(
     postNoteType: safeValueType(postPayload?.note),
     postNoteLength: safeStringLength(postPayload?.note),
   };
+}
+
+function normalizeNavlungoCreatePostEndpointPath(value: unknown): NavlungoCreatePostEndpointPath {
+  return value === '/post/return' ? '/post/return' : '/post/create';
 }
 
 function summarizeResponseShape(value: unknown): NavlungoAuthDiagnostics['responseShapeSummary'] {
@@ -963,13 +971,17 @@ export class NavlungoHttpClient {
     };
   }
 
-  async createPost(accessToken: string, payload: NavlungoCreatePostPayload): Promise<NavlungoHttpResponse> {
+  async createPost(
+    accessToken: string,
+    payload: NavlungoCreatePostPayload,
+    endpointPath: NavlungoCreatePostEndpointPath = '/post/create',
+  ): Promise<NavlungoHttpResponse> {
     const token = accessToken.trim();
     if (!token) {
       throw new Error('Navlungo access token is required for Create Post.');
     }
 
-    const response = await this.fetchImpl(this.requestUrl('/post/create'), {
+    const response = await this.fetchImpl(this.requestUrl(endpointPath), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1349,7 +1361,8 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
 
     const payload = input.requestSnapshot as NavlungoCreatePostPayload;
     const client = new NavlungoHttpClient(this.env, this.options);
-    const requestSummary = summarizeNavlungoCreatePostRequest(payload, this.env);
+    const createPostEndpointPath = normalizeNavlungoCreatePostEndpointPath(input.endpointPath);
+    const requestSummary = summarizeNavlungoCreatePostRequest(payload, this.env, createPostEndpointPath);
     const senderUsesAddressId = isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender;
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
@@ -1367,6 +1380,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       senderUsesAddressId,
       senderMode: senderUsesAddressId ? 'addressId' : 'fullSender',
       navlungoRequestSummary: requestSummary,
+      createPostEndpointPath,
       lastSuccessfulNavlungoRequestSummary: lastSuccessfulNavlungoCreatePostRequestSummary,
     };
 
@@ -1397,7 +1411,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     let createResponse: NavlungoHttpResponse;
     try {
       responseSnapshot.createPostCalled = true;
-      createResponse = await client.createPost(accessToken, payload);
+      createResponse = await client.createPost(accessToken, payload, createPostEndpointPath);
     } catch (error) {
       throw new ProviderExecutionError('Navlungo Create Post request failed before provider response.', {
         ...responseSnapshot,
@@ -1965,7 +1979,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     };
   }
 
-  async createReturnShipment(input: { requestSnapshot?: Record<string, unknown> }): Promise<ShippingProviderReturnCreateResult> {
+  async createReturnShipment(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult> {
     const payload = input.requestSnapshot as NavlungoCreatePostPayload | undefined;
     if (!payload?.posts?.length) {
       throw new ProviderExecutionError('Navlungo return pickup requires a prepared Create Post payload.', {
@@ -1980,6 +1994,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       vendorId: 'navlungo-return-pickup',
       provider: NAVLUNGO_PROVIDER_KEY,
       requestSnapshot: payload,
+      endpointPath: input.endpointPath,
     });
 
     return {

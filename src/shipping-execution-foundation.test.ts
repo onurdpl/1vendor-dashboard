@@ -5864,12 +5864,80 @@ describe('shipping execution foundation', () => {
     const requestSnapshot = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].requestSnapshot;
     expect(requestSnapshot.posts[0].carrier_id).toBe(10);
     expect(requestSnapshot.posts[0].barcode_format).toBe('pdf-A5');
+    expect((adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].endpointPath).toBe('/post/create');
     expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         returnProviderSnapshot: expect.objectContaining({
           navlungoReturnEndpointVersionTried: 'v2.1',
           navlungoReturnRequestedCarrierId: 10,
           navlungoReturnResolvedProviderPath: '/v2.1/post/create',
+        }),
+      }),
+    }));
+  });
+
+  it('can probe Navlungo return pickup against the post return endpoint', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'NAV-RETURN-ENDPOINT-1',
+        returnTrackingNumber: 'RET-TRACK-ENDPOINT-1',
+        returnTrackingUrl: 'https://tracking.example/RET-TRACK-ENDPOINT-1',
+        returnBarcode: 'barcode-string',
+        returnCarrierName: 'Sürat Kargo',
+        returnStatus: 'created',
+        responseSnapshot: {
+          createPostHttpStatus: 201,
+          providerMessage: 'Created',
+        },
+      }),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RETURN-ENDPOINT-1',
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      {
+        ...env,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+      },
+      {
+        adapter,
+        apiVersionOverride: 'v2.1',
+        endpointPathOverride: '/post/return',
+        diagnosticConfirm: 'YES',
+      },
+    );
+
+    const createInput = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(createInput.endpointPath).toBe('/post/return');
+    expect(createInput.requestSnapshot.posts[0].post_type).toBe(3);
+    expect(createInput.requestSnapshot.posts[0].recipient).toEqual({ addressId: 55574 });
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnEndpointVersionTried: 'v2.1',
+          navlungoReturnEndpointPathTried: '/post/return',
+          navlungoReturnResolvedProviderPath: '/v2.1/post/return',
+          navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/return',
         }),
       }),
     }));

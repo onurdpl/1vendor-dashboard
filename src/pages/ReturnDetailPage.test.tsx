@@ -41,6 +41,7 @@ const createNavlungoReturnPickupMock = vi.fn<
       dryRun?: boolean;
       apiVersionOverride?: 'current' | 'v2' | 'v2.1';
       carrierOverride?: 'current' | '9' | '10';
+      endpointPathOverride?: '/post/create' | '/post/return';
       diagnosticConfirm?: 'YES';
       customerOverrides?: Record<string, string | undefined>;
     },
@@ -69,6 +70,7 @@ vi.mock('../features/returns/api', async () => {
         dryRun?: boolean;
         apiVersionOverride?: 'current' | 'v2' | 'v2.1';
         carrierOverride?: 'current' | '9' | '10';
+        endpointPathOverride?: '/post/create' | '/post/return';
         diagnosticConfirm?: 'YES';
         customerOverrides?: Record<string, string | undefined>;
       },
@@ -600,6 +602,42 @@ describe('ReturnDetailPage vendor review screen', () => {
       dryRun: false,
       apiVersionOverride: 'v2.1',
       carrierOverride: '10',
+      endpointPathOverride: '/post/create',
+      diagnosticConfirm: 'YES',
+    });
+  });
+
+  it('lets admin probe Navlungo return pickup against the post return endpoint', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+    createNavlungoReturnPickupMock.mockResolvedValueOnce({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-RETURN-1',
+    });
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Provider return shipment' });
+    await user.selectOptions(screen.getByLabelText('API version'), 'v2.1');
+    await user.selectOptions(screen.getByLabelText('Endpoint path'), '/post/return');
+    await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
+    await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
+
+    expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
+      dryRun: false,
+      apiVersionOverride: 'v2.1',
+      carrierOverride: 'current',
+      endpointPathOverride: '/post/return',
       diagnosticConfirm: 'YES',
     });
   });
