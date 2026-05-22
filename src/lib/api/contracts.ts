@@ -341,11 +341,23 @@ export type ShipmentExecution = {
     navlungoProviderStatusCode?: string | number | null;
     navlungoProviderStatusName?: string | null;
     navlungoNormalizedStatus?: string | null;
+    navlungoPickedUpDate?: string | null;
+    navlungoDeliveredDate?: string | null;
+    navlungoCancelDate?: string | null;
+    navlungoCarrierTrackingCode?: string | null;
+    navlungoCarrierTrackingUrl?: string | null;
+    navlungoBarcodeStatus?: string | null;
     navlungoTrackingEnriched?: boolean | null;
     navlungoGeoStatus?: string | null;
     navlungoGeoBadAddress?: boolean | null;
     navlungoCarrierTrackingPresent?: boolean | null;
     navlungoLogsCount?: number | null;
+    navlungoStatusLogs?: Array<{
+      statusCode: string | number | null;
+      action: string | null;
+      actionResult: string | null;
+      createdAt: string | null;
+    }>;
     navlungoStatusSyncProviderTrackingId?: string | null;
     navlungoStatusSyncValidationFields?: string[];
     navlungoStatusSyncValidationMessages?: string[];

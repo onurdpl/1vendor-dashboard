@@ -101,6 +101,119 @@ function getSafeProviderTimelineDescription(value: string | null | undefined, fa
   return normalized ? normalized.slice(0, 140) : fallback;
 }
 
+function getSafeNavlungoLifecycleText(value: string | number | null | undefined) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const normalized = String(value)
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[redacted-phone]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized ? normalized.slice(0, 120) : null;
+}
+
+function getNavlungoLifecycleLabel(input: {
+  statusCode?: string | number | null;
+  action?: string | null;
+  actionResult?: string | null;
+  statusName?: string | null;
+}) {
+  const numericStatus = Number(input.statusCode);
+  switch (numericStatus) {
+    case 2:
+      return 'Teslim Edildi';
+    case 4:
+      return 'Dağıtıma Çıktı';
+    case 9:
+    case 21:
+      return 'İade Edildi';
+    case 10:
+      return 'İptal';
+    case 16:
+      return 'Teslim Alındı';
+    case 17:
+      return 'Transfer Aşamasında';
+    case 18:
+      return 'Şubede Beklemede';
+    default:
+      break;
+  }
+
+  const source = [input.statusName, input.actionResult, input.action].map(getSafeNavlungoLifecycleText).find(Boolean);
+  const normalized = source?.toLocaleLowerCase('tr-TR') ?? '';
+  if (/teslim edildi|delivered/.test(normalized)) return 'Teslim Edildi';
+  if (/dağıt|dagit|out for delivery/.test(normalized)) return 'Dağıtıma Çıktı';
+  if (/şube|sube|branch/.test(normalized)) return 'Şubede Beklemede';
+  if (/iptal|cancel/.test(normalized)) return 'İptal';
+  if (/iade|return/.test(normalized)) return 'İade Edildi';
+  if (/transfer|transit|yolda/.test(normalized)) return 'Transfer Aşamasında';
+  if (/teslim al|picked/.test(normalized)) return 'Teslim Alındı';
+  return source || 'Navlungo durum güncellendi';
+}
+
+function getNavlungoStatusBadgeLabel(summary?: ShipmentExecution['providerResponseSummary']) {
+  if (!summary) {
+    return null;
+  }
+
+  return getSafeNavlungoLifecycleText(summary.navlungoProviderStatusName) ??
+    getSafeNavlungoLifecycleText(summary.navlungoNormalizedStatus) ??
+    (summary.navlungoProviderStatusCode === null || summary.navlungoProviderStatusCode === undefined
+      ? null
+      : `Status ${summary.navlungoProviderStatusCode}`);
+}
+
+function getNavlungoStatusTone(label: string | null | undefined): OperationalEventInput['tone'] {
+  const normalized = label?.toLocaleLowerCase('tr-TR') ?? '';
+  if (/delivered|teslim edildi/.test(normalized)) return 'success';
+  if (/cancel|iptal|return|iade/.test(normalized)) return 'warning';
+  return 'info';
+}
+
+function getNavlungoLifecycleLogEvents(summary?: ShipmentExecution['providerResponseSummary']) {
+  const logs = summary?.navlungoStatusLogs ?? [];
+  const seen = new Set<string>();
+
+  return logs
+    .map((log) => {
+      const title = getNavlungoLifecycleLabel({
+        statusCode: log.statusCode,
+        action: log.action,
+        actionResult: log.actionResult,
+        statusName: summary?.navlungoProviderStatusName,
+      });
+      const description = getSafeProviderTimelineDescription(
+        getSafeNavlungoLifecycleText(log.actionResult) ?? getSafeNavlungoLifecycleText(log.action),
+        summary?.navlungoProviderStatusName ? `Provider status: ${summary.navlungoProviderStatusName}` : 'Provider lifecycle status updated.',
+      );
+      const at = log.createdAt ?? summary?.navlungoDeliveredDate ?? summary?.navlungoPickedUpDate ?? summary?.navlungoCancelDate ?? null;
+      const fingerprint = [title, log.statusCode ?? '', log.action ?? '', log.actionResult ?? '', at ?? ''].join('|');
+      return {
+        title,
+        description,
+        at,
+        status: getSafeNavlungoLifecycleText(log.actionResult) ?? getSafeNavlungoLifecycleText(summary?.navlungoProviderStatusName) ?? undefined,
+        tone: getNavlungoStatusTone(title),
+        fingerprint,
+      };
+    })
+    .filter((event) => {
+      if (seen.has(event.fingerprint)) {
+        return false;
+      }
+      seen.add(event.fingerprint);
+      return true;
+    })
+    .sort((left, right) => {
+      const leftTime = left.at ? new Date(left.at).getTime() : Number.MAX_SAFE_INTEGER;
+      const rightTime = right.at ? new Date(right.at).getTime() : Number.MAX_SAFE_INTEGER;
+      return leftTime - rightTime;
+    });
+}
+
 function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
   const grouped: OperationalEventInput[] = [];
   const seenGroupedEvents = new Set<string>();
@@ -1705,6 +1818,8 @@ export function OrderDetailPage() {
   const shipmentShopifyTrackingNumber = getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyTrackingUrl = getShipmentTrackingUrl(order ?? {}, visibleShipmentExecution);
   const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
+  const navlungoProviderStatusBadge =
+    visibleShipmentExecution?.provider === 'navlungo' ? getNavlungoStatusBadgeLabel(shipmentProviderSummary) : null;
   const shopifyFulfillmentSyncSummary =
     order && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt)
       ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution)
@@ -2790,11 +2905,32 @@ export function OrderDetailPage() {
           </strong>
         </div>
         <div className="summary-row">
+          <span>Lifecycle dates</span>
+          <strong>
+            {[
+              summary.navlungoPickedUpDate ? `picked up ${formatOptionalDate(summary.navlungoPickedUpDate)}` : null,
+              summary.navlungoDeliveredDate ? `delivered ${formatOptionalDate(summary.navlungoDeliveredDate)}` : null,
+              summary.navlungoCancelDate ? `cancelled ${formatOptionalDate(summary.navlungoCancelDate)}` : null,
+            ].filter(Boolean).join(' · ') || '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
           <span>Tracking enrichment</span>
           <strong>
             enriched {formatDiagnosticPresence(summary.navlungoTrackingEnriched)} · carrier tracking{' '}
             {formatDiagnosticPresence(summary.navlungoCarrierTrackingPresent)}
           </strong>
+        </div>
+        <div className="summary-row">
+          <span>Carrier tracking details</span>
+          <strong>
+            {summary.navlungoCarrierTrackingCode || '—'}
+            {summary.navlungoCarrierTrackingUrl ? ` · ${summary.navlungoCarrierTrackingUrl}` : ''}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Barcode status</span>
+          <strong>{summary.navlungoBarcodeStatus || '—'}</strong>
         </div>
         <div className="summary-row">
           <span>Address intelligence</span>
@@ -2812,6 +2948,18 @@ export function OrderDetailPage() {
           <span>Status logs</span>
           <strong>{summary.navlungoLogsCount ?? '—'}</strong>
         </div>
+        {summary.navlungoStatusLogs?.length ? (
+          <div className="shipment-mini-timeline" aria-label="Navlungo provider lifecycle logs">
+            {getNavlungoLifecycleLogEvents(summary).map((event) => (
+              <div className="summary-row" key={`navlungo-log-${event.fingerprint}`}>
+                <span>{event.title}</span>
+                <strong>
+                  {[event.status, event.at ? formatOptionalDate(event.at) : null].filter(Boolean).join(' · ') || '—'}
+                </strong>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="summary-row">
           <span>Status sync tracking ID</span>
           <strong>{summary.navlungoStatusSyncProviderTrackingId || summary.providerTrackingId || '—'}</strong>
@@ -3701,20 +3849,17 @@ export function OrderDetailPage() {
       tone: 'warning',
     });
   }
-  if (visibleShipmentExecution?.provider === 'navlungo' && visibleShipmentExecution.timeline?.length) {
-    const providerLogTitles = new Set(['Picked up', 'In transit', 'Out for delivery', 'Delivered', 'Returned', 'Cancelled', 'Waiting at branch']);
-    visibleShipmentExecution.timeline
-      .filter((event) => providerLogTitles.has(event.label))
-      .forEach((event) => {
-        orderTimelineEvents.push({
-          id: `navlungo-status-${visibleShipmentExecution.id}-${event.label}-${event.at}`,
-          title: event.label,
-          description: event.status ? `Provider log: ${event.status}` : 'Provider lifecycle status updated.',
-          at: event.at,
-          status: event.label,
-          tone: event.label === 'Delivered' ? 'success' : event.label === 'Cancelled' || event.label === 'Returned' ? 'warning' : 'info',
-        });
+  if (visibleShipmentExecution?.provider === 'navlungo') {
+    getNavlungoLifecycleLogEvents(shipmentProviderSummary).forEach((event, index) => {
+      orderTimelineEvents.push({
+        id: `navlungo-status-${visibleShipmentExecution.id}-${event.fingerprint}-${index}`,
+        title: event.title,
+        description: event.description,
+        at: event.at ?? visibleShipmentExecution.lastProviderResponseAt ?? visibleShipmentExecution.updatedAt ?? order.date,
+        status: event.status,
+        tone: event.tone,
       });
+    });
   }
   if (order.shippingStatus === 'Delivered' || visibleShipmentExecution?.shipmentStatus === 'delivered') {
     orderTimelineEvents.push({
@@ -4537,7 +4682,7 @@ export function OrderDetailPage() {
                     visibility: getNativeTimelineVisibility(entry.label),
                   })),
                 ...orderTimelineEvents,
-              ])}
+              ]).sort((left, right) => new Date(left.at ?? order.date).getTime() - new Date(right.at ?? order.date).getTime())}
               audience={audience}
               emptyMessage="No records available."
             />
@@ -4652,6 +4797,12 @@ export function OrderDetailPage() {
                                 : order.shippingStatus}
                             </strong>
                           </div>
+                          {navlungoProviderStatusBadge ? (
+                            <div className="summary-row">
+                              <span>Provider lifecycle</span>
+                              <strong>{navlungoProviderStatusBadge}</strong>
+                            </div>
+                          ) : null}
                           <div className="summary-row">
                             <span>Tracking number</span>
                             <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
@@ -4714,6 +4865,71 @@ export function OrderDetailPage() {
                                   {getShipmentBarcodeDisplay(visibleShipmentExecution, getShipmentTrackingNumber(order, visibleShipmentExecution))}
                                 </strong>
                               </div>
+                              {visibleShipmentExecution.provider === 'navlungo' ? (
+                                <>
+                                  <div className="summary-row">
+                                    <span>Provider lifecycle</span>
+                                    <strong>
+                                      {[
+                                        shipmentProviderSummary?.navlungoProviderStatusCode ?? null,
+                                        shipmentProviderSummary?.navlungoProviderStatusName ?? shipmentProviderSummary?.navlungoNormalizedStatus ?? null,
+                                      ].filter(Boolean).join(' · ') || '—'}
+                                    </strong>
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Carrier tracking</span>
+                                    {shipmentProviderSummary?.navlungoCarrierTrackingUrl || getShipmentTrackingUrl(order, visibleShipmentExecution) ? (
+                                      <a
+                                        className="inline-link"
+                                        href={shipmentProviderSummary?.navlungoCarrierTrackingUrl || getShipmentTrackingUrl(order, visibleShipmentExecution) || undefined}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                      >
+                                        {shipmentProviderSummary?.navlungoCarrierTrackingCode ||
+                                          getShipmentTrackingNumber(order, visibleShipmentExecution) ||
+                                          'Open carrier tracking'}
+                                      </a>
+                                    ) : (
+                                      <strong className={shipmentProviderSummary?.navlungoCarrierTrackingCode ? '' : 'muted'}>
+                                        {shipmentProviderSummary?.navlungoCarrierTrackingCode ?? 'Not available'}
+                                      </strong>
+                                    )}
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Barcode status</span>
+                                    <strong>{shipmentProviderSummary?.navlungoBarcodeStatus || '—'}</strong>
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Lifecycle dates</span>
+                                    <strong>
+                                      {[
+                                        shipmentProviderSummary?.navlungoPickedUpDate
+                                          ? `Picked up ${formatOptionalDate(shipmentProviderSummary.navlungoPickedUpDate)}`
+                                          : null,
+                                        shipmentProviderSummary?.navlungoDeliveredDate
+                                          ? `Delivered ${formatOptionalDate(shipmentProviderSummary.navlungoDeliveredDate)}`
+                                          : null,
+                                        shipmentProviderSummary?.navlungoCancelDate
+                                          ? `Cancelled ${formatOptionalDate(shipmentProviderSummary.navlungoCancelDate)}`
+                                          : null,
+                                      ].filter(Boolean).join(' · ') || '—'}
+                                    </strong>
+                                  </div>
+                                  <div className="summary-row">
+                                    <span>Address intelligence</span>
+                                    <strong>
+                                      geo {shipmentProviderSummary?.navlungoGeoStatus || '—'} · bad address{' '}
+                                      {formatDiagnosticPresence(shipmentProviderSummary?.navlungoGeoBadAddress)}
+                                    </strong>
+                                  </div>
+                                  {shipmentProviderSummary?.navlungoGeoBadAddress ? (
+                                    <div className="summary-row">
+                                      <span>Address warning</span>
+                                      <strong>Carrier reported address validation issue.</strong>
+                                    </div>
+                                  ) : null}
+                                </>
+                              ) : null}
                               {visibleShipmentExecution.provider === 'kargonomi' ? (
                                 <>
                                   <div className="summary-row">
@@ -5755,6 +5971,12 @@ export function OrderDetailPage() {
                           <span>Carrier status</span>
                           <strong>{getOperationalShipmentStatusLabel(visibleShipmentExecution.shipmentStatus)}</strong>
                         </div>
+                        {navlungoProviderStatusBadge ? (
+                          <div className="summary-row">
+                            <span>Provider lifecycle</span>
+                            <strong>{navlungoProviderStatusBadge}</strong>
+                          </div>
+                        ) : null}
                         {visibleShipmentExecution.warehouseId ? (
                           <div className="summary-row">
                             <span>Warehouse</span>

@@ -613,6 +613,12 @@ function mapProviderResponseSummary(
           : [],
       }
     : null;
+  const navlungoStatusLogs = readNavlungoStatusLogEvents(snapshot).map((event) => ({
+    statusCode: event.statusCode,
+    action: event.action,
+    actionResult: event.actionResult,
+    createdAt: event.createdAt,
+  }));
 
   return {
     httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
@@ -739,11 +745,22 @@ function mapProviderResponseSummary(
       readNumber(snapshot, ['navlungoProviderStatusCode']) ?? readString(snapshot, ['navlungoProviderStatusCode']),
     navlungoProviderStatusName: readString(snapshot, ['navlungoProviderStatusName']),
     navlungoNormalizedStatus: readString(snapshot, ['navlungoNormalizedStatus']),
+    navlungoPickedUpDate: readString(snapshot, ['navlungoPickedUpDate', 'picked_up_date', 'pickedUpDate']),
+    navlungoDeliveredDate: readString(snapshot, ['navlungoDeliveredDate', 'delivered_date', 'deliveredDate']),
+    navlungoCancelDate: readString(snapshot, ['navlungoCancelDate', 'cancel_date', 'cancelDate']),
+    navlungoCarrierTrackingCode:
+      readString(snapshot, ['navlungoCarrierTrackingCode', 'carrier_tracking_code', 'carrierTrackingCode']) ??
+      execution.trackingNumber,
+    navlungoCarrierTrackingUrl:
+      readString(snapshot, ['navlungoCarrierTrackingUrl', 'carrier_tracking_url', 'carrierTrackingUrl']) ??
+      execution.trackingUrl,
+    navlungoBarcodeStatus: readString(snapshot, ['navlungoBarcodeStatus', 'barcodeStatus', 'barcode_status']),
     navlungoTrackingEnriched: readOptionalBoolean(snapshot, ['navlungoTrackingEnriched']),
     navlungoGeoStatus: readString(snapshot, ['navlungoGeoStatus']),
     navlungoGeoBadAddress: readOptionalBoolean(snapshot, ['navlungoGeoBadAddress']),
     navlungoCarrierTrackingPresent: readOptionalBoolean(snapshot, ['navlungoCarrierTrackingPresent']),
-    navlungoLogsCount: readNumber(snapshot, ['navlungoLogsCount']),
+    navlungoLogsCount: readNumber(snapshot, ['navlungoLogsCount']) ?? navlungoStatusLogs.length,
+    navlungoStatusLogs,
     navlungoStatusSyncProviderTrackingId: readString(snapshot, ['navlungoStatusSyncProviderTrackingId']),
     navlungoStatusSyncValidationFields: readStringArray(snapshot.navlungoStatusSyncValidationFields),
     navlungoStatusSyncValidationMessages: readValidationStringArray(snapshot.navlungoStatusSyncValidationMessages),

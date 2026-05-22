@@ -1296,11 +1296,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           navlungoProviderStatusCode: 17,
           navlungoProviderStatusName: 'In Transit',
           navlungoNormalizedStatus: 'in_transit',
+          navlungoPickedUpDate: '2026-05-22T09:00:00.000Z',
+          navlungoCarrierTrackingCode: 'SURAT-1028',
+          navlungoCarrierTrackingUrl: 'https://tracking.navlungo.example/SURAT-1028',
+          navlungoBarcodeStatus: 'created',
           navlungoTrackingEnriched: true,
           navlungoGeoStatus: 'verified',
           navlungoGeoBadAddress: true,
           navlungoCarrierTrackingPresent: true,
           navlungoLogsCount: 2,
+          navlungoStatusLogs: [
+            { statusCode: 16, action: 'PickedUp', actionResult: 'Teslim Alındı', createdAt: '2026-05-22T09:00:00.000Z' },
+            { statusCode: 17, action: 'Transfer', actionResult: 'Transfer merkezinde', createdAt: '2026-05-22T10:00:00.000Z' },
+          ],
           navlungoStatusSyncProviderTrackingId: '#status-sync',
           navlungoStatusSyncValidationFields: ['post.post_number'],
           navlungoStatusSyncValidationMessages: ['post.post_number validation failed'],
@@ -1317,6 +1325,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText(/body post, limit · post post_number · limit 1/)).toBeInTheDocument();
     expect(screen.getByText(/json:object · status, data/)).toBeInTheDocument();
     expect(screen.getByText('17 · In Transit')).toBeInTheDocument();
+    expect(screen.getByText('SURAT-1028 · https://tracking.navlungo.example/SURAT-1028')).toBeInTheDocument();
+    expect(screen.getByText('created')).toBeInTheDocument();
+    expect(screen.getAllByText('Transfer Aşamasında').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Transfer merkezinde').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
     expect(screen.getByText('#status-sync')).toBeInTheDocument();
     expect(screen.getByText('post.post_number')).toBeInTheDocument();
@@ -3192,7 +3204,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       }),
     );
     expect(await screen.findByText('Shipment NAV-RETRY-1048 recorded.')).toBeInTheDocument();
-    expect(screen.getByText('NAV-TRACK-1048')).toBeInTheDocument();
+    expect(screen.getAllByText('NAV-TRACK-1048').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-RETRY-1048');
   });
 
@@ -3481,12 +3493,19 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
         navlungoStatusSyncAttempted: true,
         navlungoStatusSyncHttpStatus: 200,
-        navlungoProviderStatusCode: 17,
-        navlungoProviderStatusName: 'In Transit',
-        navlungoNormalizedStatus: 'in_transit',
+        navlungoProviderStatusCode: 2,
+        navlungoProviderStatusName: 'Delivered',
+        navlungoNormalizedStatus: 'delivered',
+        navlungoDeliveredDate: '2026-05-22T12:00:00.000Z',
+        navlungoCarrierTrackingCode: 'SURAT-1054',
+        navlungoCarrierTrackingUrl: 'https://tracking.navlungo.example/NAV-1054',
+        navlungoBarcodeStatus: 'created',
         navlungoGeoBadAddress: true,
         navlungoCarrierTrackingPresent: true,
         navlungoLogsCount: 1,
+        navlungoStatusLogs: [
+          { statusCode: 2, action: 'Delivered', actionResult: 'Alıcıya teslim edildi', createdAt: '2026-05-22T12:00:00.000Z' },
+        ],
         shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
       },
     });
@@ -3501,9 +3520,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         trackingNumber: 'SURAT-1054',
         trackingUrl: 'https://tracking.navlungo.example/NAV-1054',
         labelUrl: 'barcode-string',
-        timeline: [
-          { label: 'In transit', at: '2026-05-22T10:00:00.000Z', status: 'OK' },
-        ],
+        timeline: [],
         providerResponseSummary: {
           ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
           httpStatus: 200,
@@ -3512,9 +3529,16 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           navlungoProviderStatusCode: 17,
           navlungoProviderStatusName: 'In Transit',
           navlungoNormalizedStatus: 'in_transit',
+          navlungoCarrierTrackingCode: 'SURAT-1054',
+          navlungoCarrierTrackingUrl: 'https://tracking.navlungo.example/NAV-1054',
+          navlungoBarcodeStatus: 'created',
           navlungoGeoBadAddress: true,
           navlungoCarrierTrackingPresent: true,
           navlungoLogsCount: 1,
+          navlungoStatusLogs: [
+            { statusCode: 17, action: 'Transfer', actionResult: 'Transfer merkezinde', createdAt: '2026-05-22T10:00:00.000Z' },
+            { statusCode: 17, action: 'Transfer', actionResult: 'Transfer merkezinde', createdAt: '2026-05-22T10:00:00.000Z' },
+          ],
           shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
         },
       },
@@ -3535,7 +3559,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
-    expect(within(timeline as HTMLElement).getAllByText('In transit').length).toBeGreaterThan(0);
+    expect(within(timeline as HTMLElement).getByText('Transfer Aşamasında')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getAllByText('Transfer Aşamasında')).toHaveLength(1);
+    expect(within(timeline as HTMLElement).getAllByText('Transfer merkezinde').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('SURAT-1054').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('created').length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole('button', { name: 'Sync Navlungo status' }));
 
