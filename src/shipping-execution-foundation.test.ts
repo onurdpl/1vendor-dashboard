@@ -2780,7 +2780,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('55574');
   });
 
-  it('does not require Navlungo sender address id when full sender fields are configured', async () => {
+  it('requires a numeric Navlungo sender address id for readiness', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -2811,12 +2811,12 @@ describe('shipping execution foundation', () => {
 
     expect(diagnostics).toMatchObject({
       provider: 'navlungo',
-      executionReady: true,
-      missing: [],
+      executionReady: false,
+      missing: expect.arrayContaining(['VENDOR_NAVLUNGO_SENDER_ADDRESS_ID']),
       navlungo: {
         defaultSenderAddressIdConfigured: true,
         defaultSenderAddressIdValid: false,
-        senderFieldsConfigured: true,
+        senderFieldsConfigured: false,
       },
     });
     expect(JSON.stringify(diagnostics)).not.toContain('sender-address');
@@ -2920,14 +2920,7 @@ describe('shipping execution foundation', () => {
             post_type: 2,
             barcode_format: 'pdf-A6',
             sender: expect.objectContaining({
-              name: 'Sporjinal Warehouse',
-              phone: '+90 532 123 45 67',
-              email: 'warehouse@example.test',
-              address: 'Sporjinal Depo Sokak No: 1',
-              country: 'tr',
-              city: 'Istanbul',
-              district: 'Kadikoy',
-              post_code: '',
+              addressId: 55574,
             }),
             recipient: expect.objectContaining({
               name: 'Test Customer',
@@ -2948,7 +2941,7 @@ describe('shipping execution foundation', () => {
     expect(preview.payload.posts[0].cod_payment_type).not.toBe(2);
     expect(preview.payload.posts[0].post).toHaveProperty('price', '');
     expect(preview.payload.posts[0].post).toHaveProperty('note', '');
-    expect(preview.payload.posts[0].sender).not.toHaveProperty('addressId');
+    expect(preview.payload.posts[0].sender).toEqual({ addressId: 55574 });
 
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -3023,13 +3016,7 @@ describe('shipping execution foundation', () => {
           posts: [
             expect.objectContaining({
               sender: expect.objectContaining({
-                name: 'Sporjinal Warehouse',
-                phone: '+90 532 123 45 67',
-                email: 'warehouse@example.test',
-                address: 'Sporjinal Depo Sokak No: 1',
-                country: 'tr',
-                city: 'Istanbul',
-                district: 'Kadikoy',
+                addressId: 55574,
               }),
               recipient: expect.objectContaining({
                 city: 'Istanbul',
@@ -3047,7 +3034,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('blocks Navlungo shipment execution when a required sender field is missing', async () => {
+  it('blocks Navlungo shipment execution when sender address id is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -3057,7 +3044,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: null,
       shippingVatPercent: 18,
-      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderDistrict: '' }),
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '' }),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -3094,7 +3081,7 @@ describe('shipping execution foundation', () => {
         vendorId: 'sporjinal',
         adapter: navlungoAdapter,
       },
-    )).rejects.toThrow('Missing required shipment fields:\n- sender.district');
+    )).rejects.toThrow('Navlungo sender address ID must be numeric.');
 
     expect(navlungoAdapter.createShipment).not.toHaveBeenCalled();
   });

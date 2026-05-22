@@ -1159,36 +1159,12 @@ function parseNavlungoSenderAddressId(value: string | null | undefined) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
-function resolveNavlungoSenderField(config: VendorShippingConfigDto, keys: string[], warehouseKey?: 'name' | 'address') {
-  const metadataValue = readString(config.providerMetadata, keys);
-  if (metadataValue) {
-    return metadataValue;
-  }
-  const warehouse = selectDefaultWarehouse(config, 'navlungo');
-  return warehouseKey ? warehouse?.[warehouseKey]?.trim() || null : null;
-}
-
 function buildNavlungoSender(config: VendorShippingConfigDto) {
-  const sender = {
-    name: resolveNavlungoSenderField(config, ['navlungoSenderName', 'senderName', 'sender_name'], 'name'),
-    phone: normalizeNavlungoPhone(
-      resolveNavlungoSenderField(config, ['navlungoSenderPhone', 'senderPhone', 'sender_phone']),
-    ),
-    email: resolveNavlungoSenderField(config, ['navlungoSenderEmail', 'senderEmail', 'sender_email']),
-    address: resolveNavlungoSenderField(config, ['navlungoSenderAddress', 'senderAddress', 'sender_address'], 'address'),
-    country: resolveNavlungoSenderField(config, ['navlungoSenderCountry', 'senderCountry', 'sender_country']) ?? 'tr',
-    city: resolveNavlungoSenderField(config, ['navlungoSenderCity', 'senderCity', 'sender_city']),
-    district: resolveNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
-    post_code: resolveNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']) ?? '',
-  };
-  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city', 'district'] as const;
-  const missingFields = requiredFields
-    .filter((key) => !sender[key])
-    .map((key) => `sender.${key}`);
+  const senderAddressId = parseNavlungoSenderAddressId(resolveNavlungoSenderAddressId(config));
 
   return {
-    sender,
-    missingFields,
+    sender: senderAddressId ? { addressId: senderAddressId } : null,
+    missingFields: senderAddressId ? [] : ['sender.addressId'],
   };
 }
 
@@ -2149,13 +2125,12 @@ export async function getShippingProviderReadinessDiagnostics(
     const senderAddressId = resolveNavlungoSenderAddressId(config, env);
     const senderAddressIdConfigured = Boolean(senderAddressId);
     const senderAddressIdValid = Boolean(parseNavlungoSenderAddressId(senderAddressId));
-    const navlungoSender = buildNavlungoSender(config);
     const carrierIdConfiguredOrDefaulted = Boolean(resolveNavlungoCarrierId(config.providerMetadata, env));
     const defaultDesiConfigured = Number(config.defaultDesi) > 0;
     const missing = [
       ...diagnostics.missing,
       !configProviderSelected ? 'VENDOR_PROVIDER_SELECTION' : null,
-      ...navlungoSender.missingFields.map((field) => `VENDOR_NAVLUNGO_${field.toUpperCase().replace('.', '_')}`),
+      !senderAddressIdValid ? 'VENDOR_NAVLUNGO_SENDER_ADDRESS_ID' : null,
       !carrierIdConfiguredOrDefaulted ? 'VENDOR_NAVLUNGO_CARRIER_ID' : null,
       !defaultDesiConfigured ? 'VENDOR_DEFAULT_DESI' : null,
     ].filter((value): value is string => Boolean(value));
@@ -2166,7 +2141,7 @@ export async function getShippingProviderReadinessDiagnostics(
       executionReady:
         diagnostics.executionReady &&
         configProviderSelected &&
-        navlungoSender.missingFields.length === 0 &&
+        senderAddressIdValid &&
         carrierIdConfiguredOrDefaulted &&
         defaultDesiConfigured,
       warehouseIdConfigured: senderAddressIdConfigured,
@@ -2177,7 +2152,7 @@ export async function getShippingProviderReadinessDiagnostics(
         passwordConfigured: Boolean(env.NAVLUNGO_API_PASSWORD),
         defaultSenderAddressIdConfigured: senderAddressIdConfigured,
         defaultSenderAddressIdValid: senderAddressIdValid,
-        senderFieldsConfigured: navlungoSender.missingFields.length === 0,
+        senderFieldsConfigured: senderAddressIdValid,
         defaultBarcodeFormat: resolveNavlungoBarcodeFormat(config.providerMetadata, env),
         defaultCarrierId: String(resolveNavlungoCarrierId(config.providerMetadata, env) ?? ''),
         authDiagnosticsAvailable: true,
@@ -4622,6 +4597,11 @@ async function buildShipmentRequestPreview(
   }
   const navlungoSenderAddressId =
     provider === ShippingProvider.NAVLUNGO ? resolveNavlungoSenderAddressId(config, options.env) : null;
+  const parsedNavlungoSenderAddressId =
+    provider === ShippingProvider.NAVLUNGO ? parseNavlungoSenderAddressId(navlungoSenderAddressId) : null;
+  if (provider === ShippingProvider.NAVLUNGO && !parsedNavlungoSenderAddressId) {
+    throw new Error('Navlungo sender address ID must be numeric.');
+  }
   const navlungoCarrierId = provider === ShippingProvider.NAVLUNGO
     ? resolveNavlungoCarrierId(config.providerMetadata, options.env)
     : null;
@@ -4886,7 +4866,7 @@ async function buildShipmentRequestPreview(
               carrier_id: navlungoCarrierId,
               post_type: 2,
               cod_payment_type: '',
-              sender: navlungoSender!.sender,
+              sender: navlungoSender!.sender!,
               recipient: navlungoRecipient.recipient,
               post: {
                 desi,

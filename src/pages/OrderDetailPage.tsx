@@ -813,13 +813,7 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   }
   if (draft.preferredProvider === 'navlungo') {
     [
-      ['sender name', draft.navlungoSenderName],
-      ['sender phone', draft.navlungoSenderPhone],
-      ['sender email', draft.navlungoSenderEmail],
-      ['sender address', draft.navlungoSenderAddress],
-      ['sender country', draft.navlungoSenderCountry],
-      ['sender city', draft.navlungoSenderCity],
-      ['sender district', draft.navlungoSenderDistrict],
+      ['sender address ID', draft.navlungoSenderAddressId],
     ].forEach(([label, value]) => {
       if (!String(value).trim()) {
         errors.push(`Navlungo ${label} is required.`);
@@ -934,14 +928,6 @@ function buildShippingConfigUpdate(
     const providerMetadata = { ...metadata };
     const senderAddressId = draft.navlungoSenderAddressId.trim();
     providerMetadata.navlungoSenderAddressId = senderAddressId;
-    providerMetadata.navlungoSenderName = draft.navlungoSenderName.trim();
-    providerMetadata.navlungoSenderPhone = draft.navlungoSenderPhone.trim();
-    providerMetadata.navlungoSenderEmail = draft.navlungoSenderEmail.trim();
-    providerMetadata.navlungoSenderAddress = draft.navlungoSenderAddress.trim();
-    providerMetadata.navlungoSenderCountry = draft.navlungoSenderCountry.trim();
-    providerMetadata.navlungoSenderCity = draft.navlungoSenderCity.trim();
-    providerMetadata.navlungoSenderDistrict = draft.navlungoSenderDistrict.trim();
-    providerMetadata.navlungoSenderPostCode = draft.navlungoSenderPostCode.trim();
     providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
     providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
 
@@ -954,8 +940,8 @@ function buildShippingConfigUpdate(
         ? [
             {
               warehouseId: senderAddressId,
-              name: draft.navlungoSenderName.trim() || existingDefaultWarehouse?.name || 'Navlungo sender address',
-              address: draft.navlungoSenderAddress.trim() || existingDefaultWarehouse?.address || null,
+              name: existingDefaultWarehouse?.name || 'Navlungo sender address',
+              address: existingDefaultWarehouse?.address || null,
               isDefault: true,
               provider: 'navlungo',
             },
@@ -3324,103 +3310,6 @@ export function OrderDetailPage() {
                   setShippingConfigDraft((current) => ({
                     ...current,
                     navlungoSenderAddressId: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender name</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderName}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderName: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender phone</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderPhone}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderPhone: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender email</span>
-              <input
-                type="email"
-                value={shippingConfigDraft.navlungoSenderEmail}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderEmail: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender address</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderAddress}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderAddress: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender country</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderCountry}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderCountry: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender city</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderCity}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderCity: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender district</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderDistrict}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderDistrict: event.target.value,
-                  }))
-                }
-              />
-            </label>
-            <label className="field">
-              <span>Sender post code</span>
-              <input
-                value={shippingConfigDraft.navlungoSenderPostCode}
-                onChange={(event) =>
-                  setShippingConfigDraft((current) => ({
-                    ...current,
-                    navlungoSenderPostCode: event.target.value,
                   }))
                 }
               />
