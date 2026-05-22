@@ -6,6 +6,7 @@ import {
   type VendorShippingConfig,
   type VendorShippingWarehouse,
 } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import {
@@ -834,6 +835,32 @@ function sanitizeTryOtoReferencePart(value: string | null | undefined, fallback:
     .replace(/^-|-$/g, '')
     .toUpperCase();
   return sanitized || fallback;
+}
+
+function sanitizeNavlungoReferencePart(value: string | null | undefined, fallback: string, maxLength?: number) {
+  const sanitized = (value ?? '')
+    .trim()
+    .replace(/^#+/, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+  const safe = sanitized || fallback;
+  return maxLength ? safe.slice(0, maxLength) : safe;
+}
+
+function buildNavlungoShortUniqueReferencePart() {
+  const numeric = randomBytes(4).readUInt32BE(0);
+  return numeric.toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').padStart(6, '0').slice(-6);
+}
+
+function buildNavlungoReferenceId(input: {
+  vendorId: string;
+  shopifyOrderNumber: string | null;
+  providerMetadata?: unknown;
+}) {
+  const metadataStoreShort = readString(input.providerMetadata, ['navlungoStoreShort', 'storeShort', 'store_short', 'storeCode']);
+  const storeShort = sanitizeNavlungoReferencePart(metadataStoreShort ?? input.vendorId, 'STR', 3);
+  const orderNumber = sanitizeNavlungoReferencePart(input.shopifyOrderNumber, 'ORDER');
+  return `${storeShort}-${orderNumber}-${buildNavlungoShortUniqueReferencePart()}`;
 }
 
 function buildTryOtoInternalOrderReference(allocation: { id: string; sourceShopifyOrderId: string | null; sourceShopifyOrderNumber: string | null }) {
@@ -5224,10 +5251,11 @@ async function buildShipmentRequestPreview(
     /[^A-Za-z0-9_-]/g,
     '',
   );
-  const navlungoReferenceId = `SPJ-${allocation.sourceShopifyOrderNumber ?? allocation.id}-ALLOC-${allocation.id}`.replace(
-    /[^A-Za-z0-9_-]/g,
-    '-',
-  );
+  const navlungoReferenceId = buildNavlungoReferenceId({
+    vendorId: allocation.assignedVendorId,
+    shopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+    providerMetadata: config.providerMetadata,
+  });
   const navlungoBarcodeFormat = resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
 
   const payload = provider === ShippingProvider.TRY_OTO
