@@ -1761,27 +1761,85 @@ describe('shipping execution foundation', () => {
     expect(adapter.createShipment).not.toHaveBeenCalled();
   });
 
-  it('rejects full Navlungo sender detail retry for non-admin actors', async () => {
+  it('uses full Navlungo sender details for a vendor flagged retry', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
       shipmentStatus: 'FAILED',
     });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({
+        navlungoSenderAddressId: '55578',
+        navlungoSenderDistrict: 'Kadikoy',
+      }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
     const adapter = buildAdapter({
       provider: 'NAVLUNGO' as const,
     });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-VENDOR-FULL-1055',
+      trackingNumber: 'NAV-VENDOR-FULL-1055',
+      trackingUrl: 'https://track.navlungo.test/NAV-VENDOR-FULL-1055',
+      labelUrl: 'vendor-full-sender-barcode',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        barcode: 'vendor-full-sender-barcode',
+      },
+    });
 
-    await expect(
-      retryFailedShipmentExecution(existing.id, {
-        env,
-        vendorId: 'sporjinal',
-        actorRole: 'vendor',
-        useFullSenderDetailsForThisRetry: true,
-        adapter,
-      }),
-    ).rejects.toThrow('available only for admins');
-    expect(adapter.createShipment).not.toHaveBeenCalled();
+    await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      vendorId: 'sporjinal',
+      actorRole: 'vendor',
+      useFullSenderDetailsForThisRetry: true,
+      adapter,
+      customerOverrides: {
+        district: 'Kartal',
+      },
+    });
+
+    expect(adapter.createShipment).toHaveBeenCalledTimes(1);
+    expect(adapter.createShipment.mock.calls[0][0].requestSnapshot).toMatchObject({
+      posts: [
+        expect.objectContaining({
+          sender: expect.objectContaining({
+            name: 'Sporjinal Warehouse',
+            district: 'Kadikoy',
+          }),
+        }),
+      ],
+    });
   });
 
   it('copies the latest successful Navlungo request summary into a failed vendor retry snapshot', async () => {

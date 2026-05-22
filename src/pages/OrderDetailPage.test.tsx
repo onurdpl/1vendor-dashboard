@@ -2051,7 +2051,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ...orderWithShipmentSummary,
       shipmentExecution: {
         ...orderWithShipmentSummary.shipmentExecution!,
-        shipmentStatus: 'failed',
+        shipmentStatus: 'pending',
         providerResponseSummary: {
           ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
           httpStatus: 422,
@@ -2700,6 +2700,62 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const fullSenderToggle = (await screen.findAllByLabelText('Use full Navlungo sender details for this retry'))[0];
+    await user.click(fullSenderToggle);
+    await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: undefined,
+        useFullSenderDetailsForThisRetry: true,
+      }),
+    );
+  });
+
+  it('lets vendors request full Navlungo sender details for one failed retry', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          dryRun: false,
+          disabledGates: [],
+          providerError: 'Execution of ServiceCallout failed.',
+        },
+      },
+    });
+    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+      provider: 'navlungo',
+      shipmentStatus: 'failed',
+      providerShipmentId: null,
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const fullSenderToggle = await screen.findByLabelText('Use full Navlungo sender details for this retry');
     await user.click(fullSenderToggle);
     await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
 

@@ -1616,7 +1616,7 @@ export function OrderDetailPage() {
   );
   const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
   const canUseFullNavlungoSenderRetry =
-    isAdmin && canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
+    canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
   const shouldShowFailedShipmentRetryDiagnostics =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
@@ -1757,7 +1757,7 @@ export function OrderDetailPage() {
     });
 
     const useFullSenderDetailsForThisRetry =
-      isAdmin && visibleShipmentExecution.provider === 'navlungo' && useFullNavlungoSenderForRetry;
+      visibleShipmentExecution.provider === 'navlungo' && useFullNavlungoSenderForRetry;
 
     void retryFailedShipmentMutation({
       shipmentExecutionId: visibleShipmentExecution.id,
@@ -4979,6 +4979,18 @@ export function OrderDetailPage() {
                                   : 'Shipment recovery is not available for this shipment.'}
                             </span>
                             {canRecoverFailedShipment ? (
+                              <>
+                                {canUseFullNavlungoSenderRetry ? (
+                                  <label className="checkbox-field">
+                                    <input
+                                      type="checkbox"
+                                      checked={useFullNavlungoSenderForRetry}
+                                      onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
+                                      disabled={isRetryingFailedShipment}
+                                    />
+                                    <span>Use full Navlungo sender details for this retry</span>
+                                  </label>
+                                ) : null}
                               <div className="order-inline-actions">
                                 <button
                                   type="button"
@@ -4994,6 +5006,7 @@ export function OrderDetailPage() {
                                   </a>
                                 ) : null}
                               </div>
+                              </>
                             ) : null}
                             {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                           </div>
@@ -5959,6 +5972,18 @@ export function OrderDetailPage() {
                               : 'Shipment recovery is not available for this shipment.'}
                         </span>
                         {canRecoverFailedShipment ? (
+                          <>
+                            {canUseFullNavlungoSenderRetry ? (
+                              <label className="checkbox-field">
+                                <input
+                                  type="checkbox"
+                                  checked={useFullNavlungoSenderForRetry}
+                                  onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
+                                  disabled={isRetryingFailedShipment}
+                                />
+                                <span>Use full Navlungo sender details for this retry</span>
+                              </label>
+                            ) : null}
                           <div className="order-inline-actions">
                             <button
                               type="button"
@@ -5974,6 +5999,7 @@ export function OrderDetailPage() {
                               </a>
                             ) : null}
                           </div>
+                          </>
                         ) : null}
                         {shouldShowRecoveryShipmentFieldCompletionForm ? renderShipmentFieldCompletionForm() : null}
                       </div>

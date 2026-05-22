@@ -5534,9 +5534,6 @@ export async function retryFailedShipmentExecution(
     throw new Error('Shipment execution not found.');
   }
 
-  if (options.useFullSenderDetailsForThisRetry && options.actorRole !== 'admin') {
-    throw new Error('Full Navlungo sender detail retry is available only for admins.');
-  }
   if (options.useFullSenderDetailsForThisRetry && existing.provider !== ShippingProvider.NAVLUNGO) {
     throw new Error('Full sender detail retry is available only for Navlungo shipments.');
   }
@@ -5564,7 +5561,7 @@ export async function retryFailedShipmentExecution(
     {
       vendorId: existing.vendorId,
       env: options.env,
-      allowNavlungoFullSenderDetails: options.actorRole === 'admin',
+      allowNavlungoFullSenderDetails: options.useFullSenderDetailsForThisRetry === true,
     },
   );
 
