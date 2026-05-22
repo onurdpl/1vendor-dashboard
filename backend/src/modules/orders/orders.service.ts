@@ -107,6 +107,23 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function redactValidationDiagnosticText(value: string) {
+  return value
+    .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[redacted-phone]')
+    .trim();
+}
+
+function readValidationStringArray(value: unknown) {
+  return readStringArray(value)
+    .map(redactValidationDiagnosticText)
+    .filter(Boolean);
+}
+
+function mergeUniqueStrings(...groups: string[][]) {
+  return Array.from(new Set(groups.flat().map((value) => value.trim()).filter(Boolean)));
+}
+
 function readNumber(value: Record<string, unknown> | null, keys: string[]) {
   if (!value) {
     return null;
@@ -420,6 +437,7 @@ function buildShipmentProviderResponseSummary(
     : {};
   const createOrderDiagnostics = isRecord(snapshot?.createOrder) ? snapshot.createOrder : null;
   const createShipmentDiagnostics = isRecord(snapshot?.createShipment) ? snapshot.createShipment : null;
+  const createPostDiagnostics = isRecord(snapshot?.createPost) ? snapshot.createPost : null;
   const createShipmentRequestDiagnostics = isRecord(snapshot?.createShipmentRequestDiagnostics)
     ? snapshot.createShipmentRequestDiagnostics
     : null;
@@ -549,30 +567,53 @@ function buildShipmentProviderResponseSummary(
       }
     : undefined;
   const validationResponseShape = isRecord(snapshot?.validationResponseShape)
+    ? snapshot.validationResponseShape
+    : isRecord(createPostDiagnostics?.validationResponseShape)
+      ? createPostDiagnostics.validationResponseShape
+      : null;
+  const mappedValidationResponseShape = validationResponseShape
     ? {
-        kind: readString(snapshot.validationResponseShape, ['kind']) ?? 'unknown',
-        topLevelKeys: readStringArray(snapshot.validationResponseShape.topLevelKeys),
+        kind: readString(validationResponseShape, ['kind']) ?? 'unknown',
+        topLevelKeys: readStringArray(validationResponseShape.topLevelKeys),
       }
     : null;
+  const providerValidationErrors = mergeUniqueStrings(
+    readValidationStringArray(snapshot?.providerValidationErrors),
+    readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
+    readValidationStringArray(createPostDiagnostics?.validationErrorMessages),
+  );
+  const validationErrorKeys = mergeUniqueStrings(
+    readStringArray(snapshot?.validationErrorKeys),
+    readStringArray(createPostDiagnostics?.validationErrorKeys),
+  );
+  const validationErrorMessages = mergeUniqueStrings(
+    readValidationStringArray(snapshot?.validationErrorMessages),
+    readValidationStringArray(createPostDiagnostics?.validationErrorMessages),
+    readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
+  );
+  const failedFieldNames = mergeUniqueStrings(
+    readStringArray(snapshot?.failedFieldNames),
+    readStringArray(createPostDiagnostics?.failedFieldNames),
+  );
 
   return {
-    httpStatus: typeof snapshot?.status === 'number' ? snapshot.status : null,
+    httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'statusCode']),
     ok: typeof snapshot?.ok === 'boolean' ? snapshot.ok : null,
     contentType: typeof snapshot?.contentType === 'string' ? snapshot.contentType : null,
     parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
     responseKeys,
-    providerError: readString(snapshot, ['providerError', 'error', 'message', 'reason']),
+    providerError: readString(snapshot, ['providerError', 'providerMessage', 'error', 'message', 'reason']),
     dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
     disabledGates,
-    providerValidationErrors: Array.isArray(snapshot?.providerValidationErrors)
-      ? snapshot.providerValidationErrors.filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-      : [],
-    validationErrorKeys: readStringArray(snapshot?.validationErrorKeys),
-    validationErrorMessages: readStringArray(snapshot?.validationErrorMessages),
-    failedFieldNames: readStringArray(snapshot?.failedFieldNames),
-    providerErrorCode: readString(snapshot, ['providerErrorCode', 'errorCode', 'code']),
-    providerTrackingId: readString(snapshot, ['providerTrackingId']),
-    validationResponseShape,
+    providerValidationErrors,
+    validationErrorKeys,
+    validationErrorMessages,
+    failedFieldNames,
+    providerErrorCode:
+      readString(snapshot, ['providerErrorCode', 'errorCode', 'code']) ??
+      readString(createPostDiagnostics, ['providerErrorCode', 'errorCode', 'code']),
+    providerTrackingId: readString(snapshot, ['providerTrackingId']) ?? readString(createPostDiagnostics, ['providerTrackingId']),
+    validationResponseShape: mappedValidationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
     labelPresent: Boolean(execution.labelUrl),

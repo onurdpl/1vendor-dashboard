@@ -37,6 +37,7 @@ const {
   createShipmentExecution,
   createTryOtoReturnShipmentLabel,
   getShippingProviderGateDiagnostics,
+  getShipmentExecutionById,
   getShippingProviderReadinessDiagnostics,
   ingestKargoEntegratorWebhook,
   ingestTryOtoWebhook,
@@ -1254,6 +1255,55 @@ describe('shipping execution foundation', () => {
     });
     expect(adapter.createShipment).not.toHaveBeenCalled();
     expect(prismaMock.shipmentExecution.create).not.toHaveBeenCalled();
+  });
+
+  it('lifts nested Navlungo 422 validation diagnostics into the shipment DTO summary', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-validation-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        createPostHttpStatus: 422,
+        providerMessage: 'Validation Errors',
+        createPost: {
+          validationErrorKeys: ['posts.0.sender.phone', 'posts.0.recipient.email'],
+          failedFieldNames: ['posts.0.sender.phone', 'posts.0.recipient.email'],
+          validationErrorMessages: [
+            'posts.0.sender.phone contains +90 532 123 45 67',
+            'posts.0.recipient.email contains buyer@example.test',
+          ],
+          providerErrorCode: 'VALIDATION_ERROR',
+          validationResponseShape: {
+            kind: 'json:object',
+            topLevelKeys: ['message', 'status', 'error'],
+          },
+        },
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.shipmentShippingCost.findFirst.mockResolvedValueOnce(null);
+
+    const result = await getShipmentExecutionById(existing.id, 'sporjinal');
+
+    expect(result?.providerResponseSummary).toMatchObject({
+      httpStatus: 422,
+      validationErrorKeys: ['posts.0.sender.phone', 'posts.0.recipient.email'],
+      failedFieldNames: ['posts.0.sender.phone', 'posts.0.recipient.email'],
+      validationErrorMessages: [
+        'posts.0.sender.phone contains [redacted-phone]',
+        'posts.0.recipient.email contains [redacted-email]',
+      ],
+      providerValidationErrors: [
+        'posts.0.sender.phone contains [redacted-phone]',
+        'posts.0.recipient.email contains [redacted-email]',
+      ],
+      providerErrorCode: 'VALIDATION_ERROR',
+      validationResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['message', 'status', 'error'],
+      },
+    });
   });
 
   it('reuses stale Navlungo execution row and persists successful provider fields on vendor create', async () => {
