@@ -66,6 +66,16 @@ export async function refreshShipmentExecutionStatus(
   );
 }
 
+export async function cancelShipmentExecution(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.cancelShipmentExecution(
+    shipmentExecutionId,
+    options.vendorId ?? undefined,
+  );
+}
+
 export async function createReturnShipmentLabel(
   shipmentExecutionId: string,
   options: { vendorId?: string | null } = {},

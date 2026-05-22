@@ -505,6 +505,30 @@ Current adapter status:
 - Separate Barcode endpoint remains unknown because the docs page did not expose an endpoint path.
 - Webhook/status callback ingest is not implemented.
 
+## 16.1.1. Cancel Post Status
+
+Current cancel status:
+
+- Navlungo forward shipment cancellation is implemented for existing forward shipment executions only.
+- Runtime cancel flow uses:
+  - authenticate with `POST /auth/api`
+  - cancel with `POST /post/cancel`
+  - request body: `{ "post_number": "<stored providerShipmentId>" }`
+- Local cancellation is allowed only when:
+  - provider is `navlungo`
+  - stored provider shipment id / `post_number` exists
+  - local shipment status is not `cancelled`
+  - local shipment status is not `delivered`
+- On provider cancel success:
+  - local shipment status is persisted as `cancelled`
+  - historical tracking and barcode/label evidence is retained for audit
+  - cancel diagnostics and timestamp are persisted
+- On provider `422` or `500`:
+  - local shipment status is not changed to cancelled
+  - sanitized validation fields/messages or provider tracking ID are persisted for diagnostics
+- Shopify fulfillment cancellation/deletion is not implemented in this phase. Diagnostics explicitly set `shopifyFulfillmentCancelSyncSkippedReason=not_implemented`.
+- `update-post`, status-sync polling, return/reverse cancellation, and webhook cancellation handling remain out of scope.
+
 ## 16.2. Auth Probe Status
 
 Current diagnostics status:

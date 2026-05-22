@@ -650,12 +650,12 @@ function buildShipmentProviderResponseSummary(
   );
 
   return {
-    httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'statusCode']),
+    httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'statusCode']),
     ok: typeof snapshot?.ok === 'boolean' ? snapshot.ok : null,
     contentType: typeof snapshot?.contentType === 'string' ? snapshot.contentType : null,
     parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
     responseKeys,
-    providerError: readString(snapshot, ['providerError', 'providerMessage', 'error', 'message', 'reason']),
+    providerError: readString(snapshot, ['providerError', 'providerMessage', 'navlungoCancelProviderMessage', 'error', 'message', 'reason']),
     dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
     disabledGates,
     providerValidationErrors,
@@ -719,10 +719,21 @@ function buildShipmentProviderResponseSummary(
     shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
     shopifyFulfillmentSynced:
       typeof snapshot?.shopifyFulfillmentSynced === 'boolean' ? snapshot.shopifyFulfillmentSynced : null,
+    shopifyFulfillmentCancelSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentCancelSyncSkippedReason']),
     fulfillmentTrackingNumberPresent:
       typeof snapshot?.fulfillmentTrackingNumberPresent === 'boolean' ? snapshot.fulfillmentTrackingNumberPresent : null,
     fulfillmentTrackingUrlPresent:
       typeof snapshot?.fulfillmentTrackingUrlPresent === 'boolean' ? snapshot.fulfillmentTrackingUrlPresent : null,
+    navlungoCancelAttempted:
+      typeof snapshot?.navlungoCancelAttempted === 'boolean' ? snapshot.navlungoCancelAttempted : null,
+    navlungoCancelHttpStatus: readNumber(snapshot, ['navlungoCancelHttpStatus']),
+    navlungoCancelSucceeded:
+      typeof snapshot?.navlungoCancelSucceeded === 'boolean' ? snapshot.navlungoCancelSucceeded : null,
+    navlungoCancelProviderMessage: readString(snapshot, ['navlungoCancelProviderMessage']),
+    navlungoCancelValidationFields: readStringArray(snapshot?.navlungoCancelValidationFields),
+    navlungoCancelValidationMessages: readValidationStringArray(snapshot?.navlungoCancelValidationMessages),
+    navlungoCancelProviderTrackingId: readString(snapshot, ['navlungoCancelProviderTrackingId']),
+    navlungoCancelledAt: readString(snapshot, ['navlungoCancelledAt']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
       typeof snapshot?.createShipmentCalled === 'boolean'

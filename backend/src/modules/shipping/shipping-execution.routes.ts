@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import {
+  cancelNavlungoShipmentExecution,
   createShipmentExecution,
   createTryOtoReturnShipmentLabel,
   getShipmentExecutionById,
@@ -202,6 +203,29 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment status could not be refreshed.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/shipments/:id/cancel',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        return await cancelNavlungoShipmentExecution(request.params.id, {
+          env,
+          vendorId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment cancellation could not be completed.';
         return reply.code(400).send({ message });
       }
     },

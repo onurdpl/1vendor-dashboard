@@ -539,6 +539,19 @@ export async function refreshShipmentExecutionStatus(
   );
 }
 
+export async function cancelShipmentExecution(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/cancel`,
+    {},
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
 export async function createReturnShipmentLabel(
   shipmentExecutionId: string,
   options: { vendorId?: string | null } = {},

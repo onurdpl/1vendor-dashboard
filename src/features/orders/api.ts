@@ -1,4 +1,5 @@
 export {
+  cancelShipmentExecution,
   createShipmentExecution,
   createReturnShipmentLabel,
   getAdminShopifyOrderBreakdown,

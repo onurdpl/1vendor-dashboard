@@ -589,12 +589,12 @@ function mapProviderResponseSummary(
     : null;
 
   return {
-    httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'statusCode']),
+    httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'statusCode']),
     ok: readOptionalBoolean(snapshot, ['ok', 'success']),
     contentType: readString(snapshot, ['contentType']),
     parsedBodyType: readString(snapshot, ['parsedBodyType']),
     responseKeys: Object.keys(snapshot).filter((key) => !['body', 'request', 'payload'].includes(key)).sort(),
-    providerError,
+    providerError: providerError ?? readString(snapshot, ['navlungoCancelProviderMessage']),
     dryRun: readOptionalBoolean(snapshot, ['dryRun']),
     disabledGates,
     providerValidationErrors,
@@ -670,8 +670,17 @@ function mapProviderResponseSummary(
     shopifyFulfillmentSyncAttempted: readOptionalBoolean(snapshot, ['shopifyFulfillmentSyncAttempted']),
     shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
     shopifyFulfillmentSynced: readOptionalBoolean(snapshot, ['shopifyFulfillmentSynced']),
+    shopifyFulfillmentCancelSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentCancelSyncSkippedReason']),
     fulfillmentTrackingNumberPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingNumberPresent']),
     fulfillmentTrackingUrlPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingUrlPresent']),
+    navlungoCancelAttempted: readOptionalBoolean(snapshot, ['navlungoCancelAttempted']),
+    navlungoCancelHttpStatus: readNumber(snapshot, ['navlungoCancelHttpStatus']),
+    navlungoCancelSucceeded: readOptionalBoolean(snapshot, ['navlungoCancelSucceeded']),
+    navlungoCancelProviderMessage: readString(snapshot, ['navlungoCancelProviderMessage']),
+    navlungoCancelValidationFields: readStringArray(snapshot.navlungoCancelValidationFields),
+    navlungoCancelValidationMessages: readValidationStringArray(snapshot.navlungoCancelValidationMessages),
+    navlungoCancelProviderTrackingId: readString(snapshot, ['navlungoCancelProviderTrackingId']),
+    navlungoCancelledAt: readString(snapshot, ['navlungoCancelledAt']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -4758,6 +4767,129 @@ export async function refreshTryOtoShipmentStatus(
   });
 
   return mapShipmentExecution(updated);
+}
+
+export async function cancelNavlungoShipmentExecution(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.NAVLUNGO) {
+    throw new Error('Navlungo shipment cancellation is only available for Navlungo shipments.');
+  }
+
+  if (!existing.providerShipmentId?.trim()) {
+    throw new Error('Navlungo shipment cancellation requires a stored provider post number.');
+  }
+
+  if (existing.shipmentStatus === ShipmentExecutionStatus.CANCELLED) {
+    throw new Error('Navlungo shipment is already locally cancelled.');
+  }
+
+  if (existing.shipmentStatus === ShipmentExecutionStatus.DELIVERED) {
+    throw new Error('Delivered Navlungo shipments cannot be cancelled locally.');
+  }
+
+  const attemptSnapshot = appendTimelineEvent(
+    {
+      ...readSnapshot(existing),
+      navlungoCancelAttempted: true,
+      navlungoCancelSucceeded: false,
+      navlungoCancelProviderShipmentIdPresent: true,
+      shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+      lastProviderStage: 'cancel_post',
+    },
+    {
+      label: 'Cancel attempted',
+      status: 'pending',
+    },
+  );
+
+  await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      responseSnapshot: attemptSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'navlungo');
+  try {
+    const result = await adapter.cancelShipment(existing.providerShipmentId);
+    const cancelledAt = readString(result.responseSnapshot, ['navlungoCancelledAt']) ?? new Date().toISOString();
+    const mergedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...result.responseSnapshot,
+        navlungoCancelAttempted: true,
+        navlungoCancelSucceeded: true,
+        navlungoCancelledAt: cancelledAt,
+        shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        lastProviderStage: 'cancel_post',
+      },
+      {
+        label: 'Shipment cancelled',
+        status: 'cancelled',
+      },
+    );
+
+    const updated = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        shipmentStatus: ShipmentExecutionStatus.CANCELLED,
+        responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution(updated);
+  } catch (error) {
+    const providerSnapshot = error instanceof ShippingProviderExecutionError
+      ? error.responseSnapshot
+      : {
+          providerError: error instanceof Error ? error.message : 'Unknown Navlungo cancel error.',
+        };
+    const mergedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...providerSnapshot,
+        navlungoCancelAttempted: true,
+        navlungoCancelSucceeded: false,
+        shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        lastProviderStage: 'cancel_post',
+      },
+      {
+        label: 'Cancel needs review',
+        status: 'failed',
+      },
+    );
+
+    const updated = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution(updated);
+  }
 }
 
 export async function listShipmentExecutions(options: {

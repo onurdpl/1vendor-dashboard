@@ -44,6 +44,7 @@ vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
 }));
 
 const {
+  cancelNavlungoShipmentExecution,
   createShipmentExecution,
   createTryOtoReturnShipmentLabel,
   getShippingProviderGateDiagnostics,
@@ -1381,6 +1382,248 @@ describe('shipping execution foundation', () => {
         kind: 'json:object',
         topLevelKeys: ['message', 'status', 'error'],
       },
+    });
+  });
+
+  it('cancels an existing Navlungo shipment without deleting Shopify fulfillment', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-1001',
+      trackingNumber: 'NV-1001',
+      trackingUrl: 'https://tracking.test/NV-1001',
+      labelUrl: 'barcode-pdf',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        barcode: 'barcode-pdf',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      cancelShipment: vi.fn().mockResolvedValue({
+        providerShipmentId: 'NV-1001',
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'cancelled',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoCancelAttempted: true,
+          navlungoCancelHttpStatus: 200,
+          navlungoCancelSucceeded: true,
+          navlungoCancelledAt: '2026-05-22T10:00:00.000Z',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoCancelAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        shipmentStatus: 'CANCELLED',
+        responseSnapshot: {
+          provider: 'navlungo',
+          barcode: 'barcode-pdf',
+          navlungoCancelAttempted: true,
+          navlungoCancelHttpStatus: 200,
+          navlungoCancelSucceeded: true,
+          navlungoCancelledAt: '2026-05-22T10:00:00.000Z',
+          shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await cancelNavlungoShipmentExecution(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.cancelShipment).toHaveBeenCalledWith('NV-1001');
+    expect(result.shipmentStatus).toBe('cancelled');
+    expect(result.providerShipmentId).toBe('NV-1001');
+    expect(result.trackingNumber).toBe('NV-1001');
+    expect(result.labelUrl).toBe('barcode-pdf');
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoCancelAttempted: true,
+      navlungoCancelHttpStatus: 200,
+      navlungoCancelSucceeded: true,
+      shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+    });
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('blocks Navlungo cancel when the provider post number is missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: null,
+      shipmentStatus: 'CREATED',
+    });
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+
+    await expect(cancelNavlungoShipmentExecution(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toThrow('stored provider post number');
+
+    expect(adapter.cancelShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks Navlungo cancel when locally delivered or already cancelled', async () => {
+    const delivered = buildShipmentExecution({
+      id: 'shipment-navlungo-delivered',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-1002',
+      shipmentStatus: 'DELIVERED',
+    });
+    const cancelled = buildShipmentExecution({
+      id: 'shipment-navlungo-cancelled',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-1003',
+      shipmentStatus: 'CANCELLED',
+    });
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' });
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(delivered);
+    await expect(cancelNavlungoShipmentExecution(delivered.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toThrow('Delivered Navlungo shipments cannot be cancelled');
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(cancelled);
+    await expect(cancelNavlungoShipmentExecution(cancelled.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toThrow('already locally cancelled');
+
+    expect(adapter.cancelShipment).not.toHaveBeenCalled();
+  });
+
+  it('persists Navlungo cancel validation diagnostics without cancelling locally', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-1004',
+      shipmentStatus: 'CREATED',
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      cancelShipment: vi.fn().mockRejectedValue(new ShippingProviderExecutionError('Navlungo Cancel Post failed with HTTP 422.', {
+        provider: 'navlungo',
+        navlungoCancelAttempted: true,
+        navlungoCancelHttpStatus: 422,
+        navlungoCancelSucceeded: false,
+        navlungoCancelProviderMessage: 'Validation Errors',
+        navlungoCancelValidationFields: ['post_number'],
+        navlungoCancelValidationMessages: ['post_number validation failed'],
+        validationErrorMessages: ['post_number validation failed'],
+        failedFieldNames: ['post_number'],
+      })),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoCancelAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoCancelAttempted: true,
+          navlungoCancelHttpStatus: 422,
+          navlungoCancelSucceeded: false,
+          navlungoCancelProviderMessage: 'Validation Errors',
+          navlungoCancelValidationFields: ['post_number'],
+          navlungoCancelValidationMessages: ['post_number validation failed'],
+          failedFieldNames: ['post_number'],
+          validationErrorMessages: ['post_number validation failed'],
+          shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await cancelNavlungoShipmentExecution(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result.shipmentStatus).toBe('created');
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoCancelHttpStatus: 422,
+      navlungoCancelSucceeded: false,
+      navlungoCancelValidationFields: ['post_number'],
+      navlungoCancelValidationMessages: ['post_number validation failed'],
+    });
+  });
+
+  it('persists Navlungo cancel provider tracking ids for 500 responses', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-1005',
+      shipmentStatus: 'CREATED',
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      cancelShipment: vi.fn().mockRejectedValue(new ShippingProviderExecutionError('Navlungo Cancel Post failed with HTTP 500.', {
+        provider: 'navlungo',
+        navlungoCancelAttempted: true,
+        navlungoCancelHttpStatus: 500,
+        navlungoCancelSucceeded: false,
+        navlungoCancelProviderMessage: 'Execution of ServiceCallout failed. Tracking ID: #abc123',
+        navlungoCancelProviderTrackingId: '#abc123',
+        providerTrackingId: '#abc123',
+      })),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoCancelAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoCancelAttempted: true,
+          navlungoCancelHttpStatus: 500,
+          navlungoCancelSucceeded: false,
+          navlungoCancelProviderMessage: 'Execution of ServiceCallout failed. Tracking ID: #abc123',
+          navlungoCancelProviderTrackingId: '#abc123',
+          providerTrackingId: '#abc123',
+          shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await cancelNavlungoShipmentExecution(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result.shipmentStatus).toBe('created');
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoCancelHttpStatus: 500,
+      navlungoCancelSucceeded: false,
+      navlungoCancelProviderTrackingId: '#abc123',
+      providerTrackingId: '#abc123',
     });
   });
 

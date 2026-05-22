@@ -16,6 +16,7 @@ const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
+const cancelShipmentExecutionMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
 const probeShopifyReturnLabelUploadMock = vi.fn();
 const probeTryOtoReturnDetailsMock = vi.fn();
@@ -77,6 +78,8 @@ vi.mock('../features/orders/api', async () => {
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
+    cancelShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      cancelShipmentExecutionMock(shipmentExecutionId, options),
     createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
@@ -657,6 +660,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       labelUrl: 'https://app.tryoto.example/label-1028.pdf',
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
+    cancelShipmentExecutionMock.mockReset();
+    cancelShipmentExecutionMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'navlungo',
+      shipmentStatus: 'cancelled',
+      providerShipmentId: 'NAV-1028',
+      trackingNumber: 'NAV-1028',
+      labelUrl: 'barcode-pdf',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        navlungoCancelAttempted: true,
+        navlungoCancelSucceeded: true,
+        navlungoCancelHttpStatus: 200,
+        navlungoCancelledAt: '2026-05-22T10:00:00.000Z',
+        shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+      },
+      updatedAt: '2026-05-22T10:00:00.000Z',
+    });
     createReturnShipmentLabelMock.mockReset();
     createReturnShipmentLabelMock.mockResolvedValue({
       ...orderWithShipmentSummary.shipmentExecution,
@@ -938,6 +959,96 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Receiver address and phone requirements are unknown.')).not.toBeInTheDocument();
     expect(screen.queryByText('test-kargo-key')).not.toBeInTheDocument();
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
+  });
+
+  it('requires confirmation before cancelling a Navlungo shipment', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    const navlungoOrder: OrderDetail = {
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.test/NAV-1028',
+        labelUrl: 'barcode-pdf',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: true,
+          providerShipmentIdPresent: true,
+          trackingNumberPresent: true,
+          labelPresent: true,
+          barcodePresent: true,
+        },
+      },
+    };
+    getOrderMock.mockResolvedValue(navlungoOrder);
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+
+    renderOrderDetail();
+
+    const cancelButtons = await screen.findAllByRole('button', { name: 'Cancel Navlungo shipment' });
+    await userEvent.click(cancelButtons[0]);
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Cancel this Navlungo shipment? Shopify fulfillment will not be deleted in this phase.',
+    );
+    expect(cancelShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    expect((await screen.findAllByText('Navlungo shipment cancelled.')).length).toBeGreaterThan(0);
+    confirmSpy.mockRestore();
+  });
+
+  it('renders Navlungo cancel validation diagnostics safely', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoCancelAttempted: true,
+          navlungoCancelHttpStatus: 422,
+          navlungoCancelSucceeded: false,
+          navlungoCancelProviderMessage: 'Validation Errors',
+          navlungoCancelValidationFields: ['post_number'],
+          navlungoCancelValidationMessages: ['post_number validation failed'],
+          navlungoCancelProviderTrackingId: '#cancel422',
+          shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Cancel validation fields')).toBeInTheDocument();
+    expect(screen.getByText('post_number')).toBeInTheDocument();
+    expect(screen.getByText('post_number validation failed')).toBeInTheDocument();
+    expect(screen.getByText('#cancel422')).toBeInTheDocument();
+    expect(screen.getByText('not_implemented')).toBeInTheDocument();
   });
 
   it('uses vendor-safe customer wording and hides raw provider timeline events', async () => {

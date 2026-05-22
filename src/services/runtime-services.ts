@@ -449,6 +449,59 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async cancelShipmentExecution(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.cancelShipmentExecution(shipmentExecutionId, { vendorId });
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-navlungo-/, ''),
+        vendorId,
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'navlungo' as const,
+        providerShipmentId: `mock-navlungo-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `NV-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'cancelled' as const,
+        desi: '3.00',
+        cargoIntegrationId: null,
+        warehouseId: '55574',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        providerResponseSummary: {
+          httpStatus: 200,
+          ok: true,
+          contentType: 'application/json',
+          parsedBodyType: 'json:object',
+          responseKeys: ['navlungoCancelAttempted', 'navlungoCancelSucceeded'],
+          providerError: null,
+          dryRun: null,
+          disabledGates: [],
+          providerValidationErrors: [],
+          providerShipmentIdPresent: true,
+          trackingNumberPresent: true,
+          trackingUrlPresent: false,
+          labelPresent: false,
+          barcodePresent: false,
+          notificationUrlIncluded: null,
+          statusField: 'cancelled',
+          navlungoCancelAttempted: true,
+          navlungoCancelSucceeded: true,
+          navlungoCancelHttpStatus: 200,
+          navlungoCancelledAt: submittedAt,
+          shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async createReturnShipmentLabel(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.createReturnShipmentLabel(shipmentExecutionId, { vendorId });

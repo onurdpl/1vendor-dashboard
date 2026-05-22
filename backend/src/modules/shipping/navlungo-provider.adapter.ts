@@ -855,6 +855,37 @@ export class NavlungoHttpClient {
     };
   }
 
+  async cancelPost(accessToken: string, postNumber: string): Promise<NavlungoHttpResponse> {
+    const token = accessToken.trim();
+    const identifier = postNumber.trim();
+    if (!token) {
+      throw new Error('Navlungo access token is required for Cancel Post.');
+    }
+    if (!identifier) {
+      throw new Error('Navlungo post number is required for Cancel Post.');
+    }
+
+    const response = await this.fetchImpl(this.requestUrl('/post/cancel'), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-localization': 'tr',
+      },
+      body: JSON.stringify({ post_number: identifier }),
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseNavlungoResponseBody(contentType, responseText),
+    };
+  }
+
   requestUrl(path: string) {
     if (!this.env.NAVLUNGO_BASE_URL) {
       throw new Error('NAVLUNGO_BASE_URL is not configured.');
@@ -1253,8 +1284,119 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     throw new Error('Navlungo tracking lookup is not implemented yet.');
   }
 
-  async cancelShipment(): Promise<ShippingProviderCreateResult> {
-    throw new Error('Navlungo shipment cancellation is not implemented yet.');
+  async cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult> {
+    const postNumber = providerShipmentId.trim();
+    if (!postNumber) {
+      throw new ProviderExecutionError('Navlungo cancel requires a stored post number.', {
+        provider: NAVLUNGO_PROVIDER_KEY,
+        flow: 'cancel',
+        navlungoCancelAttempted: false,
+        navlungoCancelSucceeded: false,
+        providerError: 'Missing Navlungo post number.',
+      });
+    }
+
+    const client = new NavlungoHttpClient(this.env, this.options);
+    const responseSnapshot: Record<string, unknown> = {
+      provider: NAVLUNGO_PROVIDER_KEY,
+      flow: 'cancel',
+      authCalled: false,
+      navlungoCancelAttempted: true,
+      navlungoCancelSucceeded: false,
+      navlungoCancelPostNumberPresent: true,
+      shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+    };
+
+    let accessToken: string | null = null;
+    try {
+      responseSnapshot.authCalled = true;
+      const authResponse = await client.createAuthToken();
+      responseSnapshot.authHttpStatus = authResponse.status;
+      responseSnapshot.authContentType = authResponse.contentType;
+      accessToken = getNavlungoAccessTokenFromAuthBody(authResponse.body);
+      responseSnapshot.authTokenReceived = Boolean(accessToken);
+      if (!authResponse.ok || !accessToken) {
+        throw new ProviderExecutionError('Navlungo authentication failed before Cancel Post.', {
+          ...responseSnapshot,
+          providerError: readStringFromRecord(authResponse.body, ['message', 'error']) ?? 'Navlungo auth response did not include an access token.',
+        });
+      }
+    } catch (error) {
+      if (error instanceof ProviderExecutionError) {
+        throw error;
+      }
+      throw new ProviderExecutionError('Navlungo authentication failed before Cancel Post.', {
+        ...responseSnapshot,
+        providerError: error instanceof Error ? error.message : 'Unknown Navlungo auth error.',
+      });
+    }
+
+    let cancelResponse: NavlungoHttpResponse;
+    try {
+      cancelResponse = await client.cancelPost(accessToken, postNumber);
+    } catch (error) {
+      throw new ProviderExecutionError('Navlungo Cancel Post request failed before provider response.', {
+        ...responseSnapshot,
+        lastProviderStage: 'cancel_post',
+        providerError: error instanceof Error ? error.message : 'Unknown Navlungo Cancel Post error.',
+      });
+    }
+
+    const validationDiagnostics = getNavlungoValidationDiagnostics(cancelResponse.body);
+    const providerMessage = readStringFromRecord(cancelResponse.body, ['message', 'error']);
+    const providerTrackingId = extractNavlungoProviderTrackingId(providerMessage);
+    Object.assign(responseSnapshot, {
+      ok: cancelResponse.ok,
+      navlungoCancelHttpStatus: cancelResponse.status,
+      navlungoCancelContentType: cancelResponse.contentType,
+      navlungoCancelResponseKeys: isRecord(cancelResponse.body) ? Object.keys(cancelResponse.body) : [],
+      navlungoCancelProviderMessage: providerMessage,
+      providerMessage,
+      providerTrackingId,
+      navlungoCancelProviderTrackingId: providerTrackingId,
+      navlungoCancelValidationFields: validationDiagnostics.failedFieldNames,
+      navlungoCancelValidationMessages: validationDiagnostics.validationErrorMessages,
+      validationErrorKeys: validationDiagnostics.validationErrorKeys,
+      validationErrorMessages: validationDiagnostics.validationErrorMessages,
+      failedFieldNames: validationDiagnostics.failedFieldNames,
+      validationErrorKeysCount: validationDiagnostics.validationErrorKeysCount,
+      failedFieldNamesCount: validationDiagnostics.failedFieldNamesCount,
+      validationErrorMessagesCount: validationDiagnostics.validationErrorMessagesCount,
+      providerValidationErrors: validationDiagnostics.validationErrorMessages,
+      providerValidationErrorsShape: validationDiagnostics.providerValidationErrorsShape,
+      createPostErrorShape: validationDiagnostics.createPostErrorShape,
+      topLevelErrorShape: validationDiagnostics.topLevelErrorShape,
+      nestedCreatePostErrorShape: validationDiagnostics.nestedCreatePostErrorShape,
+      providerErrorCode: validationDiagnostics.providerErrorCode,
+      validationResponseShape: validationDiagnostics.validationResponseShape,
+      lastProviderStage: 'cancel_post',
+    });
+
+    if (!cancelResponse.ok) {
+      throw new ProviderExecutionError(`Navlungo Cancel Post failed with HTTP ${cancelResponse.status}.`, {
+        ...responseSnapshot,
+        providerError: providerMessage ?? `Navlungo Cancel Post failed with HTTP ${cancelResponse.status}.`,
+      });
+    }
+
+    return {
+      providerShipmentId: postNumber,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'cancelled',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ...responseSnapshot,
+        navlungoCancelSucceeded: true,
+        navlungoCancelledAt: new Date().toISOString(),
+        providerShipmentId: postNumber,
+        providerShipmentIdPresent: true,
+        lastProviderResponseAt: new Date().toISOString(),
+      },
+    };
   }
 
   async createReturnShipment(): Promise<never> {

@@ -5,6 +5,7 @@ import { ActionFeedback } from '../components/ActionFeedback';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
+  cancelShipmentExecution,
   createReturnShipmentLabel,
   createShipmentExecution,
   getOrder,
@@ -1373,6 +1374,15 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: cancelShipmentMutation, isPending: isCancellingShipment } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      cancelShipmentExecution(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: createReturnShipmentLabelMutation, isPending: isCreatingReturnShipmentLabel } = useMutationAction(
     async (shipmentExecutionId: string) =>
       createReturnShipmentLabel(shipmentExecutionId, {
@@ -1598,6 +1608,7 @@ export function OrderDetailPage() {
     Boolean(
       visibleShipmentExecution &&
         (['pending', 'failed', 'unknown'].includes(visibleShipmentStatus) ||
+          shipmentProviderSummary?.navlungoCancelAttempted === true ||
           !visibleShipmentExecution.providerShipmentId ||
           !visibleShipmentExecution.trackingNumber ||
           !visibleShipmentExecution.labelUrl),
@@ -1631,6 +1642,11 @@ export function OrderDetailPage() {
     visibleShipmentExecution?.provider === 'try_oto' &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
     (!getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution) || !visibleShipmentExecution.labelUrl);
+  const canCancelNavlungoShipment =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    Boolean(visibleShipmentExecution.providerShipmentId) &&
+    !['cancelled', 'delivered'].includes(visibleShipmentStatus);
   const canAutoRefreshTryOtoShipmentStatus =
     canRefreshTryOtoShipmentStatus &&
     Boolean(visibleShipmentExecution?.id) &&
@@ -1827,6 +1843,56 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleCancelNavlungoShipment() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    const confirmed = window.confirm(
+      'Cancel this Navlungo shipment? Shopify fulfillment will not be deleted in this phase.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Cancelling Navlungo shipment...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/cancel`,
+    });
+
+    void cancelShipmentMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const cancelled = shipment.shipmentStatus === 'cancelled';
+        const needsReview = shipment.providerResponseSummary?.navlungoCancelAttempted === true && !shipment.providerResponseSummary.navlungoCancelSucceeded;
+        const message = cancelled
+          ? 'Navlungo shipment cancelled.'
+          : needsReview
+            ? 'Navlungo cancellation needs attention.'
+            : 'Navlungo cancellation request completed.';
+        const tone = cancelled ? 'success' : needsReview ? 'error' : 'info';
+        setShipmentActionState({
+          tone,
+          message,
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/cancel`,
+        });
+        showFeedback(message, tone);
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Navlungo shipment could not be cancelled.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/cancel`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2398,6 +2464,39 @@ export function OrderDetailPage() {
         <div className="summary-row">
           <span>Provider tracking ID</span>
           <strong>{summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel Post</span>
+          <strong>
+            attempted {formatDiagnosticPresence(summary.navlungoCancelAttempted)} · HTTP {summary.navlungoCancelHttpStatus ?? '—'} · succeeded{' '}
+            {formatDiagnosticPresence(summary.navlungoCancelSucceeded)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel provider message</span>
+          <strong>{summary.navlungoCancelProviderMessage || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel tracking ID</span>
+          <strong>{summary.navlungoCancelProviderTrackingId || summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel validation fields</span>
+          <strong>{summary.navlungoCancelValidationFields?.length ? summary.navlungoCancelValidationFields.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel validation messages</span>
+          <strong>
+            {summary.navlungoCancelValidationMessages?.length ? summary.navlungoCancelValidationMessages.join(' · ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancel Shopify sync</span>
+          <strong>{summary.shopifyFulfillmentCancelSyncSkippedReason || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Cancelled at</span>
+          <strong>{formatOptionalDate(summary.navlungoCancelledAt ?? undefined)}</strong>
         </div>
         <div className="summary-row">
           <span>Real path request</span>
@@ -4786,6 +4885,22 @@ export function OrderDetailPage() {
                             ) : null}
                           </div>
                         ) : null}
+                        {canCancelNavlungoShipment ? (
+                          <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
+                            <strong>Navlungo cancellation</strong>
+                            <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isCancellingShipment}
+                                onClick={handleCancelNavlungoShipment}
+                              >
+                                {isCancellingShipment ? 'Cancelling...' : 'Cancel Navlungo shipment'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
                         {canRefreshTryOtoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
@@ -5737,6 +5852,22 @@ export function OrderDetailPage() {
                             </div>
                           </details>
                         ) : null}
+                      </div>
+                    ) : null}
+                    {canCancelNavlungoShipment ? (
+                      <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
+                        <strong>Navlungo cancellation</strong>
+                        <span>Cancel the provider post before delivery. Shopify fulfillment deletion is not implemented in this phase.</span>
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isCancellingShipment}
+                            onClick={handleCancelNavlungoShipment}
+                          >
+                            {isCancellingShipment ? 'Cancelling...' : 'Cancel Navlungo shipment'}
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                     <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
