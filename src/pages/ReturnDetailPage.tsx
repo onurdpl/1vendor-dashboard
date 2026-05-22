@@ -172,6 +172,82 @@ function formatDiagnosticList(values: string[]) {
   return values.length ? values.join(', ') : '—';
 }
 
+function isRenderableReturnDetail(value: unknown): value is ReturnDetail {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<ReturnDetail>;
+  return (
+    typeof candidate.id === 'string' &&
+    typeof candidate.status === 'string' &&
+    Array.isArray(candidate.refundedItems) &&
+    Array.isArray(candidate.items) &&
+    Array.isArray(candidate.timeline)
+  );
+}
+
+function ReturnDetailRouteDiagnostics({
+  returnId,
+  vendorId,
+  vendorName,
+  queryEnabled,
+  queryStatus,
+  fetchStatus,
+  endpoint,
+  httpStatus,
+  error,
+}: {
+  returnId: string | undefined;
+  vendorId: string | null | undefined;
+  vendorName: string | null | undefined;
+  queryEnabled: boolean;
+  queryStatus: string;
+  fetchStatus: string;
+  endpoint: string;
+  httpStatus?: number | null;
+  error?: string | null;
+}) {
+  return (
+    <details className="api-error-diagnostics">
+      <summary>Route diagnostics</summary>
+      <dl>
+        <div>
+          <dt>Return ID</dt>
+          <dd>{returnId ?? 'missing'}</dd>
+        </div>
+        <div>
+          <dt>Selected vendor</dt>
+          <dd>{vendorId ? `${vendorName ?? vendorId} (${vendorId})` : 'missing'}</dd>
+        </div>
+        <div>
+          <dt>Query enabled</dt>
+          <dd>{queryEnabled ? 'yes' : 'no'}</dd>
+        </div>
+        <div>
+          <dt>Query status</dt>
+          <dd>{queryStatus}</dd>
+        </div>
+        <div>
+          <dt>Fetch status</dt>
+          <dd>{fetchStatus}</dd>
+        </div>
+        <div>
+          <dt>Endpoint</dt>
+          <dd>{endpoint}</dd>
+        </div>
+        <div>
+          <dt>HTTP status</dt>
+          <dd>{httpStatus ?? 'unavailable'}</dd>
+        </div>
+        <div>
+          <dt>Error</dt>
+          <dd>{error ?? 'none'}</dd>
+        </div>
+      </dl>
+    </details>
+  );
+}
+
 function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
   const logs = Array.isArray(snapshot.navlungoReturnStatusLogs)
     ? snapshot.navlungoReturnStatusLogs.filter((log): log is Record<string, unknown> => Boolean(log) && typeof log === 'object' && !Array.isArray(log))
@@ -338,6 +414,8 @@ const RETURN_PICKUP_COMPLETION_FIELDS = [
   { field: 'sender.post_code', key: 'postcode', label: 'Post code', required: false },
 ] as const;
 
+const RETURN_DETAIL_LOADING_TIMEOUT_MS = 8000;
+
 function normalizeReturnPickupMissingField(value: string) {
   return value.trim().replace(/^-\s*/, '');
 }
@@ -382,7 +460,18 @@ export function ReturnDetailPage() {
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
-  const { data: returnRequest, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
+  const returnDetailEndpoint = returnId ? `/returns/${returnId}` : '/returns/:returnId';
+  const {
+    data: returnRequest,
+    isLoading,
+    isError,
+    error,
+    diagnostics,
+    status: returnQueryStatus,
+    fetchStatus: returnFetchStatus,
+    refetch,
+  } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
     () => {
       if (!returnId) {
@@ -392,7 +481,9 @@ export function ReturnDetailPage() {
       return getReturn(returnId, { vendorId: currentVendor.vendorId });
     },
     {
-      enabled: authContextReady && Boolean(returnId),
+      enabled: returnDetailQueryEnabled,
+      routeName: 'ReturnDetailPage',
+      endpoint: returnDetailEndpoint,
     },
   );
   const { data: relatedFinanceData } = useQueryResource(
@@ -527,11 +618,31 @@ export function ReturnDetailPage() {
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
 
   useEffect(() => {
     setRetainedReturnPickupMissingFields([]);
     setReturnPickupCompletion({});
+    setLoadingTimedOut(false);
   }, [returnId]);
+
+  useEffect(() => {
+    if (returnRequest || isError || isRenderableReturnDetail(returnRequest)) {
+      setLoadingTimedOut(false);
+      return;
+    }
+    if (authContextReady && !isLoading) {
+      setLoadingTimedOut(false);
+      return;
+    }
+    const timeout = globalThis.setTimeout(() => {
+      setLoadingTimedOut(true);
+    }, RETURN_DETAIL_LOADING_TIMEOUT_MS);
+
+    return () => {
+      globalThis.clearTimeout(timeout);
+    };
+  }, [authContextReady, isError, isLoading, returnRequest]);
 
   useEffect(() => {
     if (returnRequest?.returnProviderShipmentId) {
@@ -552,30 +663,139 @@ export function ReturnDetailPage() {
     returnRequest?.returnProviderShipmentId,
   ]);
 
+  const routeDiagnosticsNode = (
+    <ReturnDetailRouteDiagnostics
+      returnId={returnId}
+      vendorId={currentVendor.vendorId}
+      vendorName={currentVendor.vendorName}
+      queryEnabled={returnDetailQueryEnabled}
+      queryStatus={returnQueryStatus}
+      fetchStatus={returnFetchStatus}
+      endpoint={diagnostics?.endpoint ?? returnDetailEndpoint}
+      httpStatus={diagnostics?.status ?? null}
+      error={error}
+    />
+  );
+
+  if (!returnId) {
+    return (
+      <DataStatePanel
+        tone="error"
+        eyebrow="Returns"
+        title="Return request not found"
+        description="The route is missing a return request id."
+        actionNode={
+          <>
+            {routeDiagnosticsNode}
+            <Link className="button button-secondary" to="/returns">
+              Back to returns
+            </Link>
+          </>
+        }
+      />
+    );
+  }
+
+  if (appReadiness.unauthorized) {
+    return (
+      <DataStatePanel
+        tone="error"
+        eyebrow="Returns"
+        title="Session required"
+        description="Sign in again to load this return request."
+        actionLabel="Go to login"
+        actionTo="/login"
+        actionNode={routeDiagnosticsNode}
+      />
+    );
+  }
+
+  if (appReadiness.sessionReady && !appReadiness.vendorReady) {
+    return (
+      <DataStatePanel
+        tone="info"
+        eyebrow="Returns"
+        title="Waiting for vendor context"
+        description="The return request cannot load until a vendor context is selected."
+        actionNode={
+          <>
+            {routeDiagnosticsNode}
+            <button type="button" className="button button-secondary" onClick={() => void refetch()}>
+              Retry
+            </button>
+          </>
+        }
+      />
+    );
+  }
+
   if (!authContextReady || isLoading) {
+    if (loadingTimedOut) {
+      return (
+        <DataStatePanel
+          tone="error"
+          eyebrow="Returns"
+          title="Return request is taking longer than expected"
+          description="The detail request did not finish in time. Retry the request or inspect the route diagnostics."
+          onRetry={() => void refetch()}
+          actionNode={routeDiagnosticsNode}
+        />
+      );
+    }
     return (
       <DataStatePanel
         tone="loading"
         eyebrow="Returns"
         title="Loading return request"
         description="Preparing the selected return for review."
+        actionNode={routeDiagnosticsNode}
       />
     );
   }
 
   if (isError || !returnRequest) {
+    const errorStatus = diagnostics?.status ?? null;
+    const title =
+      errorStatus === 404
+        ? 'Return request not found'
+        : errorStatus === 403
+          ? 'Return access denied'
+          : 'Return unavailable';
     return (
       <DataStatePanel
         tone="error"
         eyebrow="Returns"
-        title="Return unavailable"
+        title={title}
         description={error ?? 'The selected return could not be loaded.'}
         diagnostics={diagnostics}
         onRetry={() => void refetch()}
         actionNode={
-          <Link className="button button-secondary" to="/returns">
-            Back to returns
-          </Link>
+          <>
+            {routeDiagnosticsNode}
+            <Link className="button button-secondary" to="/returns">
+              Back to returns
+            </Link>
+          </>
+        }
+      />
+    );
+  }
+
+  if (!isRenderableReturnDetail(returnRequest)) {
+    return (
+      <DataStatePanel
+        tone="error"
+        eyebrow="Returns"
+        title="Return response unavailable"
+        description="The return detail response was empty or malformed. Retry the request."
+        onRetry={() => void refetch()}
+        actionNode={
+          <>
+            {routeDiagnosticsNode}
+            <Link className="button button-secondary" to="/returns">
+              Back to returns
+            </Link>
+          </>
         }
       />
     );

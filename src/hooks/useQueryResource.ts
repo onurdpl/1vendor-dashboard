@@ -73,6 +73,7 @@ export function useQueryResource<TData>(
     isIdle: status === 'idle',
     isLoading: status === 'loading',
     isFetching: query.isFetching,
+    fetchStatus: query.fetchStatus,
     isError: blockingError,
     hasBackgroundError: Boolean(query.error && hasData),
     isSuccess: status === 'success',

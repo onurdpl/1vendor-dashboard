@@ -1,11 +1,33 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
 import type { ReturnDetail } from '../features/returns/api';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { clearToken, setCurrentUser, setToken } from '../lib/auth';
+import { ApiError } from '../lib/api/errors';
+
+const appReadinessOverride = vi.hoisted(() => ({
+  value: null as null | {
+    status: string;
+    token: string | null;
+    currentUser: unknown;
+    currentVendor: { vendorId: string; vendorName: string; scope: string };
+    sessionReady: boolean;
+    vendorReady: boolean;
+    ready: boolean;
+    unauthorized: boolean;
+  },
+}));
+
+vi.mock('../lib/appReadiness', async () => {
+  const actual = await vi.importActual<typeof import('../lib/appReadiness')>('../lib/appReadiness');
+  return {
+    ...actual,
+    useAppReadiness: () => appReadinessOverride.value ?? actual.getAppReadinessSnapshot(),
+  };
+});
 
 const getReturnMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const markReturnReceivedMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
@@ -135,10 +157,31 @@ function renderPage() {
   );
 }
 
+function renderPageAt(path: string) {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+      },
+    },
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/returns/:returnId" element={<ReturnDetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe('ReturnDetailPage vendor review screen', () => {
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
+    appReadinessOverride.value = null;
     setToken('test-token');
     setCurrentUser({
       email: 'vendor@example.com',
@@ -203,6 +246,123 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Shopify order ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Shopify return ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
+  });
+
+  it('shows waiting reason when vendor context is not ready', async () => {
+    appReadinessOverride.value = {
+      status: 'loading_vendor_context',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: true,
+        defaultVendorId: 'demo-vendor-a',
+      },
+      currentVendor: { vendorId: '', vendorName: '', scope: '' },
+      sessionReady: true,
+      vendorReady: false,
+      ready: false,
+      unauthorized: false,
+    };
+
+    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+
+    expect(await screen.findByRole('heading', { name: 'Waiting for vendor context' })).toBeInTheDocument();
+    expect(screen.getByText('return-request-23391502673-yalispor-20393734144337')).toBeInTheDocument();
+    expect(getReturnMock).not.toHaveBeenCalled();
+  });
+
+  it('shows a bounded retry fallback when loading takes too long', async () => {
+    vi.useFakeTimers();
+    getReturnMock.mockReturnValue(new Promise(() => undefined));
+
+    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+
+    expect(screen.getByRole('heading', { name: 'Loading return request' })).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(8100);
+    });
+
+    expect(screen.getByRole('heading', { name: 'Return request is taking longer than expected' })).toBeInTheDocument();
+    expect(screen.getByText('return-request-23391502673-yalispor-20393734144337')).toBeInTheDocument();
+    expect(screen.getByText('Query enabled')).toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('shows not found when the return API returns 404', async () => {
+    getReturnMock.mockRejectedValue(
+      new ApiError('Return not found.', 'server', {
+        status: 404,
+        diagnostics: {
+          endpoint: '/returns/return-request-23391502673-yalispor-20393734144337',
+          status: 404,
+          requestId: 'req-404',
+          hasAuthHeader: true,
+          hasVendorHeader: true,
+          selectedVendorPresent: true,
+          readinessState: 'ready',
+        },
+      }),
+    );
+
+    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+
+    expect(await screen.findByRole('heading', { name: 'Return request not found' })).toBeInTheDocument();
+    expect(screen.getAllByText('Return not found.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('/returns/return-request-23391502673-yalispor-20393734144337').length).toBeGreaterThan(0);
+  });
+
+  it('shows permission error when the return API returns 403', async () => {
+    getReturnMock.mockRejectedValue(
+      new ApiError('You do not have access to this workspace.', 'server', {
+        status: 403,
+        diagnostics: {
+          endpoint: '/returns/return-request-23391502673-yalispor-20393734144337',
+          status: 403,
+          requestId: 'req-403',
+          hasAuthHeader: true,
+          hasVendorHeader: true,
+          selectedVendorPresent: true,
+          readinessState: 'ready',
+        },
+      }),
+    );
+
+    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+
+    expect(await screen.findByRole('heading', { name: 'Return access denied' })).toBeInTheDocument();
+    expect(screen.getAllByText('You do not have access to this workspace.').length).toBeGreaterThan(0);
+  });
+
+  it('shows retry fallback when the return API times out', async () => {
+    getReturnMock.mockRejectedValue(new Error('Request timed out after 15000ms.'));
+
+    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+
+    expect(await screen.findByRole('heading', { name: 'Return unavailable' })).toBeInTheDocument();
+    expect(screen.getAllByText('Request timed out after 15000ms.').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('does not crash when the return detail response is null or malformed', async () => {
+    getReturnMock.mockResolvedValue({ id: returnDetail.id } as ReturnDetail);
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return response unavailable' })).toBeInTheDocument();
+    expect(screen.getByText('The return detail response was empty or malformed. Retry the request.')).toBeInTheDocument();
+  });
+
+  it('does not show infinite loading for an unauthorized session', async () => {
+    clearToken();
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Session required' })).toBeInTheDocument();
+    expect(screen.getByText('Sign in again to load this return request.')).toBeInTheDocument();
   });
 
   it('renders existing Navlungo return pickup evidence on Return Detail', async () => {
