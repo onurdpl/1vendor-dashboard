@@ -1459,6 +1459,15 @@ function resolveNavlungoBarcodeFormat(providerMetadata: unknown, env?: AppEnv) {
   return readString(providerMetadata, ['navlungoBarcodeFormat', 'barcodeFormat', 'barcode_format']) ?? env?.NAVLUNGO_DEFAULT_BARCODE_FORMAT ?? 'pdf-A6';
 }
 
+function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
+  return readString(providerMetadata, [
+    'navlungoReturnBarcodeFormat',
+    'returnBarcodeFormat',
+    'return_barcode_format',
+    'navlungo_return_barcode_format',
+  ]) ?? 'pdf-A5';
+}
+
 function normalizeNavlungoPhone(value: string | null | undefined) {
   const digits = value?.replace(/\D+/g, '') ?? '';
   const national = digits.startsWith('90') && digits.length === 12
@@ -1961,7 +1970,7 @@ function buildNavlungoReturnPickupPayload(input: {
     customerOverrides: input.customerOverrides,
   });
   const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
-  const barcodeFormat = resolveNavlungoBarcodeFormat(input.config.providerMetadata, input.env);
+  const barcodeFormat = resolveNavlungoReturnBarcodeFormat(input.config.providerMetadata);
   const desi = Number(input.config.defaultDesi || 1);
   const referenceId = buildNavlungoReferenceId({
     vendorId: input.allocation.assignedVendorId,

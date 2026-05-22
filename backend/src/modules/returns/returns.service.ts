@@ -249,8 +249,13 @@ function resolveNavlungoCarrierId(providerMetadata: unknown, env: AppEnv) {
   );
 }
 
-function resolveNavlungoBarcodeFormat(providerMetadata: unknown, env: AppEnv) {
-  return readString(providerMetadata, ['navlungoBarcodeFormat', 'barcodeFormat', 'barcode_format']) ?? env.NAVLUNGO_DEFAULT_BARCODE_FORMAT ?? 'pdf-A6';
+function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
+  return readString(providerMetadata, [
+    'navlungoReturnBarcodeFormat',
+    'returnBarcodeFormat',
+    'return_barcode_format',
+    'navlungo_return_barcode_format',
+  ]) ?? 'pdf-A5';
 }
 
 function safeShopifyReturnIdShort(value: string | null) {
@@ -884,7 +889,7 @@ function buildNavlungoReturnPickupPayload(input: {
   };
   const recipientAddressId = parsePositiveInteger(resolveNavlungoSenderAddressId(input.config, input.env));
   const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
-  const barcodeFormat = resolveNavlungoBarcodeFormat(input.config.providerMetadata, input.env);
+  const barcodeFormat = resolveNavlungoReturnBarcodeFormat(input.config.providerMetadata);
   const desi = Number(input.config.defaultDesi || 1);
   const referenceId = buildNavlungoReturnReferenceId({
     vendorId: input.record.vendorAllocation.assignedVendorId,

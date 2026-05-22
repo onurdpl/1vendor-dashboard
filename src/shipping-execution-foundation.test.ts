@@ -5660,6 +5660,7 @@ describe('shipping execution foundation', () => {
         endpointPath: '/post/create',
         requestedPostType: 3,
         requestedCarrierId: 9,
+        requestedBarcodeFormat: 'pdf-A5',
         senderFullObjectKeysPresent: true,
         recipientKeys: ['addressId'],
         desiPresent: true,
@@ -5786,6 +5787,7 @@ describe('shipping execution foundation', () => {
           expect.objectContaining({
             post_type: 3,
             recipient: { addressId: 55574 },
+            barcode_format: 'pdf-A5',
           }),
         ],
       }),
@@ -6087,6 +6089,7 @@ describe('shipping execution foundation', () => {
 
     const requestSnapshot = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].requestSnapshot;
     expect(requestSnapshot.posts[0].sender.district).toBe('Kadikoy');
+    expect(requestSnapshot.posts[0].barcode_format).toBe('pdf-A5');
     expect(adapter.createReturnShipment).toHaveBeenCalledOnce();
   });
 
