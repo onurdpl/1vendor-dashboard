@@ -2416,6 +2416,21 @@ export function OrderDetailPage() {
               <span>Validation messages</span>
               <strong>{summary.validationErrorMessages?.length ? summary.validationErrorMessages.join(' · ') : '—'}</strong>
             </div>
+            <div className="summary-row">
+              <span>Validation counts</span>
+              <strong>
+                fields {summary.failedFieldNamesCount ?? summary.failedFieldNames?.length ?? 0} · messages{' '}
+                {summary.validationErrorMessagesCount ?? summary.validationErrorMessages?.length ?? 0} · keys{' '}
+                {summary.validationErrorKeysCount ?? summary.validationErrorKeys?.length ?? 0}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>Validation shapes</span>
+              <strong>
+                top {summary.topLevelErrorShape ?? '—'} · nested {summary.nestedCreatePostErrorShape ?? '—'} · provider{' '}
+                {summary.providerValidationErrorsShape ?? '—'}
+              </strong>
+            </div>
             {summary.providerErrorCode ? (
               <div className="summary-row">
                 <span>Provider error code</span>

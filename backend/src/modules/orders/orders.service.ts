@@ -609,6 +609,27 @@ function buildShipmentProviderResponseSummary(
     validationErrorKeys,
     validationErrorMessages,
     failedFieldNames,
+    validationErrorKeysCount:
+      readNumber(snapshot, ['validationErrorKeysCount']) ??
+      readNumber(createPostDiagnostics, ['validationErrorKeysCount']) ??
+      validationErrorKeys.length,
+    failedFieldNamesCount:
+      readNumber(snapshot, ['failedFieldNamesCount']) ??
+      readNumber(createPostDiagnostics, ['failedFieldNamesCount']) ??
+      failedFieldNames.length,
+    validationErrorMessagesCount:
+      readNumber(snapshot, ['validationErrorMessagesCount']) ??
+      readNumber(createPostDiagnostics, ['validationErrorMessagesCount']) ??
+      validationErrorMessages.length,
+    providerValidationErrorsShape:
+      readString(snapshot, ['providerValidationErrorsShape']) ??
+      readString(createPostDiagnostics, ['providerValidationErrorsShape']),
+    createPostErrorShape:
+      readString(snapshot, ['createPostErrorShape']) ?? readString(createPostDiagnostics, ['createPostErrorShape']),
+    topLevelErrorShape:
+      readString(snapshot, ['topLevelErrorShape']) ?? readString(createPostDiagnostics, ['topLevelErrorShape']),
+    nestedCreatePostErrorShape:
+      readString(snapshot, ['nestedCreatePostErrorShape']) ?? readString(createPostDiagnostics, ['nestedCreatePostErrorShape']),
     providerErrorCode:
       readString(snapshot, ['providerErrorCode', 'errorCode', 'code']) ??
       readString(createPostDiagnostics, ['providerErrorCode', 'errorCode', 'code']),

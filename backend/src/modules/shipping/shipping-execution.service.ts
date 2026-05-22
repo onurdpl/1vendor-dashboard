@@ -581,6 +581,27 @@ function mapProviderResponseSummary(
     validationErrorKeys,
     validationErrorMessages,
     failedFieldNames,
+    validationErrorKeysCount:
+      readNumber(snapshot, ['validationErrorKeysCount']) ??
+      readNumber(createPostSnapshot, ['validationErrorKeysCount']) ??
+      validationErrorKeys.length,
+    failedFieldNamesCount:
+      readNumber(snapshot, ['failedFieldNamesCount']) ??
+      readNumber(createPostSnapshot, ['failedFieldNamesCount']) ??
+      failedFieldNames.length,
+    validationErrorMessagesCount:
+      readNumber(snapshot, ['validationErrorMessagesCount']) ??
+      readNumber(createPostSnapshot, ['validationErrorMessagesCount']) ??
+      validationErrorMessages.length,
+    providerValidationErrorsShape:
+      readString(snapshot, ['providerValidationErrorsShape']) ??
+      readString(createPostSnapshot, ['providerValidationErrorsShape']),
+    createPostErrorShape:
+      readString(snapshot, ['createPostErrorShape']) ?? readString(createPostSnapshot, ['createPostErrorShape']),
+    topLevelErrorShape:
+      readString(snapshot, ['topLevelErrorShape']) ?? readString(createPostSnapshot, ['topLevelErrorShape']),
+    nestedCreatePostErrorShape:
+      readString(snapshot, ['nestedCreatePostErrorShape']) ?? readString(createPostSnapshot, ['nestedCreatePostErrorShape']),
     providerErrorCode:
       readString(snapshot, ['providerErrorCode', 'errorCode', 'code']) ??
       readString(createPostSnapshot, ['providerErrorCode', 'errorCode', 'code']),

@@ -4945,6 +4945,12 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             'This reference id has already been registered.',
             'Carrier field is required',
           ],
+          validationErrorKeysCount: 2,
+          failedFieldNamesCount: 2,
+          validationErrorMessagesCount: 2,
+          topLevelErrorShape: 'object:2',
+          nestedCreatePostErrorShape: 'missing',
+          providerValidationErrorsShape: 'array:2',
         },
       },
     });
@@ -4966,6 +4972,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('posts.0.reference_id, posts.0.carrier_id').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Validation messages').length).toBeGreaterThan(0);
     expect(screen.getAllByText('This reference id has already been registered. · Carrier field is required').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Validation counts').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('fields 2 · messages 2 · keys 2').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Validation shapes').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('top object:2 · nested missing · provider array:2').length).toBeGreaterThan(0);
   });
 
   it('compares sanitized Navlungo probe and real retry request shapes without exposing PII', async () => {

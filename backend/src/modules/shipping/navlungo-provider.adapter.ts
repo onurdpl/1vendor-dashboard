@@ -539,16 +539,33 @@ function collectNavlungoValidationDiagnostics(
   return output;
 }
 
+function summarizeValidationDiagnosticShape(value: unknown) {
+  if (Array.isArray(value)) {
+    return `array:${value.length}`;
+  }
+  if (isRecord(value)) {
+    return `object:${Object.keys(value).length}`;
+  }
+  if (value === null || value === undefined) {
+    return 'missing';
+  }
+  return typeof value;
+}
+
 function getNavlungoValidationDiagnostics(body: unknown) {
   const root = isRecord(body) ? body : {};
   const data = isRecord(root.data) ? root.data : {};
   const rootErrorObject = isRecord(root.error) ? root.error : null;
+  const rootErrorsObject = isRecord(root.errors) ? root.errors : null;
+  const dataErrorObject = isRecord(data.error) ? data.error : null;
+  const dataErrorsObject = isRecord(data.errors) ? data.errors : null;
   const candidates = {
     error: rootErrorObject,
     errors: root.errors,
     validation: root.validation,
     validation_errors: root.validation_errors,
     error_details: root.error_details,
+    data_error: data.error,
     data_errors: data.errors,
     data_validation: data.validation,
     data_validation_errors: data.validation_errors,
@@ -559,13 +576,29 @@ function getNavlungoValidationDiagnostics(body: unknown) {
     (output, [, value]) => collectNavlungoValidationDiagnostics(value, [], output),
     { fields: [] as string[], messages: [] as string[] },
   );
+  const validationErrorKeys = rootErrorObject
+    ? Object.keys(rootErrorObject)
+    : dataErrorObject
+      ? Object.keys(dataErrorObject)
+      : rootErrorsObject
+        ? Object.keys(rootErrorsObject)
+        : dataErrorsObject
+          ? Object.keys(dataErrorsObject)
+          : presentCandidates.map(([key]) => key);
+  const validationErrorMessages = Array.from(new Set(collected.messages)).slice(0, 12);
+  const failedFieldNames = Array.from(new Set(collected.fields)).slice(0, 20);
 
   return {
-    validationErrorKeys: rootErrorObject
-      ? Object.keys(rootErrorObject)
-      : presentCandidates.map(([key]) => key),
-    validationErrorMessages: Array.from(new Set(collected.messages)).slice(0, 12),
-    failedFieldNames: Array.from(new Set(collected.fields)).slice(0, 20),
+    validationErrorKeys,
+    validationErrorMessages,
+    failedFieldNames,
+    validationErrorKeysCount: validationErrorKeys.length,
+    failedFieldNamesCount: failedFieldNames.length,
+    validationErrorMessagesCount: validationErrorMessages.length,
+    providerValidationErrorsShape: `array:${validationErrorMessages.length}`,
+    topLevelErrorShape: summarizeValidationDiagnosticShape(root.error ?? root.errors),
+    nestedCreatePostErrorShape: summarizeValidationDiagnosticShape(data.error ?? data.errors),
+    createPostErrorShape: summarizeValidationDiagnosticShape(root.error ?? root.errors ?? data.error ?? data.errors),
     providerErrorCode: readString(root, ['code', 'error_code', 'errorCode', 'providerErrorCode']) ??
       readString(data, ['code', 'error_code', 'errorCode', 'providerErrorCode']),
     validationResponseShape: summarizeResponseShape(body),
@@ -1038,6 +1071,13 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       validationErrorKeys: createDiagnostics.validationErrorKeys,
       validationErrorMessages: createDiagnostics.validationErrorMessages,
       failedFieldNames: createDiagnostics.failedFieldNames,
+      validationErrorKeysCount: createDiagnostics.validationErrorKeysCount,
+      failedFieldNamesCount: createDiagnostics.failedFieldNamesCount,
+      validationErrorMessagesCount: createDiagnostics.validationErrorMessagesCount,
+      providerValidationErrorsShape: createDiagnostics.providerValidationErrorsShape,
+      createPostErrorShape: createDiagnostics.createPostErrorShape,
+      topLevelErrorShape: createDiagnostics.topLevelErrorShape,
+      nestedCreatePostErrorShape: createDiagnostics.nestedCreatePostErrorShape,
       providerErrorCode: createDiagnostics.providerErrorCode,
       providerTrackingId: createDiagnostics.providerTrackingId,
       validationResponseShape: createDiagnostics.validationResponseShape,

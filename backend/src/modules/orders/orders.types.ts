@@ -255,6 +255,13 @@ export type OrderShipmentExecutionDto = {
     validationErrorKeys?: string[];
     validationErrorMessages?: string[];
     failedFieldNames?: string[];
+    validationErrorKeysCount?: number | null;
+    failedFieldNamesCount?: number | null;
+    validationErrorMessagesCount?: number | null;
+    providerValidationErrorsShape?: string | null;
+    createPostErrorShape?: string | null;
+    topLevelErrorShape?: string | null;
+    nestedCreatePostErrorShape?: string | null;
     providerErrorCode?: string | null;
     providerTrackingId?: string | null;
     validationResponseShape?: {
