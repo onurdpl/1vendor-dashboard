@@ -1,6 +1,7 @@
 import { prisma } from '../../db/prisma.js';
 import { createShopifyAdminService } from './shopify-admin.service.js';
 import type { AppEnv } from '../../config/env.js';
+import { autoCreateNavlungoReturnPickupForApprovedReturn } from '../returns/returns.service.js';
 import type {
   ReturnLifecycleIngestionInput,
   ReturnLifecycleIngestionResult,
@@ -117,6 +118,25 @@ async function failWebhook(eventId: string, errorMessage: string): Promise<Retur
   };
 }
 
+async function autoCreateReturnPickupsForApprovedRecords(env: AppEnv, returnRecordIds: string[]) {
+  let attempted = 0;
+  let skipped = 0;
+
+  for (const returnRecordId of returnRecordIds) {
+    const result = await autoCreateNavlungoReturnPickupForApprovedReturn(returnRecordId, env);
+    if (result.attempted) {
+      attempted += 1;
+    } else {
+      skipped += 1;
+    }
+  }
+
+  return {
+    attempted,
+    skipped,
+  };
+}
+
 export async function ingestReturnRequestWebhook(
   env: AppEnv,
   input: ReturnLifecycleIngestionInput,
@@ -207,6 +227,7 @@ export async function ingestReturnRequestWebhook(
       });
 
       let affectedRecordCount = 0;
+      const affectedReturnRecordIds: string[] = [];
       const lifecycleStatus = mapLifecycleStatus('returns/request');
 
       for (const mappedItem of mappedItems) {
@@ -254,6 +275,7 @@ export async function ingestReturnRequestWebhook(
         });
 
         affectedRecordCount += 1;
+        affectedReturnRecordIds.push(id);
       }
 
       await tx.webhookEvent.update({
@@ -269,8 +291,11 @@ export async function ingestReturnRequestWebhook(
       return {
         shopifyReturnGid: identity.sourceShopifyReturnGid,
         affectedRecordCount,
+        affectedReturnRecordIds,
       };
     });
+
+    const autoCreateResult = await autoCreateReturnPickupsForApprovedRecords(env, result.affectedReturnRecordIds);
 
     return {
       ok: true,
@@ -278,6 +303,8 @@ export async function ingestReturnRequestWebhook(
       processingStatus: 'processed',
       shopifyReturnGid: result.shopifyReturnGid,
       affectedRecordCount: result.affectedRecordCount,
+      navlungoReturnAutoCreateAttemptedCount: autoCreateResult.attempted,
+      navlungoReturnAutoCreateSkippedCount: autoCreateResult.skipped,
     };
   } catch (error) {
     return failWebhook(
@@ -332,6 +359,18 @@ export async function applyReturnLifecycleStatusWebhook(
         throw new Error(`No pending return request records found for Shopify return ${identity.sourceShopifyReturnGid}.`);
       }
 
+      const updatedRecords = await tx.returnRecord.findMany({
+        where: {
+          OR: [
+            { sourceShopifyReturnGid: identity.sourceShopifyReturnGid },
+            { sourceShopifyReturnId: identity.sourceShopifyReturnId },
+          ],
+        },
+        select: {
+          id: true,
+        },
+      });
+
       await tx.webhookEvent.update({
         where: { id: input.event.id },
         data: {
@@ -341,15 +380,24 @@ export async function applyReturnLifecycleStatusWebhook(
         },
       });
 
-      return updated.count;
+      return {
+        count: updated.count,
+        returnRecordIds: updatedRecords.map((record) => record.id),
+      };
     });
+
+    const autoCreateResult = lifecycleStatus === 'approved'
+      ? await autoCreateReturnPickupsForApprovedRecords(env, updateResult.returnRecordIds)
+      : { attempted: 0, skipped: updateResult.returnRecordIds.length };
 
     return {
       ok: true,
       action: 'accepted',
       processingStatus: 'processed',
       shopifyReturnGid: identity.sourceShopifyReturnGid,
-      affectedRecordCount: updateResult,
+      affectedRecordCount: updateResult.count,
+      navlungoReturnAutoCreateAttemptedCount: autoCreateResult.attempted,
+      navlungoReturnAutoCreateSkippedCount: autoCreateResult.skipped,
     };
   } catch (error) {
     return failWebhook(

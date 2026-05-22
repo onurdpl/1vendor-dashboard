@@ -388,6 +388,11 @@ export function ReturnDetailPage() {
   const navlungoReturnPickupMissingFields = Array.isArray(returnProviderSnapshot.navlungoReturnPickupMissingFields)
     ? returnProviderSnapshot.navlungoReturnPickupMissingFields.filter((field): field is string => typeof field === 'string')
     : [];
+  const navlungoReturnAutoCreateAttempted = returnProviderSnapshot.navlungoReturnAutoCreateAttempted === true;
+  const navlungoReturnAutoCreateSkippedReason =
+    typeof returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason === 'string'
+      ? returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason
+      : null;
   const canReviewReturn =
     currentUser?.role === 'admin' ||
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
@@ -475,13 +480,27 @@ export function ReturnDetailPage() {
       ? [
           {
             id: `navlungo-return-${returnRequest.id}`,
-            title: 'Navlungo return pickup created',
+            title: navlungoReturnAutoCreateAttempted ? 'Return pickup auto-created' : 'Navlungo return pickup created',
             description: returnRequest.returnCarrierName
               ? `Provider shipment created · ${returnRequest.returnCarrierName}`
               : 'Provider shipment created',
             at: returnRequest.navlungoReturnCreatedAt,
             status: 'Created',
             tone: 'success' as const,
+          },
+        ]
+      : []),
+    ...(!returnRequest.navlungoReturnCreatedAt && navlungoReturnAutoCreateSkippedReason
+      ? [
+          {
+            id: `navlungo-return-attention-${returnRequest.id}`,
+            title: 'Return pickup needs attention',
+            description: navlungoReturnPickupMissingFields.length
+              ? `Missing fields: ${navlungoReturnPickupMissingFields.join(', ')}`
+              : navlungoReturnAutoCreateSkippedReason.replace(/_/g, ' '),
+            at: returnRequest.updatedAt ?? returnRequest.date,
+            status: 'Needs attention',
+            tone: 'warning' as const,
           },
         ]
       : []),
@@ -710,6 +729,33 @@ export function ReturnDetailPage() {
                   <div>
                     <span>Barcode / label</span>
                     <strong>Available</strong>
+                  </div>
+                ) : null}
+              </div>
+            </article>
+          ) : null}
+
+          {!hasReturnShipment && navlungoReturnAutoCreateSkippedReason ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Return pickup</p>
+                  <h3>Needs attention</h3>
+                </div>
+              </div>
+              <div className="return-review-summary-list">
+                <div>
+                  <span>Status</span>
+                  <strong>Pending provider create</strong>
+                </div>
+                <div>
+                  <span>Reason</span>
+                  <strong>{navlungoReturnAutoCreateSkippedReason.replace(/_/g, ' ')}</strong>
+                </div>
+                {navlungoReturnPickupMissingFields.length ? (
+                  <div>
+                    <span>Missing fields</span>
+                    <strong>{navlungoReturnPickupMissingFields.join(', ')}</strong>
                   </div>
                 ) : null}
               </div>

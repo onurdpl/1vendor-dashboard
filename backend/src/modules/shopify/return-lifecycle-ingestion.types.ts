@@ -21,6 +21,8 @@ export type ReturnLifecycleIngestionResult =
       processingStatus: 'processed';
       shopifyReturnGid: string;
       affectedRecordCount: number;
+      navlungoReturnAutoCreateAttemptedCount?: number;
+      navlungoReturnAutoCreateSkippedCount?: number;
     }
   | {
       ok: false;
@@ -28,4 +30,3 @@ export type ReturnLifecycleIngestionResult =
       processingStatus: 'needs_attention';
       error: string;
     };
-

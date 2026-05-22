@@ -31,6 +31,7 @@ export type ReturnActorScope = {
 export type NavlungoReturnPickupInput = {
   dryRun?: boolean;
   adapter?: ShippingProviderAdapter;
+  autoCreate?: boolean;
   customerOverrides?: {
     name?: string;
     phone?: string;
@@ -739,6 +740,8 @@ async function getVendorShippingConfigForReturn(vendorId: string) {
   });
 
   return {
+    preferredProvider: config?.preferredProvider?.toString().toLowerCase() ?? null,
+    shippingEnabled: config?.shippingEnabled ?? false,
     defaultDesi: config?.defaultDesi?.toString() ?? '1',
     defaultWarehouseId: config?.defaultWarehouseId ?? null,
     providerMetadata: config?.providerMetadata ?? null,
@@ -748,6 +751,10 @@ async function getVendorShippingConfigForReturn(vendorId: string) {
       isDefault: warehouse.isDefault,
     })),
   };
+}
+
+function isNavlungoReturnProviderConfig(config: Awaited<ReturnType<typeof getVendorShippingConfigForReturn>>) {
+  return config.shippingEnabled && config.preferredProvider === 'navlungo';
 }
 
 function buildNavlungoReturnPickupPayload(input: {
@@ -799,7 +806,6 @@ function buildNavlungoReturnPickupPayload(input: {
   const missingFields = [
     sender.name ? null : 'sender.name',
     sender.phone ? null : 'sender.phone',
-    sender.email ? null : 'sender.email',
     sender.address ? null : 'sender.address',
     sender.country ? null : 'sender.country',
     sender.city ? null : 'sender.city',
@@ -888,6 +894,8 @@ export async function createNavlungoReturnPickupForReturn(
     flow: 'return_pickup',
     endpoint: '/post/create',
     dryRun: input.dryRun === true,
+    navlungoReturnAutoCreateAttempted: input.autoCreate === true && input.dryRun !== true,
+    navlungoReturnAutoCreateSkippedReason: null,
     navlungoReturnPickupDryRun: input.dryRun === true,
     navlungoReturnPickupAttempted: input.dryRun !== true,
     navlungoReturnPickupSucceeded: false,
@@ -897,6 +905,7 @@ export async function createNavlungoReturnPickupForReturn(
     returnRequestId: record.id,
     shopifyReturnIdPresent: Boolean(record.sourceShopifyReturnId || record.sourceShopifyReturnGid),
     shopifyReturnSyncSkippedReason: 'not_implemented',
+    shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
     attemptedAt,
   };
 
@@ -937,6 +946,8 @@ export async function createNavlungoReturnPickupForReturn(
       ...diagnostics,
       dryRun: false,
       navlungoReturnPickupSucceeded: Boolean(result.returnOrderId),
+      navlungoReturnCreateSucceeded: Boolean(result.returnOrderId),
+      navlungoReturnCreateHttpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
       httpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
       responseKeys: Object.keys(result.responseSnapshot),
       providerMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
@@ -946,6 +957,7 @@ export async function createNavlungoReturnPickupForReturn(
       returnStatus: result.returnStatus,
       rawResponseSummary: result.responseSnapshot,
       shopifyReturnSyncSkippedReason: 'not_implemented',
+      shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
     };
     await prisma.returnRecord.update({
       where: { id: returnId },
@@ -970,6 +982,8 @@ export async function createNavlungoReturnPickupForReturn(
             ...diagnostics,
             dryRun: false,
             navlungoReturnPickupSucceeded: false,
+            navlungoReturnCreateSucceeded: false,
+            navlungoReturnCreateHttpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
             providerMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
             httpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
             responseKeys: Object.keys(error.responseSnapshot),
@@ -987,4 +1001,102 @@ export async function createNavlungoReturnPickupForReturn(
     throw new ReturnReviewError('Return record not found.', 404);
   }
   return updated;
+}
+
+export async function autoCreateNavlungoReturnPickupForApprovedReturn(
+  returnId: string,
+  env: AppEnv,
+  input: Pick<NavlungoReturnPickupInput, 'adapter'> = {},
+) {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: {
+        include: {
+          order: true,
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    return { attempted: false, skippedReason: 'return_record_not_found' };
+  }
+
+  const normalizedStatus = (record.returnLifecycleStatus || record.status || '').toLowerCase();
+  if (normalizedStatus !== 'approved') {
+    return { attempted: false, skippedReason: 'return_not_approved' };
+  }
+
+  if (record.returnProvider === 'navlungo' && record.returnProviderShipmentId) {
+    return { attempted: false, skippedReason: 'return_provider_evidence_exists' };
+  }
+
+  const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  if (!isNavlungoReturnProviderConfig(config)) {
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: {
+          ...(readSnapshot(record.returnProviderSnapshot) ?? {}),
+          provider: 'navlungo',
+          flow: 'return_pickup',
+          navlungoReturnAutoCreateAttempted: false,
+          navlungoReturnAutoCreateSkippedReason: 'provider_not_navlungo',
+          navlungoReturnPickupStatus: 'not_applicable',
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return { attempted: false, skippedReason: 'provider_not_navlungo' };
+  }
+
+  const built = buildNavlungoReturnPickupPayload({
+    record,
+    config,
+    env,
+  });
+
+  if (built.missingFields.length > 0) {
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: {
+          ...(readSnapshot(record.returnProviderSnapshot) ?? {}),
+          provider: 'navlungo',
+          flow: 'return_pickup',
+          endpoint: '/post/create',
+          navlungoReturnAutoCreateAttempted: true,
+          navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+          navlungoReturnPickupStatus: 'needs_attention',
+          navlungoReturnPickupDryRun: false,
+          navlungoReturnPickupAttempted: false,
+          navlungoReturnPickupSucceeded: false,
+          navlungoReturnPickupMissingFields: built.missingFields,
+          navlungoReturnMissingFields: built.missingFields,
+          navlungoReturnPickupPayloadSummary: built.summary,
+          navlungoReturnRequestSummary: built.summary,
+          recipientAddressIdValid: built.recipientAddressIdValid,
+          shopifyReturnSyncSkippedReason: 'not_implemented',
+          shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
+          attemptedAt: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+      },
+    });
+    return { attempted: false, skippedReason: 'missing_required_fields', missingFields: built.missingFields };
+  }
+
+  try {
+    await createNavlungoReturnPickupForReturn(
+      returnId,
+      { role: 'admin', vendorId: null },
+      env,
+      {
+        adapter: input.adapter,
+        autoCreate: true,
+      },
+    );
+    return { attempted: true, skippedReason: null };
+  } catch {
+    return { attempted: true, skippedReason: 'provider_create_failed' };
+  }
 }
