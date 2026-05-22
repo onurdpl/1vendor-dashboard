@@ -295,6 +295,8 @@ export type ShipmentExecution = {
     senderAddressIdPresent?: boolean | null;
     senderAddressIdValid?: boolean | null;
     senderUsesAddressId?: boolean | null;
+    senderMode?: string | null;
+    fullSenderRetryRequested?: boolean | null;
     realPathPostNumberPresent?: boolean | null;
     realPathTrackingUrlPresent?: boolean | null;
     realPathBarcodePresent?: boolean | null;

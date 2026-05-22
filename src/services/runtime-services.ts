@@ -379,9 +379,18 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async retryFailedShipmentExecution(shipmentExecutionId: string, vendorId = getCurrentVendorId(), customerOverrides?: ShipmentCustomerOverrides) {
+    async retryFailedShipmentExecution(
+      shipmentExecutionId: string,
+      vendorId = getCurrentVendorId(),
+      customerOverrides?: ShipmentCustomerOverrides,
+      useFullSenderDetailsForThisRetry?: boolean,
+    ) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.retryFailedShipmentExecution(shipmentExecutionId, { vendorId, customerOverrides });
+        return realOrders.retryFailedShipmentExecution(shipmentExecutionId, {
+          vendorId,
+          customerOverrides,
+          useFullSenderDetailsForThisRetry,
+        });
       }
 
       const submittedAt = new Date().toISOString();

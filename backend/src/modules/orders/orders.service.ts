@@ -711,6 +711,9 @@ function buildShipmentProviderResponseSummary(
     senderAddressIdPresent: typeof snapshot?.senderAddressIdPresent === 'boolean' ? snapshot.senderAddressIdPresent : null,
     senderAddressIdValid: typeof snapshot?.senderAddressIdValid === 'boolean' ? snapshot.senderAddressIdValid : null,
     senderUsesAddressId: typeof snapshot?.senderUsesAddressId === 'boolean' ? snapshot.senderUsesAddressId : null,
+    senderMode: readString(snapshot, ['senderMode']),
+    fullSenderRetryRequested:
+      typeof snapshot?.fullSenderRetryRequested === 'boolean' ? snapshot.fullSenderRetryRequested : null,
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
       typeof snapshot?.createShipmentCalled === 'boolean'

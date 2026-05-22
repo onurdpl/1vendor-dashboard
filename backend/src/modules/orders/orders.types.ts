@@ -291,6 +291,8 @@ export type OrderShipmentExecutionDto = {
     senderAddressIdPresent?: boolean | null;
     senderAddressIdValid?: boolean | null;
     senderUsesAddressId?: boolean | null;
+    senderMode?: string | null;
+    fullSenderRetryRequested?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;
     priceComparisonCalled?: boolean | null;

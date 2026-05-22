@@ -5479,6 +5479,31 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.82rem;
 }
 
+.shipping-config-advanced {
+  grid-column: 1 / -1;
+  padding: 8px 10px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.shipping-config-advanced summary {
+  cursor: pointer;
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.shipping-config-advanced p {
+  margin: 6px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.shipping-config-advanced .field {
+  margin-bottom: 8px;
+}
+
 .shipping-config-feedback {
   padding: 8px 10px;
   border-radius: 10px;

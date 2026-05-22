@@ -508,12 +508,17 @@ export async function retryShipmentExecution(shipmentExecutionId: string) {
 
 export async function retryFailedShipmentExecution(
   shipmentExecutionId: string,
-  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+  options: {
+    vendorId?: string | null;
+    customerOverrides?: ShipmentCustomerOverrides;
+    useFullSenderDetailsForThisRetry?: boolean;
+  } = {},
 ) {
   return apiClient.post<CreateShipmentExecutionResult>(
     `/shipments/${shipmentExecutionId}/retry`,
     {
       customerOverrides: options.customerOverrides,
+      ...(options.useFullSenderDetailsForThisRetry ? { useFullSenderDetailsForThisRetry: true } : {}),
     },
     {
       vendorId: options.vendorId,

@@ -1069,6 +1069,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     const payload = input.requestSnapshot as NavlungoCreatePostPayload;
     const client = new NavlungoHttpClient(this.env, this.options);
     const requestSummary = summarizeNavlungoCreatePostRequest(payload, this.env);
+    const senderUsesAddressId = isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender;
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
       flow: 'forward',
@@ -1082,7 +1083,8 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       priceIncluded: payload.posts?.[0]?.post?.price !== undefined,
       senderAddressIdPresent: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderAddressIdValid: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
-      senderUsesAddressId: isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender,
+      senderUsesAddressId,
+      senderMode: senderUsesAddressId ? 'addressId' : 'fullSender',
       navlungoRequestSummary: requestSummary,
       lastSuccessfulNavlungoRequestSummary: lastSuccessfulNavlungoCreatePostRequestSummary,
     };

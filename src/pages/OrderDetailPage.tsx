@@ -984,6 +984,14 @@ function buildShippingConfigUpdate(
     const providerMetadata = { ...metadata };
     const senderAddressId = draft.navlungoSenderAddressId.trim();
     providerMetadata.navlungoSenderAddressId = senderAddressId;
+    providerMetadata.navlungoSenderName = draft.navlungoSenderName.trim();
+    providerMetadata.navlungoSenderPhone = draft.navlungoSenderPhone.trim();
+    providerMetadata.navlungoSenderEmail = draft.navlungoSenderEmail.trim();
+    providerMetadata.navlungoSenderAddress = draft.navlungoSenderAddress.trim();
+    providerMetadata.navlungoSenderCountry = draft.navlungoSenderCountry.trim();
+    providerMetadata.navlungoSenderCity = draft.navlungoSenderCity.trim();
+    providerMetadata.navlungoSenderDistrict = draft.navlungoSenderDistrict.trim();
+    providerMetadata.navlungoSenderPostCode = draft.navlungoSenderPostCode.trim();
     providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
     providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
 
@@ -1233,6 +1241,7 @@ export function OrderDetailPage() {
   const [navlungoCheckPostProbeError, setNavlungoCheckPostProbeError] = useState<string | null>(null);
   const [navlungoBarcodeProbeDiagnostics, setNavlungoBarcodeProbeDiagnostics] = useState<NavlungoBarcodeProbeDiagnostics | null>(null);
   const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
+  const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1341,10 +1350,15 @@ export function OrderDetailPage() {
     },
   );
   const { mutateAsync: retryFailedShipmentMutation, isPending: isRetryingFailedShipment } = useMutationAction(
-    async (payload: { shipmentExecutionId: string; customerOverrides?: ShipmentCustomerOverrides }) =>
+    async (payload: {
+      shipmentExecutionId: string;
+      customerOverrides?: ShipmentCustomerOverrides;
+      useFullSenderDetailsForThisRetry?: boolean;
+    }) =>
       retryFailedShipmentExecution(payload.shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
         customerOverrides: payload.customerOverrides,
+        useFullSenderDetailsForThisRetry: payload.useFullSenderDetailsForThisRetry,
       }),
     {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
@@ -1601,6 +1615,8 @@ export function OrderDetailPage() {
     shipmentProviderSummary,
   );
   const canRecoverFailedShipment = Boolean(visibleShipmentExecution) && failedShipmentRetryBlockedReason === null;
+  const canUseFullNavlungoSenderRetry =
+    isAdmin && canRecoverFailedShipment && visibleShipmentExecution?.provider === 'navlungo';
   const shouldShowFailedShipmentRetryDiagnostics =
     (isAdmin || canUseFulfillmentActions) &&
     Boolean(visibleShipmentExecution) &&
@@ -1667,6 +1683,7 @@ export function OrderDetailPage() {
   useEffect(() => {
     setShipmentCustomerOverrides({});
     setShipmentActionState(null);
+    setUseFullNavlungoSenderForRetry(false);
     tryOtoAutoRefreshAttemptsRef.current = {};
     if (tryOtoAutoRefreshTimerRef.current !== null) {
       window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
@@ -1739,7 +1756,14 @@ export function OrderDetailPage() {
       endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
     });
 
-    void retryFailedShipmentMutation({ shipmentExecutionId: visibleShipmentExecution.id, customerOverrides })
+    const useFullSenderDetailsForThisRetry =
+      isAdmin && visibleShipmentExecution.provider === 'navlungo' && useFullNavlungoSenderForRetry;
+
+    void retryFailedShipmentMutation({
+      shipmentExecutionId: visibleShipmentExecution.id,
+      customerOverrides,
+      ...(useFullSenderDetailsForThisRetry ? { useFullSenderDetailsForThisRetry: true } : {}),
+    })
       .then((shipment) => {
         const resultState = getShipmentActionResultState(shipment, 'retry');
         setShipmentActionState({
@@ -1748,6 +1772,7 @@ export function OrderDetailPage() {
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/retry`,
         });
         setShipmentCustomerOverrides({});
+        setUseFullNavlungoSenderForRetry(false);
         showFeedback(resultState.message, resultState.tone);
         void refetch();
       })
@@ -2418,6 +2443,14 @@ export function OrderDetailPage() {
               )}
             </strong>
           </div>
+          <div className="summary-row">
+            <span>Navlungo sender mode</span>
+            <strong>
+              {summary.senderMode ?? (summary.senderUsesAddressId ?? summary.navlungoRequestSummary?.senderUsesAddressId ? 'addressId' : '—')}
+              {' · '}
+              full sender retry {formatDiagnosticPresence(summary.fullSenderRetryRequested)}
+            </strong>
+          </div>
           {summary.navlungoRequestSummary ? (
             <>
               <div className="summary-row">
@@ -2613,6 +2646,13 @@ export function OrderDetailPage() {
             present {formatDiagnosticPresence(summary.senderAddressIdPresent)} · valid{' '}
             {formatDiagnosticPresence(summary.senderAddressIdValid)} · addressId sender{' '}
             {formatDiagnosticPresence(summary.senderUsesAddressId)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Navlungo sender mode</span>
+          <strong>
+            {summary.senderMode ?? (summary.senderUsesAddressId ? 'addressId' : '—')} · full sender retry{' '}
+            {formatDiagnosticPresence(summary.fullSenderRetryRequested)}
           </strong>
         </div>
         <div className="summary-row">
@@ -3570,6 +3610,106 @@ export function OrderDetailPage() {
                 <option value="html">html</option>
               </select>
             </label>
+            <details className="shipping-config-advanced">
+              <summary>Full sender details for diagnostics</summary>
+              <p>Optional. Used only when an admin explicitly retries Navlungo with full sender details.</p>
+              <label className="field">
+                <span>Sender name</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderName}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderName: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender phone</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderPhone}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderPhone: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender email</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderEmail}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderEmail: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender address</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderAddress}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderAddress: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender country</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderCountry}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderCountry: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender city</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderCity}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderCity: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender district</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderDistrict}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderDistrict: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Sender post code</span>
+                <input
+                  value={shippingConfigDraft.navlungoSenderPostCode}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoSenderPostCode: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </details>
             <div className="shipping-config-readonly">
               <span>Base URL configured</span>
               <strong>{navlungoOptionDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
@@ -4781,6 +4921,17 @@ export function OrderDetailPage() {
                               <div className="shipment-recovery-actions">
                                 <strong>Shipment recovery</strong>
                                 <span>Provider execution failed before a shipment id or tracking was created.</span>
+                                {canUseFullNavlungoSenderRetry ? (
+                                  <label className="checkbox-field">
+                                    <input
+                                      type="checkbox"
+                                      checked={useFullNavlungoSenderForRetry}
+                                      onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
+                                      disabled={isRetryingFailedShipment}
+                                    />
+                                    <span>Use full Navlungo sender details for this retry</span>
+                                  </label>
+                                ) : null}
                                 <div className="order-inline-actions">
                                   <button
                                     type="button"
@@ -5750,6 +5901,17 @@ export function OrderDetailPage() {
                           <div className="shipment-recovery-actions">
                             <strong>Shipment recovery</strong>
                             <span>Provider execution failed before a shipment id or tracking was created.</span>
+                            {canUseFullNavlungoSenderRetry ? (
+                              <label className="checkbox-field">
+                                <input
+                                  type="checkbox"
+                                  checked={useFullNavlungoSenderForRetry}
+                                  onChange={(event) => setUseFullNavlungoSenderForRetry(event.target.checked)}
+                                  disabled={isRetryingFailedShipment}
+                                />
+                                <span>Use full Navlungo sender details for this retry</span>
+                              </label>
+                            ) : null}
                             <div className="order-inline-actions">
                               <button
                                 type="button"

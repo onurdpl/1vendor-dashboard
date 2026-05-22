@@ -174,6 +174,8 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
           vendorId,
           notificationUrl: body.notificationUrl ?? resolveNotificationUrl(request),
           customerOverrides: body.customerOverrides,
+          useFullSenderDetailsForThisRetry: body.useFullSenderDetailsForThisRetry === true,
+          actorRole: request.authUser?.role,
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment execution could not be retried.';

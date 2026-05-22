@@ -69,7 +69,11 @@ vi.mock('../features/orders/api', async () => {
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     retryFailedShipmentExecution: (
       shipmentExecutionId: string,
-      options?: { vendorId?: string | null; customerOverrides?: Record<string, string> },
+      options?: {
+        vendorId?: string | null;
+        customerOverrides?: Record<string, string>;
+        useFullSenderDetailsForThisRetry?: boolean;
+      },
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
@@ -2650,6 +2654,62 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Shipment NAV-RETRY-1048 recorded.')).toBeInTheDocument();
     expect(screen.getByText('NAV-TRACK-1048')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Open tracking/i })).toHaveAttribute('href', 'https://track.navlungo.test/NAV-RETRY-1048');
+  });
+
+  it('lets admins request full Navlungo sender details for one failed retry', async () => {
+    const user = userEvent.setup();
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          dryRun: false,
+          disabledGates: [],
+          providerError: 'Execution of ServiceCallout failed.',
+        },
+      },
+    });
+    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+      provider: 'navlungo',
+      shipmentStatus: 'failed',
+      providerShipmentId: null,
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    const fullSenderToggle = (await screen.findAllByLabelText('Use full Navlungo sender details for this retry'))[0];
+    await user.click(fullSenderToggle);
+    await user.click(screen.getByRole('button', { name: 'Retry shipment' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: undefined,
+        useFullSenderDetailsForThisRetry: true,
+      }),
+    );
   });
 
   it('does not expose failed shipment recovery when provider identifiers already exist', async () => {

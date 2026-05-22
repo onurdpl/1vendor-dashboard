@@ -42,12 +42,17 @@ export async function retryShipmentExecution(shipmentExecutionId: string) {
 
 export async function retryFailedShipmentExecution(
   shipmentExecutionId: string,
-  options: { vendorId?: string | null; customerOverrides?: ShipmentCustomerOverrides } = {},
+  options: {
+    vendorId?: string | null;
+    customerOverrides?: ShipmentCustomerOverrides;
+    useFullSenderDetailsForThisRetry?: boolean;
+  } = {},
 ) {
   return runtimeServices.orders.retryFailedShipmentExecution(
     shipmentExecutionId,
     options.vendorId ?? undefined,
     options.customerOverrides,
+    options.useFullSenderDetailsForThisRetry,
   );
 }
 

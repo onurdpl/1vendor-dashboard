@@ -664,6 +664,8 @@ function mapProviderResponseSummary(
     senderAddressIdPresent: readOptionalBoolean(snapshot, ['senderAddressIdPresent']),
     senderAddressIdValid: readOptionalBoolean(snapshot, ['senderAddressIdValid']),
     senderUsesAddressId: readOptionalBoolean(snapshot, ['senderUsesAddressId']),
+    senderMode: readString(snapshot, ['senderMode']),
+    fullSenderRetryRequested: readOptionalBoolean(snapshot, ['fullSenderRetryRequested']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -1181,12 +1183,56 @@ function parseNavlungoSenderAddressId(value: string | null | undefined) {
   return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
 }
 
-function buildNavlungoSender(config: VendorShippingConfigDto) {
+function resolveNavlungoSenderField(config: VendorShippingConfigDto, keys: string[], fallback?: string | null) {
+  const fromMetadata = readString(config.providerMetadata, keys);
+  if (fromMetadata !== null) {
+    return fromMetadata;
+  }
+  return fallback?.trim() || null;
+}
+
+function buildNavlungoSender(config: VendorShippingConfigDto, options: { useFullSenderDetails?: boolean } = {}) {
+  if (options.useFullSenderDetails) {
+    const defaultWarehouse = selectDefaultWarehouse(config, 'navlungo') ?? config.warehouses[0] ?? null;
+    const sender = {
+      name: resolveNavlungoSenderField(config, ['navlungoSenderName', 'senderName', 'sender_name'], defaultWarehouse?.name) ?? '',
+      phone: normalizeNavlungoPhone(
+        resolveNavlungoSenderField(config, ['navlungoSenderPhone', 'senderPhone', 'sender_phone']),
+      ) ?? '',
+      email: resolveNavlungoSenderField(config, ['navlungoSenderEmail', 'senderEmail', 'sender_email']) ?? '',
+      address: resolveNavlungoSenderField(
+        config,
+        ['navlungoSenderAddress', 'senderAddress', 'sender_address'],
+        defaultWarehouse?.address,
+      ) ?? '',
+      country: resolveNavlungoSenderField(config, ['navlungoSenderCountry', 'senderCountry', 'sender_country'], 'tr') ?? '',
+      city: resolveNavlungoSenderField(config, ['navlungoSenderCity', 'senderCity', 'sender_city']) ?? '',
+      district: resolveNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']) ?? '',
+      post_code: resolveNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']) ?? '',
+    };
+    const missingFields = [
+      sender.name ? null : 'sender.name',
+      sender.phone ? null : 'sender.phone',
+      sender.email ? null : 'sender.email',
+      sender.address ? null : 'sender.address',
+      sender.country ? null : 'sender.country',
+      sender.city ? null : 'sender.city',
+      sender.district ? null : 'sender.district',
+    ].filter((field): field is string => Boolean(field));
+
+    return {
+      sender: missingFields.length === 0 ? sender : null,
+      missingFields,
+      mode: 'fullSender' as const,
+    };
+  }
+
   const senderAddressId = parseNavlungoSenderAddressId(resolveNavlungoSenderAddressId(config));
 
   return {
     sender: senderAddressId ? { addressId: senderAddressId } : null,
     missingFields: senderAddressId ? [] : ['sender.addressId'],
+    mode: 'addressId' as const,
   };
 }
 
@@ -4658,6 +4704,7 @@ async function buildShipmentRequestPreview(
     vendorId: string;
     env?: AppEnv;
     kargonomiDestinationClient?: KargonomiDestinationLookupClient;
+    allowNavlungoFullSenderDetails?: boolean;
   },
 ): Promise<ShipmentExecutionPreviewDto> {
   if (!input.allocationId) {
@@ -4873,7 +4920,13 @@ async function buildShipmentRequestPreview(
     customerEmail: allocation.order.customerEmail,
     customerOverrides: input.customerOverrides,
   });
-  const navlungoSender = provider === ShippingProvider.NAVLUNGO ? buildNavlungoSender(config) : null;
+  const navlungoFullSenderRetryRequested =
+    provider === ShippingProvider.NAVLUNGO &&
+    options.allowNavlungoFullSenderDetails === true &&
+    input.useFullSenderDetailsForThisRetry === true;
+  const navlungoSender = provider === ShippingProvider.NAVLUNGO
+    ? buildNavlungoSender(config, { useFullSenderDetails: navlungoFullSenderRetryRequested })
+    : null;
   const missingCustomerFields = [
     ...(dummyKargoRequested
       ? kargoCustomer.missingFields
@@ -5466,6 +5519,8 @@ export async function retryFailedShipmentExecution(
     vendorId: string;
     notificationUrl?: string | null;
     customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+    useFullSenderDetailsForThisRetry?: boolean;
+    actorRole?: string | null;
     adapter?: ShippingProviderAdapter;
   },
 ): Promise<ShipmentExecutionDto> {
@@ -5477,6 +5532,13 @@ export async function retryFailedShipmentExecution(
 
   if (!existing || existing.vendorId !== options.vendorId) {
     throw new Error('Shipment execution not found.');
+  }
+
+  if (options.useFullSenderDetailsForThisRetry && options.actorRole !== 'admin') {
+    throw new Error('Full Navlungo sender detail retry is available only for admins.');
+  }
+  if (options.useFullSenderDetailsForThisRetry && existing.provider !== ShippingProvider.NAVLUNGO) {
+    throw new Error('Full sender detail retry is available only for Navlungo shipments.');
   }
 
   const retryingStaleNavlungo = canRetryStaleNavlungoExecution(existing);
@@ -5497,10 +5559,12 @@ export async function retryFailedShipmentExecution(
       provider: providerDto,
       notificationUrl: options.notificationUrl ?? undefined,
       customerOverrides: options.customerOverrides,
+      useFullSenderDetailsForThisRetry: options.useFullSenderDetailsForThisRetry === true,
     },
     {
       vendorId: existing.vendorId,
       env: options.env,
+      allowNavlungoFullSenderDetails: options.actorRole === 'admin',
     },
   );
 
@@ -5508,6 +5572,10 @@ export async function retryFailedShipmentExecution(
   if (provider !== existing.provider) {
     throw new Error('Vendor shipping provider no longer matches the shipment execution provider.');
   }
+  const fullSenderRetryRequested = options.useFullSenderDetailsForThisRetry === true && provider === ShippingProvider.NAVLUNGO;
+  const navlungoSenderMode = provider === ShippingProvider.NAVLUNGO
+    ? fullSenderRetryRequested ? 'fullSender' : 'addressId'
+    : null;
 
   const allocation = await prisma.vendorAllocation.findUnique({
     where: {
@@ -5539,6 +5607,8 @@ export async function retryFailedShipmentExecution(
       staleRecoveryAttempted: retryingStaleNavlungo,
       providerCallAttempted: false,
       providerCallSkippedReason: null,
+      fullSenderRetryRequested,
+      senderMode: navlungoSenderMode,
     },
     {
     label: 'Retry attempted',
@@ -5568,6 +5638,7 @@ export async function retryFailedShipmentExecution(
         provider: providerDto,
         notificationUrl: options.notificationUrl ?? undefined,
         customerOverrides: options.customerOverrides,
+        useFullSenderDetailsForThisRetry: options.useFullSenderDetailsForThisRetry === true,
       },
       preview,
       options.env,
@@ -5603,6 +5674,8 @@ export async function retryFailedShipmentExecution(
           persistedProviderShipmentIdPresent: Boolean(result.providerShipmentId),
           persistedTrackingUrlPresent: Boolean(result.trackingUrl),
           persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
+          fullSenderRetryRequested,
+          senderMode: navlungoSenderMode,
         },
       },
     });
