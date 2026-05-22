@@ -1288,6 +1288,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
           navlungoStatusSyncAttempted: true,
           navlungoStatusSyncHttpStatus: 200,
+          navlungoStatusSyncResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/check',
+          navlungoStatusSyncRequestPayloadKeys: ['post', 'limit'],
+          navlungoStatusSyncPostPayloadKeys: ['post_number'],
+          navlungoStatusSyncLimit: 1,
+          navlungoStatusSyncResponseShape: { kind: 'json:object', topLevelKeys: ['status', 'data'] },
           navlungoProviderStatusCode: 17,
           navlungoProviderStatusName: 'In Transit',
           navlungoNormalizedStatus: 'in_transit',
@@ -1308,6 +1313,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByText('Detailed status sync')).toBeInTheDocument();
     expect(screen.getByText(/attempted yes · HTTP 200 · status in_transit/)).toBeInTheDocument();
+    expect(screen.getByText('https://domestic-api.navlungo.com/v2.1/post/check')).toBeInTheDocument();
+    expect(screen.getByText(/body post, limit · post post_number · limit 1/)).toBeInTheDocument();
+    expect(screen.getByText(/json:object · status, data/)).toBeInTheDocument();
     expect(screen.getByText('17 · In Transit')).toBeInTheDocument();
     expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
     expect(screen.getByText('#status-sync')).toBeInTheDocument();

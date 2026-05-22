@@ -2759,6 +2759,30 @@ export function OrderDetailPage() {
           </strong>
         </div>
         <div className="summary-row">
+          <span>Status sync URL</span>
+          <strong>{summary.navlungoStatusSyncResolvedProviderUrl || summary.navlungoStatusSyncResolvedProviderPath || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Status sync payload</span>
+          <strong>
+            body {summary.navlungoStatusSyncRequestPayloadKeys?.length ? summary.navlungoStatusSyncRequestPayloadKeys.join(', ') : '—'} · post{' '}
+            {summary.navlungoStatusSyncPostPayloadKeys?.length ? summary.navlungoStatusSyncPostPayloadKeys.join(', ') : '—'} · limit{' '}
+            {summary.navlungoStatusSyncLimit ?? '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Status sync response shape</span>
+          <strong>
+            {summary.navlungoStatusSyncResponseShape
+              ? `${summary.navlungoStatusSyncResponseShape.kind} · ${
+                  summary.navlungoStatusSyncResponseShape.topLevelKeys.length
+                    ? summary.navlungoStatusSyncResponseShape.topLevelKeys.join(', ')
+                    : 'no keys'
+                }`
+              : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
           <span>Provider status</span>
           <strong>
             {summary.navlungoProviderStatusCode ?? '—'}

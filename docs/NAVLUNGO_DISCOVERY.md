@@ -738,6 +738,10 @@ Implemented for forward Navlungo shipments as a manual action only:
 
 - Endpoint used:
   - `POST /post/check`
+- Base URL behavior:
+  - Detailed Check Post belongs to the v2.1 docs set.
+  - If the configured `NAVLUNGO_BASE_URL` still ends in legacy `/v2`, only this detailed status sync request is resolved to the sibling `/v2.1/post/check` path.
+  - Create Post, Update Post, and Cancel Post behavior is unchanged.
 - Payload:
   - `post.post_number` from the stored Navlungo `providerShipmentId`
   - `limit = 1`

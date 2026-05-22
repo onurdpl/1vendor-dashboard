@@ -1003,7 +1003,7 @@ export class NavlungoHttpClient {
       throw new Error('Navlungo post number is required for detailed Check Post.');
     }
 
-    const response = await this.fetchImpl(this.requestUrl('/post/check'), {
+    const response = await this.fetchImpl(this.detailedCheckPostUrl(), {
       method: 'POST',
       headers: {
         Accept: 'application/json',
@@ -1096,6 +1096,25 @@ export class NavlungoHttpClient {
     }
 
     return `${this.env.NAVLUNGO_BASE_URL.replace(/\/$/, '')}${path}`;
+  }
+
+  detailedCheckPostUrl() {
+    if (!this.env.NAVLUNGO_BASE_URL) {
+      throw new Error('NAVLUNGO_BASE_URL is not configured.');
+    }
+
+    const trimmedBaseUrl = this.env.NAVLUNGO_BASE_URL.trim().replace(/\/$/, '');
+    try {
+      const url = new URL(trimmedBaseUrl);
+      if (url.pathname.replace(/\/$/, '') === '/v2') {
+        url.pathname = '/v2.1';
+        return `${url.toString().replace(/\/$/, '')}/post/check`;
+      }
+    } catch {
+      // Fall through to the configured URL so the existing error handling reports provider/network details.
+    }
+
+    return `${trimmedBaseUrl}/post/check`;
   }
 }
 
@@ -1492,6 +1511,15 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     }
 
     const client = new NavlungoHttpClient(this.env, this.options);
+    const detailedCheckPostUrl = client.detailedCheckPostUrl();
+    const detailedCheckPostPath = (() => {
+      try {
+        const url = new URL(detailedCheckPostUrl);
+        return url.pathname;
+      } catch {
+        return null;
+      }
+    })();
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
       flow: 'status_sync',
@@ -1499,6 +1527,11 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       navlungoStatusSyncAttempted: true,
       navlungoStatusSyncSucceeded: false,
       navlungoStatusSyncPostNumberPresent: true,
+      navlungoStatusSyncResolvedProviderUrl: detailedCheckPostUrl,
+      navlungoStatusSyncResolvedProviderPath: detailedCheckPostPath,
+      navlungoStatusSyncRequestPayloadKeys: ['post', 'limit'],
+      navlungoStatusSyncPostPayloadKeys: ['post_number'],
+      navlungoStatusSyncLimit: 1,
       shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
     };
 
@@ -1570,6 +1603,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       navlungoStatusSyncHttpStatus: checkResponse.status,
       navlungoStatusSyncContentType: checkResponse.contentType,
       navlungoStatusSyncResponseKeys: isRecord(checkResponse.body) ? Object.keys(checkResponse.body) : [],
+      navlungoStatusSyncResponseShape: summarizeResponseShape(checkResponse.body),
       navlungoStatusSyncDataKeys: Object.keys(checkData),
       navlungoStatusSyncProviderMessage: providerMessage,
       providerMessage,

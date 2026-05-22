@@ -329,6 +329,15 @@ export type ShipmentExecution = {
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     navlungoStatusSyncAttempted?: boolean | null;
     navlungoStatusSyncHttpStatus?: number | null;
+    navlungoStatusSyncResolvedProviderUrl?: string | null;
+    navlungoStatusSyncResolvedProviderPath?: string | null;
+    navlungoStatusSyncRequestPayloadKeys?: string[];
+    navlungoStatusSyncPostPayloadKeys?: string[];
+    navlungoStatusSyncLimit?: number | null;
+    navlungoStatusSyncResponseShape?: {
+      kind: string;
+      topLevelKeys: string[];
+    } | null;
     navlungoProviderStatusCode?: string | number | null;
     navlungoProviderStatusName?: string | null;
     navlungoNormalizedStatus?: string | null;

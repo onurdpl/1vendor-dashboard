@@ -294,7 +294,7 @@ describe('Navlungo dormant auth scaffold', () => {
     });
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe('https://domestic-api.navlungo.com/v2/post/check');
+    expect(calls[0].url).toBe('https://domestic-api.navlungo.com/v2.1/post/check');
     expect(calls[0].init.method).toBe('POST');
     expect(calls[0].init.headers).toMatchObject({
       Authorization: 'Bearer secret-access-token',
@@ -306,6 +306,29 @@ describe('Navlungo dormant auth scaffold', () => {
       },
       limit: 1,
     });
+  });
+
+  it('keeps detailed Check Post on configured v2.1 base URL', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      return new Response(JSON.stringify({ status: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+
+    const client = new NavlungoHttpClient(buildEnv({ NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2.1/' }), {
+      fetchImpl,
+    });
+    await client.checkPostDetailed('secret-access-token', {
+      post: {
+        post_number: 'NAV-1',
+      },
+      limit: 1,
+    });
+
+    expect(calls[0].url).toBe('https://domestic-api.navlungo.com/v2.1/post/check');
   });
 
   it('creates a forward shipment through Create Post and enriches with Check Post', async () => {

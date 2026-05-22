@@ -722,6 +722,19 @@ function mapProviderResponseSummary(
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     navlungoStatusSyncAttempted: readOptionalBoolean(snapshot, ['navlungoStatusSyncAttempted']),
     navlungoStatusSyncHttpStatus: readNumber(snapshot, ['navlungoStatusSyncHttpStatus']),
+    navlungoStatusSyncResolvedProviderUrl: readString(snapshot, ['navlungoStatusSyncResolvedProviderUrl']),
+    navlungoStatusSyncResolvedProviderPath: readString(snapshot, ['navlungoStatusSyncResolvedProviderPath']),
+    navlungoStatusSyncRequestPayloadKeys: readStringArray(snapshot.navlungoStatusSyncRequestPayloadKeys),
+    navlungoStatusSyncPostPayloadKeys: readStringArray(snapshot.navlungoStatusSyncPostPayloadKeys),
+    navlungoStatusSyncLimit: readNumber(snapshot, ['navlungoStatusSyncLimit']),
+    navlungoStatusSyncResponseShape: isRecord(snapshot.navlungoStatusSyncResponseShape)
+      ? {
+          kind: readString(snapshot.navlungoStatusSyncResponseShape, ['kind']) ?? 'unknown',
+          topLevelKeys: Array.isArray(snapshot.navlungoStatusSyncResponseShape.topLevelKeys)
+            ? snapshot.navlungoStatusSyncResponseShape.topLevelKeys.filter((key): key is string => typeof key === 'string')
+            : [],
+        }
+      : null,
     navlungoProviderStatusCode:
       readNumber(snapshot, ['navlungoProviderStatusCode']) ?? readString(snapshot, ['navlungoProviderStatusCode']),
     navlungoProviderStatusName: readString(snapshot, ['navlungoProviderStatusName']),
