@@ -400,6 +400,12 @@ function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
       return 'Complete the missing shipment fields to continue.';
     }
 
+    if (actionState.endpoint?.includes('/update-navlungo')) {
+      return actionState.shipment?.providerResponseSummary?.providerError ||
+        actionState.message ||
+        'Navlungo shipment can only be updated before pickup.';
+    }
+
     return isReturnShipmentActionEndpoint(actionState.endpoint)
       ? 'Return shipment action needs attention.'
       : 'Shipment action needs attention.';
@@ -1672,7 +1678,7 @@ export function OrderDetailPage() {
     Boolean(visibleShipmentExecution.providerShipmentId) &&
     !['cancelled', 'delivered'].includes(visibleShipmentStatus);
   const canUpdateNavlungoShipment =
-    (isAdmin || canUseFulfillmentActions) &&
+    isAdmin &&
     visibleShipmentExecution?.provider === 'navlungo' &&
     Boolean(visibleShipmentExecution.providerShipmentId) &&
     !['cancelled', 'delivered'].includes(visibleShipmentStatus);
@@ -1965,7 +1971,12 @@ export function OrderDetailPage() {
     })
       .then((shipment) => {
         const succeeded = shipment.providerResponseSummary?.navlungoUpdateSucceeded === true;
-        const message = succeeded ? 'Navlungo shipment updated.' : 'Navlungo update needs attention.';
+        const providerMessage = shipment.providerResponseSummary?.navlungoUpdateProviderMessage ||
+          shipment.providerResponseSummary?.providerError ||
+          null;
+        const message = succeeded
+          ? 'Navlungo shipment updated'
+          : providerMessage || 'Navlungo shipment can only be updated before pickup.';
         const tone = succeeded ? 'success' : 'error';
         setShipmentActionState({
           tone,
@@ -1979,7 +1990,9 @@ export function OrderDetailPage() {
       })
       .catch((mutationError) => {
         const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Navlungo shipment could not be updated.';
+        const errorMessage = mutationError instanceof Error
+          ? mutationError.message
+          : 'Navlungo shipment can only be updated before pickup.';
         setShipmentActionState({
           tone: 'error',
           message: errorMessage,
@@ -2361,27 +2374,35 @@ export function OrderDetailPage() {
         <form className="shipment-field-completion-form" onSubmit={handleUpdateNavlungoShipment}>
           <div>
             <span>Recipient update</span>
-            <p>Blank fields use the current stored order values where available.</p>
+            <p>Leave fields empty to keep current shipment values.</p>
           </div>
-          <div className="shipment-field-completion-grid">
-            {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as ShipmentCustomerField[]).map((field) => (
-              <label className="field" key={`navlungo-${field}`}>
-                <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]}{field === 'email' || field === 'postcode' ? '' : ' *'}</span>
-                <input name={`navlungo-${field}`} />
+          <div className="shipment-update-section">
+            <span className="shipment-update-section-label">Recipient info</span>
+            <div className="shipment-field-completion-grid">
+              {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as ShipmentCustomerField[]).map((field) => (
+                <label className="field" key={`navlungo-${field}`}>
+                  <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]}{field === 'email' || field === 'postcode' ? '' : ' *'}</span>
+                  <input name={`navlungo-${field}`} />
+                </label>
+              ))}
+              <label className="field">
+                <span>Country *</span>
+                <input name="navlungo-country" placeholder="tr" />
               </label>
-            ))}
-            <label className="field">
-              <span>Country *</span>
-              <input name="navlungo-country" placeholder="tr" />
-            </label>
-            <label className="field">
-              <span>Post note</span>
-              <input name="navlungo-post-note" />
-            </label>
-            <label className="field">
-              <span>Barcode format</span>
-              <input name="navlungo-barcode-format" placeholder="pdf-A6" />
-            </label>
+            </div>
+          </div>
+          <div className="shipment-update-section">
+            <span className="shipment-update-section-label">Shipment options</span>
+            <div className="shipment-field-completion-grid">
+              <label className="field">
+                <span>Post note</span>
+                <input name="navlungo-post-note" />
+              </label>
+              <label className="field">
+                <span>Barcode format</span>
+                <input name="navlungo-barcode-format" placeholder="pdf-A6" />
+              </label>
+            </div>
           </div>
           <label className="checkbox-field">
             <input
@@ -2390,8 +2411,9 @@ export function OrderDetailPage() {
               onChange={(event) => setNavlungoUpdateConfirmed(event.target.checked)}
               disabled={isUpdatingNavlungoShipment}
             />
-            <span>I understand this updates the existing Navlungo post and does not update Shopify fulfillment.</span>
+            <span>Update only the Navlungo shipment</span>
           </label>
+          <p className="muted helper-text">Shopify fulfillment/tracking will not change in this phase.</p>
           <div className="order-inline-actions">
             <button
               type="submit"

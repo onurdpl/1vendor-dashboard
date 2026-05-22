@@ -1034,8 +1034,60 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     confirmSpy.mockRestore();
   });
 
-  it('requires confirmation before updating a Navlungo shipment', async () => {
+  it('allows admins to confirm and update a Navlungo shipment', async () => {
     const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
+    expect(screen.getByText('Leave fields empty to keep current shipment values.')).toBeInTheDocument();
+    expect(screen.getByText('Recipient info')).toBeInTheDocument();
+    expect(screen.getByText('Shipment options')).toBeInTheDocument();
+    await user.type(screen.getAllByLabelText('District *')[0], 'Kartal');
+    const updateButton = screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0];
+    expect(updateButton).toBeDisabled();
+    await user.click(screen.getByLabelText(/Update only the Navlungo shipment/i));
+    await user.click(updateButton);
+
+    await waitFor(() =>
+      expect(updateNavlungoShipmentExecutionMock).toHaveBeenCalledWith(
+        'shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
+        {
+          recipient: {
+            district: 'Kartal',
+          },
+          postNote: '',
+          barcodeFormat: '',
+        },
+        {
+          vendorId: 'sporjinal',
+        },
+      ),
+    );
+    expect((await screen.findAllByText('Navlungo shipment updated')).length).toBeGreaterThan(0);
+  });
+
+  it('hides the Navlungo shipment update form from vendors while preserving cancellation', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Sporjinal Vendor',
@@ -1059,29 +1111,55 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
-    await user.type(screen.getAllByLabelText('District *')[0], 'Kartal');
-    const updateButton = screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0];
-    expect(updateButton).toBeDisabled();
-    await user.click(screen.getByLabelText(/I understand this updates the existing Navlungo post/i));
-    await user.click(updateButton);
+    expect(await screen.findByRole('button', { name: 'Cancel Navlungo shipment' })).toBeInTheDocument();
+    expect(screen.queryByText('Update Navlungo shipment')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
+  });
 
-    await waitFor(() =>
-      expect(updateNavlungoShipmentExecutionMock).toHaveBeenCalledWith(
-        'shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
-        {
-          recipient: {
-            district: 'Kartal',
-          },
-          postNote: '',
-          barcodeFormat: '',
-        },
-        {
-          vendorId: 'sporjinal',
-        },
-      ),
-    );
-    expect((await screen.findAllByText('Navlungo shipment updated.')).length).toBeGreaterThan(0);
+  it('uses provider message for failed Navlungo update feedback', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+      },
+    });
+    updateNavlungoShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      provider: 'navlungo',
+      providerShipmentId: 'NAV-1028',
+      shipmentStatus: 'created',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        navlungoUpdateAttempted: true,
+        navlungoUpdateSucceeded: false,
+        navlungoUpdateHttpStatus: 500,
+        navlungoUpdateProviderMessage: 'Navlungo shipment can only be updated before pickup.',
+        providerError: 'Navlungo shipment can only be updated before pickup.',
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
+    await user.click(screen.getByLabelText(/Update only the Navlungo shipment/i));
+    await user.click(screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0]);
+
+    expect((await screen.findAllByText('Navlungo shipment can only be updated before pickup.')).length).toBeGreaterThan(0);
   });
 
   it('renders Navlungo cancel validation diagnostics safely', async () => {
