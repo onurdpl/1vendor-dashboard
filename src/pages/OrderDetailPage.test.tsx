@@ -5114,6 +5114,80 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(successDiff).getByText('recipient district present').closest('.summary-row')).toHaveTextContent('same · success: yes · current: yes');
   });
 
+  it('renders current-only Navlungo request diagnostics when no last successful summary exists', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: null,
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          ok: false,
+          httpStatus: 500,
+          providerError: 'Execution of ServiceCallout failed',
+          realPathCreatePostHttpStatus: 500,
+          providerCallHttpStatus: 500,
+          navlungoRequestSummary: buildNavlungoRequestSummary({
+            senderKeys: ['addressId'],
+            senderUsesAddressId: true,
+            senderFullObjectKeysPresent: false,
+            recipientDistrictPresent: true,
+            recipientCityPresent: true,
+            recipientPhoneFormatValid: true,
+            recipientEmailPresent: true,
+            recipientAddressPresent: true,
+            recipientAddressLength: 42,
+            requestedDesi: 3,
+            requestedPackageCount: 1,
+            requestedCarrierId: 9,
+            requestedPostType: 2,
+            barcodeFormatType: 'string',
+          }),
+          lastSuccessfulNavlungoRequestSummary: null,
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByText('Order #1028');
+
+    const diff = screen.getByLabelText('Navlungo successful failing request diff');
+    expect(within(diff).getByText('Last successful request').closest('.summary-row')).toHaveTextContent('not available');
+    expect(within(diff).getByText('current sender mode').closest('.summary-row')).toHaveTextContent(
+      'addressId yes · sender keys addressId',
+    );
+    expect(within(diff).getByText('current recipient presence').closest('.summary-row')).toHaveTextContent(
+      'district yes · city yes · email yes · address yes',
+    );
+    expect(within(diff).getByText('current recipient format').closest('.summary-row')).toHaveTextContent(
+      'phone format yes · address length 42',
+    );
+    expect(within(diff).getByText('current package').closest('.summary-row')).toHaveTextContent('desi 3 · package_count 1');
+    expect(within(diff).getByText('current provider choices').closest('.summary-row')).toHaveTextContent(
+      'carrier 9 · post 2 · barcode string',
+    );
+    expect(screen.queryByText('+90 532 123 45 68')).not.toBeInTheDocument();
+    expect(screen.queryByText('recipient.test@example.invalid')).not.toBeInTheDocument();
+    expect(screen.queryByText('Navlungo Test Recipient')).not.toBeInTheDocument();
+    expect(screen.queryByText('Navlungo manual probe recipient address')).not.toBeInTheDocument();
+  });
+
   it('renders Navlungo provider tracking id in admin retry diagnostics', async () => {
     const providerMessage =
       'Execution of ServiceCallout failed. Please report for error resolution with Tracking ID: #35440d91ec90403483413b548ba91844';

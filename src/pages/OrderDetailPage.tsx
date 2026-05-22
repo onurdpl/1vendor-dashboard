@@ -338,6 +338,49 @@ function buildNavlungoRequestDiff(
   ];
 }
 
+function renderNavlungoRequestSummaryRows(summary: NavlungoRequestSummary, prefix: string) {
+  return (
+    <>
+      <div className="summary-row">
+        <span>{prefix} sender mode</span>
+        <strong>
+          addressId {formatDiagnosticPresence(summary.senderUsesAddressId)} · sender keys{' '}
+          {formatNavlungoRequestSummaryValue(summary.senderKeys)}
+        </strong>
+      </div>
+      <div className="summary-row">
+        <span>{prefix} recipient presence</span>
+        <strong>
+          district {formatDiagnosticPresence(summary.recipientDistrictPresent)} · city{' '}
+          {formatDiagnosticPresence(summary.recipientCityPresent)} · email{' '}
+          {formatDiagnosticPresence(summary.recipientEmailPresent)} · address{' '}
+          {formatDiagnosticPresence(summary.recipientAddressPresent)}
+        </strong>
+      </div>
+      <div className="summary-row">
+        <span>{prefix} recipient format</span>
+        <strong>
+          phone format {formatDiagnosticPresence(summary.recipientPhoneFormatValid)} · address length{' '}
+          {summary.recipientAddressLength}
+        </strong>
+      </div>
+      <div className="summary-row">
+        <span>{prefix} package</span>
+        <strong>
+          desi {summary.requestedDesi ?? '—'} · package_count {summary.requestedPackageCount ?? '—'}
+        </strong>
+      </div>
+      <div className="summary-row">
+        <span>{prefix} provider choices</span>
+        <strong>
+          carrier {summary.requestedCarrierId ?? '—'} · post {summary.requestedPostType ?? '—'} · barcode{' '}
+          {summary.barcodeFormatPresent ? summary.barcodeFormatType ?? 'present' : 'missing'}
+        </strong>
+      </div>
+    </>
+  );
+}
+
 function getVendorShipmentActionMessage(actionState: ShipmentActionState) {
   if (!isReturnShipmentActionEndpoint(actionState.endpoint) && isShipmentExecutionNeedsReview(actionState.shipment)) {
     return 'Shipment needs review. Provider did not return a shipment id or tracking yet.';
@@ -2434,11 +2477,11 @@ export function OrderDetailPage() {
             ))}
           </details>
         ) : null}
-        {successfulRequestDiffRows.length ? (
+        {summary.lastSuccessfulNavlungoRequestSummary || summary.navlungoRequestSummary ? (
           <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo successful failing request diff">
             <summary className="provider-response-heading">
               <strong>Last successful vs current request diff</strong>
-              <span>Sanitized shape comparison</span>
+              <span>Sanitized request summaries</span>
             </summary>
             <div className="summary-row">
               <span>Current provider result</span>
@@ -2451,6 +2494,22 @@ export function OrderDetailPage() {
               <span>Current provider message</span>
               <strong>{summary.providerError || '—'}</strong>
             </div>
+            {summary.lastSuccessfulNavlungoRequestSummary ? (
+              renderNavlungoRequestSummaryRows(summary.lastSuccessfulNavlungoRequestSummary, 'last success')
+            ) : (
+              <div className="summary-row">
+                <span>Last successful request</span>
+                <strong>not available</strong>
+              </div>
+            )}
+            {summary.navlungoRequestSummary ? (
+              renderNavlungoRequestSummaryRows(summary.navlungoRequestSummary, 'current')
+            ) : (
+              <div className="summary-row">
+                <span>Current request</span>
+                <strong>not available</strong>
+              </div>
+            )}
             {successfulRequestDiffRows.map((row) => (
               <div className="summary-row" key={row.label}>
                 <span>{row.label}</span>
