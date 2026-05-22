@@ -58,9 +58,11 @@ const {
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   previewShipmentExecution,
+  refreshShipmentExecutionStatus,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
+  syncNavlungoShipmentStatus,
   updateNavlungoShipmentExecution,
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
@@ -9734,5 +9736,212 @@ describe('shipping execution foundation', () => {
         adapter,
       }),
     ).rejects.toThrow('only available for Try OTO');
+  });
+
+  it('syncs detailed Navlungo status, enriches tracking, and records deduped timeline logs', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NAV-POST-1001',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        timelineEventFingerprints: ['navlungo_status_log|PickedUp|16|2026-05-15T11:00:00.000Z'],
+        timeline: [{ label: 'Picked up', at: '2026-05-15T11:00:00.000Z', status: 'OK' }],
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.getShipmentStatus.mockResolvedValue({
+      providerShipmentId: 'NAV-POST-1001',
+      trackingNumber: 'SURAT-TRACK-1001',
+      trackingUrl: 'https://tracking.navlungo.example/NAV-POST-1001',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'in_transit',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'navlungo',
+        navlungoStatusSyncAttempted: true,
+        navlungoStatusSyncHttpStatus: 200,
+        navlungoProviderStatusCode: 17,
+        navlungoProviderStatusName: 'In Transit',
+        navlungoNormalizedStatus: 'in_transit',
+        navlungoTrackingEnriched: true,
+        navlungoGeoStatus: 'verified',
+        navlungoGeoBadAddress: true,
+        navlungoCarrierTrackingPresent: true,
+        navlungoLogsCount: 2,
+        navlungoStatusLogs: [
+          { status_code: 16, action: 'PickedUp', action_result: 'OK', created_at: '2026-05-15T11:00:00.000Z' },
+          { status_code: 17, action: 'InTransit', action_result: 'OK', created_at: '2026-05-15T12:00:00.000Z' },
+        ],
+        shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+      },
+    });
+
+    const result = await syncNavlungoShipmentStatus('shipment-navlungo-alloc-1', {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.getShipmentStatus).toHaveBeenCalledWith('NAV-POST-1001');
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-navlungo-alloc-1' },
+        data: expect.objectContaining({
+          providerShipmentId: 'NAV-POST-1001',
+          trackingNumber: 'SURAT-TRACK-1001',
+          trackingUrl: 'https://tracking.navlungo.example/NAV-POST-1001',
+          labelUrl: 'barcode-string',
+          shipmentStatus: 'IN_TRANSIT',
+          responseSnapshot: expect.objectContaining({
+            navlungoStatusSyncAttempted: true,
+            navlungoStatusSyncHttpStatus: 200,
+            navlungoProviderStatusCode: 17,
+            navlungoNormalizedStatus: 'in_transit',
+            navlungoGeoBadAddress: true,
+            shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+            timeline: expect.arrayContaining([
+              expect.objectContaining({ label: 'Picked up' }),
+              expect.objectContaining({ label: 'In transit', at: '2026-05-15T12:00:00.000Z' }),
+              expect.objectContaining({ label: 'Navlungo status synced', status: 'in_transit' }),
+            ]),
+          }),
+        }),
+      }),
+    );
+    const updatePayload = prismaMock.shipmentExecution.update.mock.calls.at(-1)?.[0].data.responseSnapshot as {
+      timeline?: Array<{ label: string }>;
+    };
+    expect(updatePayload.timeline?.filter((event) => event.label === 'Picked up')).toHaveLength(1);
+    expect(result).toMatchObject({
+      trackingNumber: 'SURAT-TRACK-1001',
+      trackingUrl: 'https://tracking.navlungo.example/NAV-POST-1001',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'in_transit',
+    });
+  });
+
+  it('keeps unknown Navlungo detailed statuses diagnostic-only', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NAV-POST-1001',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+      },
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.getShipmentStatus.mockResolvedValue({
+      providerShipmentId: 'NAV-POST-1001',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'pending',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'navlungo',
+        navlungoStatusSyncAttempted: true,
+        navlungoStatusSyncHttpStatus: 200,
+        navlungoProviderStatusCode: 999,
+        navlungoProviderStatusName: 'Mystery',
+        navlungoNormalizedStatus: null,
+        navlungoLogsCount: 0,
+      },
+    });
+
+    await syncNavlungoShipmentStatus('shipment-navlungo-alloc-1', {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          shipmentStatus: 'CREATED',
+          responseSnapshot: expect.objectContaining({
+            navlungoProviderStatusCode: 999,
+            navlungoProviderStatusName: 'Mystery',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('blocks Navlungo detailed status sync when provider shipment id is missing', async () => {
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(
+      buildShipmentExecution({
+        id: 'shipment-navlungo-alloc-1',
+        provider: 'NAVLUNGO',
+        providerShipmentId: null,
+      }),
+    );
+
+    await expect(
+      syncNavlungoShipmentStatus('shipment-navlungo-alloc-1', {
+        env,
+        vendorId: 'sporjinal',
+      }),
+    ).rejects.toThrow('stored provider post number');
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
+  it('routes the generic manual status refresh to Navlungo without changing Try OTO refresh behavior', async () => {
+    prismaMock.shipmentExecution.findUnique
+      .mockResolvedValueOnce(
+        buildShipmentExecution({
+          id: 'shipment-navlungo-alloc-1',
+          provider: 'NAVLUNGO',
+        }),
+      )
+      .mockResolvedValueOnce(
+        buildShipmentExecution({
+          id: 'shipment-navlungo-alloc-1',
+          provider: 'NAVLUNGO',
+          providerShipmentId: 'NAV-POST-1001',
+          shipmentStatus: 'CREATED',
+        }),
+      );
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.getShipmentStatus.mockResolvedValue({
+      providerShipmentId: 'NAV-POST-1001',
+      trackingNumber: 'NAV-POST-1001',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'navlungo',
+        navlungoStatusSyncAttempted: true,
+        navlungoStatusSyncHttpStatus: 200,
+      },
+    });
+
+    await refreshShipmentExecutionStatus('shipment-navlungo-alloc-1', {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.getShipmentStatus).toHaveBeenCalledWith('NAV-POST-1001');
   });
 });

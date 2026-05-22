@@ -732,6 +732,30 @@ The output must never include:
 - refresh token
 - customer/order data
 
+## 16.6. Detailed Status Sync Status
+
+Implemented for forward Navlungo shipments as a manual action only:
+
+- Endpoint used:
+  - `POST /post/check`
+- Payload:
+  - `post.post_number` from the stored Navlungo `providerShipmentId`
+  - `limit = 1`
+- The sync parses and stores safe shipment lifecycle fields:
+  - provider status code/name
+  - normalized operational status
+  - tracking URL/code enrichment
+  - barcode string when returned
+  - carrier status/geo status/bad-address flag
+  - safe log entries from `logs[]`
+  - carrier barcode numbers from `carrierBarcodes[]`
+- Timeline events are created from provider `logs[]` and deduped by provider action plus timestamp.
+- Unknown provider status codes are preserved in diagnostics and are not over-mapped.
+- Shopify delivery-state sync is intentionally not implemented in this phase:
+  - `shopifyDeliveryStatusSyncSkippedReason = not_implemented`
+
+No cron, webhook, or automatic background status sync has been added.
+
 ## 17. Critical Unknowns Before Implementation
 
 - Final production base URL.
@@ -743,7 +767,7 @@ The output must never include:
 - Carrier endpoint response shape.
 - Whether Create Post and Check Post response shape is stable across all carriers.
 - Barcode endpoint contract.
-- Full Check Post status lifecycle.
+- Full production status lifecycle beyond the currently mapped Check Post Detailed status codes.
 - Return Post contract.
 - Webhook support.
 - Multi-vendor / marketplace model.

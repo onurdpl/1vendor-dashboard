@@ -210,6 +210,13 @@ export type NavlungoUpdatePostPayload = {
   custom_data_4: string;
 };
 
+export type NavlungoDetailedCheckPostPayload = {
+  post: {
+    post_number: string;
+  };
+  limit: number;
+};
+
 export type NavlungoCreatePostRequestSummary = {
   baseUrl: string | null;
   baseUrlHost: string | null;
@@ -539,6 +546,100 @@ function mapNavlungoShipmentStatus(value: unknown) {
     return 'in_transit' as const;
   }
   return 'created' as const;
+}
+
+function readNavlungoStatusCode(status: unknown) {
+  if (!isRecord(status)) {
+    return null;
+  }
+  const value = readNumberOrString(status, ['status_code', 'statusCode', 'code']);
+  if (typeof value === 'number') {
+    return value;
+  }
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function mapNavlungoDetailedStatusCode(value: number | null) {
+  switch (value) {
+    case 1:
+      return 'ready_for_pickup';
+    case 2:
+      return 'delivered';
+    case 3:
+      return 'to_be_delivered';
+    case 4:
+      return 'out_for_delivery';
+    case 5:
+      return 'redispatch';
+    case 6:
+      return 'delivery_planned';
+    case 7:
+      return 'return_pending';
+    case 9:
+      return 'returned';
+    case 10:
+      return 'cancelled';
+    case 14:
+      return 'preview';
+    case 16:
+      return 'picked_up';
+    case 17:
+      return 'in_transit';
+    case 18:
+      return 'waiting_at_branch';
+    case 21:
+      return 'returned_to_warehouse';
+    default:
+      return null;
+  }
+}
+
+function mapNavlungoDetailedStatusToInternalStatus(value: number | null) {
+  switch (value) {
+    case 2:
+      return 'delivered' as const;
+    case 10:
+      return 'cancelled' as const;
+    case 9:
+    case 21:
+      return 'returned' as const;
+    case 3:
+    case 4:
+    case 5:
+    case 6:
+    case 7:
+    case 16:
+    case 17:
+    case 18:
+      return 'in_transit' as const;
+    case 1:
+    case 14:
+      return 'created' as const;
+    default:
+      return null;
+  }
+}
+
+function readNavlungoDetailedLogs(value: unknown) {
+  const logs = Array.isArray(value) ? value.filter(isRecord) : [];
+  return logs.slice(0, 50).map((log) => ({
+    status_code: readNumberOrString(log, ['status_code', 'statusCode']),
+    action: readString(log, ['action']),
+    action_result: readString(log, ['action_result', 'actionResult']),
+    created_at: readString(log, ['created_at', 'createdAt']),
+  }));
+}
+
+function readNavlungoCarrierBarcodes(value: unknown) {
+  const barcodes = Array.isArray(value) ? value.filter(isRecord) : [];
+  return barcodes
+    .map((barcode) => readString(barcode, ['barcode_number', 'barcodeNumber']))
+    .filter((barcode): barcode is string => Boolean(barcode))
+    .slice(0, 20);
 }
 
 function parsePositiveInteger(value: unknown, fallback: number) {
@@ -880,6 +981,42 @@ export class NavlungoHttpClient {
         'Content-Type': 'application/json',
         'X-localization': 'en',
       },
+    });
+    const contentType = response.headers.get('content-type') ?? '';
+    const responseText = await response.text();
+
+    return {
+      ok: response.ok,
+      status: response.status,
+      contentType,
+      body: parseNavlungoResponseBody(contentType, responseText),
+    };
+  }
+
+  async checkPostDetailed(accessToken: string, payload: NavlungoDetailedCheckPostPayload): Promise<NavlungoHttpResponse> {
+    const token = accessToken.trim();
+    const identifier = payload.post.post_number.trim();
+    if (!token) {
+      throw new Error('Navlungo access token is required for detailed Check Post.');
+    }
+    if (!identifier) {
+      throw new Error('Navlungo post number is required for detailed Check Post.');
+    }
+
+    const response = await this.fetchImpl(this.requestUrl('/post/check'), {
+      method: 'POST',
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'X-localization': 'tr',
+      },
+      body: JSON.stringify({
+        post: {
+          post_number: identifier,
+        },
+        limit: payload.limit,
+      }),
     });
     const contentType = response.headers.get('content-type') ?? '';
     const responseText = await response.text();
@@ -1343,8 +1480,157 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     };
   }
 
-  async getShipmentStatus(): Promise<ShippingProviderCreateResult> {
-    throw new Error('Navlungo status polling is not implemented yet.');
+  async getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult> {
+    const postNumber = providerShipmentId.trim();
+    if (!postNumber) {
+      throw new ProviderExecutionError('Navlungo detailed status sync requires a stored post number.', {
+        provider: NAVLUNGO_PROVIDER_KEY,
+        flow: 'status_sync',
+        navlungoStatusSyncAttempted: false,
+        providerError: 'Missing Navlungo post number.',
+      });
+    }
+
+    const client = new NavlungoHttpClient(this.env, this.options);
+    const responseSnapshot: Record<string, unknown> = {
+      provider: NAVLUNGO_PROVIDER_KEY,
+      flow: 'status_sync',
+      authCalled: false,
+      navlungoStatusSyncAttempted: true,
+      navlungoStatusSyncSucceeded: false,
+      navlungoStatusSyncPostNumberPresent: true,
+      shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+    };
+
+    let accessToken: string | null = null;
+    try {
+      responseSnapshot.authCalled = true;
+      const authResponse = await client.createAuthToken();
+      responseSnapshot.authHttpStatus = authResponse.status;
+      responseSnapshot.authContentType = authResponse.contentType;
+      accessToken = getNavlungoAccessTokenFromAuthBody(authResponse.body);
+      responseSnapshot.authTokenReceived = Boolean(accessToken);
+      if (!authResponse.ok || !accessToken) {
+        throw new ProviderExecutionError('Navlungo authentication failed before detailed Check Post.', {
+          ...responseSnapshot,
+          providerError: readStringFromRecord(authResponse.body, ['message', 'error']) ?? 'Navlungo auth response did not include an access token.',
+        });
+      }
+    } catch (error) {
+      if (error instanceof ProviderExecutionError) {
+        throw error;
+      }
+      throw new ProviderExecutionError('Navlungo authentication failed before detailed Check Post.', {
+        ...responseSnapshot,
+        providerError: error instanceof Error ? error.message : 'Unknown Navlungo auth error.',
+      });
+    }
+
+    let checkResponse: NavlungoHttpResponse;
+    try {
+      checkResponse = await client.checkPostDetailed(accessToken, {
+        post: {
+          post_number: postNumber,
+        },
+        limit: 1,
+      });
+    } catch (error) {
+      throw new ProviderExecutionError('Navlungo detailed Check Post request failed before provider response.', {
+        ...responseSnapshot,
+        lastProviderStage: 'detailed_check_post',
+        providerError: error instanceof Error ? error.message : 'Unknown Navlungo detailed Check Post error.',
+      });
+    }
+
+    const checkData = getNavlungoResponseData(checkResponse.body);
+    const postRecord = getNavlungoPostRecord(checkData);
+    const statusRecord = isRecord(checkData.status) ? checkData.status : {};
+    const statusCode = readNavlungoStatusCode(statusRecord);
+    const normalizedStatus = mapNavlungoDetailedStatusCode(statusCode);
+    const internalStatus = mapNavlungoDetailedStatusToInternalStatus(statusCode) ?? 'pending';
+    const providerMessage = readStringFromRecord(checkResponse.body, ['message', 'error']);
+    const providerTrackingId = extractNavlungoProviderTrackingId(providerMessage);
+    const validationDiagnostics = getNavlungoValidationDiagnostics(checkResponse.body);
+    const trackingNumber =
+      readNavlungoTrackingNumber(checkData) ??
+      readString(checkData, ['carrier_post_number', 'carrierPostNumber']) ??
+      postNumber;
+    const trackingUrl = readNavlungoTrackingUrl(checkData);
+    const barcode = readNavlungoBarcode(checkData);
+    const logs = readNavlungoDetailedLogs(checkData.logs);
+    const carrierBarcodes = readNavlungoCarrierBarcodes(checkData.carrierBarcodes);
+    const carrierName =
+      readString(postRecord, ['carrier_name', 'carrierName']) ??
+      NAVLUNGO_PROVIDER_DISPLAY_NAME;
+    const carrierId = readNumberOrString(postRecord, ['carrier_id', 'carrierId']);
+    const geoBadAddress = readNumberOrString(postRecord, ['geo_bad_address', 'geoBadAddress']);
+
+    Object.assign(responseSnapshot, {
+      ok: checkResponse.ok,
+      navlungoStatusSyncHttpStatus: checkResponse.status,
+      navlungoStatusSyncContentType: checkResponse.contentType,
+      navlungoStatusSyncResponseKeys: isRecord(checkResponse.body) ? Object.keys(checkResponse.body) : [],
+      navlungoStatusSyncDataKeys: Object.keys(checkData),
+      navlungoStatusSyncProviderMessage: providerMessage,
+      providerMessage,
+      providerTrackingId,
+      navlungoStatusSyncProviderTrackingId: providerTrackingId,
+      navlungoStatusSyncValidationFields: validationDiagnostics.failedFieldNames,
+      navlungoStatusSyncValidationMessages: validationDiagnostics.validationErrorMessages,
+      validationErrorKeys: validationDiagnostics.validationErrorKeys,
+      validationErrorMessages: validationDiagnostics.validationErrorMessages,
+      failedFieldNames: validationDiagnostics.failedFieldNames,
+      providerValidationErrors: validationDiagnostics.validationErrorMessages,
+      navlungoProviderStatusCode: statusCode,
+      navlungoProviderStatusName: readString(statusRecord, ['status_name', 'statusName', 'name']),
+      navlungoNormalizedStatus: normalizedStatus,
+      navlungoTrackingEnriched: Boolean(readNavlungoTrackingNumber(checkData) || readNavlungoTrackingUrl(checkData) || barcode),
+      navlungoGeoStatus: readString(postRecord, ['geo_status', 'geoStatus']),
+      navlungoGeoBadAddress: geoBadAddress === 1 || geoBadAddress === '1',
+      navlungoCarrierTrackingPresent: Boolean(readNavlungoTrackingNumber(checkData)),
+      navlungoLogsCount: logs.length,
+      navlungoStatusLogs: logs,
+      navlungoCarrierBarcodes: carrierBarcodes,
+      barcodeStatus: readString(checkData, ['barcode_status', 'barcodeStatus']),
+      carrierName,
+      carrierId,
+      carrierStatus: readString(postRecord, ['carrier_status', 'carrierStatus']),
+      postType: readNumberOrString(postRecord, ['post_type', 'postType']),
+      postTypeName: readString(postRecord, ['post_type_name', 'postTypeName']),
+      statusField:
+        readString(statusRecord, ['status_name', 'statusName', 'name']) ??
+        (statusCode === null ? null : String(statusCode)),
+      providerShipmentId: readNavlungoPostNumber(checkData) ?? postNumber,
+      providerShipmentIdPresent: true,
+      trackingNumberPresent: Boolean(trackingNumber),
+      trackingUrlPresent: Boolean(trackingUrl),
+      labelUrlPresent: Boolean(barcode),
+      barcodePresent: Boolean(barcode),
+      lastProviderStage: 'detailed_check_post',
+    });
+
+    if (!checkResponse.ok) {
+      throw new ProviderExecutionError(`Navlungo detailed Check Post failed with HTTP ${checkResponse.status}.`, {
+        ...responseSnapshot,
+        providerError: providerMessage ?? `Navlungo detailed Check Post failed with HTTP ${checkResponse.status}.`,
+      });
+    }
+
+    return {
+      providerShipmentId: readNavlungoPostNumber(checkData) ?? postNumber,
+      trackingNumber,
+      trackingUrl,
+      labelUrl: barcode,
+      shipmentStatus: internalStatus,
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ...responseSnapshot,
+        navlungoStatusSyncSucceeded: true,
+        lastProviderResponseAt: new Date().toISOString(),
+      },
+    };
   }
 
   async getTrackingInfo(): Promise<ShippingProviderCreateResult> {

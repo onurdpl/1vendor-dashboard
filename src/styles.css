@@ -4850,6 +4850,12 @@ h3 {
   background: #fff7ed;
 }
 
+.warning-copy {
+  color: var(--op-warning);
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
 .order-alert-support {
   border-left-color: #2563eb;
   background: #eff6ff;

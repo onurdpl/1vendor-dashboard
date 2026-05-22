@@ -1683,6 +1683,10 @@ export function OrderDetailPage() {
     visibleShipmentExecution?.provider === 'try_oto' &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.shipmentStatus === 'created') &&
     (!getShipmentTrackingNumber(order ?? {}, visibleShipmentExecution) || !visibleShipmentExecution.labelUrl);
+  const canSyncNavlungoShipmentStatus =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    Boolean(visibleShipmentExecution.providerShipmentId);
   const canCancelNavlungoShipment =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'navlungo' &&
@@ -1866,17 +1870,22 @@ export function OrderDetailPage() {
     void refreshShipmentStatusMutation(visibleShipmentExecution.id)
       .then((shipment) => {
         const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.labelUrl);
+        const isNavlungoStatusSync = shipment.provider === 'navlungo';
         setShipmentActionState({
           tone: hasNewShipmentEvidence ? 'success' : 'info',
           message: hasNewShipmentEvidence
-            ? 'Shipment status refreshed.'
+            ? isNavlungoStatusSync
+              ? 'Navlungo status synced.'
+              : 'Shipment status refreshed.'
             : 'Shipment was created. Tracking or label may still be processing.',
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh`,
         });
         showFeedback(
           hasNewShipmentEvidence
-            ? 'Shipment status refreshed.'
+            ? isNavlungoStatusSync
+              ? 'Navlungo status synced.'
+              : 'Shipment status refreshed.'
             : 'Shipment was created. Tracking or label may still be processing.',
           hasNewShipmentEvidence ? 'success' : 'info',
         );
@@ -1884,7 +1893,7 @@ export function OrderDetailPage() {
       })
       .catch((mutationError) => {
         const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO shipment status could not be refreshed.';
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Shipment status could not be refreshed.';
         setShipmentActionState({
           tone: 'error',
           message: errorMessage,
@@ -2741,6 +2750,61 @@ export function OrderDetailPage() {
         <div className="summary-row">
           <span>Updated at</span>
           <strong>{formatOptionalDate(summary.navlungoUpdatedAt ?? undefined)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Detailed status sync</span>
+          <strong>
+            attempted {formatDiagnosticPresence(summary.navlungoStatusSyncAttempted)} · HTTP {summary.navlungoStatusSyncHttpStatus ?? '—'} · status{' '}
+            {summary.navlungoNormalizedStatus || '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Provider status</span>
+          <strong>
+            {summary.navlungoProviderStatusCode ?? '—'}
+            {summary.navlungoProviderStatusName ? ` · ${summary.navlungoProviderStatusName}` : ''}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Tracking enrichment</span>
+          <strong>
+            enriched {formatDiagnosticPresence(summary.navlungoTrackingEnriched)} · carrier tracking{' '}
+            {formatDiagnosticPresence(summary.navlungoCarrierTrackingPresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Address intelligence</span>
+          <strong>
+            geo {summary.navlungoGeoStatus || '—'} · bad address {formatDiagnosticPresence(summary.navlungoGeoBadAddress)}
+          </strong>
+        </div>
+        {summary.navlungoGeoBadAddress ? (
+          <div className="summary-row">
+            <span>Address warning</span>
+            <strong>Carrier reported address validation issue.</strong>
+          </div>
+        ) : null}
+        <div className="summary-row">
+          <span>Status logs</span>
+          <strong>{summary.navlungoLogsCount ?? '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Status sync tracking ID</span>
+          <strong>{summary.navlungoStatusSyncProviderTrackingId || summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Status sync validation fields</span>
+          <strong>{summary.navlungoStatusSyncValidationFields?.length ? summary.navlungoStatusSyncValidationFields.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Status sync validation messages</span>
+          <strong>
+            {summary.navlungoStatusSyncValidationMessages?.length ? summary.navlungoStatusSyncValidationMessages.join(' · ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Shopify delivery sync</span>
+          <strong>{summary.shopifyDeliveryStatusSyncSkippedReason || '—'}</strong>
         </div>
         <div className="summary-row">
           <span>Real path request</span>
@@ -3612,6 +3676,21 @@ export function OrderDetailPage() {
       status: 'Cancelled',
       tone: 'warning',
     });
+  }
+  if (visibleShipmentExecution?.provider === 'navlungo' && visibleShipmentExecution.timeline?.length) {
+    const providerLogTitles = new Set(['Picked up', 'In transit', 'Out for delivery', 'Delivered', 'Returned', 'Cancelled', 'Waiting at branch']);
+    visibleShipmentExecution.timeline
+      .filter((event) => providerLogTitles.has(event.label))
+      .forEach((event) => {
+        orderTimelineEvents.push({
+          id: `navlungo-status-${visibleShipmentExecution.id}-${event.label}-${event.at}`,
+          title: event.label,
+          description: event.status ? `Provider log: ${event.status}` : 'Provider lifecycle status updated.',
+          at: event.at,
+          status: event.label,
+          tone: event.label === 'Delivered' ? 'success' : event.label === 'Cancelled' || event.label === 'Returned' ? 'warning' : 'info',
+        });
+      });
   }
   if (order.shippingStatus === 'Delivered' || visibleShipmentExecution?.shipmentStatus === 'delivered') {
     orderTimelineEvents.push({
@@ -5175,6 +5254,25 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
+                        {canSyncNavlungoShipmentStatus ? (
+                          <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
+                            <strong>Navlungo status sync</strong>
+                            <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                            {shipmentProviderSummary?.navlungoGeoBadAddress ? (
+                              <span className="warning-copy">Carrier reported address validation issue.</span>
+                            ) : null}
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isRefreshingShipmentStatus}
+                                onClick={handleRefreshShipmentStatus}
+                              >
+                                {isRefreshingShipmentStatus ? 'Syncing...' : 'Sync Navlungo status'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {canRefreshTryOtoShipmentStatus ? (
                           <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                             <strong>Try OTO status refresh</strong>
@@ -6145,6 +6243,25 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     <ShopifyReturnSignalDiagnostics order={order} isAdmin={isAdmin} />
+                    {canSyncNavlungoShipmentStatus ? (
+                      <div className="shipment-recovery-actions" aria-label="Navlungo shipment status sync">
+                        <strong>Navlungo status sync</strong>
+                        <span>Pull detailed provider lifecycle status from Navlungo. Shopify delivery-state sync is not implemented in this phase.</span>
+                        {shipmentProviderSummary?.navlungoGeoBadAddress ? (
+                          <span className="warning-copy">Carrier reported address validation issue.</span>
+                        ) : null}
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isRefreshingShipmentStatus}
+                            onClick={handleRefreshShipmentStatus}
+                          >
+                            {isRefreshingShipmentStatus ? 'Syncing...' : 'Sync Navlungo status'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
                     {canRefreshTryOtoShipmentStatus ? (
                       <div className="shipment-recovery-actions" aria-label="Try OTO shipment status refresh">
                         <strong>Try OTO status refresh</strong>

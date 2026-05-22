@@ -1265,6 +1265,57 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('not_implemented')).toBeInTheDocument();
   });
 
+  it('shows Navlungo detailed status sync diagnostics safely', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'SURAT-1028',
+        shipmentStatus: 'in_transit',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoStatusSyncAttempted: true,
+          navlungoStatusSyncHttpStatus: 200,
+          navlungoProviderStatusCode: 17,
+          navlungoProviderStatusName: 'In Transit',
+          navlungoNormalizedStatus: 'in_transit',
+          navlungoTrackingEnriched: true,
+          navlungoGeoStatus: 'verified',
+          navlungoGeoBadAddress: true,
+          navlungoCarrierTrackingPresent: true,
+          navlungoLogsCount: 2,
+          navlungoStatusSyncProviderTrackingId: '#status-sync',
+          navlungoStatusSyncValidationFields: ['post.post_number'],
+          navlungoStatusSyncValidationMessages: ['post.post_number validation failed'],
+          shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Detailed status sync')).toBeInTheDocument();
+    expect(screen.getByText(/attempted yes · HTTP 200 · status in_transit/)).toBeInTheDocument();
+    expect(screen.getByText('17 · In Transit')).toBeInTheDocument();
+    expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
+    expect(screen.getByText('#status-sync')).toBeInTheDocument();
+    expect(screen.getByText('post.post_number')).toBeInTheDocument();
+    expect(screen.getByText('post.post_number validation failed')).toBeInTheDocument();
+    expect(screen.getAllByText('not_implemented').length).toBeGreaterThan(0);
+  });
+
   it('adds successful Navlungo update events to the Order Detail timeline without leaking PII', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
@@ -3406,6 +3457,85 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
     expect((await screen.findAllByText('Shipment status refreshed.')).length).toBeGreaterThan(0);
     expect(screen.queryByText(/Provider id: yes · Barcode:\s*yes · Tracking:\s*yes · Label:\s*yes/)).not.toBeInTheDocument();
+  });
+
+  it('renders Navlungo manual detailed status sync diagnostics and timeline events', async () => {
+    const user = userEvent.setup();
+    refreshShipmentExecutionStatusMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      provider: 'navlungo',
+      providerShipmentId: 'NAV-1054',
+      trackingNumber: 'SURAT-1054',
+      trackingUrl: 'https://tracking.navlungo.example/NAV-1054',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'in_transit',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        navlungoStatusSyncAttempted: true,
+        navlungoStatusSyncHttpStatus: 200,
+        navlungoProviderStatusCode: 17,
+        navlungoProviderStatusName: 'In Transit',
+        navlungoNormalizedStatus: 'in_transit',
+        navlungoGeoBadAddress: true,
+        navlungoCarrierTrackingPresent: true,
+        navlungoLogsCount: 1,
+        shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+      },
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1054',
+        shipmentStatus: 'created',
+        trackingNumber: 'SURAT-1054',
+        trackingUrl: 'https://tracking.navlungo.example/NAV-1054',
+        labelUrl: 'barcode-string',
+        timeline: [
+          { label: 'In transit', at: '2026-05-22T10:00:00.000Z', status: 'OK' },
+        ],
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          httpStatus: 200,
+          navlungoStatusSyncAttempted: true,
+          navlungoStatusSyncHttpStatus: 200,
+          navlungoProviderStatusCode: 17,
+          navlungoProviderStatusName: 'In Transit',
+          navlungoNormalizedStatus: 'in_transit',
+          navlungoGeoBadAddress: true,
+          navlungoCarrierTrackingPresent: true,
+          navlungoLogsCount: 1,
+          shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+        },
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('button', { name: 'Sync Navlungo status' })).toBeInTheDocument();
+    expect(screen.getAllByText('Carrier reported address validation issue.').length).toBeGreaterThan(0);
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getAllByText('In transit').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Sync Navlungo status' }));
+
+    expect(refreshShipmentExecutionStatusMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledTimes(2));
+    expect((await screen.findAllByText('Navlungo status synced.')).length).toBeGreaterThan(0);
   });
 
   it('automatically refreshes Try OTO created shipments while tracking or label is missing', async () => {

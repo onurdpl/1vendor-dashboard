@@ -18,7 +18,7 @@ import {
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   previewShipmentExecution,
-  refreshTryOtoShipmentStatus,
+  refreshShipmentExecutionStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
   updateNavlungoShipmentExecution,
@@ -198,7 +198,7 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       try {
-        return await refreshTryOtoShipmentStatus(request.params.id, {
+        return await refreshShipmentExecutionStatus(request.params.id, {
           env,
           vendorId,
         });

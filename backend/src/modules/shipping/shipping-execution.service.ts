@@ -720,6 +720,21 @@ function mapProviderResponseSummary(
     navlungoUpdateMissingSenderFields: readStringArray(snapshot.navlungoUpdateMissingSenderFields),
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
+    navlungoStatusSyncAttempted: readOptionalBoolean(snapshot, ['navlungoStatusSyncAttempted']),
+    navlungoStatusSyncHttpStatus: readNumber(snapshot, ['navlungoStatusSyncHttpStatus']),
+    navlungoProviderStatusCode:
+      readNumber(snapshot, ['navlungoProviderStatusCode']) ?? readString(snapshot, ['navlungoProviderStatusCode']),
+    navlungoProviderStatusName: readString(snapshot, ['navlungoProviderStatusName']),
+    navlungoNormalizedStatus: readString(snapshot, ['navlungoNormalizedStatus']),
+    navlungoTrackingEnriched: readOptionalBoolean(snapshot, ['navlungoTrackingEnriched']),
+    navlungoGeoStatus: readString(snapshot, ['navlungoGeoStatus']),
+    navlungoGeoBadAddress: readOptionalBoolean(snapshot, ['navlungoGeoBadAddress']),
+    navlungoCarrierTrackingPresent: readOptionalBoolean(snapshot, ['navlungoCarrierTrackingPresent']),
+    navlungoLogsCount: readNumber(snapshot, ['navlungoLogsCount']),
+    navlungoStatusSyncProviderTrackingId: readString(snapshot, ['navlungoStatusSyncProviderTrackingId']),
+    navlungoStatusSyncValidationFields: readStringArray(snapshot.navlungoStatusSyncValidationFields),
+    navlungoStatusSyncValidationMessages: readValidationStringArray(snapshot.navlungoStatusSyncValidationMessages),
+    shopifyDeliveryStatusSyncSkippedReason: readString(snapshot, ['shopifyDeliveryStatusSyncSkippedReason']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -991,6 +1006,83 @@ function appendTimelineEventOnce(snapshot: unknown, event: { label: string; stat
     ...appendTimelineEvent(base, event),
     timelineEventFingerprints: [...fingerprints, fingerprint],
   };
+}
+
+function readNavlungoStatusLogEvents(snapshot: Record<string, unknown>) {
+  const logs = Array.isArray(snapshot.navlungoStatusLogs) ? snapshot.navlungoStatusLogs.filter(isRecord) : [];
+  return logs
+    .map((log) => ({
+      statusCode:
+        readNumber(log, ['status_code', 'statusCode']) ??
+        readString(log, ['status_code', 'statusCode']),
+      action: readString(log, ['action']),
+      actionResult: readString(log, ['action_result', 'actionResult']),
+      createdAt: readString(log, ['created_at', 'createdAt']),
+    }))
+    .filter((event) => event.action || event.statusCode !== null || event.createdAt);
+}
+
+function mapNavlungoTimelineStatusLabel(statusCode: string | number | null, action: string | null) {
+  const numeric = typeof statusCode === 'number' ? statusCode : Number(statusCode);
+  switch (numeric) {
+    case 2:
+      return 'Delivered';
+    case 4:
+      return 'Out for delivery';
+    case 9:
+    case 21:
+      return 'Returned';
+    case 10:
+      return 'Cancelled';
+    case 16:
+      return 'Picked up';
+    case 17:
+      return 'In transit';
+    case 18:
+      return 'Waiting at branch';
+    default:
+      break;
+  }
+
+  const normalizedAction = action?.trim().toLowerCase() ?? '';
+  if (/deliver|teslim/.test(normalizedAction)) return 'Delivered';
+  if (/cancel|iptal/.test(normalizedAction)) return 'Cancelled';
+  if (/return|iade/.test(normalizedAction)) return 'Returned';
+  if (/pickup|picked|teslim al/.test(normalizedAction)) return 'Picked up';
+  if (/branch|şube|sube/.test(normalizedAction)) return 'Waiting at branch';
+  if (/transit|yolda|transfer/.test(normalizedAction)) return 'In transit';
+  return action?.trim() || 'Shipment status updated';
+}
+
+function appendNavlungoStatusLogTimelineEvents(snapshot: Record<string, unknown>) {
+  return readNavlungoStatusLogEvents(snapshot).reduce((current, event) => {
+    const label = mapNavlungoTimelineStatusLabel(event.statusCode, event.action);
+    const fingerprint = [
+      'navlungo_status_log',
+      event.action ?? '',
+      event.statusCode ?? '',
+      event.createdAt ?? '',
+    ].join('|');
+    const fingerprints = Array.isArray(current.timelineEventFingerprints)
+      ? current.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
+      : [];
+    if (fingerprints.includes(fingerprint)) {
+      return current;
+    }
+
+    return {
+      ...current,
+      timeline: [
+        ...readTimeline(current),
+        {
+          label,
+          at: event.createdAt ?? new Date().toISOString(),
+          status: event.actionResult ?? (event.statusCode === null ? null : String(event.statusCode)),
+        },
+      ],
+      timelineEventFingerprints: [...fingerprints, fingerprint],
+    };
+  }, snapshot as Record<string, unknown>);
 }
 
 function isDummyKargoRequested(input: CreateShipmentExecutionDto, env?: AppEnv) {
@@ -4870,6 +4962,135 @@ export async function refreshTryOtoShipmentStatus(
   });
 
   return mapShipmentExecution(updated);
+}
+
+export async function syncNavlungoShipmentStatus(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.NAVLUNGO) {
+    throw new Error('Navlungo status sync is only available for Navlungo shipments.');
+  }
+
+  if (!existing.providerShipmentId?.trim()) {
+    throw new Error('Navlungo status sync requires a stored provider post number.');
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'navlungo');
+  let result;
+  try {
+    result = await adapter.getShipmentStatus(existing.providerShipmentId);
+  } catch (error) {
+    if (error instanceof ShippingProviderExecutionError) {
+      const failedSnapshot = appendTimelineEvent(
+        {
+          ...readSnapshot(existing),
+          ...error.responseSnapshot,
+          navlungoStatusSyncSucceeded: false,
+          lastProviderResponseAt: new Date().toISOString(),
+        },
+        {
+          label: 'Navlungo status sync failed',
+          status: readString(error.responseSnapshot, ['navlungoNormalizedStatus', 'statusField']) ?? 'failed',
+        },
+      );
+      await prisma.shipmentExecution.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          responseSnapshot: failedSnapshot as Prisma.InputJsonValue,
+        },
+      });
+    }
+    throw error;
+  }
+
+  const existingSnapshot = readSnapshot(existing);
+  const trackingNumber = result.trackingNumber ?? existing.trackingNumber;
+  const trackingUrl = result.trackingUrl ?? existing.trackingUrl;
+  const labelUrl = result.labelUrl ?? existing.labelUrl;
+  const providerShipmentId = result.providerShipmentId ?? existing.providerShipmentId;
+  const trackingEnriched =
+    Boolean(result.trackingNumber && result.trackingNumber !== existing.trackingNumber) ||
+    Boolean(result.trackingUrl && result.trackingUrl !== existing.trackingUrl) ||
+    Boolean(result.labelUrl && result.labelUrl !== existing.labelUrl);
+  const statusFromProvider = result.shipmentStatus === 'pending' ? existing.shipmentStatus : mapProviderStatus(result.shipmentStatus);
+  const mergedSnapshotBase = {
+    ...existingSnapshot,
+    ...result.responseSnapshot,
+    navlungoTrackingEnriched: trackingEnriched || readOptionalBoolean(result.responseSnapshot, ['navlungoTrackingEnriched']) === true,
+    shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+    lastProviderResponseAt: new Date().toISOString(),
+  };
+  const statusSnapshot = appendTimelineEvent(
+    appendNavlungoStatusLogTimelineEvents(mergedSnapshotBase),
+    {
+      label: 'Navlungo status synced',
+      status:
+        readString(result.responseSnapshot, ['navlungoNormalizedStatus']) ??
+        result.shipmentStatus,
+    },
+  );
+
+  const updated = await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      providerShipmentId,
+      trackingNumber,
+      trackingUrl,
+      labelUrl,
+      shipmentStatus: statusFromProvider,
+      currency: result.currency ?? existing.currency,
+      responseSnapshot: statusSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  return mapShipmentExecution(updated);
+}
+
+export async function refreshShipmentExecutionStatus(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+    select: {
+      provider: true,
+    },
+  });
+
+  if (!existing) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider === ShippingProvider.NAVLUNGO) {
+    return syncNavlungoShipmentStatus(shipmentExecutionId, options);
+  }
+
+  return refreshTryOtoShipmentStatus(shipmentExecutionId, options);
 }
 
 export async function cancelNavlungoShipmentExecution(
