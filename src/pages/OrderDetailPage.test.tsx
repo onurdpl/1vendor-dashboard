@@ -1377,7 +1377,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(supportCard).not.toBeNull();
     expect(timelineCard?.parentElement).toBe(sidebarFlow);
     expect(supportCard?.parentElement).toBe(sidebarFlow);
+    expect(supportCard?.parentElement).not.toBe(rail);
     expect(Boolean(timelineCard!.compareDocumentPosition(supportCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Array.from(sidebarFlow!.children).map((child) => child.className)).toEqual([
+      expect.stringContaining('operational-timeline-card'),
+      expect.stringContaining('order-support-card'),
+    ]);
+    expect(Array.from(sidebarFlow!.children).some((child) => /spacer|placeholder|offset/i.test(String(child.className)))).toBe(false);
   });
 
   it('collapses provider-heavy admin diagnostics by default', async () => {

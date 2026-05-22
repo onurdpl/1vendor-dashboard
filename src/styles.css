@@ -4953,11 +4953,12 @@ h3 {
 }
 
 .order-detail-sidebar-flow {
-  display: grid;
+  display: flex;
+  flex-direction: column;
   grid-column: 2;
   grid-row: 1 / span 5;
   gap: 12px;
-  align-content: start;
+  align-items: stretch;
   align-self: start;
   min-width: 0;
   position: sticky;
@@ -5017,7 +5018,9 @@ h3 {
   grid-column: auto;
   grid-row: auto;
   order: initial;
+  flex: 0 0 auto;
   min-width: 0;
+  width: 100%;
 }
 
 .return-review-side .operational-timeline-card {
