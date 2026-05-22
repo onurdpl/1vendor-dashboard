@@ -1397,6 +1397,9 @@ describe('shipping execution foundation', () => {
       {
         allocationId: 'alloc-1',
         provider: 'navlungo',
+        customerOverrides: {
+          district: 'Kartal',
+        },
       },
       {
         env: {
@@ -1525,6 +1528,9 @@ describe('shipping execution foundation', () => {
       },
       vendorId: 'sporjinal',
       adapter,
+      customerOverrides: {
+        district: 'Kartal',
+      },
     });
 
     expect(result).toMatchObject({
@@ -1827,6 +1833,9 @@ describe('shipping execution foundation', () => {
       },
       actorRole: 'admin',
       adapter,
+      customerOverrides: {
+        district: 'Kartal',
+      },
     });
 
     expect(result).toMatchObject({
@@ -2966,10 +2975,34 @@ describe('shipping execution foundation', () => {
       responseSnapshot: { ok: true, postNumberPresent: true },
     });
 
+    await expect(
+      createShipmentExecution(
+        {
+          allocationId: 'alloc-1',
+          provider: 'navlungo',
+        },
+        {
+          env: {
+            ...env,
+            SHIPPING_PROVIDER: 'navlungo',
+            NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+            NAVLUNGO_API_USERNAME: 'api-user',
+            NAVLUNGO_API_PASSWORD: 'secret-password',
+          },
+          vendorId: 'sporjinal',
+          adapter: navlungoAdapter,
+        },
+      ),
+    ).rejects.toThrow('Missing required shipment fields:\n- recipient.district');
+    expect(navlungoAdapter.createShipment).not.toHaveBeenCalled();
+
     const result = await createShipmentExecution(
       {
         allocationId: 'alloc-1',
         provider: 'navlungo',
+        customerOverrides: {
+          district: 'Kartal',
+        },
       },
       {
         env: {
@@ -3000,7 +3033,7 @@ describe('shipping execution foundation', () => {
               }),
               recipient: expect.objectContaining({
                 city: 'Istanbul',
-                district: null,
+                district: 'Kartal',
               }),
             }),
           ],

@@ -1118,15 +1118,27 @@ function getMissingShipmentCustomerFields(message: string, provider?: string | n
   const fields = Array.from(message.matchAll(/customer\.([a-zA-Z0-9_]+)/g))
     .map((match) => match[1])
     .filter((field): field is ShipmentCustomerField => Boolean(field && allowedFields.has(field)));
+  for (const match of message.matchAll(/recipient\.([a-zA-Z0-9_]+)/g)) {
+    const field = match[1];
+    if (field && allowedFields.has(field)) {
+      fields.push(field as ShipmentCustomerField);
+    }
+  }
   const normalizedMessage = message.toLocaleLowerCase('tr-TR');
   const isKargonomiLocationMessage =
     provider === 'kargonomi' ||
     normalizedMessage.includes('kargonomi') ||
     normalizedMessage.includes('buyer.buyer_state_id') ||
     normalizedMessage.includes('buyer.buyer_city_id');
+  const isNavlungoRecipientDistrictMessage =
+    provider === 'navlungo' &&
+    (normalizedMessage.includes('recipient.district') ||
+      normalizedMessage.includes('posts.0.recipient.district') ||
+      normalizedMessage.includes('alıcı ilçe') ||
+      normalizedMessage.includes('alici ilce'));
   const isLegacyKargoDistrictMessage = provider === 'kargo_entegrator' || provider === 'hepsijet';
   if (
-    (isKargonomiLocationMessage || isLegacyKargoDistrictMessage) &&
+    (isKargonomiLocationMessage || isLegacyKargoDistrictMessage || isNavlungoRecipientDistrictMessage) &&
     (/\bdistrict\b/.test(normalizedMessage) || normalizedMessage.includes('ilçe') || normalizedMessage.includes('ilce'))
   ) {
     fields.push('district');

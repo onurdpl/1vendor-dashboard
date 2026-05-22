@@ -4820,7 +4820,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
   });
 
-  it('does not render shipment-only District for Navlungo district messages', async () => {
+  it('renders shipment-only District for Navlungo recipient district messages and submits override', async () => {
+    const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
       ...orderWithShipmentSummary,
       shipmentExecution: {
@@ -4839,6 +4840,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         },
       },
     });
+    retryFailedShipmentExecutionMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary.shipmentExecution!,
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-RECIPIENT-DISTRICT',
+      barcode: 'barcode-string',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Sporjinal Vendor',
@@ -4853,8 +4862,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     await screen.findByText('Order #1028');
 
-    expect(screen.queryByText('Complete shipment-only fields')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
+    expect(await screen.findByText('Complete shipment-only fields')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('District *'), 'Kartal');
+    await user.click(screen.getByRole('button', { name: 'Retry shipment with completed fields' }));
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-kargo_entegrator-alloc-sporjinal-7621783322961', {
+        vendorId: 'sporjinal',
+        customerOverrides: {
+          district: 'Kartal',
+        },
+      }),
+    );
   });
 
   it('renders sanitized Navlungo validation fields and messages in admin diagnostics', async () => {

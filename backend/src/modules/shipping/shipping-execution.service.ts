@@ -1637,7 +1637,7 @@ function buildNavlungoRecipient(input: {
       webhookAddress?.shippingPostcode ??
       '',
   };
-  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city'] as const;
+  const requiredFields = ['name', 'phone', 'email', 'address', 'country', 'city', 'district'] as const;
   const missingFields = requiredFields
     .filter((key) => !recipient[key])
     .map((key) => `recipient.${key}`);
@@ -5202,6 +5202,7 @@ export async function retryDryRunShipmentExecution(
     env: AppEnv;
     actorRole?: string;
     notificationUrl?: string | null;
+    customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
     adapter?: ShippingProviderAdapter;
   },
 ): Promise<ShipmentExecutionDto> {
@@ -5236,6 +5237,7 @@ export async function retryDryRunShipmentExecution(
       allocationId: existing.allocationId,
       provider: providerDto,
       notificationUrl: options.notificationUrl ?? undefined,
+      customerOverrides: options.customerOverrides,
     },
     {
       vendorId: existing.vendorId,
