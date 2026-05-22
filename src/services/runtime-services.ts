@@ -1219,7 +1219,13 @@ export const runtimeServices = {
     },
     async createNavlungoReturnPickup(
       returnId: string,
-      input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+      input: {
+        dryRun?: boolean;
+        apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+        carrierOverride?: 'current' | '9' | '10';
+        diagnosticConfirm?: 'YES';
+        customerOverrides?: Record<string, string | undefined>;
+      } = {},
       vendorId = getCurrentVendorId(),
     ) {
       if (runtimeConfig.apiMode === 'real') {

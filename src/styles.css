@@ -6127,6 +6127,25 @@ summary.provider-response-heading::-webkit-details-marker {
   letter-spacing: 0.04em;
 }
 
+.return-review-compact-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.return-review-compact-grid label {
+  display: grid;
+  gap: 4px;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.return-review-compact-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
 .return-review-navlungo-card .checkbox-row {
   align-items: flex-start;
   margin: 0;

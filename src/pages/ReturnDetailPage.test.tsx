@@ -35,7 +35,16 @@ const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
 >();
 const createNavlungoReturnPickupMock = vi.fn<
-  (returnId: string, input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> }) => Promise<ReturnDetail>
+  (
+    returnId: string,
+    input: {
+      dryRun?: boolean;
+      apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+      carrierOverride?: 'current' | '9' | '10';
+      diagnosticConfirm?: 'YES';
+      customerOverrides?: Record<string, string | undefined>;
+    },
+  ) => Promise<ReturnDetail>
 >();
 const saveNavlungoReturnPickupAddressCompletionMock = vi.fn<
   (returnId: string, input: { customerOverrides?: Record<string, string | undefined> }) => Promise<ReturnDetail>
@@ -54,7 +63,16 @@ vi.mock('../features/returns/api', async () => {
     markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
     reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
       reviewReturnMock(returnId, input),
-    createNavlungoReturnPickup: (returnId: string, input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> }) =>
+    createNavlungoReturnPickup: (
+      returnId: string,
+      input: {
+        dryRun?: boolean;
+        apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+        carrierOverride?: 'current' | '9' | '10';
+        diagnosticConfirm?: 'YES';
+        customerOverrides?: Record<string, string | undefined>;
+      },
+    ) =>
       createNavlungoReturnPickupMock(returnId, input),
     saveNavlungoReturnPickupAddressCompletion: (
       returnId: string,
@@ -552,6 +570,40 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
   });
 
+  it('lets admin send Navlungo return pickup diagnostic API version and carrier overrides', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+    createNavlungoReturnPickupMock.mockResolvedValueOnce({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-DIAG-1',
+    });
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Provider return shipment' });
+    await user.selectOptions(screen.getByLabelText('API version'), 'v2.1');
+    await user.selectOptions(screen.getByLabelText('Carrier'), '10');
+    await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
+    await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
+
+    expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
+      dryRun: false,
+      apiVersionOverride: 'v2.1',
+      carrierOverride: '10',
+      diagnosticConfirm: 'YES',
+    });
+  });
+
   it('renders admin completion fields for missing Navlungo return pickup customer address data', async () => {
     const user = userEvent.setup();
     setCurrentUser({
@@ -953,7 +1005,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Provider return shipment' });
-    await user.click(screen.getByLabelText('Creates a live Navlungo return pickup.'));
+    await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
     await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
 
     expect(await screen.findByText(/Missing required Navlungo return pickup fields/)).toBeInTheDocument();

@@ -458,6 +458,8 @@ export function ReturnDetailPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
+  const [navlungoReturnPickupApiVersionOverride, setNavlungoReturnPickupApiVersionOverride] = useState<'current' | 'v2' | 'v2.1'>('current');
+  const [navlungoReturnPickupCarrierOverride, setNavlungoReturnPickupCarrierOverride] = useState<'current' | '9' | '10'>('current');
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
   const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
@@ -541,7 +543,12 @@ export function ReturnDetailPage() {
     },
   );
   const navlungoReturnPickupMutation = useMutationAction(
-    (input: { dryRun?: boolean }) => {
+    (input: {
+      dryRun?: boolean;
+      apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+      carrierOverride?: 'current' | '9' | '10';
+      diagnosticConfirm?: 'YES';
+    }) => {
       if (!returnId) {
         throw new Error('Return not found.');
       }
@@ -560,6 +567,8 @@ export function ReturnDetailPage() {
         if (!variables.dryRun && data.returnProviderShipmentId) {
           setRetainedReturnPickupMissingFields([]);
           setNavlungoReturnPickupLiveConfirmed(false);
+          setNavlungoReturnPickupApiVersionOverride('current');
+          setNavlungoReturnPickupCarrierOverride('current');
         }
       },
       onError: (error) => {
@@ -844,9 +853,14 @@ export function ReturnDetailPage() {
     returnProviderSnapshot.navlungoReturnRequestedCarrierId ?? navlungoReturnRequestSummary?.requestedCarrierId ?? null;
   const navlungoReturnRequestedPostType =
     returnProviderSnapshot.navlungoReturnRequestedPostType ?? navlungoReturnRequestSummary?.requestedPostType ?? null;
+  const navlungoReturnEndpointVersionTried = readSnapshotString(returnProviderSnapshot, 'navlungoReturnEndpointVersionTried');
+  const navlungoReturnResolvedProviderPath = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderPath');
   const navlungoReturnProviderMessage =
     readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderMessage') ??
     readSnapshotString(returnProviderSnapshot, 'providerMessage');
+  const navlungoReturnProviderTrackingId =
+    readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderTrackingId') ??
+    readSnapshotString(returnProviderSnapshot, 'providerTrackingId');
   const navlungoReturnValidationFields = readSnapshotStringArrays(returnProviderSnapshot, [
     'navlungoReturnValidationFields',
     'navlungoReturnCreateValidationFields',
@@ -1434,12 +1448,24 @@ export function ReturnDetailPage() {
                   <strong>{navlungoReturnRequestedCarrierId !== null ? String(navlungoReturnRequestedCarrierId) : '—'}</strong>
                 </div>
                 <div>
+                  <span>Endpoint version tried</span>
+                  <strong>{navlungoReturnEndpointVersionTried ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Resolved provider path</span>
+                  <strong>{navlungoReturnResolvedProviderPath ?? '—'}</strong>
+                </div>
+                <div>
                   <span>Requested barcode format</span>
                   <strong>{navlungoReturnRequestedBarcodeFormat ?? '—'}</strong>
                 </div>
                 <div>
                   <span>Provider message</span>
                   <strong>{navlungoReturnProviderMessage ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Provider tracking ID</span>
+                  <strong>{navlungoReturnProviderTrackingId ?? '—'}</strong>
                 </div>
                 <div>
                   <span>Validation fields</span>
@@ -1690,13 +1716,43 @@ export function ReturnDetailPage() {
                   ) : null}
                   <div className="return-review-live-create">
                     <span>Live create</span>
+                    {isAdmin ? (
+                      <div className="return-review-compact-grid" aria-label="Navlungo return pickup diagnostics options">
+                        <label>
+                          <span>API version</span>
+                          <select
+                            value={navlungoReturnPickupApiVersionOverride}
+                            onChange={(event) =>
+                              setNavlungoReturnPickupApiVersionOverride(event.target.value as 'current' | 'v2' | 'v2.1')
+                            }
+                          >
+                            <option value="current">Default/current</option>
+                            <option value="v2">v2</option>
+                            <option value="v2.1">v2.1</option>
+                          </select>
+                        </label>
+                        <label>
+                          <span>Carrier</span>
+                          <select
+                            value={navlungoReturnPickupCarrierOverride}
+                            onChange={(event) =>
+                              setNavlungoReturnPickupCarrierOverride(event.target.value as 'current' | '9' | '10')
+                            }
+                          >
+                            <option value="current">Current carrier</option>
+                            <option value="9">9 - Surat Kargo</option>
+                            <option value="10">10 - HepsiJet</option>
+                          </select>
+                        </label>
+                      </div>
+                    ) : null}
                     <label className="checkbox-row">
                       <input
                         type="checkbox"
                         checked={navlungoReturnPickupLiveConfirmed}
                         onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
                       />
-                      <span>Creates a live Navlungo return pickup.</span>
+                      <span>I understand this may create a live Navlungo return pickup.</span>
                     </label>
                     <button
                       type="button"
@@ -1706,7 +1762,16 @@ export function ReturnDetailPage() {
                         !navlungoReturnPickupLiveConfirmed ||
                         navlungoReturnPickupMissingFields.some((field) => field.startsWith('sender.'))
                       }
-                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false }).catch(() => undefined)}
+                      onClick={() =>
+                        void navlungoReturnPickupMutation
+                          .mutateAsync({
+                            dryRun: false,
+                            apiVersionOverride: navlungoReturnPickupApiVersionOverride,
+                            carrierOverride: navlungoReturnPickupCarrierOverride,
+                            diagnosticConfirm: navlungoReturnPickupLiveConfirmed ? 'YES' : undefined,
+                          })
+                          .catch(() => undefined)
+                      }
                     >
                       {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
                     </button>

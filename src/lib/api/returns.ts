@@ -22,7 +22,13 @@ export async function reviewReturn(
 
 export async function createNavlungoReturnPickup(
   returnId: string,
-  input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+  input: {
+    dryRun?: boolean;
+    apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+    carrierOverride?: 'current' | '9' | '10';
+    diagnosticConfirm?: 'YES';
+    customerOverrides?: Record<string, string | undefined>;
+  } = {},
   options: { vendorId?: string | null } = {},
 ) {
   return runtimeServices.returns.createNavlungoReturnPickup(returnId, input, options.vendorId ?? undefined);

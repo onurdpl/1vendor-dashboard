@@ -32,6 +32,9 @@ export type NavlungoReturnPickupInput = {
   dryRun?: boolean;
   adapter?: ShippingProviderAdapter;
   autoCreate?: boolean;
+  apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+  carrierOverride?: 'current' | '9' | '10';
+  diagnosticConfirm?: 'YES';
   customerOverrides?: {
     name?: string;
     phone?: string;
@@ -249,6 +252,17 @@ function resolveNavlungoCarrierId(providerMetadata: unknown, env: AppEnv) {
   );
 }
 
+function resolveNavlungoDiagnosticCarrierId(
+  providerMetadata: unknown,
+  env: AppEnv,
+  carrierOverride: NavlungoReturnPickupInput['carrierOverride'],
+) {
+  if (carrierOverride === '9' || carrierOverride === '10') {
+    return Number(carrierOverride);
+  }
+  return resolveNavlungoCarrierId(providerMetadata, env);
+}
+
 function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
   return readString(providerMetadata, [
     'navlungoReturnBarcodeFormat',
@@ -256,6 +270,49 @@ function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
     'return_barcode_format',
     'navlungo_return_barcode_format',
   ]) ?? 'pdf-A5';
+}
+
+function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride']) {
+  const selectedVersion = apiVersionOverride === 'v2' || apiVersionOverride === 'v2.1' ? apiVersionOverride : 'current';
+  const baseUrl = env.NAVLUNGO_BASE_URL?.trim();
+  if (!baseUrl || selectedVersion === 'current') {
+    let resolvedProviderPath = '/post/create';
+    if (baseUrl) {
+      try {
+        resolvedProviderPath = `${new URL(baseUrl).pathname.replace(/\/$/, '') || ''}/post/create`;
+      } catch {
+        resolvedProviderPath = '/post/create';
+      }
+    }
+    return {
+      env,
+      versionTried: selectedVersion,
+      baseUrlOverride: null,
+      resolvedProviderPath,
+    };
+  }
+
+  try {
+    const url = new URL(baseUrl);
+    url.pathname = `/${selectedVersion}`;
+    const nextBaseUrl = url.toString().replace(/\/$/, '');
+    return {
+      env: {
+        ...env,
+        NAVLUNGO_BASE_URL: nextBaseUrl,
+      },
+      versionTried: selectedVersion,
+      baseUrlOverride: nextBaseUrl,
+      resolvedProviderPath: `/${selectedVersion}/post/create`,
+    };
+  } catch {
+    return {
+      env,
+      versionTried: selectedVersion,
+      baseUrlOverride: null,
+      resolvedProviderPath: '/post/create',
+    };
+  }
 }
 
 function safeShopifyReturnIdShort(value: string | null) {
@@ -873,6 +930,7 @@ function buildNavlungoReturnPickupPayload(input: {
   config: Awaited<ReturnType<typeof getVendorShippingConfigForReturn>>;
   env: AppEnv;
   customerOverrides?: NavlungoReturnPickupInput['customerOverrides'];
+  carrierOverride?: NavlungoReturnPickupInput['carrierOverride'];
 }) {
   const order = input.record.vendorAllocation.order;
   const overrides = input.customerOverrides ?? {};
@@ -888,7 +946,7 @@ function buildNavlungoReturnPickupPayload(input: {
     post_code: overrides.postcode?.trim() || overrides.post_code?.trim() || order.shippingPostcode?.trim() || '',
   };
   const recipientAddressId = parsePositiveInteger(resolveNavlungoSenderAddressId(input.config, input.env));
-  const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
+  const carrierId = resolveNavlungoDiagnosticCarrierId(input.config.providerMetadata, input.env, input.carrierOverride);
   const barcodeFormat = resolveNavlungoReturnBarcodeFormat(input.config.providerMetadata);
   const desi = Number(input.config.defaultDesi || 1);
   const referenceId = buildNavlungoReturnReferenceId({
@@ -975,12 +1033,22 @@ export async function createNavlungoReturnPickupForReturn(
   }
 
   const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  const diagnosticOverrideRequested =
+    input.apiVersionOverride === 'v2' ||
+    input.apiVersionOverride === 'v2.1' ||
+    input.carrierOverride === '9' ||
+    input.carrierOverride === '10';
+  if (diagnosticOverrideRequested && input.dryRun !== true && input.diagnosticConfirm !== 'YES') {
+    throw new ReturnReviewError('Explicit confirmation is required for Navlungo return pickup diagnostic live create.', 400);
+  }
+  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, input.apiVersionOverride);
   const savedCompletion = readNavlungoReturnPickupCompletion(record.returnProviderSnapshot);
   const built = buildNavlungoReturnPickupPayload({
     record,
     config,
-    env,
+    env: requestBase.env,
     customerOverrides: mergeNavlungoReturnPickupCompletion(savedCompletion, input.customerOverrides),
+    carrierOverride: input.carrierOverride,
   });
   const attemptedAt = new Date().toISOString();
   const diagnostics = {
@@ -999,6 +1067,9 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnRequestedBarcodeFormat: built.summary.requestedBarcodeFormat,
     navlungoReturnRequestedCarrierId: built.summary.requestedCarrierId,
     navlungoReturnRequestedPostType: built.summary.requestedPostType,
+    navlungoReturnEndpointVersionTried: requestBase.versionTried,
+    navlungoReturnResolvedProviderPath: requestBase.resolvedProviderPath,
+    navlungoReturnBaseUrlOverrideApplied: Boolean(requestBase.baseUrlOverride),
     recipientAddressIdValid: built.recipientAddressIdValid,
     returnRequestId: record.id,
     shopifyReturnIdPresent: Boolean(record.sourceShopifyReturnId || record.sourceShopifyReturnGid),
@@ -1031,7 +1102,7 @@ export async function createNavlungoReturnPickupForReturn(
   }
 
   try {
-    const adapter = input.adapter ?? createShippingProviderAdapter(env, 'navlungo');
+    const adapter = input.adapter ?? createShippingProviderAdapter(requestBase.env, 'navlungo');
     if (!adapter.createReturnShipment) {
       throw new Error('Navlungo return pickup creation is not supported by this adapter.');
     }
@@ -1049,6 +1120,8 @@ export async function createNavlungoReturnPickupForReturn(
       httpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
       responseKeys: Object.keys(result.responseSnapshot),
       providerMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
+      navlungoReturnProviderMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
+      navlungoReturnProviderTrackingId: readString(result.responseSnapshot, ['providerTrackingId']),
       returnProviderIdPresent: Boolean(result.returnOrderId),
       returnTrackingPresent: Boolean(result.returnTrackingNumber || result.returnTrackingUrl),
       returnBarcodePresent: Boolean(result.returnBarcode),
@@ -1083,6 +1156,8 @@ export async function createNavlungoReturnPickupForReturn(
             navlungoReturnCreateSucceeded: false,
             navlungoReturnCreateHttpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
             providerMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
+            navlungoReturnProviderMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
+            navlungoReturnProviderTrackingId: readString(error.responseSnapshot, ['providerTrackingId']),
             httpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
             responseKeys: Object.keys(error.responseSnapshot),
             rawResponseSummary: error.responseSnapshot,

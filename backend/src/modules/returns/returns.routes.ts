@@ -37,6 +37,9 @@ type ReturnReviewBody = {
 
 type NavlungoReturnPickupBody = {
   dryRun?: boolean;
+  apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+  carrierOverride?: 'current' | '9' | '10';
+  diagnosticConfirm?: 'YES';
   customerOverrides?: {
     name?: string;
     phone?: string;
@@ -210,6 +213,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return await createNavlungoReturnPickupForReturn(request.params.returnId, actor.actor, env, {
           dryRun: request.body?.dryRun === true,
           customerOverrides: request.body?.customerOverrides,
+          apiVersionOverride: request.body?.apiVersionOverride,
+          carrierOverride: request.body?.carrierOverride,
+          diagnosticConfirm: request.body?.diagnosticConfirm,
         });
       } catch (error) {
         return sendReviewError(error, reply);

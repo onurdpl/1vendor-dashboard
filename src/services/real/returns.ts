@@ -373,7 +373,13 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
 
 export async function createNavlungoReturnPickup(
   returnId: string,
-  input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+  input: {
+    dryRun?: boolean;
+    apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+    carrierOverride?: 'current' | '9' | '10';
+    diagnosticConfirm?: 'YES';
+    customerOverrides?: Record<string, string | undefined>;
+  } = {},
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
   const requestOptions = readVendorRequestOptions(options.vendorId);

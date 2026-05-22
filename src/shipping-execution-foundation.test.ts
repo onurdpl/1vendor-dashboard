@@ -5810,6 +5810,103 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('applies admin Navlungo return pickup diagnostic API version and carrier overrides', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'NAV-DIAG-1',
+        returnTrackingNumber: 'NAV-DIAG-1',
+        returnTrackingUrl: 'https://tracking.example/NAV-DIAG-1',
+        returnBarcode: 'barcode-string',
+        returnCarrierName: 'HepsiJet',
+        returnStatus: 'created',
+        responseSnapshot: {
+          createPostHttpStatus: 201,
+          providerMessage: 'Created',
+        },
+      }),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-DIAG-1',
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      {
+        ...env,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+      },
+      {
+        adapter,
+        apiVersionOverride: 'v2.1',
+        carrierOverride: '10',
+        diagnosticConfirm: 'YES',
+      },
+    );
+
+    const requestSnapshot = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].requestSnapshot;
+    expect(requestSnapshot.posts[0].carrier_id).toBe(10);
+    expect(requestSnapshot.posts[0].barcode_format).toBe('pdf-A5');
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnEndpointVersionTried: 'v2.1',
+          navlungoReturnRequestedCarrierId: 10,
+          navlungoReturnResolvedProviderPath: '/v2.1/post/create',
+        }),
+      }),
+    }));
+  });
+
+  it('requires confirmation for live Navlungo return pickup diagnostic overrides', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await expect(createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      {
+        adapter,
+        carrierOverride: '10',
+      },
+    )).rejects.toThrow('Explicit confirmation is required for Navlungo return pickup diagnostic live create.');
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+  });
+
   it('auto-creates Navlungo return pickup for an approved return request with complete data', async () => {
     const returnRecord = buildNavlungoReturnRecord();
     const adapter = buildAdapter({
