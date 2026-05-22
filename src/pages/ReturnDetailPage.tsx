@@ -152,6 +152,26 @@ function readSnapshotNumber(snapshot: Record<string, unknown>, key: string) {
   return Number.isFinite(numeric) ? numeric : null;
 }
 
+function readSnapshotBoolean(snapshot: Record<string, unknown>, key: string) {
+  const value = snapshot[key];
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readSnapshotStringArrays(snapshot: Record<string, unknown>, keys: string[]) {
+  return Array.from(new Set(keys.flatMap((key) => readSnapshotStringArray(snapshot[key]))));
+}
+
+function formatDiagnosticBoolean(value: boolean | null) {
+  if (value === null) {
+    return '—';
+  }
+  return value ? 'yes' : 'no';
+}
+
+function formatDiagnosticList(values: string[]) {
+  return values.length ? values.join(', ') : '—';
+}
+
 function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
   const logs = Array.isArray(snapshot.navlungoReturnStatusLogs)
     ? snapshot.navlungoReturnStatusLogs.filter((log): log is Record<string, unknown> => Boolean(log) && typeof log === 'object' && !Array.isArray(log))
@@ -585,6 +605,32 @@ export function ReturnDetailPage() {
     typeof returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason === 'string'
       ? returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason
       : null;
+  const navlungoReturnCreateHttpStatus =
+    readSnapshotNumber(returnProviderSnapshot, 'navlungoReturnCreateHttpStatus') ??
+    readSnapshotNumber(returnProviderSnapshot, 'httpStatus');
+  const navlungoReturnCreateSucceeded = readSnapshotBoolean(returnProviderSnapshot, 'navlungoReturnCreateSucceeded');
+  const navlungoReturnProviderMessage =
+    readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderMessage') ??
+    readSnapshotString(returnProviderSnapshot, 'providerMessage');
+  const navlungoReturnValidationFields = readSnapshotStringArrays(returnProviderSnapshot, [
+    'navlungoReturnValidationFields',
+    'navlungoReturnCreateValidationFields',
+    'failedFieldNames',
+    'validationErrorKeys',
+  ]);
+  const navlungoReturnValidationMessages = readSnapshotStringArrays(returnProviderSnapshot, [
+    'navlungoReturnValidationMessages',
+    'providerValidationErrors',
+    'validationErrorMessages',
+  ]);
+  const returnProviderSnapshotResponseKeys = Object.keys(returnProviderSnapshot).sort();
+  const shouldRenderNavlungoAutoCreateDiagnostics =
+    isAdmin &&
+    returnRequest.sourceType === 'shopify_return_request' &&
+    (returnProviderSnapshotResponseKeys.length > 0 ||
+      navlungoReturnAutoCreateAttempted ||
+      Boolean(navlungoReturnAutoCreateSkippedReason) ||
+      Boolean(returnRequest.returnProviderShipmentId));
   const navlungoReturnStatusLogs = readNavlungoReturnLogs(returnProviderSnapshot);
   const navlungoReturnNormalizedStatus = readSnapshotString(returnProviderSnapshot, 'navlungoReturnNormalizedStatus');
   const navlungoReturnProviderStatusName = readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderStatusName');
@@ -1111,6 +1157,73 @@ export function ReturnDetailPage() {
                     <strong>{navlungoReturnPickupMissingFields.join(', ')}</strong>
                   </div>
                 ) : null}
+              </div>
+            </article>
+          ) : null}
+
+          {shouldRenderNavlungoAutoCreateDiagnostics ? (
+            <article className="return-review-card" aria-label="Navlungo return auto-create diagnostics">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Navlungo diagnostics</p>
+                  <h3>Return pickup auto-create</h3>
+                </div>
+              </div>
+              <div className="return-review-summary-list">
+                <div>
+                  <span>Auto-create attempted</span>
+                  <strong>{formatDiagnosticBoolean(navlungoReturnAutoCreateAttempted)}</strong>
+                </div>
+                <div>
+                  <span>Skipped reason</span>
+                  <strong>{navlungoReturnAutoCreateSkippedReason?.replace(/_/g, ' ') ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Missing fields</span>
+                  <strong>{formatDiagnosticList(navlungoReturnPickupMissingFields)}</strong>
+                </div>
+                <div>
+                  <span>Create HTTP</span>
+                  <strong>{navlungoReturnCreateHttpStatus ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Create succeeded</span>
+                  <strong>{formatDiagnosticBoolean(navlungoReturnCreateSucceeded)}</strong>
+                </div>
+                <div>
+                  <span>Provider message</span>
+                  <strong>{navlungoReturnProviderMessage ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Validation fields</span>
+                  <strong>{formatDiagnosticList(navlungoReturnValidationFields)}</strong>
+                </div>
+                <div>
+                  <span>Validation messages</span>
+                  <strong>{formatDiagnosticList(navlungoReturnValidationMessages)}</strong>
+                </div>
+                <div>
+                  <span>Provider post number</span>
+                  <strong>{returnRequest.returnProviderShipmentId ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Tracking URL</span>
+                  {returnRequest.returnTrackingUrl ? (
+                    <a href={returnRequest.returnTrackingUrl} target="_blank" rel="noreferrer">
+                      Open tracking
+                    </a>
+                  ) : (
+                    <strong>—</strong>
+                  )}
+                </div>
+                <div>
+                  <span>Barcode / label</span>
+                  <strong>{returnRequest.returnLabel ? 'available' : '—'}</strong>
+                </div>
+                <div>
+                  <span>Snapshot response keys</span>
+                  <strong>{formatDiagnosticList(returnProviderSnapshotResponseKeys)}</strong>
+                </div>
               </div>
             </article>
           ) : null}

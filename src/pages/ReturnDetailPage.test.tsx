@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -459,6 +459,126 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(await screen.findByLabelText('Return pickup address completion')).toBeInTheDocument();
     expect(screen.getByLabelText('District')).toBeInTheDocument();
+  });
+
+  it('shows skipped Navlungo return auto-create diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnAutoCreateAttempted: false,
+        navlungoReturnAutoCreateSkippedReason: 'provider_not_navlungo',
+      },
+    });
+
+    renderPage();
+
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('Auto-create attempted')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('no')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('provider not navlungo')).toBeInTheDocument();
+  });
+
+  it('shows missing fields in Navlungo return auto-create diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnAutoCreateAttempted: true,
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+        navlungoReturnMissingFields: ['sender.district'],
+      },
+    });
+
+    renderPage();
+
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('yes')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('missing required fields')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('sender.district')).toBeInTheDocument();
+  });
+
+  it('shows Navlungo return provider failure diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnAutoCreateAttempted: true,
+        navlungoReturnCreateHttpStatus: 422,
+        navlungoReturnCreateSucceeded: false,
+        providerMessage: 'Validation Errors',
+        failedFieldNames: ['posts.0.sender.district'],
+        providerValidationErrors: ['Sender district is required.'],
+        responseKeys: ['message', 'status', 'error'],
+      },
+    });
+
+    renderPage();
+
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('422')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Validation Errors')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('posts.0.sender.district')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Sender district is required.')).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/responseKeys/)).toBeInTheDocument();
+  });
+
+  it('shows successful Navlungo return provider evidence in diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-77',
+      returnTrackingUrl: 'https://tracking.example/NAV-RET-77',
+      returnLabel: 'barcode-string',
+      returnProviderSnapshot: {
+        navlungoReturnAutoCreateAttempted: true,
+        navlungoReturnCreateHttpStatus: 201,
+        navlungoReturnCreateSucceeded: true,
+        navlungoReturnProviderMessage: 'Created',
+      },
+    });
+
+    renderPage();
+
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('201')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Created')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('NAV-RET-77')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Open tracking')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('available')).toBeInTheDocument();
   });
 
   it('keeps completion fields and typed district visible across background refetch', async () => {
