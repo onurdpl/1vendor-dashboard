@@ -2272,6 +2272,65 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
   });
 }
 
+async function findLatestSuccessfulNavlungoRequestSummary(vendorId: string, excludeExecutionId?: string | null) {
+  const executions = await prisma.shipmentExecution.findMany({
+    where: {
+      vendorId,
+      provider: ShippingProvider.NAVLUNGO,
+      ...(excludeExecutionId ? { id: { not: excludeExecutionId } } : {}),
+    },
+    orderBy: {
+      updatedAt: 'desc',
+    },
+    take: 25,
+  });
+
+  if (!Array.isArray(executions)) {
+    return null;
+  }
+
+  for (const execution of executions) {
+    if (!hasPersistedShipmentEvidence(execution)) {
+      continue;
+    }
+    const snapshot = isRecord(execution.responseSnapshot) ? execution.responseSnapshot : null;
+    const summary = mapNavlungoRequestSummary(snapshot?.navlungoRequestSummary);
+    if (summary) {
+      return summary;
+    }
+  }
+
+  return null;
+}
+
+async function buildProviderFailureSnapshotWithDurableDiagnostics(
+  error: unknown,
+  provider: ShippingProvider,
+  baseSnapshot: unknown,
+  options?: {
+    vendorId?: string | null;
+    executionId?: string | null;
+  },
+) {
+  const snapshot: Record<string, unknown> = buildProviderFailureSnapshot(error, provider, baseSnapshot);
+  if (
+    provider !== ShippingProvider.NAVLUNGO ||
+    !options?.vendorId ||
+    isRecord(snapshot.lastSuccessfulNavlungoRequestSummary)
+  ) {
+    return snapshot;
+  }
+
+  const latestSummary = await findLatestSuccessfulNavlungoRequestSummary(options.vendorId, options.executionId);
+  return latestSummary
+    ? {
+        ...snapshot,
+        lastSuccessfulNavlungoRequestSummary: latestSummary,
+        lastSuccessfulNavlungoRequestSummarySource: 'latest_successful_vendor_execution',
+      }
+    : snapshot;
+}
+
 function readTryOtoForwardDeliveryOptionMetadata(snapshot: Record<string, unknown>) {
   const deliveryOptionId = readString(snapshot, [
     'forwardDeliveryOptionId',
@@ -5110,7 +5169,10 @@ export async function createShipmentExecution(
           },
           data: {
             shipmentStatus: ShipmentExecutionStatus.FAILED,
-            responseSnapshot: buildProviderFailureSnapshot(error, provider, retrySnapshot),
+            responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, retrySnapshot, {
+              vendorId: existing.vendorId,
+              executionId: existing.id,
+            })) as Prisma.InputJsonValue,
           },
         });
 
@@ -5188,7 +5250,10 @@ export async function createShipmentExecution(
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: buildProviderFailureSnapshot(error, provider, attemptSnapshot),
+        responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, attemptSnapshot, {
+          vendorId: allocation.assignedVendorId,
+          executionId,
+        })) as Prisma.InputJsonValue,
       },
     });
 
@@ -5327,7 +5392,10 @@ export async function retryDryRunShipmentExecution(
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: buildProviderFailureSnapshot(error, provider, existing.responseSnapshot),
+        responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, existing.responseSnapshot, {
+          vendorId: existing.vendorId,
+          executionId: existing.id,
+        })) as Prisma.InputJsonValue,
       },
     });
 
@@ -5501,7 +5569,10 @@ export async function retryFailedShipmentExecution(
       },
       data: {
         shipmentStatus: ShipmentExecutionStatus.FAILED,
-        responseSnapshot: buildProviderFailureSnapshot(error, provider, retrySnapshot),
+        responseSnapshot: (await buildProviderFailureSnapshotWithDurableDiagnostics(error, provider, retrySnapshot, {
+          vendorId: existing.vendorId,
+          executionId: existing.id,
+        })) as Prisma.InputJsonValue,
       },
     });
 

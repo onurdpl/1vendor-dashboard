@@ -392,9 +392,21 @@ describe('Navlungo dormant auth scaffold', () => {
         barcodePresent: true,
         carrierName: 'Sürat Kargo',
         carrierId: 9,
+        navlungoRequestSummary: expect.objectContaining({
+          endpointPath: '/post/create',
+          method: 'POST',
+          senderUsesAddressId: false,
+          recipientDistrictPresent: true,
+          recipientPhoneFormatValid: true,
+          recipientAddressPresent: true,
+          requestedCarrierId: 9,
+          requestedPostType: 2,
+        }),
       },
     });
     expect(JSON.stringify(result)).not.toContain('secret-access-token');
+    expect(JSON.stringify(result.responseSnapshot.navlungoRequestSummary)).not.toContain('recipient@example.test');
+    expect(JSON.stringify(result.responseSnapshot.navlungoRequestSummary)).not.toContain('Recipient address');
   });
 
   it('treats successful Navlungo Create Post response as shipment success when Check Post fails', async () => {
