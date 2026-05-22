@@ -2703,6 +2703,18 @@ export function OrderDetailPage() {
           </strong>
         </div>
         <div className="summary-row">
+          <span>Update sender mode</span>
+          <strong>{summary.navlungoUpdateSenderMode || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update sender fields</span>
+          <strong>{summary.navlungoUpdateSenderFieldKeys?.length ? summary.navlungoUpdateSenderFieldKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Missing update sender fields</span>
+          <strong>{summary.navlungoUpdateMissingSenderFields?.length ? summary.navlungoUpdateMissingSenderFields.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
           <span>Update validation fields</span>
           <strong>{summary.navlungoUpdateValidationFields?.length ? summary.navlungoUpdateValidationFields.join(', ') : '—'}</strong>
         </div>

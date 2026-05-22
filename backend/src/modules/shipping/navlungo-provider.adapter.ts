@@ -176,9 +176,20 @@ export type NavlungoCreatePostPayload = {
 
 export type NavlungoUpdatePostPayload = {
   post_number: string;
-  sender: {
-    addressId: number;
-  };
+  sender:
+    | {
+        addressId: number;
+      }
+    | {
+        name: string;
+        phone: string;
+        email: string;
+        address: string;
+        country: string;
+        city: string;
+        district: string;
+        post_code: string;
+      };
   recipient: {
     name: string;
     phone: string;
@@ -1468,6 +1479,8 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     }
 
     const payload = input.requestSnapshot as NavlungoUpdatePostPayload;
+    const senderFieldKeys = sortedRecordKeys(payload.sender);
+    const senderAddressId = readSenderAddressId(payload.sender);
     const client = new NavlungoHttpClient(this.env, this.options);
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
@@ -1476,10 +1489,13 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       navlungoUpdateAttempted: true,
       navlungoUpdateSucceeded: false,
       navlungoUpdatePostNumberPresent: true,
-      senderAddressIdPresent: readSenderAddressId(payload.sender) !== null,
-      senderAddressIdValid: readSenderAddressId(payload.sender) !== null,
-      senderUsesAddressId: true,
-      senderMode: 'addressId',
+      senderAddressIdPresent: senderAddressId !== null,
+      senderAddressIdValid: senderAddressId !== null,
+      senderUsesAddressId: senderAddressId !== null,
+      senderMode: senderAddressId !== null ? 'addressId' : 'fullSender',
+      navlungoUpdateSenderMode: senderAddressId !== null ? 'addressId' : 'fullSender',
+      navlungoUpdateSenderFieldKeys: senderFieldKeys,
+      navlungoUpdateMissingSenderFields: [],
       navlungoUpdateRecipientFieldKeys: sortedRecordKeys(payload.recipient),
       navlungoUpdatePostFieldKeys: sortedRecordKeys(payload.post),
       navlungoUpdateBarcodeFormatPresent: payload.barcode_format !== undefined,

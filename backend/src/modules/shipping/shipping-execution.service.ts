@@ -715,6 +715,9 @@ function mapProviderResponseSummary(
     navlungoUpdateValidationMessages: readValidationStringArray(snapshot.navlungoUpdateValidationMessages),
     navlungoUpdateProviderTrackingId: readString(snapshot, ['navlungoUpdateProviderTrackingId']),
     navlungoUpdateResponseShape,
+    navlungoUpdateSenderMode: readString(snapshot, ['navlungoUpdateSenderMode']),
+    navlungoUpdateSenderFieldKeys: readStringArray(snapshot.navlungoUpdateSenderFieldKeys),
+    navlungoUpdateMissingSenderFields: readStringArray(snapshot.navlungoUpdateMissingSenderFields),
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
@@ -1268,7 +1271,7 @@ function resolveNavlungoSenderField(config: VendorShippingConfigDto, keys: strin
   return fallback?.trim() || null;
 }
 
-function buildNavlungoSender(config: VendorShippingConfigDto, options: { useFullSenderDetails?: boolean } = {}) {
+function buildNavlungoSender(config: VendorShippingConfigDto, options: { useFullSenderDetails?: boolean; requireEmail?: boolean } = {}) {
   if (options.useFullSenderDetails) {
     const defaultWarehouse = selectDefaultWarehouse(config, 'navlungo') ?? config.warehouses[0] ?? null;
     const sender = {
@@ -1287,10 +1290,11 @@ function buildNavlungoSender(config: VendorShippingConfigDto, options: { useFull
       district: resolveNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']) ?? '',
       post_code: resolveNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']) ?? '',
     };
+    const requireEmail = options.requireEmail !== false;
     const missingFields = [
       sender.name ? null : 'sender.name',
       sender.phone ? null : 'sender.phone',
-      sender.email ? null : 'sender.email',
+      requireEmail && !sender.email ? 'sender.email' : null,
       sender.address ? null : 'sender.address',
       sender.country ? null : 'sender.country',
       sender.city ? null : 'sender.city',
@@ -5065,10 +5069,16 @@ export async function updateNavlungoShipmentExecution(
   }
 
   const config = mapShippingConfig(await getStoredShippingConfig(options.vendorId), options.vendorId);
-  const senderAddressId = resolveNavlungoSenderAddressId(config, options.env);
-  const parsedSenderAddressId = parseNavlungoSenderAddressId(senderAddressId);
-  if (!parsedSenderAddressId) {
-    throw new Error('Navlungo sender address ID must be numeric.');
+  const sender = buildNavlungoSender(config, { useFullSenderDetails: true, requireEmail: false });
+  if (!sender.sender) {
+    throw new Error(
+      [
+        'Missing required Navlungo update sender fields:',
+        ...sender.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before update call.',
+      ].join('\n'),
+    );
   }
 
   const recipient = buildNavlungoUpdateRecipient({
@@ -5091,9 +5101,7 @@ export async function updateNavlungoShipmentExecution(
   const barcodeFormat = input.barcodeFormat?.trim() || resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
   const payload = {
     post_number: existing.providerShipmentId,
-    sender: {
-      addressId: parsedSenderAddressId,
-    },
+    sender: sender.sender,
     recipient: recipient.recipient,
     post: {
       note: input.postNote?.trim() ?? '',
@@ -5111,10 +5119,13 @@ export async function updateNavlungoShipmentExecution(
       navlungoUpdateAttempted: true,
       navlungoUpdateSucceeded: false,
       navlungoUpdateProviderShipmentIdPresent: true,
-      senderAddressIdPresent: true,
-      senderAddressIdValid: true,
-      senderUsesAddressId: true,
-      senderMode: 'addressId',
+      senderAddressIdPresent: false,
+      senderAddressIdValid: false,
+      senderUsesAddressId: false,
+      senderMode: 'fullSender',
+      navlungoUpdateSenderMode: 'fullSender',
+      navlungoUpdateSenderFieldKeys: Object.keys(sender.sender).sort(),
+      navlungoUpdateMissingSenderFields: sender.missingFields,
       shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
       lastProviderStage: 'update_post',
     },

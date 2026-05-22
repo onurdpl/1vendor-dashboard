@@ -318,6 +318,9 @@ export type OrderShipmentExecutionDto = {
       kind: string;
       topLevelKeys: string[];
     } | null;
+    navlungoUpdateSenderMode?: string | null;
+    navlungoUpdateSenderFieldKeys?: string[];
+    navlungoUpdateMissingSenderFields?: string[];
     navlungoUpdatedAt?: string | null;
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     lastProviderStage?: string | null;

@@ -1628,7 +1628,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('updates an existing Navlungo shipment with sender address id only', async () => {
+  it('updates an existing Navlungo shipment with full sender fields', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-update-1',
       allocationId: 'alloc-1',
@@ -1659,6 +1659,9 @@ describe('shipping execution foundation', () => {
           navlungoUpdateAttempted: true,
           navlungoUpdateHttpStatus: 200,
           navlungoUpdateSucceeded: true,
+          navlungoUpdateSenderMode: 'fullSender',
+          navlungoUpdateSenderFieldKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+          navlungoUpdateMissingSenderFields: [],
           navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
         },
       }),
@@ -1694,6 +1697,9 @@ describe('shipping execution foundation', () => {
           navlungoUpdateAttempted: true,
           navlungoUpdateHttpStatus: 200,
           navlungoUpdateSucceeded: true,
+          navlungoUpdateSenderMode: 'fullSender',
+          navlungoUpdateSenderFieldKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+          navlungoUpdateMissingSenderFields: [],
           navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
           shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
         },
@@ -1715,7 +1721,16 @@ describe('shipping execution foundation', () => {
       providerShipmentId: 'NV-2001',
       requestSnapshot: expect.objectContaining({
         post_number: 'NV-2001',
-        sender: { addressId: 55574 },
+        sender: expect.objectContaining({
+          name: 'Sporjinal Warehouse',
+          phone: '+90 532 123 45 67',
+          email: 'warehouse@example.test',
+          address: 'Sporjinal Depo Sokak No: 1',
+          country: 'tr',
+          city: 'Istanbul',
+          district: 'Kadikoy',
+          post_code: '',
+        }),
         recipient: expect.objectContaining({
           district: 'Kartal',
           city: 'Istanbul',
@@ -1727,16 +1742,63 @@ describe('shipping execution foundation', () => {
         barcode_format: 'pdf-A6',
       }),
     });
-    expect(adapter.updateShipment.mock.calls[0][0].requestSnapshot.sender).not.toHaveProperty('phone');
+    expect(adapter.updateShipment.mock.calls[0][0].requestSnapshot.sender).not.toHaveProperty('addressId');
     expect(result.trackingNumber).toBe('TRK-2001');
     expect(result.labelUrl).toBe('new-barcode');
     expect(result.providerResponseSummary).toMatchObject({
       navlungoUpdateAttempted: true,
       navlungoUpdateHttpStatus: 200,
       navlungoUpdateSucceeded: true,
+      navlungoUpdateSenderMode: 'fullSender',
+      navlungoUpdateMissingSenderFields: [],
       shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
     });
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('blocks Navlungo update before provider call when full sender fields are missing', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-update-missing-sender',
+      allocationId: 'alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2001',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        flow: 'forward',
+      },
+    });
+    const adapter = buildAdapter({ provider: 'NAVLUNGO', updateShipment: vi.fn() });
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocationWithShopifyFulfillmentData());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({
+        navlungoSenderName: '',
+        navlungoSenderPhone: '',
+        navlungoSenderAddress: '',
+        navlungoSenderCity: '',
+        navlungoSenderDistrict: '',
+      }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await expect(updateNavlungoShipmentExecution(existing.id, { recipient: { district: 'Kartal' } }, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    })).rejects.toThrow(/Missing required Navlungo update sender fields/);
+
+    expect(adapter.updateShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
   });
 
   it('blocks Navlungo update without post number or for delivered/cancelled shipments', async () => {

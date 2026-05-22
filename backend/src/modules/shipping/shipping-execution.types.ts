@@ -402,6 +402,9 @@ export type ShipmentExecutionDto = {
       kind: string;
       topLevelKeys: string[];
     } | null;
+    navlungoUpdateSenderMode?: string | null;
+    navlungoUpdateSenderFieldKeys?: string[];
+    navlungoUpdateMissingSenderFields?: string[];
     navlungoUpdatedAt?: string | null;
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     realPathPostNumberPresent?: boolean | null;
