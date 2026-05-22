@@ -313,6 +313,7 @@ export type ShipmentExecution = {
     providerMode?: string | null;
     navlungoRequestSummary?: NavlungoCreatePostRequestSummary | null;
     lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummary | null;
+    lastSuccessfulNavlungoRequestSummarySource?: string | null;
     providerApiCallAttempted?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;

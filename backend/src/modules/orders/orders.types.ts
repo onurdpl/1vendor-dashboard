@@ -286,6 +286,7 @@ export type OrderShipmentExecutionDto = {
     providerApiCallAttempted?: boolean | null;
     navlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
+    lastSuccessfulNavlungoRequestSummarySource?: string | null;
     senderAddressIdPresent?: boolean | null;
     senderAddressIdValid?: boolean | null;
     senderUsesAddressId?: boolean | null;

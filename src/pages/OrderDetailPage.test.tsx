@@ -5069,6 +5069,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             requestedCarrierId: 9,
             requestedPostType: 2,
           }),
+          lastSuccessfulNavlungoRequestSummarySource: 'latest_successful_vendor_execution',
         },
       },
     });
@@ -5112,6 +5113,21 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(successDiff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('same · success: yes · current: yes');
     expect(within(successDiff).getByText('recipient address length').closest('.summary-row')).toHaveTextContent('different · success: 38 · current: 42');
     expect(within(successDiff).getByText('recipient district present').closest('.summary-row')).toHaveTextContent('same · success: yes · current: yes');
+    const visibleSummary = screen.getByLabelText('Navlungo request summary diagnostics');
+    expect(within(visibleSummary).getByText('Request summary present').closest('.summary-row')).toHaveTextContent('yes');
+    expect(within(visibleSummary).getByText('Last successful summary present').closest('.summary-row')).toHaveTextContent('yes');
+    expect(within(visibleSummary).getByText('Last successful summary source').closest('.summary-row')).toHaveTextContent(
+      'latest_successful_vendor_execution',
+    );
+    expect(within(visibleSummary).getByText('Current Navlungo request summary').closest('.summary-row')).toHaveTextContent(
+      'available',
+    );
+    expect(within(visibleSummary).getByText('Last successful Navlungo request summary').closest('.summary-row')).toHaveTextContent(
+      'available',
+    );
+    expect(within(visibleSummary).getByText('Last successful vs current request diff').closest('.summary-row')).toHaveTextContent(
+      'safe fields compared',
+    );
   });
 
   it('renders current-only Navlungo request diagnostics when no last successful summary exists', async () => {
@@ -5168,6 +5184,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await screen.findByText('Order #1028');
 
     const diff = screen.getByLabelText('Navlungo successful failing request diff');
+    const visibleSummary = screen.getByLabelText('Navlungo request summary diagnostics');
+    expect(within(visibleSummary).getByText('Request summary present').closest('.summary-row')).toHaveTextContent('yes');
+    expect(within(visibleSummary).getByText('Last successful summary present').closest('.summary-row')).toHaveTextContent('no');
+    expect(within(visibleSummary).getByText('Last successful summary source').closest('.summary-row')).toHaveTextContent('—');
+    expect(within(visibleSummary).getByText('Current Navlungo request summary').closest('.summary-row')).toHaveTextContent(
+      'available',
+    );
     expect(within(diff).getByText('Last successful request').closest('.summary-row')).toHaveTextContent('not available');
     expect(within(diff).getByText('current sender mode').closest('.summary-row')).toHaveTextContent(
       'addressId yes · sender keys addressId',

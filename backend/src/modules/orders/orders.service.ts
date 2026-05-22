@@ -704,6 +704,7 @@ function buildShipmentProviderResponseSummary(
     providerMode: readString(snapshot, ['providerMode']),
     navlungoRequestSummary: mapNavlungoRequestSummary(snapshot?.navlungoRequestSummary),
     lastSuccessfulNavlungoRequestSummary: mapNavlungoRequestSummary(snapshot?.lastSuccessfulNavlungoRequestSummary),
+    lastSuccessfulNavlungoRequestSummarySource: readString(snapshot, ['lastSuccessfulNavlungoRequestSummarySource']),
     providerApiCallAttempted:
       typeof snapshot?.providerApiCallAttempted === 'boolean' ? snapshot.providerApiCallAttempted : null,
     senderAddressIdPresent: typeof snapshot?.senderAddressIdPresent === 'boolean' ? snapshot.senderAddressIdPresent : null,

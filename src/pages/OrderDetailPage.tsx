@@ -2290,7 +2290,13 @@ export function OrderDetailPage() {
   }
 
   function renderNavlungoRetryDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
-    if (visibleShipmentExecution?.provider !== 'navlungo') {
+    const hasNavlungoRequestDiagnostics = Boolean(
+      summary.navlungoRequestSummary ||
+        summary.lastSuccessfulNavlungoRequestSummary ||
+        summary.responseKeys?.includes('navlungoRequestSummary') ||
+        summary.responseKeys?.includes('lastSuccessfulNavlungoRequestSummary'),
+    );
+    if (visibleShipmentExecution?.provider !== 'navlungo' && !hasNavlungoRequestDiagnostics) {
       return null;
     }
     const hasValidationDiagnostics =
@@ -2365,6 +2371,67 @@ export function OrderDetailPage() {
             COD {formatDiagnosticPresence(summary.realPathCodPaymentIncluded)} · price{' '}
             {formatDiagnosticPresence(summary.realPathPriceIncluded)}
           </strong>
+        </div>
+        <div className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo request summary diagnostics">
+          <div className="provider-response-heading">
+            <strong>Navlungo request summary diagnostics</strong>
+            <span>Sanitized persisted request comparison</span>
+          </div>
+          <div className="summary-row">
+            <span>Request summary present</span>
+            <strong>{formatDiagnosticPresence(Boolean(summary.navlungoRequestSummary))}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Last successful summary present</span>
+            <strong>{formatDiagnosticPresence(Boolean(summary.lastSuccessfulNavlungoRequestSummary))}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Last successful summary source</span>
+            <strong>{summary.lastSuccessfulNavlungoRequestSummarySource || '—'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Sender address ID</span>
+            <strong>
+              present {formatDiagnosticPresence(summary.senderAddressIdPresent)} · sender uses addressId{' '}
+              {formatDiagnosticPresence(
+                summary.senderUsesAddressId ?? summary.navlungoRequestSummary?.senderUsesAddressId ?? null,
+              )}
+            </strong>
+          </div>
+          {summary.navlungoRequestSummary ? (
+            <>
+              <div className="summary-row">
+                <span>Current Navlungo request summary</span>
+                <strong>available</strong>
+              </div>
+              {renderNavlungoRequestSummaryRows(summary.navlungoRequestSummary, 'current')}
+            </>
+          ) : null}
+          {summary.lastSuccessfulNavlungoRequestSummary ? (
+            <>
+              <div className="summary-row">
+                <span>Last successful Navlungo request summary</span>
+                <strong>available</strong>
+              </div>
+              {renderNavlungoRequestSummaryRows(summary.lastSuccessfulNavlungoRequestSummary, 'last success')}
+            </>
+          ) : null}
+          {successfulRequestDiffRows.length ? (
+            <>
+              <div className="summary-row">
+                <span>Last successful vs current request diff</span>
+                <strong>{successfulRequestDiffRows.length} safe fields compared</strong>
+              </div>
+              {successfulRequestDiffRows.map((row) => (
+                <div className="summary-row" key={`visible-${row.label}`}>
+                  <span>{row.label}</span>
+                  <strong>
+                    {row.same ? 'same' : 'different'} · success: {row.probe} · current: {row.real}
+                  </strong>
+                </div>
+              ))}
+            </>
+          ) : null}
         </div>
         {summary.navlungoRequestSummary ? (
           <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo real retry request summary">

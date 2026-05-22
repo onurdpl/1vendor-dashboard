@@ -682,6 +682,7 @@ function mapProviderResponseSummary(
     providerMode: readString(snapshot, ['providerMode']),
     navlungoRequestSummary: mapNavlungoRequestSummary(snapshot.navlungoRequestSummary),
     lastSuccessfulNavlungoRequestSummary: mapNavlungoRequestSummary(snapshot.lastSuccessfulNavlungoRequestSummary),
+    lastSuccessfulNavlungoRequestSummarySource: readString(snapshot, ['lastSuccessfulNavlungoRequestSummarySource']),
     providerApiCallAttempted: readOptionalBoolean(snapshot, ['providerApiCallAttempted']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
