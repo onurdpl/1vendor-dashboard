@@ -5457,6 +5457,150 @@ describe('shipping execution foundation', () => {
     ).rejects.toThrow('Return label creation is only available for Try OTO shipments.');
   });
 
+  it('previews Navlungo return pickup payload without calling provider or persisting evidence', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'NAV-1001',
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fulfillmentStatus: 'Fulfilled',
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 532 123 45 67',
+        shippingAddress: 'Test Mah. No: 1',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingCountry: 'tr',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env: {
+        ...env,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2.1',
+        NAVLUNGO_API_USERNAME: 'user',
+        NAVLUNGO_API_PASSWORD: 'pass',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+      dryRun: true,
+    });
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoReturnPickupDryRun: true,
+      navlungoReturnPickupAttempted: false,
+      navlungoReturnPickupSucceeded: false,
+      navlungoReturnPickupMissingFields: [],
+      navlungoReturnPickupPayloadSummary: expect.objectContaining({
+        endpointPath: '/post/create',
+        requestedPostType: 3,
+        requestedCarrierId: 9,
+        senderFullObjectKeysPresent: true,
+        recipientKeys: ['addressId'],
+        desiPresent: true,
+        packageCountPresent: true,
+      }),
+    });
+    expect(result.returnShipment).toBeNull();
+  });
+
+  it('creates live Navlungo return pickup through provider when dry-run is off', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'DELIVERED',
+      providerShipmentId: 'NAV-1001',
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'NAV-RETURN-1',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnTrackingUrl: 'https://tracking.example/RET-TRACK-1',
+        returnLabelUrl: 'barcode-string',
+        returnBarcode: 'barcode-string',
+        returnCarrierName: 'Sürat Kargo',
+        returnStatus: 'created',
+        responseSnapshot: {
+          createPostHttpStatus: 201,
+          providerMessage: 'Created',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      fulfillmentStatus: 'Fulfilled',
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 532 123 45 67',
+        shippingAddress: 'Test Mah. No: 1',
+        shippingCity: 'Istanbul',
+        shippingDistrict: 'Kadikoy',
+        shippingCountry: 'tr',
+      },
+    }));
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+    storedExecution = existing;
+
+    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
+      requestSnapshot: expect.objectContaining({
+        posts: [
+          expect.objectContaining({
+            post_type: 3,
+            recipient: { addressId: 55574 },
+          }),
+        ],
+      }),
+    }));
+    expect(result.returnShipment).toMatchObject({
+      provider: 'navlungo',
+      returnOrderId: 'NAV-RETURN-1',
+      trackingNumber: 'RET-TRACK-1',
+    });
+  });
+
   it('does not create duplicate Try OTO return shipments', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-try_oto-alloc-1',

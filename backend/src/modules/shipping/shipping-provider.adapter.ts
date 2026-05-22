@@ -42,6 +42,7 @@ export type ShippingProviderReturnCreateInput = {
   pickupLocationCode?: string | null;
   deliveryOptionId?: string | null;
   packageWeight?: number | null;
+  requestSnapshot?: Record<string, unknown>;
 };
 
 export type ShippingProviderReturnCreateResult = {

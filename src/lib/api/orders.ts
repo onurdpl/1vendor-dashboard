@@ -91,11 +91,13 @@ export async function updateNavlungoShipmentExecution(
 
 export async function createReturnShipmentLabel(
   shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
+  options: { vendorId?: string | null; dryRun?: boolean; customerOverrides?: ShipmentCustomerOverrides } = {},
 ) {
   return runtimeServices.orders.createReturnShipmentLabel(
     shipmentExecutionId,
     options.vendorId ?? undefined,
+    options.dryRun,
+    options.customerOverrides,
   );
 }
 

@@ -3,6 +3,7 @@ import type {
   ShippingProviderAdapter,
   ShippingProviderCreateInput,
   ShippingProviderCreateResult,
+  ShippingProviderReturnCreateResult,
   ShippingProviderUpdateInput,
 } from './shipping-provider.adapter.js';
 import { ShippingProviderExecutionError as ProviderExecutionError } from './shipping-provider.adapter.js';
@@ -150,16 +151,20 @@ export type NavlungoCreatePostPayload = {
           district: string;
           post_code: string;
         };
-    recipient: {
-      name: string;
-      phone: string;
-      email: string;
-      address: string;
-      country: string;
-      city: string;
-      district: string;
-      post_code: string;
-    };
+    recipient:
+      | {
+          addressId: number;
+        }
+      | {
+          name: string;
+          phone: string;
+          email: string;
+          address: string;
+          country: string;
+          city: string;
+          district: string;
+          post_code: string;
+        };
     post: {
       desi: number;
       package_count: number;
@@ -336,6 +341,7 @@ export function summarizeNavlungoCreatePostRequest(
   const postPayload = post?.post;
   const senderKeys = sortedRecordKeys(sender);
   const recipientKeys = sortedRecordKeys(recipient);
+  const recipientRecord: Record<string, unknown> = isRecord(recipient) ? recipient : {};
   const postPayloadKeys = sortedRecordKeys(postPayload);
 
   return {
@@ -364,16 +370,16 @@ export function summarizeNavlungoCreatePostRequest(
     customData2Present: post?.custom_data_2 !== undefined,
     customData3Present: post?.custom_data_3 !== undefined,
     customData4Present: post?.custom_data_4 !== undefined,
-    recipientDistrictPresent: hasTrimmedString(recipient?.district),
-    recipientCityPresent: hasTrimmedString(recipient?.city),
-    recipientCountryPresent: hasTrimmedString(recipient?.country),
-    recipientPostCodePresent: hasTrimmedString(recipient?.post_code),
-    recipientPhonePresent: hasTrimmedString(recipient?.phone),
-    recipientPhoneFormatValid: isSafeTurkishPhoneFormat(recipient?.phone),
-    recipientEmailPresent: hasTrimmedString(recipient?.email),
-    recipientEmailFormatValid: isSafeEmailFormat(recipient?.email),
-    recipientAddressPresent: hasTrimmedString(recipient?.address),
-    recipientAddressLength: safeStringLength(recipient?.address),
+    recipientDistrictPresent: hasTrimmedString(recipientRecord.district),
+    recipientCityPresent: hasTrimmedString(recipientRecord.city),
+    recipientCountryPresent: hasTrimmedString(recipientRecord.country),
+    recipientPostCodePresent: hasTrimmedString(recipientRecord.post_code),
+    recipientPhonePresent: hasTrimmedString(recipientRecord.phone),
+    recipientPhoneFormatValid: isSafeTurkishPhoneFormat(recipientRecord.phone),
+    recipientEmailPresent: hasTrimmedString(recipientRecord.email),
+    recipientEmailFormatValid: isSafeEmailFormat(recipientRecord.email),
+    recipientAddressPresent: hasTrimmedString(recipientRecord.address),
+    recipientAddressLength: safeStringLength(recipientRecord.address),
     packageCountPresent: postPayload?.package_count !== undefined,
     packageCountType: safeValueType(postPayload?.package_count),
     requestedPackageCount: postPayload?.package_count ?? null,
@@ -1938,7 +1944,37 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     };
   }
 
-  async createReturnShipment(): Promise<never> {
-    throw new Error('Navlungo return shipment creation is not implemented yet.');
+  async createReturnShipment(input: { requestSnapshot?: Record<string, unknown> }): Promise<ShippingProviderReturnCreateResult> {
+    const payload = input.requestSnapshot as NavlungoCreatePostPayload | undefined;
+    if (!payload?.posts?.length) {
+      throw new ProviderExecutionError('Navlungo return pickup requires a prepared Create Post payload.', {
+        provider: NAVLUNGO_PROVIDER_KEY,
+        flow: 'return_pickup',
+        providerError: 'Missing Navlungo return pickup payload.',
+      });
+    }
+
+    const result = await this.createShipment({
+      allocationId: 'navlungo-return-pickup',
+      vendorId: 'navlungo-return-pickup',
+      provider: NAVLUNGO_PROVIDER_KEY,
+      requestSnapshot: payload,
+    });
+
+    return {
+      returnOrderId: result.providerShipmentId,
+      returnTrackingNumber: result.trackingNumber,
+      returnTrackingUrl: result.trackingUrl,
+      returnLabelUrl: result.labelUrl,
+      returnBarcode: result.labelUrl,
+      returnCarrierName: readStringFromRecord(result.responseSnapshot, ['carrierName']) ?? NAVLUNGO_PROVIDER_DISPLAY_NAME,
+      returnStatus: result.shipmentStatus,
+      responseSnapshot: {
+        ...result.responseSnapshot,
+        flow: 'return_pickup',
+        navlungoReturnPickupAttempted: true,
+        navlungoReturnPickupSucceeded: Boolean(result.providerShipmentId),
+      },
+    };
   }
 }

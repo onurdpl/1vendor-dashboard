@@ -96,10 +96,12 @@ describe('Navlungo dormant auth scaffold', () => {
     });
   });
 
-  it('keeps return execution unsupported', async () => {
+  it('requires prepared payload for return pickup execution', async () => {
     const adapter = new NavlungoAdapter(buildEnv());
 
-    await expect(adapter.createReturnShipment()).rejects.toThrow('Navlungo return shipment creation is not implemented yet.');
+    await expect(adapter.createReturnShipment({ orderId: 'order-1', items: [] })).rejects.toThrow(
+      'Navlungo return pickup requires a prepared Create Post payload.',
+    );
   });
 
   it('uses configured base URL and does not expose credentials in auth diagnostics', async () => {

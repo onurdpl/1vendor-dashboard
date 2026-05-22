@@ -1374,6 +1374,7 @@ export function OrderDetailPage() {
   const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
   const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
   const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
+  const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1537,9 +1538,10 @@ export function OrderDetailPage() {
     },
   );
   const { mutateAsync: createReturnShipmentLabelMutation, isPending: isCreatingReturnShipmentLabel } = useMutationAction(
-    async (shipmentExecutionId: string) =>
-      createReturnShipmentLabel(shipmentExecutionId, {
+    async (payload: { shipmentExecutionId: string; dryRun?: boolean }) =>
+      createReturnShipmentLabel(payload.shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
+        dryRun: payload.dryRun === true,
       }),
     {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
@@ -1836,6 +1838,12 @@ export function OrderDetailPage() {
     ['delivered'].includes(visibleShipmentStatus) &&
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
     !visibleShipmentExecution.returnShipment;
+  const canCreateNavlungoReturnPickup =
+    isAdmin &&
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    ['delivered'].includes(visibleShipmentStatus) &&
+    Boolean(visibleShipmentExecution.providerShipmentId) &&
+    !visibleShipmentExecution.returnShipment;
   const hasShopifyReturnIdForLabelProbe = Boolean(order?.shopifyReturnSignal?.returnIdPresent);
   const hasReturnTrackingForLabelProbe = Boolean(
     visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode,
@@ -1866,6 +1874,7 @@ export function OrderDetailPage() {
     setShipmentActionState(null);
     setUseFullNavlungoSenderForRetry(false);
     setNavlungoUpdateConfirmed(false);
+    setNavlungoReturnPickupLiveConfirmed(false);
     tryOtoAutoRefreshAttemptsRef.current = {};
     if (tryOtoAutoRefreshTimerRef.current !== null) {
       window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
@@ -2138,44 +2147,61 @@ export function OrderDetailPage() {
       });
   }
 
-  function handleCreateReturnShipmentLabel() {
+  function handleCreateReturnShipmentLabel(options: { dryRun?: boolean } = {}) {
     if (!visibleShipmentExecution) {
       return;
     }
+    const isNavlungo = visibleShipmentExecution.provider === 'navlungo';
+    const dryRun = options.dryRun === true;
 
     setShipmentActionState({
       tone: 'info',
-      message: 'Creating Try OTO return label...',
+      message: dryRun
+        ? 'Previewing Navlungo return pickup...'
+        : isNavlungo
+          ? 'Creating live Navlungo return pickup...'
+          : 'Creating Try OTO return label...',
       endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
     });
 
-    void createReturnShipmentLabelMutation(visibleShipmentExecution.id)
+    void createReturnShipmentLabelMutation({ shipmentExecutionId: visibleShipmentExecution.id, dryRun })
       .then((shipment) => {
+        if (dryRun) {
+          setShipmentActionState({
+            tone: 'info',
+            message: 'Navlungo return pickup preview generated. No provider call was made.',
+            shipment,
+            endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
+          });
+          showFeedback('Navlungo return pickup preview generated.', 'info');
+          return;
+        }
         const hasReturnLabel = Boolean(shipment.returnShipment?.labelUrl);
         const returnFinalized = Boolean(shipment.returnShipment?.finalized || shipment.returnShipment?.labelRetrievable);
+        const providerLabel = isNavlungo ? 'Navlungo return pickup' : 'Try OTO return shipment';
         setShipmentActionState({
           tone: hasReturnLabel ? 'success' : 'info',
           message: hasReturnLabel
-            ? 'Try OTO return label created.'
+            ? `${providerLabel} label created.`
             : returnFinalized
-              ? 'Try OTO return shipment created. Printable return label unavailable.'
-              : 'Try OTO return created. Return tracking code will appear here when available.',
+              ? `${providerLabel} created. Printable return label unavailable.`
+              : `${providerLabel} created. Return tracking code will appear here when available.`,
           shipment,
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/create-return`,
         });
         showFeedback(
           hasReturnLabel
-            ? 'Try OTO return label created.'
+            ? `${providerLabel} label created.`
             : returnFinalized
-              ? 'Try OTO return shipment created. Printable return label unavailable.'
-              : 'Try OTO return created. Return tracking code will appear here when available.',
+              ? `${providerLabel} created. Printable return label unavailable.`
+              : `${providerLabel} created. Return tracking code will appear here when available.`,
           hasReturnLabel ? 'success' : 'info',
         );
         void refetch();
       })
       .catch((mutationError) => {
         const diagnostics = getApiErrorDiagnostics(mutationError);
-        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Try OTO return label could not be created.';
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Return shipment could not be created.';
         setShipmentActionState({
           tone: 'error',
           message: errorMessage,
@@ -2184,6 +2210,64 @@ export function OrderDetailPage() {
         });
         showFeedback(errorMessage, 'error');
       });
+  }
+
+  function renderNavlungoReturnPickupPreviewSummary(summary = visibleShipmentExecution?.providerResponseSummary) {
+    const payloadSummary = summary?.navlungoReturnPickupPayloadSummary;
+    if (!payloadSummary) {
+      return null;
+    }
+
+    return (
+      <div className="provider-response-summary" aria-label="Navlungo return pickup payload summary">
+        <div className="summary-row">
+          <span>Endpoint</span>
+          <strong>{payloadSummary.endpointPath}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Post type / carrier</span>
+          <strong>
+            {payloadSummary.requestedPostType ?? '—'} · {payloadSummary.requestedCarrierId ?? '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Sender keys</span>
+          <strong>{payloadSummary.senderKeys.length ? payloadSummary.senderKeys.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Recipient addressId</span>
+          <strong>
+            {payloadSummary.recipientKeys.includes('addressId') ? 'present' : 'missing'} · valid{' '}
+            {formatDiagnosticPresence(summary?.recipientAddressIdValid)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Package</span>
+          <strong>
+            desi {formatDiagnosticPresence(payloadSummary.desiPresent)} · package_count{' '}
+            {formatDiagnosticPresence(payloadSummary.packageCountPresent)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Reference format</span>
+          <strong>{payloadSummary.postKeys.includes('reference_id') ? 'present' : 'missing'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Custom data</span>
+          <strong>
+            {[payloadSummary.customData1Present, payloadSummary.customData2Present, payloadSummary.customData3Present, payloadSummary.customData4Present]
+              .filter(Boolean).length}
+            /4 present
+          </strong>
+        </div>
+        {summary?.navlungoReturnPickupMissingFields?.length ? (
+          <div className="summary-row">
+            <span>Missing fields</span>
+            <strong>{summary.navlungoReturnPickupMissingFields.join(', ')}</strong>
+          </div>
+        ) : null}
+      </div>
+    );
   }
 
   function handleProbeShopifyReturnLabelUpload() {
@@ -5404,7 +5488,7 @@ export function OrderDetailPage() {
                                 <button
                                   type="button"
                                   className="secondary-action-button"
-                                  onClick={handleCreateReturnShipmentLabel}
+                                  onClick={() => handleCreateReturnShipmentLabel()}
                                   disabled={!canCreateTryOtoReturnLabel || isCreatingReturnShipmentLabel}
                                 >
                                   {isCreatingReturnShipmentLabel ? 'Creating return label...' : 'Create return label'}
@@ -5477,6 +5561,39 @@ export function OrderDetailPage() {
                           </div>
                         ) : null}
                         {renderNavlungoUpdateForm()}
+                        {canCreateNavlungoReturnPickup ? (
+                          <div className="shipment-recovery-actions" aria-label="Navlungo return pickup creation">
+                            <strong>Navlungo return pickup</strong>
+                            <span>Preview the return pickup payload before creating a live Navlungo return shipment.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isCreatingReturnShipmentLabel}
+                                onClick={() => handleCreateReturnShipmentLabel({ dryRun: true })}
+                              >
+                                {isCreatingReturnShipmentLabel ? 'Previewing...' : 'Preview Navlungo return pickup'}
+                              </button>
+                            </div>
+                            {renderNavlungoReturnPickupPreviewSummary()}
+                            <label className="checkbox-row">
+                              <input
+                                type="checkbox"
+                                checked={navlungoReturnPickupLiveConfirmed}
+                                onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
+                              />
+                              <span>I understand this creates a live Navlungo return pickup.</span>
+                            </label>
+                            <button
+                              type="button"
+                              className="button button-primary"
+                              disabled={isCreatingReturnShipmentLabel || !navlungoReturnPickupLiveConfirmed}
+                              onClick={() => handleCreateReturnShipmentLabel()}
+                            >
+                              {isCreatingReturnShipmentLabel ? 'Creating...' : 'Create live Navlungo return pickup'}
+                            </button>
+                          </div>
+                        ) : null}
                         {canCancelNavlungoShipment ? (
                           <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                             <strong>Navlungo cancellation</strong>
@@ -5774,6 +5891,9 @@ export function OrderDetailPage() {
                             {shipmentActionState.shipment ? (
                               <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
                             ) : null}
+                            {shipmentActionState.shipment?.providerResponseSummary?.navlungoReturnPickupPayloadSummary
+                              ? renderNavlungoReturnPickupPreviewSummary(shipmentActionState.shipment.providerResponseSummary)
+                              : null}
                           </>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}
@@ -6472,6 +6592,39 @@ export function OrderDetailPage() {
                       </div>
                     ) : null}
                     {renderNavlungoUpdateForm()}
+                    {canCreateNavlungoReturnPickup ? (
+                      <div className="shipment-recovery-actions" aria-label="Navlungo return pickup creation">
+                        <strong>Navlungo return pickup</strong>
+                        <span>Preview the return pickup payload before creating a live Navlungo return shipment.</span>
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isCreatingReturnShipmentLabel}
+                            onClick={() => handleCreateReturnShipmentLabel({ dryRun: true })}
+                          >
+                            {isCreatingReturnShipmentLabel ? 'Previewing...' : 'Preview Navlungo return pickup'}
+                          </button>
+                        </div>
+                        {renderNavlungoReturnPickupPreviewSummary()}
+                        <label className="checkbox-row">
+                          <input
+                            type="checkbox"
+                            checked={navlungoReturnPickupLiveConfirmed}
+                            onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
+                          />
+                          <span>I understand this creates a live Navlungo return pickup.</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="button button-primary"
+                          disabled={isCreatingReturnShipmentLabel || !navlungoReturnPickupLiveConfirmed}
+                          onClick={() => handleCreateReturnShipmentLabel()}
+                        >
+                          {isCreatingReturnShipmentLabel ? 'Creating...' : 'Create live Navlungo return pickup'}
+                        </button>
+                      </div>
+                    ) : null}
                     {canCancelNavlungoShipment ? (
                       <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                         <strong>Navlungo cancellation</strong>
@@ -6797,6 +6950,9 @@ export function OrderDetailPage() {
                             {shipmentActionState.shipment ? (
                               <span>{getShipmentActionEvidenceSummary(shipmentActionState)}</span>
                             ) : null}
+                            {shipmentActionState.shipment?.providerResponseSummary?.navlungoReturnPickupPayloadSummary
+                              ? renderNavlungoReturnPickupPreviewSummary(shipmentActionState.shipment.providerResponseSummary)
+                              : null}
                           </>
                         ) : null}
                         {renderShipmentFieldCompletionForm()}

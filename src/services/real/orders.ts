@@ -573,11 +573,14 @@ export async function updateNavlungoShipmentExecution(
 
 export async function createReturnShipmentLabel(
   shipmentExecutionId: string,
-  options: { vendorId?: string | null } = {},
+  options: { vendorId?: string | null; dryRun?: boolean; customerOverrides?: ShipmentCustomerOverrides } = {},
 ) {
   return apiClient.post<CreateShipmentExecutionResult>(
     `/shipments/${shipmentExecutionId}/create-return`,
-    {},
+    {
+      ...(options.dryRun ? { dryRun: true } : {}),
+      ...(options.customerOverrides ? { customerOverrides: options.customerOverrides } : {}),
+    },
     {
       vendorId: options.vendorId,
     },

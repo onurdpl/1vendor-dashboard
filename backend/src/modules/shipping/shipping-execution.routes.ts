@@ -267,12 +267,15 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
       }
 
       try {
+        const body = (request.body ?? {}) as { dryRun?: boolean; customerOverrides?: CreateShipmentExecutionDto['customerOverrides'] };
         return await createTryOtoReturnShipmentLabel(request.params.id, {
           env,
           vendorId,
+          dryRun: body.dryRun === true,
+          customerOverrides: body.customerOverrides,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Try OTO return label could not be created.';
+        const message = error instanceof Error ? error.message : 'Return shipment could not be created.';
         return reply.code(400).send({ message });
       }
     },

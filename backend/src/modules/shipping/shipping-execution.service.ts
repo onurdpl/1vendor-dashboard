@@ -19,6 +19,10 @@ import {
   resolveKargonomiDestinationAddress,
   type KargonomiDestinationLookupClient,
 } from './kargonomi-provider.adapter.js';
+import {
+  summarizeNavlungoCreatePostRequest,
+  type NavlungoCreatePostPayload,
+} from './navlungo-provider.adapter.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
 import { createFulfillmentService } from '../fulfillments/fulfillment.service.js';
@@ -427,7 +431,7 @@ function mapReturnShipment(snapshot: Record<string, unknown>): ShipmentExecution
   const labelUrl = readTryOtoReturnLabelUrl(returnShipment);
   const trackingNumber = readString(returnShipment, ['trackingNumber', 'returnTrackingNumber']);
   return {
-    provider: 'try_oto',
+    provider: readString(returnShipment, ['provider']) === 'navlungo' ? 'navlungo' : 'try_oto',
     returnOrderId: readString(returnShipment, ['returnOrderId', 'returnProviderId', 'providerReturnId', 'returnOtoId']),
     trackingNumber,
     trackingUrl: readTryOtoReturnTrackingUrl(returnShipment),
@@ -726,6 +730,12 @@ function mapProviderResponseSummary(
     navlungoUpdateMissingSenderFields: readStringArray(snapshot.navlungoUpdateMissingSenderFields),
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
+    navlungoReturnPickupDryRun: readOptionalBoolean(snapshot, ['navlungoReturnPickupDryRun']),
+    navlungoReturnPickupAttempted: readOptionalBoolean(snapshot, ['navlungoReturnPickupAttempted']),
+    navlungoReturnPickupSucceeded: readOptionalBoolean(snapshot, ['navlungoReturnPickupSucceeded']),
+    navlungoReturnPickupMissingFields: readStringArray(snapshot.navlungoReturnPickupMissingFields),
+    navlungoReturnPickupPayloadSummary: mapNavlungoRequestSummary(snapshot.navlungoReturnPickupPayloadSummary),
+    recipientAddressIdValid: readOptionalBoolean(snapshot, ['recipientAddressIdValid']),
     navlungoStatusSyncAttempted: readOptionalBoolean(snapshot, ['navlungoStatusSyncAttempted']),
     navlungoStatusSyncHttpStatus: readNumber(snapshot, ['navlungoStatusSyncHttpStatus']),
     navlungoStatusSyncResolvedProviderUrl: readString(snapshot, ['navlungoStatusSyncResolvedProviderUrl']),
@@ -1929,6 +1939,80 @@ function buildNavlungoUpdateRecipient(input: {
   return {
     recipient,
     missingFields,
+  };
+}
+
+function buildNavlungoReturnPickupPayload(input: {
+  allocation: {
+    id: string;
+    assignedVendorId: string;
+    sourceShopifyOrderNumber: string | null;
+    order: unknown;
+  };
+  config: VendorShippingConfigDto;
+  env: AppEnv;
+  customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+}) {
+  const recipientAddressId = parseNavlungoSenderAddressId(resolveNavlungoSenderAddressId(input.config, input.env));
+  const sender = buildNavlungoRecipient({
+    order: input.allocation.order,
+    customerName: isRecord(input.allocation.order) ? readString(input.allocation.order, ['customerName']) : null,
+    customerEmail: isRecord(input.allocation.order) ? readString(input.allocation.order, ['customerEmail']) : null,
+    customerOverrides: input.customerOverrides,
+  });
+  const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
+  const barcodeFormat = resolveNavlungoBarcodeFormat(input.config.providerMetadata, input.env);
+  const desi = Number(input.config.defaultDesi || 1);
+  const referenceId = buildNavlungoReferenceId({
+    vendorId: input.allocation.assignedVendorId,
+    shopifyOrderNumber: input.allocation.sourceShopifyOrderNumber,
+    providerMetadata: input.config.providerMetadata,
+  });
+  const missingFields = [
+    ...sender.missingFields.map((field) => field.replace(/^recipient\./, 'sender.')),
+    recipientAddressId ? null : 'recipient.addressId',
+    carrierId ? null : 'carrier_id',
+    Number.isFinite(desi) && desi > 0 ? null : 'post.desi',
+  ].filter((field): field is string => Boolean(field));
+  const payload: NavlungoCreatePostPayload = {
+    platform: 'shopify',
+    posts: [
+      {
+        reference_id: referenceId,
+        carrier_id: carrierId ?? 9,
+        post_type: 3,
+        cod_payment_type: '',
+        sender: {
+          name: sender.recipient.name ?? '',
+          phone: sender.recipient.phone ?? '',
+          email: sender.recipient.email ?? '',
+          address: sender.recipient.address ?? '',
+          country: sender.recipient.country ?? 'tr',
+          city: sender.recipient.city ?? '',
+          district: sender.recipient.district ?? '',
+          post_code: sender.recipient.post_code ?? '',
+        },
+        recipient: recipientAddressId ? { addressId: recipientAddressId } : { addressId: 0 },
+        post: {
+          desi: Number.isFinite(desi) && desi > 0 ? desi : 1,
+          package_count: 1,
+          price: '',
+          note: '',
+        },
+        barcode_format: barcodeFormat,
+        custom_data_1: input.allocation.id,
+        custom_data_2: input.allocation.sourceShopifyOrderNumber ?? '',
+        custom_data_3: input.allocation.assignedVendorId,
+        custom_data_4: 'return_pickup',
+      },
+    ],
+  };
+
+  return {
+    payload,
+    missingFields,
+    summary: summarizeNavlungoCreatePostRequest(payload, input.env),
+    recipientAddressIdValid: Boolean(recipientAddressId),
   };
 }
 
@@ -4145,12 +4229,154 @@ async function persistShopifyReturnLabelUploadProbe(
   return mapShipmentExecution(updated);
 }
 
+async function createNavlungoReturnPickup(
+  existing: ShipmentExecution,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+    dryRun?: boolean;
+    customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
+  },
+): Promise<ShipmentExecutionDto> {
+  if (existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+  const existingSnapshot = readSnapshot(existing);
+  if (isRecord(existingSnapshot.returnShipment) && !options.dryRun) {
+    return mapShipmentExecution(existing);
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: { id: existing.allocationId },
+    include: {
+      order: true,
+      lineItems: {
+        include: {
+          shopifyOrderLineItem: true,
+        },
+      },
+      returnRecords: true,
+    },
+  });
+  if (!allocation || allocation.assignedVendorId !== existing.vendorId) {
+    throw new Error('Allocation could not be found for the selected shipment execution.');
+  }
+
+  const config = await getVendorShippingConfig(existing.vendorId);
+  const built = buildNavlungoReturnPickupPayload({
+    allocation,
+    config,
+    env: options.env,
+    customerOverrides: options.customerOverrides,
+  });
+  const diagnostics = {
+    provider: 'navlungo',
+    flow: 'return_pickup',
+    endpoint: '/post/create',
+    dryRun: options.dryRun === true,
+    navlungoReturnPickupDryRun: options.dryRun === true,
+    navlungoReturnPickupAttempted: options.dryRun !== true,
+    navlungoReturnPickupSucceeded: false,
+    navlungoReturnPickupPayloadSummary: built.summary,
+    navlungoReturnPickupMissingFields: built.missingFields,
+    recipientAddressIdPresent: built.summary.recipientKeys.includes('addressId'),
+    recipientAddressIdValid: built.recipientAddressIdValid,
+    missingFields: built.missingFields,
+  };
+
+  if (options.dryRun) {
+    return {
+      ...mapShipmentExecution(existing),
+      providerResponseSummary: {
+        ...(mapShipmentExecution(existing).providerResponseSummary ?? {}),
+        ...diagnostics,
+      } as ShipmentExecutionDto['providerResponseSummary'],
+    };
+  }
+
+  if (built.missingFields.length > 0) {
+    throw new Error(
+      [
+        'Missing required Navlungo return pickup fields:',
+        ...built.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before create call.',
+      ].join('\n'),
+    );
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'navlungo');
+  if (!adapter.createReturnShipment) {
+    throw new Error('Navlungo return pickup creation is not supported by this adapter.');
+  }
+  const result = await adapter.createReturnShipment({
+    orderId: existing.providerShipmentId ?? existing.id,
+    items: [],
+    requestSnapshot: built.payload as unknown as Record<string, unknown>,
+  });
+  const now = new Date().toISOString();
+  const returnShipment = {
+    provider: 'navlungo',
+    endpoint: '/post/create',
+    returnOrderId: result.returnOrderId,
+    trackingNumber: result.returnTrackingNumber,
+    trackingUrl: result.returnTrackingUrl,
+    labelUrl: result.returnLabelUrl,
+    barcode: result.returnBarcode,
+    carrierName: result.returnCarrierName,
+    status: result.returnStatus,
+    createdAt: now,
+    requestKeys: Object.keys(built.payload),
+    responseKeys: Object.keys(result.responseSnapshot),
+    trackingPresent: Boolean(result.returnTrackingNumber),
+    labelPresent: Boolean(result.returnLabelUrl),
+    labelRetrievalConfirmed: Boolean(result.returnLabelUrl),
+    labelRetrievalNote: result.returnLabelUrl ? null : 'Navlungo return pickup created. Printable label is not available yet.',
+    finalized: Boolean(result.returnOrderId),
+    labelRetrievable: Boolean(result.returnLabelUrl),
+    providerStatusSource: 'return_pickup_create',
+    diagnostics: {
+      ...diagnostics,
+      dryRun: false,
+      httpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
+      responseKeys: Object.keys(result.responseSnapshot),
+      returnProviderIdPresent: Boolean(result.returnOrderId),
+      returnTrackingPresent: Boolean(result.returnTrackingNumber),
+      returnBarcodePresent: Boolean(result.returnBarcode),
+      returnStatus: result.returnStatus,
+      providerMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
+      navlungoReturnPickupSucceeded: Boolean(result.returnOrderId),
+    },
+  };
+  const mergedSnapshot = appendTimelineEvent(
+    {
+      ...existingSnapshot,
+      returnShipment,
+      lastProviderResponseAt: now,
+    },
+    {
+      label: 'Navlungo return pickup created',
+      status: result.returnStatus,
+    },
+  );
+  const updated = await prisma.shipmentExecution.update({
+    where: { id: existing.id },
+    data: {
+      responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+    },
+  });
+  return mapShipmentExecution(updated);
+}
+
 export async function createTryOtoReturnShipmentLabel(
   shipmentExecutionId: string,
   options: {
     env: AppEnv;
     vendorId: string;
     adapter?: ShippingProviderAdapter;
+    dryRun?: boolean;
+    customerOverrides?: CreateShipmentExecutionDto['customerOverrides'];
   },
 ): Promise<ShipmentExecutionDto> {
   const existing = await prisma.shipmentExecution.findUnique({
@@ -4161,6 +4387,10 @@ export async function createTryOtoReturnShipmentLabel(
 
   if (!existing || existing.vendorId !== options.vendorId) {
     throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider === ShippingProvider.NAVLUNGO) {
+    return createNavlungoReturnPickup(existing, options);
   }
 
   if (existing.provider !== ShippingProvider.TRY_OTO) {

@@ -86,7 +86,7 @@ vi.mock('../features/orders/api', async () => {
       payload: unknown,
       options?: { vendorId?: string | null },
     ) => updateNavlungoShipmentExecutionMock(shipmentExecutionId, payload, options),
-    createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+    createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null; dryRun?: boolean }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
     probeTryOtoReturnDetails: (shipmentExecutionId: string) => probeTryOtoReturnDetailsMock(shipmentExecutionId),
@@ -4692,8 +4692,125 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-try_oto-alloc-sporjinal-7621783322961', {
       vendorId: 'sporjinal',
+      dryRun: false,
     });
-    expect((await screen.findAllByText('Try OTO return label created.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Try OTO return shipment label created.')).length).toBeGreaterThan(0);
+  });
+
+  it('previews Navlungo return pickup without live confirmation and gates live create', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    const navlungoShipment = {
+      ...orderWithShipmentSummary.shipmentExecution!,
+      id: 'shipment-navlungo-alloc-sporjinal-7621783322961',
+      provider: 'navlungo' as const,
+      shipmentStatus: 'delivered' as const,
+      providerShipmentId: 'NAV-1028',
+      trackingNumber: 'NAV-TRACK-1028',
+      returnShipment: null,
+      providerResponseSummary: null,
+    };
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: navlungoShipment,
+    });
+    createReturnShipmentLabelMock.mockResolvedValueOnce({
+      ...navlungoShipment,
+      providerResponseSummary: {
+        httpStatus: null,
+        ok: true,
+        contentType: null,
+        parsedBodyType: null,
+        responseKeys: [],
+        providerError: null,
+        dryRun: true,
+        disabledGates: [],
+        providerValidationErrors: [],
+        providerShipmentIdPresent: true,
+        trackingNumberPresent: false,
+        trackingUrlPresent: false,
+        labelPresent: false,
+        barcodePresent: false,
+        notificationUrlIncluded: null,
+        statusField: null,
+        navlungoReturnPickupDryRun: true,
+        navlungoReturnPickupAttempted: false,
+        navlungoReturnPickupSucceeded: false,
+        navlungoReturnPickupMissingFields: [],
+        recipientAddressIdValid: true,
+        navlungoReturnPickupPayloadSummary: {
+          baseUrl: null,
+          baseUrlHost: null,
+          baseUrlPath: null,
+          endpointPath: '/post/create',
+          method: 'POST',
+          headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+          topLevelBodyKeys: ['platform', 'posts'],
+          postKeys: ['reference_id', 'carrier_id', 'post_type', 'sender', 'recipient', 'post', 'barcode_format'],
+          senderKeys: ['name', 'phone', 'email', 'address', 'country', 'city', 'district', 'post_code'],
+          recipientKeys: ['addressId'],
+          postPayloadKeys: ['desi', 'package_count', 'price', 'note'],
+          barcodeFormatPresent: true,
+          barcodeFormatType: 'string',
+          codPaymentTypePresent: true,
+          codPaymentType: 'string-empty',
+          postPricePresent: true,
+          postPriceType: 'string-empty',
+          requestedCarrierId: 9,
+          requestedPostType: 3,
+          senderUsesAddressId: false,
+          senderFullObjectKeysPresent: true,
+          customData1Present: true,
+          customData2Present: true,
+          customData3Present: true,
+          customData4Present: true,
+          recipientDistrictPresent: false,
+          recipientCityPresent: false,
+          recipientCountryPresent: false,
+          recipientPostCodePresent: false,
+          recipientPhonePresent: false,
+          recipientPhoneFormatValid: false,
+          recipientEmailPresent: false,
+          recipientEmailFormatValid: false,
+          recipientAddressPresent: false,
+          recipientAddressLength: 0,
+          packageCountPresent: true,
+          packageCountType: 'number',
+          requestedPackageCount: 1,
+          desiPresent: true,
+          desiType: 'number',
+          requestedDesi: 3,
+          postNotePresent: true,
+          postNoteType: 'string-empty',
+          postNoteLength: 0,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('button', { name: 'Preview Navlungo return pickup' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create live Navlungo return pickup' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Preview Navlungo return pickup' }));
+
+    expect(createReturnShipmentLabelMock).toHaveBeenCalledWith('shipment-navlungo-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+      dryRun: true,
+    });
+    expect(await screen.findByText('Navlungo return pickup preview generated.')).toBeInTheDocument();
+    expect(screen.getAllByText('/post/create').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('3 · 9').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByLabelText('I understand this creates a live Navlungo return pickup.'));
+    expect(screen.getByRole('button', { name: 'Create live Navlungo return pickup' })).toBeEnabled();
   });
 
   it('does not describe unfinalized Try OTO return requests as created return shipments', async () => {

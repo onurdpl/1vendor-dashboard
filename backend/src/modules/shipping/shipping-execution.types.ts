@@ -172,7 +172,7 @@ export type ShipmentExecutionDto = {
   barcodeAssigned: boolean;
   trackingAssigned: boolean;
   returnShipment: {
-    provider: 'try_oto';
+    provider: 'try_oto' | 'navlungo';
     returnOrderId: string | null;
     trackingNumber: string | null;
     trackingUrl: string | null;
@@ -407,6 +407,12 @@ export type ShipmentExecutionDto = {
     navlungoUpdateMissingSenderFields?: string[];
     navlungoUpdatedAt?: string | null;
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
+    navlungoReturnPickupDryRun?: boolean | null;
+    navlungoReturnPickupAttempted?: boolean | null;
+    navlungoReturnPickupSucceeded?: boolean | null;
+    navlungoReturnPickupMissingFields?: string[];
+    navlungoReturnPickupPayloadSummary?: NavlungoCreatePostRequestSummaryDto | null;
+    recipientAddressIdValid?: boolean | null;
     navlungoStatusSyncAttempted?: boolean | null;
     navlungoStatusSyncHttpStatus?: number | null;
     navlungoStatusSyncResolvedProviderUrl?: string | null;
