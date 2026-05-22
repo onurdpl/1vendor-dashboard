@@ -269,7 +269,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
-    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
@@ -298,7 +298,7 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
-    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('selects a finance row by Shopify refund id numeric tail', async () => {
@@ -434,7 +434,9 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('Invoice visibility incomplete')).length).toBeGreaterThan(0);
-    await waitFor(() => expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown'));
+    await waitFor(() =>
+      expect(getInvoiceExecutionResponseSummaryMock).toHaveBeenCalledWith('invoice-exec-unknown', expect.any(Object)),
+    );
     expect(await screen.findByLabelText('Provider issue summary')).toBeInTheDocument();
     expect(screen.getByText('Provider error: Provider did not return invoice artifacts.')).toBeInTheDocument();
     expect(screen.queryByText('Provider response summary')).not.toBeInTheDocument();

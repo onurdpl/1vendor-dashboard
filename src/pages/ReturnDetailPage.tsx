@@ -479,12 +479,12 @@ export function ReturnDetailPage() {
     refetch,
   } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
-    () => {
+    ({ signal }) => {
       if (!returnId) {
         throw new Error('Return not found.');
       }
 
-      return getReturn(returnId, { vendorId: currentVendor.vendorId });
+      return getReturn(returnId, { vendorId: currentVendor.vendorId, signal });
     },
     {
       enabled: returnDetailQueryEnabled,
@@ -494,14 +494,14 @@ export function ReturnDetailPage() {
   );
   const { data: relatedFinanceData } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
-    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(returnRequest),
     },
   );
   const { data: relatedSupportTicketsData } = useQueryResource(
     isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
-    () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
+    ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     {
       enabled: authContextReady && Boolean(returnRequest),
     },

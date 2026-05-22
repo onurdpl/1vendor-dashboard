@@ -218,13 +218,13 @@ export function DashboardPage() {
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
   const { data: dashboard, isLoading, isError, error, diagnostics, refetch: refetchDashboard } = useQueryResource(
     queryKeys.dashboard.overview(vendorId),
-    () => getDashboardOverview(vendorId),
+    ({ signal }) => getDashboardOverview(vendorId, { signal }),
     { enabled: appReadiness.ready },
   );
   const {
     data: notifications,
     refetch: refetchNotifications,
-  } = useQueryResource(notificationQueryKey, () => runtimeServices.notifications.list(notificationScopeVendorId), {
+  } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.list(notificationScopeVendorId, { signal }), {
     enabled: appReadiness.ready,
   });
   const markNotificationReadMutation = useMutationAction(

@@ -146,24 +146,24 @@ export function AdminDiagnosticsPage() {
   const [showPayloadPreview, setShowPayloadPreview] = useState(false);
   const isRealMode = runtimeConfig.apiMode === 'real';
 
-  const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), () =>
-    runtimeServices.diagnostics.webhooks(),
+  const webhooksQuery = useQueryResource(queryKeys.admin.diagnostics.webhooks(), ({ signal }) =>
+    runtimeServices.diagnostics.webhooks({ signal }),
     { enabled: appReadiness.ready },
   );
-  const reconciliationQuery = useQueryResource(queryKeys.admin.diagnostics.reconciliation(), () =>
-    runtimeServices.diagnostics.reconciliation(),
+  const reconciliationQuery = useQueryResource(queryKeys.admin.diagnostics.reconciliation(), ({ signal }) =>
+    runtimeServices.diagnostics.reconciliation({ signal }),
     { enabled: appReadiness.ready },
   );
-  const syncEventsQuery = useQueryResource(queryKeys.admin.diagnostics.syncEvents(), () =>
-    runtimeServices.diagnostics.syncEvents(),
+  const syncEventsQuery = useQueryResource(queryKeys.admin.diagnostics.syncEvents(), ({ signal }) =>
+    runtimeServices.diagnostics.syncEvents({ signal }),
     { enabled: appReadiness.ready },
   );
-  const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), () =>
-    runtimeServices.observability.summary(),
+  const observabilityQuery = useQueryResource(queryKeys.admin.observability.summary(), ({ signal }) =>
+    runtimeServices.observability.summary({ signal }),
     { enabled: appReadiness.ready },
   );
-  const runtimeHealthQuery = useQueryResource(queryKeys.admin.runtime.health(), () =>
-    runtimeServices.runtime.health(),
+  const runtimeHealthQuery = useQueryResource(queryKeys.admin.runtime.health(), ({ signal }) =>
+    runtimeServices.runtime.health({ signal }),
     { enabled: appReadiness.ready && isRealMode },
   );
 
@@ -177,12 +177,12 @@ export function AdminDiagnosticsPage() {
     latestWebhookEventId
       ? queryKeys.admin.diagnostics.webhookDetail(latestWebhookEventId)
       : queryKeys.admin.diagnostics.webhooks(),
-    () => {
+    ({ signal }) => {
       if (!latestWebhookEventId) {
         throw new Error('Webhook event not found.');
       }
 
-      return runtimeServices.diagnostics.webhookDetail(latestWebhookEventId);
+      return runtimeServices.diagnostics.webhookDetail(latestWebhookEventId, { signal });
     },
     {
       enabled: appReadiness.ready && Boolean(latestWebhookEventId) && isRealMode,

@@ -60,22 +60,22 @@ export function VendorInboxPage() {
 
   const supportQuery = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
-    listVendorSupportTickets,
+    ({ signal }) => listVendorSupportTickets({ signal }),
     { enabled: appReadiness.ready },
   );
   const ordersQuery = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
-    () => listOrders({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
     { enabled: appReadiness.ready },
   );
   const returnsQuery = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
-    () => listReturns({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
     { enabled: appReadiness.ready },
   );
   const financeQuery = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
-    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     { enabled: appReadiness.ready },
   );
 

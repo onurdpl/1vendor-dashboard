@@ -5,24 +5,24 @@ export async function createSupportTicket(input: CreateSupportTicketInput): Prom
   return apiClient.post<SupportTicket>('/support/tickets', input);
 }
 
-export async function listAdminSupportTickets(): Promise<SupportTicket[]> {
-  return apiClient.get<SupportTicket[]>('/admin/support/tickets');
+export async function listAdminSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
+  return apiClient.get<SupportTicket[]>('/admin/support/tickets', { signal: options.signal });
 }
 
-export async function getAdminSupportAnalytics(): Promise<SupportAnalytics> {
-  return apiClient.get<SupportAnalytics>('/admin/support/analytics');
+export async function getAdminSupportAnalytics(options: { signal?: AbortSignal } = {}): Promise<SupportAnalytics> {
+  return apiClient.get<SupportAnalytics>('/admin/support/analytics', { signal: options.signal });
 }
 
-export async function listVendorSupportTickets(): Promise<SupportTicket[]> {
-  return apiClient.get<SupportTicket[]>('/support/tickets');
+export async function listVendorSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
+  return apiClient.get<SupportTicket[]>('/support/tickets', { signal: options.signal });
 }
 
-export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicket> {
-  return apiClient.get<SupportTicket>(`/admin/support/tickets/${ticketId}`);
+export async function getAdminSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {
+  return apiClient.get<SupportTicket>(`/admin/support/tickets/${ticketId}`, { signal: options.signal });
 }
 
-export async function getVendorSupportTicket(ticketId: string): Promise<SupportTicket> {
-  return apiClient.get<SupportTicket>(`/support/tickets/${ticketId}`);
+export async function getVendorSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {
+  return apiClient.get<SupportTicket>(`/support/tickets/${ticketId}`, { signal: options.signal });
 }
 
 export async function updateAdminSupportTicketStatus(ticketId: string, status: SupportTicketStatus): Promise<SupportTicket> {

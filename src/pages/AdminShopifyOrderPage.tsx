@@ -36,12 +36,12 @@ export function AdminShopifyOrderPage() {
   );
   const { data: breakdown, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
-    () => {
+    ({ signal }) => {
       if (!shopifyOrderId) {
         throw new Error('Shopify order not found.');
       }
 
-      return getAdminShopifyOrderBreakdown(shopifyOrderId);
+      return getAdminShopifyOrderBreakdown(shopifyOrderId, { signal });
     },
     {
       enabled: appReadiness.ready && Boolean(shopifyOrderId),

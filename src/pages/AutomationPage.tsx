@@ -22,7 +22,7 @@ export function AutomationPage() {
   const currentVendor = appReadiness.currentVendor;
   const { data: automation, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.automation.alerts(currentVendor.vendorId),
-    getAutomationDashboard,
+    ({ signal }) => getAutomationDashboard({ signal }),
     { enabled: appReadiness.ready },
   );
   const { message, tone, showFeedback } = useActionFeedback();

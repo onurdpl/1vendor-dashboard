@@ -203,7 +203,7 @@ export function OrdersPage() {
   const isAdmin = currentUser?.role === 'admin';
   const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
-    () => listOrders({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady },
   );
   const [searchTerm, setSearchTerm] = useState('');
@@ -296,11 +296,11 @@ export function OrdersPage() {
     selectedOrderSummary
       ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
       : ['orders', 'detail', currentVendor.vendorId, 'empty'],
-    () => {
+    ({ signal }) => {
       if (!selectedOrderSummary) {
         throw new Error('Order not found.');
       }
-      return getOrder(selectedOrderSummary.id, { vendorId: currentVendor.vendorId });
+      return getOrder(selectedOrderSummary.id, { vendorId: currentVendor.vendorId, signal });
     },
     { enabled: authContextReady && Boolean(selectedOrderSummary) },
   );

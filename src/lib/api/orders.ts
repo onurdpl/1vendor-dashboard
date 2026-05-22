@@ -2,16 +2,16 @@ import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
 import type { UpdateNavlungoShipmentPayload } from '../../services/real/orders';
 
-export async function listOrders(options: { vendorId?: string | null } = {}) {
-  return runtimeServices.orders.list(options.vendorId ?? undefined);
+export async function listOrders(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.list(options.vendorId ?? undefined, { signal: options.signal });
 }
 
-export async function getOrder(orderId: string, options: { vendorId?: string | null } = {}) {
-  return runtimeServices.orders.detail(orderId, options.vendorId ?? undefined);
+export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.detail(orderId, options.vendorId ?? undefined, { signal: options.signal });
 }
 
-export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string) {
-  return runtimeServices.orders.adminBreakdown(shopifyOrderId);
+export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.adminBreakdown(shopifyOrderId, { signal: options.signal });
 }
 
 export async function submitFulfillmentTracking(
@@ -118,13 +118,13 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 }
 
 export async function getShippingProviderDiagnostics(
-  options: { vendorId?: string | null; provider?: ShippingProvider | 'navlungo' | null } = {},
+  options: { vendorId?: string | null; provider?: ShippingProvider | 'navlungo' | null; signal?: AbortSignal } = {},
 ) {
-  return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined, options.provider ?? undefined);
+  return runtimeServices.orders.shippingProviderDiagnostics(options.vendorId ?? undefined, options.provider ?? undefined, { signal: options.signal });
 }
 
-export async function getVendorShippingConfig(options: { vendorId?: string | null } = {}) {
-  return runtimeServices.orders.vendorShippingConfig(options.vendorId ?? undefined);
+export async function getVendorShippingConfig(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.orders.vendorShippingConfig(options.vendorId ?? undefined, { signal: options.signal });
 }
 
 export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {

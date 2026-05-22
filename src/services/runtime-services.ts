@@ -39,6 +39,8 @@ function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
 }
 
+type ReadRequestOptions = { signal?: AbortSignal };
+
 const mockSupportTickets: SupportTicket[] = [];
 
 function calculateMockSupportDueAt(priority: SupportTicket['priority'], baseDate = new Date()) {
@@ -195,9 +197,9 @@ function buildMockSupportAnalytics(): SupportAnalytics {
 
 export const runtimeServices = {
   runtime: {
-    health: () =>
+    health: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realRuntime.getBackendHealth()
+        ? realRuntime.getBackendHealth({ signal: options.signal })
         : Promise.resolve({
             ok: true,
             status: 'ok' as const,
@@ -260,11 +262,11 @@ export const runtimeServices = {
     },
   },
   orders: {
-    list: (vendorId = getCurrentVendorId()) =>
-      runtimeConfig.apiMode === 'real' ? realOrders.listOrders({ vendorId }) : Promise.resolve(listMockOrders(vendorId)),
-    async detail(orderId: string, vendorId = getCurrentVendorId()) {
+    list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real' ? realOrders.listOrders({ vendorId, signal: options.signal }) : Promise.resolve(listMockOrders(vendorId)),
+    async detail(orderId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getOrder(orderId, { vendorId });
+        return realOrders.getOrder(orderId, { vendorId, signal: options.signal });
       }
 
       const order = getMockOrder(orderId, vendorId);
@@ -273,9 +275,9 @@ export const runtimeServices = {
       }
       return order;
     },
-    async adminBreakdown(shopifyOrderId: string) {
+    async adminBreakdown(shopifyOrderId: string, options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getAdminShopifyOrderBreakdown(shopifyOrderId);
+        return realOrders.getAdminShopifyOrderBreakdown(shopifyOrderId, { signal: options.signal });
       }
 
       const breakdown = getShopifyOrderBreakdown(shopifyOrderId);
@@ -1041,9 +1043,13 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
-    async shippingProviderDiagnostics(vendorId = getCurrentVendorId(), provider: ShippingProvider | 'navlungo' = 'kargo_entegrator') {
+    async shippingProviderDiagnostics(
+      vendorId = getCurrentVendorId(),
+      provider: ShippingProvider | 'navlungo' = 'kargo_entegrator',
+      options: ReadRequestOptions = {},
+    ) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getShippingProviderDiagnostics(provider, { vendorId });
+        return realOrders.getShippingProviderDiagnostics(provider, { vendorId, signal: options.signal });
       }
 
       if (provider === 'navlungo') {
@@ -1111,9 +1117,9 @@ export const runtimeServices = {
         ],
       };
     },
-    async vendorShippingConfig(vendorId = getCurrentVendorId()) {
+    async vendorShippingConfig(vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realOrders.getVendorShippingConfig({ vendorId });
+        return realOrders.getVendorShippingConfig({ vendorId, signal: options.signal });
       }
 
       return {
@@ -1173,11 +1179,11 @@ export const runtimeServices = {
     },
   },
   returns: {
-    list: (vendorId = getCurrentVendorId()) =>
-      runtimeConfig.apiMode === 'real' ? realReturns.listReturns({ vendorId }) : Promise.resolve(listMockReturns(vendorId)),
-    async detail(returnId: string, vendorId = getCurrentVendorId()) {
+    list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real' ? realReturns.listReturns({ vendorId, signal: options.signal }) : Promise.resolve(listMockReturns(vendorId)),
+    async detail(returnId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realReturns.getReturn(returnId, { vendorId });
+        return realReturns.getReturn(returnId, { vendorId, signal: options.signal });
       }
 
       const returnRecord = getMockReturn(returnId, vendorId);
@@ -1348,9 +1354,9 @@ export const runtimeServices = {
     },
   },
   finance: {
-    dashboard: (vendorId = getCurrentVendorId()) =>
+    dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realFinance.getFinanceDashboard({ vendorId })
+        ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal })
         : Promise.resolve(getMockFinanceDashboard(vendorId)),
     updateProfile: (
       vendorId: string,
@@ -1459,9 +1465,9 @@ export const runtimeServices = {
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           }),
-    getInvoiceExecutionResponseSummary: (invoiceExecutionId: string) =>
+    getInvoiceExecutionResponseSummary: (invoiceExecutionId: string, options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realFinance.getInvoiceExecutionResponseSummary(invoiceExecutionId)
+        ? realFinance.getInvoiceExecutionResponseSummary(invoiceExecutionId, { signal: options.signal })
         : Promise.resolve({
             id: invoiceExecutionId,
             provider: 'bizimhesap' as const,
@@ -1483,25 +1489,25 @@ export const runtimeServices = {
           }),
   },
   automation: {
-    dashboard: (vendorId = getCurrentVendorId()) =>
+    dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realAutomation.getAutomationDashboard(vendorId)
+        ? realAutomation.getAutomationDashboard(vendorId, { signal: options.signal })
         : Promise.resolve(getMockAutomationDashboard(vendorId)),
   },
   operations: {
-    list: () =>
+    list: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.listAdminOperationsQueue()
+        ? realOperations.listAdminOperationsQueue({ signal: options.signal })
         : Promise.resolve(listMockAdminOperationsQueue()),
-    attention: () =>
+    attention: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.getAdminOperationsAttention()
+        ? realOperations.getAdminOperationsAttention({ signal: options.signal })
         : Promise.resolve(getMockAdminOperationsAttention()),
   },
   signals: {
-    list: (vendorId = getCurrentVendorId()) =>
+    list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSignals.listOperationalSignals(vendorId)
+        ? realSignals.listOperationalSignals(vendorId, { signal: options.signal })
         : Promise.resolve({
             summary: {
               total: 0,
@@ -1514,9 +1520,9 @@ export const runtimeServices = {
           }),
   },
   notifications: {
-    list: (vendorId: string | null = getCurrentVendorId()) =>
+    list: (vendorId: string | null = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realNotifications.listNotifications(vendorId)
+        ? realNotifications.listNotifications(vendorId, { signal: options.signal })
         : Promise.resolve({
             summary: {
               total: 0,
@@ -1607,21 +1613,21 @@ export const runtimeServices = {
       mockSupportTickets.unshift(ticket);
       return toMockVendorSupportTicket(ticket);
     },
-    listAdmin: () =>
+    listAdmin: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSupport.listAdminSupportTickets()
+        ? realSupport.listAdminSupportTickets({ signal: options.signal })
         : Promise.resolve(mockSupportTickets),
-    analytics: () =>
+    analytics: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSupport.getAdminSupportAnalytics()
+        ? realSupport.getAdminSupportAnalytics({ signal: options.signal })
         : Promise.resolve(buildMockSupportAnalytics()),
-    listVendor: () =>
+    listVendor: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSupport.listVendorSupportTickets()
+        ? realSupport.listVendorSupportTickets({ signal: options.signal })
         : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId()).map(toMockVendorSupportTicket)),
-    async detailAdmin(ticketId: string) {
+    async detailAdmin(ticketId: string, options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realSupport.getAdminSupportTicket(ticketId);
+        return realSupport.getAdminSupportTicket(ticketId, { signal: options.signal });
       }
       const ticket = mockSupportTickets.find((item) => item.id === ticketId);
       if (!ticket) {
@@ -1630,9 +1636,9 @@ export const runtimeServices = {
       ticket.adminUnreadCount = 0;
       return ticket;
     },
-    async detailVendor(ticketId: string) {
+    async detailVendor(ticketId: string, options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        return realSupport.getVendorSupportTicket(ticketId);
+        return realSupport.getVendorSupportTicket(ticketId, { signal: options.signal });
       }
       const ticket = mockSupportTickets.find((item) => item.id === ticketId && item.vendorId === getCurrentVendorId());
       if (!ticket) {
@@ -1782,9 +1788,9 @@ export const runtimeServices = {
     },
   },
   diagnostics: {
-    webhooks: () =>
+    webhooks: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realDiagnostics.listWebhookDiagnostics()
+        ? realDiagnostics.listWebhookDiagnostics({ signal: options.signal })
         : Promise.resolve({
             summary: {
               total: 0,
@@ -1796,9 +1802,9 @@ export const runtimeServices = {
             },
             events: [],
           }),
-    webhookDetail: (webhookEventId: string) =>
+    webhookDetail: (webhookEventId: string, options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realDiagnostics.getWebhookDiagnostic(webhookEventId)
+        ? realDiagnostics.getWebhookDiagnostic(webhookEventId, { signal: options.signal })
         : Promise.resolve({
             id: webhookEventId,
             topic: 'mock',
@@ -1834,15 +1840,15 @@ export const runtimeServices = {
             updatedAt: new Date().toISOString(),
             relatedShopifyOrderId: null,
           }),
-    syncEvents: () =>
+    syncEvents: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realDiagnostics.listSyncEvents()
+        ? realDiagnostics.listSyncEvents({ signal: options.signal })
         : Promise.resolve({
             items: [],
           }),
-    reconciliation: () =>
+    reconciliation: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realDiagnostics.getReconciliationDiagnostics()
+        ? realDiagnostics.getReconciliationDiagnostics({ signal: options.signal })
         : Promise.resolve({
             summary: {
               stuckReceived: 0,
@@ -2179,9 +2185,9 @@ export const runtimeServices = {
           }),
   },
   observability: {
-    summary: () =>
+    summary: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realObservability.getObservabilitySummary()
+        ? realObservability.getObservabilitySummary({ signal: options.signal })
         : Promise.resolve({
             health: 'healthy' as const,
             generatedAt: new Date().toISOString(),

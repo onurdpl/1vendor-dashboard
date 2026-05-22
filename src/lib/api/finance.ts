@@ -1,8 +1,8 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { VendorFinancialProfile } from './contracts';
 
-export function getFinanceDashboard(options: { vendorId?: string | null } = {}) {
-  return runtimeServices.finance.dashboard(options.vendorId ?? undefined);
+export function getFinanceDashboard(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
 }
 
 export function updateVendorFinancialProfile(
@@ -43,6 +43,6 @@ export function retryInvoiceExecution(invoiceExecutionId: string) {
   return runtimeServices.finance.retryInvoiceExecution(invoiceExecutionId);
 }
 
-export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string) {
-  return runtimeServices.finance.getInvoiceExecutionResponseSummary(invoiceExecutionId);
+export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string, options: { signal?: AbortSignal } = {}) {
+  return runtimeServices.finance.getInvoiceExecutionResponseSummary(invoiceExecutionId, { signal: options.signal });
 }

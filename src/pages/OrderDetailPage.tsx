@@ -1382,12 +1382,12 @@ export function OrderDetailPage() {
   const refetchOrderRef = useRef<(() => unknown) | null>(null);
   const { data: order, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
-    () => {
+    ({ signal }) => {
       if (!orderId) {
         throw new Error('Order not found.');
       }
 
-      return getOrder(orderId, { vendorId: currentVendor.vendorId });
+      return getOrder(orderId, { vendorId: currentVendor.vendorId, signal });
     },
     {
       enabled: authContextReady && Boolean(orderId),
@@ -1395,7 +1395,7 @@ export function OrderDetailPage() {
   );
   const { data: vendorShippingConfig, refetch: refetchVendorShippingConfig } = useQueryResource(
     queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
-    () => getVendorShippingConfig({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId),
     },
@@ -1408,49 +1408,49 @@ export function OrderDetailPage() {
         : 'kargo_entegrator';
   const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
-    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider }),
+    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider, signal }),
     {
       enabled: authContextReady && isAdmin,
     },
   );
   const { data: tryOtoOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('try_oto', currentVendor.vendorId),
-    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto' }),
+    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto', signal }),
     {
       enabled: authContextReady && isAdmin,
     },
   );
   const { data: kargonomiOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('kargonomi', currentVendor.vendorId),
-    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi' }),
+    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi', signal }),
     {
       enabled: authContextReady && isAdmin,
     },
   );
   const { data: navlungoOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('navlungo', currentVendor.vendorId),
-    () => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'navlungo' }),
+    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'navlungo', signal }),
     {
       enabled: authContextReady && isAdmin,
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
-    () => listReturns({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(order),
     },
   );
   const { data: relatedFinanceData } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
-    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(order),
     },
   );
   const { data: relatedSupportTicketsData } = useQueryResource(
     isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
-    () => (isAdmin ? listAdminSupportTickets() : listVendorSupportTickets()),
+    ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     {
       enabled: authContextReady && Boolean(order),
     },

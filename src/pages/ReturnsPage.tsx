@@ -438,7 +438,7 @@ export function ReturnsPage() {
   const authContextReady = appReadiness.ready;
   const { data: returns, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.returns.list(currentVendor.vendorId),
-    () => listReturns({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => listReturns({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady },
   );
   const [searchTerm, setSearchTerm] = useState('');
@@ -560,12 +560,12 @@ export function ReturnsPage() {
 
   const detailQuery = useQueryResource(
     selectedReturn ? queryKeys.returns.detail(selectedReturn.id, currentVendor.vendorId) : ['returns', 'detail', currentVendor.vendorId, 'empty'],
-    () => {
+    ({ signal }) => {
       if (!selectedReturn) {
         throw new Error('Return not selected.');
       }
 
-      return getReturn(selectedReturn.id, { vendorId: currentVendor.vendorId });
+      return getReturn(selectedReturn.id, { vendorId: currentVendor.vendorId, signal });
     },
     {
       enabled: authContextReady && Boolean(selectedReturn),

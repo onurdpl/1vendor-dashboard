@@ -130,7 +130,7 @@ export function AdminSupportTicketsPage() {
   const currentUser = appReadiness.currentUser;
   const { data: tickets, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.admin.support.tickets(),
-    listAdminSupportTickets,
+    ({ signal }) => listAdminSupportTickets({ signal }),
     { enabled: appReadiness.ready },
   );
   const [searchTerm, setSearchTerm] = useState('');

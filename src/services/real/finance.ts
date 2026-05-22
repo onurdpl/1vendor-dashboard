@@ -98,16 +98,19 @@ export const __financeStatusMapping = {
   mapRecordStatusLabel,
 };
 
-function readVendorRequestOptions(vendorId?: string | null) {
-  return vendorId ? { vendorId } : undefined;
+function readVendorRequestOptions(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  const requestOptions: { vendorId?: string; signal?: AbortSignal } = {};
+  if (options.vendorId) requestOptions.vendorId = options.vendorId;
+  if (options.signal) requestOptions.signal = options.signal;
+  return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null } = {}): Promise<FinanceDashboard> {
+export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal } = {}): Promise<FinanceDashboard> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   const path = `/finance${params.size ? `?${params.toString()}` : ''}`;
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.get<FinanceDashboardDto>(path, requestOptions)
     : apiClient.get<FinanceDashboardDto>(path));
@@ -246,8 +249,12 @@ export function retryInvoiceExecution(invoiceExecutionId: string): Promise<Invoi
   return apiClient.post<InvoiceExecutionReference>(`/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/retry`);
 }
 
-export function getInvoiceExecutionResponseSummary(invoiceExecutionId: string): Promise<InvoiceExecutionResponseSummary> {
+export function getInvoiceExecutionResponseSummary(
+  invoiceExecutionId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<InvoiceExecutionResponseSummary> {
   return apiClient.get<InvoiceExecutionResponseSummary>(
     `/admin/invoices/${encodeURIComponent(invoiceExecutionId)}/response-summary`,
+    { signal: options.signal },
   );
 }

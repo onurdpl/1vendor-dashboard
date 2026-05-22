@@ -12,6 +12,6 @@ export type BackendHealthResponse = {
   migrationsReachable: boolean;
 };
 
-export async function getBackendHealth() {
-  return apiClient.get<BackendHealthResponse>('/health');
+export async function getBackendHealth(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<BackendHealthResponse>('/health', { signal: options.signal });
 }

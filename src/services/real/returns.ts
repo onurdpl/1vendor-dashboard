@@ -303,16 +303,19 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
   };
 }
 
-function readVendorRequestOptions(vendorId?: string | null) {
-  return vendorId ? { vendorId } : undefined;
+function readVendorRequestOptions(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  const requestOptions: { vendorId?: string; signal?: AbortSignal } = {};
+  if (options.vendorId) requestOptions.vendorId = options.vendorId;
+  if (options.signal) requestOptions.signal = options.signal;
+  return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function listReturns(options: { limit?: number; offset?: number; vendorId?: string | null } = {}) {
+export async function listReturns(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   const path = `/returns${params.size ? `?${params.toString()}` : ''}`;
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.get<ReturnSummaryDto[]>(path, requestOptions)
     : apiClient.get<ReturnSummaryDto[]>(path));
@@ -320,8 +323,8 @@ export async function listReturns(options: { limit?: number; offset?: number; ve
   return mapped;
 }
 
-export async function getReturn(returnId: string, options: { vendorId?: string | null } = {}): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+export async function getReturn(returnId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.get<ReturnDetailDto>(`/returns/${returnId}`, requestOptions)
     : apiClient.get<ReturnDetailDto>(`/returns/${returnId}`));
@@ -382,7 +385,7 @@ export async function createNavlungoReturnPickup(
   } = {},
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input));
@@ -426,7 +429,7 @@ export async function saveNavlungoReturnPickupAddressCompletion(
   input: { customerOverrides?: Record<string, string | undefined> } = {},
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input));
@@ -469,7 +472,7 @@ export async function syncNavlungoReturnStatus(
   returnId: string,
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-status-sync`, {}, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-status-sync`, {}));
@@ -512,7 +515,7 @@ export async function markReturnReceived(
   returnId: string,
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/mark-received`, {}, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/mark-received`, {}));
@@ -559,7 +562,7 @@ export async function reviewReturn(
   input: { decision: 'approved' | 'rejected'; reason?: string },
   options: { vendorId?: string | null } = {},
 ): Promise<ReturnDetail> {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/review`, input, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/review`, input));

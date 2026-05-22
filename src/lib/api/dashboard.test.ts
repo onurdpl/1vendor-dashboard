@@ -125,7 +125,7 @@ describe('getDashboardOverview real-mode aggregation', () => {
       kind: 'unauthorized',
       status: 401,
     } satisfies Partial<InstanceType<typeof ApiError>>);
-    expect(services.orders.list).toHaveBeenCalledWith('demo-vendor-a');
+    expect(services.orders.list).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object));
   });
 
   it('propagates 403 failures from finance instead of returning a partial finance snapshot', async () => {
@@ -157,12 +157,12 @@ describe('getDashboardOverview real-mode aggregation', () => {
 
     await getDashboardOverview('vendor-query-key');
 
-    expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.finance.dashboard).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.notifications.list).toHaveBeenCalledWith('vendor-query-key');
+    expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.finance.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.notifications.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
   });
 
   it('uses explicit global admin notification scope for admin dashboard aggregation', async () => {
@@ -170,8 +170,8 @@ describe('getDashboardOverview real-mode aggregation', () => {
 
     await getDashboardOverview('vendor-query-key');
 
-    expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key');
-    expect(services.notifications.list).toHaveBeenCalledWith(null);
+    expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
   });
 
   it('keeps admin vendor switch dashboard query keys distinct', () => {

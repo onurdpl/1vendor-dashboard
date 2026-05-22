@@ -35,7 +35,7 @@ export function VendorSupportTicketsPage() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const { data: tickets, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
-    listVendorSupportTickets,
+    ({ signal }) => listVendorSupportTickets({ signal }),
     { enabled: appReadiness.ready },
   );
 

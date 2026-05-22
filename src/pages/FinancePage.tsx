@@ -489,12 +489,12 @@ export function FinancePage() {
   const authContextReady = appReadiness.ready;
   const { data: finance, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
-    () => getFinanceDashboard({ vendorId: currentVendor.vendorId }),
+    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady },
   );
   const { data: supportTickets } = useQueryResource(
     currentUser?.role === 'admin' ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
-    () => (currentUser?.role === 'admin' ? listAdminSupportTickets() : listVendorSupportTickets()),
+    ({ signal }) => (currentUser?.role === 'admin' ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     { enabled: authContextReady },
   );
   const { message, tone, showFeedback } = useActionFeedback();
@@ -717,7 +717,7 @@ export function FinancePage() {
     ['failed', 'unknown'].includes(selectedRecord?.invoiceExecution?.status ?? '');
   const invoiceResponseSummaryQuery = useQueryResource(
     queryKeys.finance.invoiceResponseSummary(selectedRecord?.invoiceExecution?.id ?? 'none'),
-    () => getInvoiceExecutionResponseSummary(selectedRecord!.invoiceExecution!.id),
+    ({ signal }) => getInvoiceExecutionResponseSummary(selectedRecord!.invoiceExecution!.id, { signal }),
     { enabled: shouldLoadInvoiceResponseSummary },
   );
   const selectedInvoiceCapabilities = getProviderCapabilities(selectedRecord?.invoiceExecution ?? null);

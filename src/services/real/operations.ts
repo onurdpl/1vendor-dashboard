@@ -47,11 +47,13 @@ function mapSeverity(severity: OperationsResponseDto['items'][number]['severity'
   return 'critical';
 }
 
-export async function listAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueItem[]> {
+export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<OperationsQueueItem[]> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  const response = await apiClient.get<OperationsResponseDto>(`/admin/operations${params.size ? `?${params.toString()}` : ''}`);
+  const response = await apiClient.get<OperationsResponseDto>(`/admin/operations${params.size ? `?${params.toString()}` : ''}`, {
+    signal: options.signal,
+  });
 
   return response.items.map((item) => ({
     id: item.id,
@@ -70,6 +72,6 @@ export async function listAdminOperationsQueue(options: { limit?: number; offset
   }));
 }
 
-export async function getAdminOperationsAttention(): Promise<OperationsAttentionDashboard> {
-  return apiClient.get<OperationsAttentionDashboard>('/admin/operations/attention');
+export async function getAdminOperationsAttention(options: { signal?: AbortSignal } = {}): Promise<OperationsAttentionDashboard> {
+  return apiClient.get<OperationsAttentionDashboard>('/admin/operations/attention', { signal: options.signal });
 }

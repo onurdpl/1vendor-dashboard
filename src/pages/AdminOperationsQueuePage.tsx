@@ -85,8 +85,8 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
 
 export function AdminOperationsQueuePage() {
   const appReadiness = useAppReadiness();
-  const { data, isLoading, isError, error, diagnostics, refetch } = useQueryResource(queryKeys.admin.operations.attention(), () =>
-    runtimeServices.operations.attention(),
+  const { data, isLoading, isError, error, diagnostics, refetch } = useQueryResource(queryKeys.admin.operations.attention(), ({ signal }) =>
+    runtimeServices.operations.attention({ signal }),
     { enabled: appReadiness.ready },
   );
 

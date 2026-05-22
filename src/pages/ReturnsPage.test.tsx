@@ -226,7 +226,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage();
 
     expect(await screen.findByRole('heading', { name: /return requests/i })).toBeInTheDocument();
-    expect(listReturnsMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+    expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Wireless label printer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SKU-A-1').length).toBeGreaterThan(0);
@@ -248,7 +248,7 @@ describe('ReturnsPage control center', () => {
     await userEvent.click(screen.getAllByText('#1002')[0]);
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
-    expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
+    expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(screen.getAllByText('Standard').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.queryByText('Included in payout calculations')).not.toBeInTheDocument();
@@ -263,9 +263,9 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage([`/returns?refundId=${encodeURIComponent(processedRefund.sourceShopifyRefundId ?? '')}`]);
 
     await waitFor(() =>
-      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' })),
     );
-    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('selects a return by Shopify refund numeric tail', async () => {
@@ -275,9 +275,9 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage(['/returns?refundId=5002']);
 
     await waitFor(() =>
-      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' })),
     );
-    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('selects a return by Shopify return numeric tail', async () => {
@@ -287,9 +287,9 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage(['/returns?shopifyReturnId=9001']);
 
     await waitFor(() =>
-      expect(getReturnMock).toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' }),
+      expect(getReturnMock).toHaveBeenCalledWith(pendingReturn.id, expect.objectContaining({ vendorId: 'demo-vendor-a' })),
     );
-    expect(getReturnMock).not.toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' });
+    expect(getReturnMock).not.toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('clears stale selected return state when a linked query target changes', async () => {
@@ -306,9 +306,9 @@ describe('ReturnsPage control center', () => {
     await user.click(screen.getByRole('button', { name: 'Navigate to linked return' }));
 
     await waitFor(() =>
-      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, { vendorId: 'demo-vendor-a' }),
+      expect(getReturnMock).toHaveBeenCalledWith(processedRefund.id, expect.objectContaining({ vendorId: 'demo-vendor-a' })),
     );
-    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, { vendorId: 'demo-vendor-a' });
+    expect(getReturnMock).not.toHaveBeenCalledWith(pendingReturn.id, expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('does not select the first return when a linked query target is unavailable', async () => {

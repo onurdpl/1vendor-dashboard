@@ -148,7 +148,7 @@ function createPriorityWork(input: {
   ];
 }
 
-async function buildRealDashboardOverview(vendorId?: VendorId): Promise<DashboardOverview> {
+async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal?: AbortSignal } = {}): Promise<DashboardOverview> {
   const currentVendorId = resolveVendorId(vendorId);
   const currentVendor = getCurrentVendorContext();
   const currentUser = getCurrentUser();
@@ -156,15 +156,15 @@ async function buildRealDashboardOverview(vendorId?: VendorId): Promise<Dashboar
 
   const partialDataWarnings: string[] = [];
   const dashboardRequests = await Promise.allSettled([
-    runtimeServices.orders.list(currentVendorId),
-    runtimeServices.returns.list(currentVendorId),
-    runtimeServices.finance.dashboard(currentVendorId),
-    runtimeServices.automation.dashboard(currentVendorId),
-    currentUser?.role === 'admin' ? runtimeServices.operations.list() : Promise.resolve(null),
-    runtimeServices.signals.list(currentVendorId),
-    runtimeServices.notifications.list(notificationScopeVendorId),
-    currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation() : Promise.resolve(null),
-    currentUser?.role === 'admin' ? runtimeServices.observability.summary() : Promise.resolve(null),
+    runtimeServices.orders.list(currentVendorId, { signal: options.signal }),
+    runtimeServices.returns.list(currentVendorId, { signal: options.signal }),
+    runtimeServices.finance.dashboard(currentVendorId, { signal: options.signal }),
+    runtimeServices.automation.dashboard(currentVendorId, { signal: options.signal }),
+    currentUser?.role === 'admin' ? runtimeServices.operations.list({ signal: options.signal }) : Promise.resolve(null),
+    runtimeServices.signals.list(currentVendorId, { signal: options.signal }),
+    runtimeServices.notifications.list(notificationScopeVendorId, { signal: options.signal }),
+    currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation({ signal: options.signal }) : Promise.resolve(null),
+    currentUser?.role === 'admin' ? runtimeServices.observability.summary({ signal: options.signal }) : Promise.resolve(null),
   ]);
 
   throwDashboardAuthError(dashboardRequests);
@@ -331,9 +331,9 @@ export function buildDashboardOverview(vendorId?: VendorId): DashboardOverview {
   return buildMockDashboardOverview(vendorId);
 }
 
-export async function getDashboardOverview(vendorId?: VendorId): Promise<DashboardOverview> {
+export async function getDashboardOverview(vendorId?: VendorId, options: { signal?: AbortSignal } = {}): Promise<DashboardOverview> {
   if (runtimeConfig.apiMode === 'real') {
-    return buildRealDashboardOverview(vendorId);
+    return buildRealDashboardOverview(vendorId, options);
   }
 
   return buildMockDashboardOverview(vendorId);

@@ -5,24 +5,24 @@ export async function createSupportTicket(input: CreateSupportTicketInput): Prom
   return runtimeServices.support.create(input);
 }
 
-export async function listAdminSupportTickets(): Promise<SupportTicket[]> {
-  return runtimeServices.support.listAdmin();
+export async function listAdminSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
+  return runtimeServices.support.listAdmin({ signal: options.signal });
 }
 
-export async function getAdminSupportAnalytics(): Promise<SupportAnalytics> {
-  return runtimeServices.support.analytics();
+export async function getAdminSupportAnalytics(options: { signal?: AbortSignal } = {}): Promise<SupportAnalytics> {
+  return runtimeServices.support.analytics({ signal: options.signal });
 }
 
-export async function listVendorSupportTickets(): Promise<SupportTicket[]> {
-  return runtimeServices.support.listVendor();
+export async function listVendorSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
+  return runtimeServices.support.listVendor({ signal: options.signal });
 }
 
-export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicket> {
-  return runtimeServices.support.detailAdmin(ticketId);
+export async function getAdminSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {
+  return runtimeServices.support.detailAdmin(ticketId, { signal: options.signal });
 }
 
-export async function getVendorSupportTicket(ticketId: string): Promise<SupportTicket> {
-  return runtimeServices.support.detailVendor(ticketId);
+export async function getVendorSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {
+  return runtimeServices.support.detailVendor(ticketId, { signal: options.signal });
 }
 
 export async function updateAdminSupportTicketStatus(ticketId: string, status: SupportTicketStatus): Promise<SupportTicket> {

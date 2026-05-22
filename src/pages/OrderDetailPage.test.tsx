@@ -1960,7 +1960,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
     await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(5));
-    expect(getVendorShippingConfigMock).toHaveBeenCalledWith({ vendorId: 'sporjinal' });
+    expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
   });
 
   it('lets admins update Try OTO pickup location configuration', async () => {

@@ -442,23 +442,25 @@ export type NavlungoCarrierDiagnostics = {
   fetchError: { name: string; message: string; cause: { name: string; message: string } | string | null } | null;
 };
 
-export async function listWebhookDiagnostics(options: { limit?: number; offset?: number } = {}) {
+export async function listWebhookDiagnostics(options: { limit?: number; offset?: number; signal?: AbortSignal } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  return apiClient.get<WebhooksResponseDto>(`/admin/diagnostics/webhooks${params.size ? `?${params.toString()}` : ''}`);
+  return apiClient.get<WebhooksResponseDto>(`/admin/diagnostics/webhooks${params.size ? `?${params.toString()}` : ''}`, {
+    signal: options.signal,
+  });
 }
 
-export async function getWebhookDiagnostic(webhookEventId: string) {
-  return apiClient.get<DiagnosticsWebhookDetail>(`/admin/diagnostics/webhooks/${webhookEventId}`);
+export async function getWebhookDiagnostic(webhookEventId: string, options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<DiagnosticsWebhookDetail>(`/admin/diagnostics/webhooks/${webhookEventId}`, { signal: options.signal });
 }
 
-export async function listSyncEvents() {
-  return apiClient.get<SyncEventsResponseDto>('/admin/diagnostics/sync-events');
+export async function listSyncEvents(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<SyncEventsResponseDto>('/admin/diagnostics/sync-events', { signal: options.signal });
 }
 
-export async function getReconciliationDiagnostics() {
-  return apiClient.get<ReconciliationResponseDto>('/admin/diagnostics/reconciliation');
+export async function getReconciliationDiagnostics(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<ReconciliationResponseDto>('/admin/diagnostics/reconciliation', { signal: options.signal });
 }
 
 export async function runKargonomiLocationLookupDiagnostics() {

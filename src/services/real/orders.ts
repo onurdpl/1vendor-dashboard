@@ -389,32 +389,40 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
   };
 }
 
-function readVendorRequestOptions(vendorId?: string | null) {
-  return vendorId ? { vendorId } : undefined;
+function readVendorRequestOptions(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  const requestOptions: { vendorId?: string; signal?: AbortSignal } = {};
+  if (options.vendorId) requestOptions.vendorId = options.vendorId;
+  if (options.signal) requestOptions.signal = options.signal;
+  return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null } = {}) {
+export async function listOrders(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal } = {}) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   const path = `/orders${params.size ? `?${params.toString()}` : ''}`;
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.get<OrderSummaryDto[]>(path, requestOptions)
     : apiClient.get<OrderSummaryDto[]>(path));
   return response.map(mapOrderSummary);
 }
 
-export async function getOrder(orderId: string, options: { vendorId?: string | null } = {}) {
-  const requestOptions = readVendorRequestOptions(options.vendorId);
+export async function getOrder(orderId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  const requestOptions = readVendorRequestOptions(options);
   const response = await (requestOptions
     ? apiClient.get<OrderDetailDto>(`/orders/${orderId}`, requestOptions)
     : apiClient.get<OrderDetailDto>(`/orders/${orderId}`));
   return mapOrderDetail(response);
 }
 
-export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string): Promise<ShopifyOrderBreakdown> {
-  const response = await apiClient.get<AdminOrderBreakdownDto>(`/admin/orders/${shopifyOrderId}`);
+export async function getAdminShopifyOrderBreakdown(
+  shopifyOrderId: string,
+  options: { signal?: AbortSignal } = {},
+): Promise<ShopifyOrderBreakdown> {
+  const response = await apiClient.get<AdminOrderBreakdownDto>(`/admin/orders/${shopifyOrderId}`, {
+    signal: options.signal,
+  });
 
   return {
     sourceShopifyOrderId: response.order.sourceShopifyOrderId,
@@ -617,18 +625,21 @@ export async function probeTryOtoReturnAwbPrint(shipmentExecutionId: string) {
 
 export async function getShippingProviderDiagnostics(
   provider: ShippingProvider | 'navlungo' = 'kargo_entegrator',
-  options: { vendorId?: string | null } = {},
+  options: { vendorId?: string | null; signal?: AbortSignal } = {},
 ) {
   const params = new URLSearchParams({ provider });
   if (options.vendorId) {
     params.set('vendorId', options.vendorId);
   }
-  return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?${params.toString()}`);
+  return apiClient.get<ShippingProviderDiagnosticsResult>(`/admin/shipments/provider-config?${params.toString()}`, {
+    signal: options.signal,
+  });
 }
 
-export async function getVendorShippingConfig(options: { vendorId?: string | null } = {}) {
+export async function getVendorShippingConfig(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
   return apiClient.get<VendorShippingConfig>('/shipping/config', {
     vendorId: options.vendorId,
+    signal: options.signal,
   });
 }
 

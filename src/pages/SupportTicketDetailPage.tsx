@@ -282,11 +282,11 @@ export function SupportTicketDetailPage() {
     : queryKeys.support.detail(ticketId ?? 'missing', currentVendor.vendorId);
   const { data: ticket, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKey,
-    () => {
+    ({ signal }) => {
       if (!ticketId) {
         throw new Error('Support ticket not found.');
       }
-      return isAdmin ? getAdminSupportTicket(ticketId) : getVendorSupportTicket(ticketId);
+      return isAdmin ? getAdminSupportTicket(ticketId, { signal }) : getVendorSupportTicket(ticketId, { signal });
     },
     {
       enabled: authContextReady && Boolean(ticketId),

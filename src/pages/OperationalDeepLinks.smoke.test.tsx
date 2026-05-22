@@ -417,7 +417,7 @@ describe('operational deep-link smoke navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Order #1030' })).toBeInTheDocument();
     expect((await screen.findAllByText('TRY 1,030.00')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Recorded').length).toBeGreaterThan(0);
-    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId });
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId }));
   });
 
   it('navigates Return Detail → Finance linked record and selects the correct refund row', async () => {
@@ -430,7 +430,7 @@ describe('operational deep-link smoke navigation', () => {
 
     expect(await screen.findByRole('heading', { name: 'Order #1031' })).toBeInTheDocument();
     expect((await screen.findAllByText('-$77.00')).length).toBeGreaterThan(0);
-    expect(getFinanceDashboardMock).toHaveBeenCalledWith({ vendorId });
+    expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId }));
   });
 
   it('navigates Finance linked Order to Orders workspace and selects the target order', async () => {
@@ -446,9 +446,9 @@ describe('operational deep-link smoke navigation', () => {
     );
     await user.click(linkedOrder);
 
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(targetOrder.id, { vendorId }));
+    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith(targetOrder.id, expect.objectContaining({ vendorId })));
     expect((await screen.findAllByText('Target order customer')).length).toBeGreaterThan(0);
-    expect(getOrderMock).not.toHaveBeenCalledWith(firstOrder.id, { vendorId });
+    expect(getOrderMock).not.toHaveBeenCalledWith(firstOrder.id, expect.objectContaining({ vendorId }));
   });
 
   it('navigates Finance linked Return to Returns workspace and selects the target return', async () => {
@@ -459,9 +459,9 @@ describe('operational deep-link smoke navigation', () => {
     await screen.findByRole('heading', { name: 'Order #1031' });
     await user.click(getLinkedRecordAnchor('Related return'));
 
-    await waitFor(() => expect(getReturnMock).toHaveBeenCalledWith(targetReturn.id, { vendorId }));
+    await waitFor(() => expect(getReturnMock).toHaveBeenCalledWith(targetReturn.id, expect.objectContaining({ vendorId })));
     expect((await screen.findAllByText('Target returned item')).length).toBeGreaterThan(0);
-    expect(getReturnMock).not.toHaveBeenCalledWith(firstReturn.id, { vendorId });
+    expect(getReturnMock).not.toHaveBeenCalledWith(firstReturn.id, expect.objectContaining({ vendorId }));
   });
 
   it('shows unavailable for missing Finance deep-link targets without selecting the first row', async () => {

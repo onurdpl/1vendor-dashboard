@@ -139,7 +139,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage();
 
     expect(await screen.findByRole('heading', { name: /^orders$/i })).toBeInTheDocument();
-    expect(listOrdersMock).toHaveBeenCalledWith({ vendorId: 'demo-vendor-a' });
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(screen.getAllByText('#1002').length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
@@ -229,7 +229,7 @@ describe('OrdersPage control center', () => {
     await userEvent.click(customerLabels[0]);
 
     expect((await screen.findAllByText('Barcode gateway license')).length).toBeGreaterThan(0);
-    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1002', { vendorId: 'demo-vendor-a' });
+    expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1002', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
@@ -263,8 +263,10 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?order=1030']);
 
     expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
-    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+    await waitFor(() =>
+      expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
+    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('selects the order requested by Shopify order id segment', async () => {
@@ -295,8 +297,10 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?shopifyOrderId=7616544244030']);
 
     expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
-    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+    await waitFor(() =>
+      expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
+    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('falls back to the order number when a linked Shopify id target does not match the visible row id', async () => {
@@ -327,9 +331,11 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?order=1030&shopifyOrderId=gid%3A%2F%2Fshopify%2FOrder%2F999999999']);
 
     expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
+    await waitFor(() =>
+      expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
     expect(screen.queryByText('Linked order unavailable')).not.toBeInTheDocument();
-    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', { vendorId: 'demo-vendor-a' });
+    expect(getOrderMock).not.toHaveBeenCalledWith('ORD-A-1001', expect.objectContaining({ vendorId: 'demo-vendor-a' }));
   });
 
   it('defers linked unavailable state until async order data finishes loading', async () => {
@@ -352,7 +358,9 @@ describe('OrdersPage control center', () => {
     ordersResult.resolve([toSummary(targetOrder)]);
 
     expect((await screen.findAllByText('Target Customer')).length).toBeGreaterThan(0);
-    await waitFor(() => expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', { vendorId: 'demo-vendor-a' }));
+    await waitFor(() =>
+      expect(getOrderMock).toHaveBeenCalledWith('ORD-A-1030', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
   });
 
   it('does not select the first order when a linked query target is unavailable', async () => {

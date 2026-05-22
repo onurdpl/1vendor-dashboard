@@ -45,7 +45,7 @@ export function AdminSupportAnalyticsPage() {
   const appReadiness = useAppReadiness();
   const { data: analytics, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.admin.support.analytics(),
-    getAdminSupportAnalytics,
+    ({ signal }) => getAdminSupportAnalytics({ signal }),
     { enabled: appReadiness.ready },
   );
 

@@ -62,10 +62,10 @@ export type ObservabilityMetricsResponse = {
   windows: ObservabilityWindowMetrics[];
 };
 
-export async function getObservabilitySummary() {
-  return apiClient.get<ObservabilitySummary>('/admin/observability/summary');
+export async function getObservabilitySummary(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<ObservabilitySummary>('/admin/observability/summary', { signal: options.signal });
 }
 
-export async function getObservabilityMetrics() {
-  return apiClient.get<ObservabilityMetricsResponse>('/admin/observability/metrics');
+export async function getObservabilityMetrics(options: { signal?: AbortSignal } = {}) {
+  return apiClient.get<ObservabilityMetricsResponse>('/admin/observability/metrics', { signal: options.signal });
 }
