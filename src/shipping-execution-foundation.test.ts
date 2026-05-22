@@ -61,6 +61,7 @@ const {
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
+  updateNavlungoShipmentExecution,
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
@@ -1624,6 +1625,232 @@ describe('shipping execution foundation', () => {
       navlungoCancelSucceeded: false,
       navlungoCancelProviderTrackingId: '#abc123',
       providerTrackingId: '#abc123',
+    });
+  });
+
+  it('updates an existing Navlungo shipment with sender address id only', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-update-1',
+      allocationId: 'alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2001',
+      trackingNumber: 'NV-2001',
+      trackingUrl: 'https://tracking.test/NV-2001',
+      labelUrl: 'old-barcode',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        flow: 'forward',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      updateShipment: vi.fn().mockResolvedValue({
+        providerShipmentId: 'NV-2001',
+        trackingNumber: 'TRK-2001',
+        trackingUrl: 'https://tracking.test/TRK-2001',
+        labelUrl: 'new-barcode',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocationWithShopifyFulfillmentData());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoUpdateAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        trackingNumber: 'TRK-2001',
+        trackingUrl: 'https://tracking.test/TRK-2001',
+        labelUrl: 'new-barcode',
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+          shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await updateNavlungoShipmentExecution(existing.id, {
+      recipient: {
+        district: 'Kartal',
+      },
+      postNote: 'Leave at reception',
+      barcodeFormat: 'pdf-A6',
+    }, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.updateShipment).toHaveBeenCalledWith({
+      providerShipmentId: 'NV-2001',
+      requestSnapshot: expect.objectContaining({
+        post_number: 'NV-2001',
+        sender: { addressId: 55574 },
+        recipient: expect.objectContaining({
+          district: 'Kartal',
+          city: 'Istanbul',
+          address: 'Test Mahallesi 1. Sokak No: 1',
+        }),
+        post: {
+          note: 'Leave at reception',
+        },
+        barcode_format: 'pdf-A6',
+      }),
+    });
+    expect(adapter.updateShipment.mock.calls[0][0].requestSnapshot.sender).not.toHaveProperty('phone');
+    expect(result.trackingNumber).toBe('TRK-2001');
+    expect(result.labelUrl).toBe('new-barcode');
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoUpdateAttempted: true,
+      navlungoUpdateHttpStatus: 200,
+      navlungoUpdateSucceeded: true,
+      shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+    });
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+  });
+
+  it('blocks Navlungo update without post number or for delivered/cancelled shipments', async () => {
+    const missingPost = buildShipmentExecution({
+      id: 'shipment-navlungo-missing-post',
+      provider: 'NAVLUNGO',
+      providerShipmentId: null,
+      shipmentStatus: 'CREATED',
+    });
+    const delivered = buildShipmentExecution({
+      id: 'shipment-navlungo-delivered-update',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2002',
+      shipmentStatus: 'DELIVERED',
+    });
+    const cancelled = buildShipmentExecution({
+      id: 'shipment-navlungo-cancelled-update',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2003',
+      shipmentStatus: 'CANCELLED',
+    });
+    const adapter = buildAdapter({ provider: 'NAVLUNGO', updateShipment: vi.fn() });
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(missingPost);
+    await expect(updateNavlungoShipmentExecution(missingPost.id, {}, { env, vendorId: 'sporjinal', adapter }))
+      .rejects.toThrow('stored provider post number');
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(delivered);
+    await expect(updateNavlungoShipmentExecution(delivered.id, {}, { env, vendorId: 'sporjinal', adapter }))
+      .rejects.toThrow('Delivered Navlungo shipments cannot be updated');
+
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(cancelled);
+    await expect(updateNavlungoShipmentExecution(cancelled.id, {}, { env, vendorId: 'sporjinal', adapter }))
+      .rejects.toThrow('Cancelled Navlungo shipments cannot be updated');
+
+    expect(adapter.updateShipment).not.toHaveBeenCalled();
+  });
+
+  it('persists Navlungo update validation and provider tracking diagnostics', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-update-422',
+      allocationId: 'alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2004',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        flow: 'forward',
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      updateShipment: vi.fn().mockRejectedValue(new ShippingProviderExecutionError('Navlungo Update Post failed with HTTP 422.', {
+        provider: 'navlungo',
+        navlungoUpdateAttempted: true,
+        navlungoUpdateHttpStatus: 422,
+        navlungoUpdateSucceeded: false,
+        navlungoUpdateProviderMessage: 'Validation Errors',
+        navlungoUpdateValidationFields: ['posts.0.recipient.district'],
+        navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
+        navlungoUpdateProviderTrackingId: '#update123',
+        providerTrackingId: '#update123',
+      })),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocationWithShopifyFulfillmentData());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata(),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoUpdateAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateHttpStatus: 422,
+          navlungoUpdateSucceeded: false,
+          navlungoUpdateProviderMessage: 'Validation Errors',
+          navlungoUpdateValidationFields: ['posts.0.recipient.district'],
+          navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
+          navlungoUpdateProviderTrackingId: '#update123',
+          providerTrackingId: '#update123',
+          shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await updateNavlungoShipmentExecution(existing.id, { recipient: { district: 'Kartal' } }, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoUpdateHttpStatus: 422,
+      navlungoUpdateSucceeded: false,
+      navlungoUpdateValidationFields: ['posts.0.recipient.district'],
+      navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
+      navlungoUpdateProviderTrackingId: '#update123',
+      providerTrackingId: '#update123',
     });
   });
 

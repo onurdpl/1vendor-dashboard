@@ -391,6 +391,15 @@ export type ShipmentExecutionDto = {
     navlungoCancelValidationMessages?: string[];
     navlungoCancelProviderTrackingId?: string | null;
     navlungoCancelledAt?: string | null;
+    navlungoUpdateAttempted?: boolean | null;
+    navlungoUpdateHttpStatus?: number | null;
+    navlungoUpdateSucceeded?: boolean | null;
+    navlungoUpdateProviderMessage?: string | null;
+    navlungoUpdateValidationFields?: string[];
+    navlungoUpdateValidationMessages?: string[];
+    navlungoUpdateProviderTrackingId?: string | null;
+    navlungoUpdatedAt?: string | null;
+    shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     realPathPostNumberPresent?: boolean | null;
     realPathTrackingUrlPresent?: boolean | null;
     realPathBarcodePresent?: boolean | null;
@@ -433,6 +442,15 @@ export type CreateShipmentExecutionDto = {
     string | null
   >>;
   useFullSenderDetailsForThisRetry?: boolean;
+};
+
+export type UpdateNavlungoShipmentDto = {
+  recipient?: Partial<Record<
+    'name' | 'phone' | 'email' | 'country' | 'postcode' | 'city' | 'district' | 'address',
+    string | null
+  >>;
+  postNote?: string | null;
+  barcodeFormat?: string | null;
 };
 
 export type ShipmentExecutionPreviewDto = {

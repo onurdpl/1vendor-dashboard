@@ -1,5 +1,6 @@
 import { runtimeServices } from '../../services/runtime-services';
 import type { ShipmentCustomerOverrides, ShippingProvider, VendorShippingConfigUpdate } from './contracts';
+import type { UpdateNavlungoShipmentPayload } from '../../services/real/orders';
 
 export async function listOrders(options: { vendorId?: string | null } = {}) {
   return runtimeServices.orders.list(options.vendorId ?? undefined);
@@ -72,6 +73,18 @@ export async function cancelShipmentExecution(
 ) {
   return runtimeServices.orders.cancelShipmentExecution(
     shipmentExecutionId,
+    options.vendorId ?? undefined,
+  );
+}
+
+export async function updateNavlungoShipmentExecution(
+  shipmentExecutionId: string,
+  payload: UpdateNavlungoShipmentPayload,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.updateNavlungoShipmentExecution(
+    shipmentExecutionId,
+    payload,
     options.vendorId ?? undefined,
   );
 }

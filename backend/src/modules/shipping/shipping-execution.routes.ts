@@ -21,9 +21,10 @@ import {
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
+  updateNavlungoShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
-import type { CreateShipmentExecutionDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
+import type { CreateShipmentExecutionDto, UpdateNavlungoShipmentDto, VendorShippingConfigUpdateDto } from './shipping-execution.types.js';
 
 function resolveNotificationUrl(request: { headers: Record<string, unknown>; protocol: string; hostname: string }) {
   const forwardedProto = String(request.headers['x-forwarded-proto'] ?? '').split(',')[0]?.trim();
@@ -226,6 +227,29 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment cancellation could not be completed.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/shipments/:id/update-navlungo',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      try {
+        return await updateNavlungoShipmentExecution(request.params.id, (request.body ?? {}) as UpdateNavlungoShipmentDto, {
+          env,
+          vendorId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment update could not be completed.';
         return reply.code(400).send({ message });
       }
     },

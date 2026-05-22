@@ -28,6 +28,11 @@ export type ShippingProviderCreateResult = {
   responseSnapshot: Record<string, unknown>;
 };
 
+export type ShippingProviderUpdateInput = {
+  providerShipmentId: string;
+  requestSnapshot: Record<string, unknown>;
+};
+
 export type ShippingProviderReturnCreateInput = {
   orderId: string;
   items: Array<{
@@ -78,6 +83,7 @@ export interface ShippingProviderAdapter {
   getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   getTrackingInfo(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   cancelShipment(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
+  updateShipment?(input: ShippingProviderUpdateInput): Promise<ShippingProviderCreateResult>;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

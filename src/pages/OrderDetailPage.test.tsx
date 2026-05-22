@@ -17,6 +17,7 @@ const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
 const cancelShipmentExecutionMock = vi.fn();
+const updateNavlungoShipmentExecutionMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
 const probeShopifyReturnLabelUploadMock = vi.fn();
 const probeTryOtoReturnDetailsMock = vi.fn();
@@ -80,6 +81,11 @@ vi.mock('../features/orders/api', async () => {
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
     cancelShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       cancelShipmentExecutionMock(shipmentExecutionId, options),
+    updateNavlungoShipmentExecution: (
+      shipmentExecutionId: string,
+      payload: unknown,
+      options?: { vendorId?: string | null },
+    ) => updateNavlungoShipmentExecutionMock(shipmentExecutionId, payload, options),
     createReturnShipmentLabel: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       createReturnShipmentLabelMock(shipmentExecutionId, options),
     probeShopifyReturnLabelUpload: (shipmentExecutionId: string) => probeShopifyReturnLabelUploadMock(shipmentExecutionId),
@@ -678,6 +684,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
       updatedAt: '2026-05-22T10:00:00.000Z',
     });
+    updateNavlungoShipmentExecutionMock.mockReset();
+    updateNavlungoShipmentExecutionMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'navlungo',
+      shipmentStatus: 'created',
+      providerShipmentId: 'NAV-1028',
+      trackingNumber: 'NAV-1028',
+      labelUrl: 'barcode-pdf',
+      providerResponseSummary: {
+        ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+        navlungoUpdateAttempted: true,
+        navlungoUpdateSucceeded: true,
+        navlungoUpdateHttpStatus: 200,
+        navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+        shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+      },
+      updatedAt: '2026-05-22T10:00:00.000Z',
+    });
     createReturnShipmentLabelMock.mockReset();
     createReturnShipmentLabelMock.mockResolvedValue({
       ...orderWithShipmentSummary.shipmentExecution,
@@ -1008,6 +1032,56 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
     expect((await screen.findAllByText('Navlungo shipment cancelled.')).length).toBeGreaterThan(0);
     confirmSpy.mockRestore();
+  });
+
+  it('requires confirmation before updating a Navlungo shipment', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Sporjinal Vendor',
+      vendorId: 'sporjinal',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click((await screen.findAllByText('Update Navlungo shipment'))[0]);
+    await user.type(screen.getAllByLabelText('District *')[0], 'Kartal');
+    const updateButton = screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0];
+    expect(updateButton).toBeDisabled();
+    await user.click(screen.getByLabelText(/I understand this updates the existing Navlungo post/i));
+    await user.click(updateButton);
+
+    await waitFor(() =>
+      expect(updateNavlungoShipmentExecutionMock).toHaveBeenCalledWith(
+        'shipment-kargo_entegrator-alloc-sporjinal-7621783322961',
+        {
+          recipient: {
+            district: 'Kartal',
+          },
+          postNote: '',
+          barcodeFormat: '',
+        },
+        {
+          vendorId: 'sporjinal',
+        },
+      ),
+    );
+    expect((await screen.findAllByText('Navlungo shipment updated.')).length).toBeGreaterThan(0);
   });
 
   it('renders Navlungo cancel validation diagnostics safely', async () => {

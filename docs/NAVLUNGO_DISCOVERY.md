@@ -534,7 +534,37 @@ Current cancel status:
   - local shipment status is not changed to cancelled
   - sanitized validation fields/messages or provider tracking ID are persisted for diagnostics
 - Shopify fulfillment cancellation/deletion is not implemented in this phase. Diagnostics explicitly set `shopifyFulfillmentCancelSyncSkippedReason=not_implemented`.
-- `update-post`, status-sync polling, return/reverse cancellation, and webhook cancellation handling remain out of scope.
+- Status-sync polling, return/reverse cancellation, and webhook cancellation handling remain out of scope.
+
+## 16.1.2. Update Post Status
+
+Current update status:
+
+- Navlungo forward shipment update is implemented for existing forward shipment executions only.
+- Runtime update flow uses:
+  - authenticate with `POST /auth/api`
+  - update with `POST /post/update`
+  - request body includes stored `post_number`, `sender: { addressId }`, full recipient fields, `post.note`, `barcode_format`, and empty `custom_data_1..4`
+- Local update is allowed only when:
+  - provider is `navlungo`
+  - stored provider shipment id / `post_number` exists
+  - local shipment status is not `cancelled`
+  - local shipment status is not `delivered`
+  - shipment is a forward shipment, not return/reverse
+- Update payload intentionally does not allow editing:
+  - sender details beyond configured sender address id
+  - carrier id
+  - post type
+  - price/COD
+  - provider shipment id / `post_number`
+- On provider update success:
+  - local shipment remains active
+  - refreshed tracking/barcode fields are persisted only if returned by Navlungo
+  - update diagnostics and `navlungoUpdatedAt` are persisted
+- On provider `422` or `500`:
+  - local shipment remains active
+  - sanitized validation fields/messages or provider tracking ID are persisted for diagnostics
+- Shopify fulfillment update sync is not implemented in this phase. Diagnostics explicitly set `shopifyFulfillmentUpdateSyncSkippedReason=not_implemented`.
 
 ## 16.2. Auth Probe Status
 

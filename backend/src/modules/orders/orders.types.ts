@@ -307,6 +307,15 @@ export type OrderShipmentExecutionDto = {
     navlungoCancelValidationMessages?: string[];
     navlungoCancelProviderTrackingId?: string | null;
     navlungoCancelledAt?: string | null;
+    navlungoUpdateAttempted?: boolean | null;
+    navlungoUpdateHttpStatus?: number | null;
+    navlungoUpdateSucceeded?: boolean | null;
+    navlungoUpdateProviderMessage?: string | null;
+    navlungoUpdateValidationFields?: string[];
+    navlungoUpdateValidationMessages?: string[];
+    navlungoUpdateProviderTrackingId?: string | null;
+    navlungoUpdatedAt?: string | null;
+    shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;
     priceComparisonCalled?: boolean | null;

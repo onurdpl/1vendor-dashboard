@@ -54,6 +54,11 @@ export type SubmitFulfillmentTrackingResult = {
 
 export type CreateShipmentExecutionResult = ShipmentExecution;
 export type ShippingProviderDiagnosticsResult = ShippingProviderDiagnostics;
+export type UpdateNavlungoShipmentPayload = {
+  recipient?: Partial<Record<'name' | 'phone' | 'email' | 'country' | 'postcode' | 'city' | 'district' | 'address', string | null>>;
+  postNote?: string | null;
+  barcodeFormat?: string | null;
+};
 
 type OrderSummaryDto = {
   id: string;
@@ -546,6 +551,20 @@ export async function cancelShipmentExecution(
   return apiClient.post<CreateShipmentExecutionResult>(
     `/shipments/${shipmentExecutionId}/cancel`,
     {},
+    {
+      vendorId: options.vendorId,
+    },
+  );
+}
+
+export async function updateNavlungoShipmentExecution(
+  shipmentExecutionId: string,
+  payload: UpdateNavlungoShipmentPayload,
+  options: { vendorId?: string | null } = {},
+) {
+  return apiClient.post<CreateShipmentExecutionResult>(
+    `/shipments/${shipmentExecutionId}/update-navlungo`,
+    payload,
     {
       vendorId: options.vendorId,
     },

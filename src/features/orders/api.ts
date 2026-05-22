@@ -15,6 +15,7 @@ export {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
 } from '../../lib/api/orders';
 export type {

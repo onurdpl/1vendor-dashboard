@@ -19,6 +19,7 @@ import {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
   type OrderDetail,
   type ShipmentCustomerField,
@@ -1243,6 +1244,7 @@ export function OrderDetailPage() {
   const [navlungoBarcodeProbeDiagnostics, setNavlungoBarcodeProbeDiagnostics] = useState<NavlungoBarcodeProbeDiagnostics | null>(null);
   const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
   const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
+  const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1379,6 +1381,28 @@ export function OrderDetailPage() {
       cancelShipmentExecution(shipmentExecutionId, {
         vendorId: currentVendor.vendorId,
       }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
+  const { mutateAsync: updateNavlungoShipmentMutation, isPending: isUpdatingNavlungoShipment } = useMutationAction(
+    async (payload: {
+      shipmentExecutionId: string;
+      recipient: Partial<Record<ShipmentCustomerField, string>>;
+      postNote?: string | null;
+      barcodeFormat?: string | null;
+    }) =>
+      updateNavlungoShipmentExecution(
+        payload.shipmentExecutionId,
+        {
+          recipient: payload.recipient,
+          postNote: payload.postNote,
+          barcodeFormat: payload.barcodeFormat,
+        },
+        {
+          vendorId: currentVendor.vendorId,
+        },
+      ),
     {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
@@ -1647,6 +1671,11 @@ export function OrderDetailPage() {
     visibleShipmentExecution?.provider === 'navlungo' &&
     Boolean(visibleShipmentExecution.providerShipmentId) &&
     !['cancelled', 'delivered'].includes(visibleShipmentStatus);
+  const canUpdateNavlungoShipment =
+    (isAdmin || canUseFulfillmentActions) &&
+    visibleShipmentExecution?.provider === 'navlungo' &&
+    Boolean(visibleShipmentExecution.providerShipmentId) &&
+    !['cancelled', 'delivered'].includes(visibleShipmentStatus);
   const canAutoRefreshTryOtoShipmentStatus =
     canRefreshTryOtoShipmentStatus &&
     Boolean(visibleShipmentExecution?.id) &&
@@ -1700,6 +1729,7 @@ export function OrderDetailPage() {
     setShipmentCustomerOverrides({});
     setShipmentActionState(null);
     setUseFullNavlungoSenderForRetry(false);
+    setNavlungoUpdateConfirmed(false);
     tryOtoAutoRefreshAttemptsRef.current = {};
     if (tryOtoAutoRefreshTimerRef.current !== null) {
       window.clearTimeout(tryOtoAutoRefreshTimerRef.current);
@@ -1893,6 +1923,68 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/cancel`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleUpdateNavlungoShipment(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    if (!navlungoUpdateConfirmed) {
+      showFeedback('Confirm the Navlungo update before saving.', 'error');
+      return;
+    }
+
+    const formData = new FormData(event.currentTarget);
+    const recipient = Object.fromEntries(
+      (['name', 'phone', 'email', 'address', 'country', 'city', 'district', 'postcode'] as ShipmentCustomerField[])
+        .map((field) => {
+          const value = formData.get(`navlungo-${field}`);
+          return [field, typeof value === 'string' ? value.trim() : ''] as const;
+        })
+        .filter(([, value]) => value.length > 0),
+    ) as Partial<Record<ShipmentCustomerField, string>>;
+    const postNoteValue = formData.get('navlungo-post-note');
+    const barcodeFormatValue = formData.get('navlungo-barcode-format');
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Updating Navlungo shipment...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
+    });
+
+    void updateNavlungoShipmentMutation({
+      shipmentExecutionId: visibleShipmentExecution.id,
+      recipient,
+      postNote: typeof postNoteValue === 'string' ? postNoteValue.trim() : '',
+      barcodeFormat: typeof barcodeFormatValue === 'string' ? barcodeFormatValue.trim() : '',
+    })
+      .then((shipment) => {
+        const succeeded = shipment.providerResponseSummary?.navlungoUpdateSucceeded === true;
+        const message = succeeded ? 'Navlungo shipment updated.' : 'Navlungo update needs attention.';
+        const tone = succeeded ? 'success' : 'error';
+        setShipmentActionState({
+          tone,
+          message,
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
+        });
+        setNavlungoUpdateConfirmed(false);
+        showFeedback(message, tone);
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Navlungo shipment could not be updated.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -2255,6 +2347,65 @@ export function OrderDetailPage() {
     );
   }
 
+  function renderNavlungoUpdateForm() {
+    if (!canUpdateNavlungoShipment || !visibleShipmentExecution) {
+      return null;
+    }
+
+    return (
+      <details className="shipment-recovery-actions" aria-label="Navlungo shipment update">
+        <summary>
+          <strong>Update Navlungo shipment</strong>
+          <span>Forward shipment only. Shopify fulfillment update sync is not implemented in this phase.</span>
+        </summary>
+        <form className="shipment-field-completion-form" onSubmit={handleUpdateNavlungoShipment}>
+          <div>
+            <span>Recipient update</span>
+            <p>Blank fields use the current stored order values where available.</p>
+          </div>
+          <div className="shipment-field-completion-grid">
+            {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as ShipmentCustomerField[]).map((field) => (
+              <label className="field" key={`navlungo-${field}`}>
+                <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]}{field === 'email' || field === 'postcode' ? '' : ' *'}</span>
+                <input name={`navlungo-${field}`} />
+              </label>
+            ))}
+            <label className="field">
+              <span>Country *</span>
+              <input name="navlungo-country" placeholder="tr" />
+            </label>
+            <label className="field">
+              <span>Post note</span>
+              <input name="navlungo-post-note" />
+            </label>
+            <label className="field">
+              <span>Barcode format</span>
+              <input name="navlungo-barcode-format" placeholder="pdf-A6" />
+            </label>
+          </div>
+          <label className="checkbox-field">
+            <input
+              type="checkbox"
+              checked={navlungoUpdateConfirmed}
+              onChange={(event) => setNavlungoUpdateConfirmed(event.target.checked)}
+              disabled={isUpdatingNavlungoShipment}
+            />
+            <span>I understand this updates the existing Navlungo post and does not update Shopify fulfillment.</span>
+          </label>
+          <div className="order-inline-actions">
+            <button
+              type="submit"
+              className="button button-primary"
+              disabled={isUpdatingNavlungoShipment || !navlungoUpdateConfirmed}
+            >
+              {isUpdatingNavlungoShipment ? 'Updating...' : 'Update Navlungo shipment'}
+            </button>
+          </div>
+        </form>
+      </details>
+    );
+  }
+
   function renderShipmentPayloadDiagnostics(summary: NonNullable<typeof shipmentProviderSummary>) {
     const diagnostics = summary.payloadDiagnostics;
     if (!diagnostics) {
@@ -2497,6 +2648,39 @@ export function OrderDetailPage() {
         <div className="summary-row">
           <span>Cancelled at</span>
           <strong>{formatOptionalDate(summary.navlungoCancelledAt ?? undefined)}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update Post</span>
+          <strong>
+            attempted {formatDiagnosticPresence(summary.navlungoUpdateAttempted)} · HTTP {summary.navlungoUpdateHttpStatus ?? '—'} · succeeded{' '}
+            {formatDiagnosticPresence(summary.navlungoUpdateSucceeded)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Update provider message</span>
+          <strong>{summary.navlungoUpdateProviderMessage || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update tracking ID</span>
+          <strong>{summary.navlungoUpdateProviderTrackingId || summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update validation fields</span>
+          <strong>{summary.navlungoUpdateValidationFields?.length ? summary.navlungoUpdateValidationFields.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update validation messages</span>
+          <strong>
+            {summary.navlungoUpdateValidationMessages?.length ? summary.navlungoUpdateValidationMessages.join(' · ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Update Shopify sync</span>
+          <strong>{summary.shopifyFulfillmentUpdateSyncSkippedReason || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Updated at</span>
+          <strong>{formatOptionalDate(summary.navlungoUpdatedAt ?? undefined)}</strong>
         </div>
         <div className="summary-row">
           <span>Real path request</span>
@@ -4885,6 +5069,7 @@ export function OrderDetailPage() {
                             ) : null}
                           </div>
                         ) : null}
+                        {renderNavlungoUpdateForm()}
                         {canCancelNavlungoShipment ? (
                           <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                             <strong>Navlungo cancellation</strong>
@@ -5854,6 +6039,7 @@ export function OrderDetailPage() {
                         ) : null}
                       </div>
                     ) : null}
+                    {renderNavlungoUpdateForm()}
                     {canCancelNavlungoShipment ? (
                       <div className="shipment-recovery-actions" aria-label="Navlungo shipment cancellation">
                         <strong>Navlungo cancellation</strong>

@@ -30,6 +30,7 @@ import type {
   ShipmentExecutionDto,
   ShippingProviderGateDiagnosticsDto,
   ShippingProviderDto,
+  UpdateNavlungoShipmentDto,
   VendorShippingConfigDto,
   VendorShippingConfigUpdateDto,
 } from './shipping-execution.types.js';
@@ -543,9 +544,11 @@ function mapProviderResponseSummary(
   barcode: string | null,
 ): ShipmentExecutionDto['providerResponseSummary'] {
   const createPostSnapshot = isRecord(snapshot.createPost) ? snapshot.createPost : null;
+  const updatePostSnapshot = isRecord(snapshot.updatePost) ? snapshot.updatePost : null;
   const providerError = readString(snapshot, [
     'providerError',
     'providerMessage',
+    'navlungoUpdateProviderMessage',
     'errorMessage',
     'message',
     'error',
@@ -561,19 +564,26 @@ function mapProviderResponseSummary(
     readValidationStringArray(snapshot.providerValidationErrors),
     readValidationStringArray(createPostSnapshot?.providerValidationErrors),
     readValidationStringArray(createPostSnapshot?.validationErrorMessages),
+    readValidationStringArray(snapshot.navlungoUpdateValidationMessages),
+    readValidationStringArray(updatePostSnapshot?.validationErrorMessages),
   );
   const validationErrorKeys = mergeUniqueStrings(
     readStringArray(snapshot.validationErrorKeys),
     readStringArray(createPostSnapshot?.validationErrorKeys),
+    readStringArray(updatePostSnapshot?.validationErrorKeys),
   );
   const validationErrorMessages = mergeUniqueStrings(
     readValidationStringArray(snapshot.validationErrorMessages),
     readValidationStringArray(createPostSnapshot?.validationErrorMessages),
     readValidationStringArray(createPostSnapshot?.providerValidationErrors),
+    readValidationStringArray(snapshot.navlungoUpdateValidationMessages),
+    readValidationStringArray(updatePostSnapshot?.validationErrorMessages),
   );
   const failedFieldNames = mergeUniqueStrings(
     readStringArray(snapshot.failedFieldNames),
     readStringArray(createPostSnapshot?.failedFieldNames),
+    readStringArray(snapshot.navlungoUpdateValidationFields),
+    readStringArray(updatePostSnapshot?.failedFieldNames),
   );
   const validationResponseShapeSource = isRecord(snapshot.validationResponseShape)
     ? snapshot.validationResponseShape
@@ -590,7 +600,7 @@ function mapProviderResponseSummary(
     : null;
 
   return {
-    httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'statusCode']),
+    httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
     ok: readOptionalBoolean(snapshot, ['ok', 'success']),
     contentType: readString(snapshot, ['contentType']),
     parsedBodyType: readString(snapshot, ['parsedBodyType']),
@@ -626,7 +636,7 @@ function mapProviderResponseSummary(
     providerErrorCode:
       readString(snapshot, ['providerErrorCode', 'errorCode', 'code']) ??
       readString(createPostSnapshot, ['providerErrorCode', 'errorCode', 'code']),
-    providerTrackingId: readString(snapshot, ['providerTrackingId']),
+    providerTrackingId: readString(snapshot, ['providerTrackingId', 'navlungoUpdateProviderTrackingId']),
     validationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
@@ -682,6 +692,15 @@ function mapProviderResponseSummary(
     navlungoCancelValidationMessages: readValidationStringArray(snapshot.navlungoCancelValidationMessages),
     navlungoCancelProviderTrackingId: readString(snapshot, ['navlungoCancelProviderTrackingId']),
     navlungoCancelledAt: readString(snapshot, ['navlungoCancelledAt']),
+    navlungoUpdateAttempted: readOptionalBoolean(snapshot, ['navlungoUpdateAttempted']),
+    navlungoUpdateHttpStatus: readNumber(snapshot, ['navlungoUpdateHttpStatus']),
+    navlungoUpdateSucceeded: readOptionalBoolean(snapshot, ['navlungoUpdateSucceeded']),
+    navlungoUpdateProviderMessage: readString(snapshot, ['navlungoUpdateProviderMessage']),
+    navlungoUpdateValidationFields: readStringArray(snapshot.navlungoUpdateValidationFields),
+    navlungoUpdateValidationMessages: readValidationStringArray(snapshot.navlungoUpdateValidationMessages),
+    navlungoUpdateProviderTrackingId: readString(snapshot, ['navlungoUpdateProviderTrackingId']),
+    navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
+    shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -1303,6 +1322,10 @@ function normalizeNavlungoPhone(value: string | null | undefined) {
   return value?.trim() || null;
 }
 
+function isNavlungoEmailLike(value: string | null | undefined) {
+  return !value?.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function normalizeKargonomiPhone(value: string | null) {
   if (!value) {
     return null;
@@ -1727,6 +1750,39 @@ function buildNavlungoRecipient(input: {
   const missingFields = requiredFields
     .filter((key) => !recipient[key])
     .map((key) => `recipient.${key}`);
+
+  return {
+    recipient,
+    missingFields,
+  };
+}
+
+function buildNavlungoUpdateRecipient(input: {
+  order: unknown;
+  customerName: string | null | undefined;
+  customerEmail: string | null | undefined;
+  recipient?: UpdateNavlungoShipmentDto['recipient'];
+}) {
+  const base = buildNavlungoRecipient({
+    order: input.order,
+    customerName: input.customerName,
+    customerEmail: input.customerEmail,
+    customerOverrides: input.recipient,
+  });
+  const recipient = {
+    ...base.recipient,
+    email: base.recipient.email ?? '',
+    post_code: base.recipient.post_code ?? '',
+  };
+  const missingFields = [
+    recipient.name ? null : 'recipient.name',
+    recipient.phone ? null : 'recipient.phone',
+    recipient.address ? null : 'recipient.address',
+    recipient.country ? null : 'recipient.country',
+    recipient.city ? null : 'recipient.city',
+    recipient.district ? null : 'recipient.district',
+    isNavlungoEmailLike(recipient.email) ? null : 'recipient.email',
+  ].filter((field): field is string => Boolean(field));
 
   return {
     recipient,
@@ -4902,6 +4958,229 @@ export async function cancelNavlungoShipmentExecution(
       },
       {
         label: 'Cancel needs review',
+        status: 'failed',
+      },
+    );
+
+    const updated = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution(updated);
+  }
+}
+
+export async function updateNavlungoShipmentExecution(
+  shipmentExecutionId: string,
+  input: UpdateNavlungoShipmentDto,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.NAVLUNGO) {
+    throw new Error('Navlungo shipment update is only available for Navlungo shipments.');
+  }
+
+  if (!existing.providerShipmentId?.trim()) {
+    throw new Error('Navlungo shipment update requires a stored provider post number.');
+  }
+
+  if (existing.shipmentStatus === ShipmentExecutionStatus.CANCELLED) {
+    throw new Error('Cancelled Navlungo shipments cannot be updated locally.');
+  }
+
+  if (existing.shipmentStatus === ShipmentExecutionStatus.DELIVERED) {
+    throw new Error('Delivered Navlungo shipments cannot be updated locally.');
+  }
+
+  const existingSnapshot = readSnapshot(existing);
+  if (readString(existingSnapshot, ['flow']) === 'return' || isRecord(existingSnapshot.returnShipment)) {
+    throw new Error('Navlungo update is available for forward shipments only.');
+  }
+
+  const allocation = await prisma.vendorAllocation.findUnique({
+    where: {
+      id: existing.allocationId,
+    },
+    include: {
+      order: {
+        include: {
+          webhookEvents: {
+            where: {
+              topic: 'orders/create',
+              rawPayload: {
+                not: null,
+              },
+            },
+            orderBy: [
+              {
+                processedAt: 'desc',
+              },
+              {
+                receivedAt: 'desc',
+              },
+            ],
+            take: 1,
+          },
+        },
+      },
+    },
+  });
+
+  if (!allocation || allocation.assignedVendorId !== options.vendorId) {
+    throw new Error('Allocation could not be found for the selected vendor.');
+  }
+
+  const config = mapShippingConfig(await getStoredShippingConfig(options.vendorId), options.vendorId);
+  const senderAddressId = resolveNavlungoSenderAddressId(config, options.env);
+  const parsedSenderAddressId = parseNavlungoSenderAddressId(senderAddressId);
+  if (!parsedSenderAddressId) {
+    throw new Error('Navlungo sender address ID must be numeric.');
+  }
+
+  const recipient = buildNavlungoUpdateRecipient({
+    order: allocation.order,
+    customerName: allocation.order.customerName,
+    customerEmail: allocation.order.customerEmail,
+    recipient: input.recipient,
+  });
+  if (recipient.missingFields.length > 0) {
+    throw new Error(
+      [
+        'Missing required Navlungo update fields:',
+        ...recipient.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before update call.',
+      ].join('\n'),
+    );
+  }
+
+  const barcodeFormat = input.barcodeFormat?.trim() || resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
+  const payload = {
+    post_number: existing.providerShipmentId,
+    sender: {
+      addressId: parsedSenderAddressId,
+    },
+    recipient: recipient.recipient,
+    post: {
+      note: input.postNote?.trim() ?? '',
+    },
+    barcode_format: barcodeFormat,
+    custom_data_1: '',
+    custom_data_2: '',
+    custom_data_3: '',
+    custom_data_4: '',
+  };
+
+  const attemptSnapshot = appendTimelineEvent(
+    {
+      ...existingSnapshot,
+      navlungoUpdateAttempted: true,
+      navlungoUpdateSucceeded: false,
+      navlungoUpdateProviderShipmentIdPresent: true,
+      senderAddressIdPresent: true,
+      senderAddressIdValid: true,
+      senderUsesAddressId: true,
+      senderMode: 'addressId',
+      shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+      lastProviderStage: 'update_post',
+    },
+    {
+      label: 'Update attempted',
+      status: 'pending',
+    },
+  );
+
+  await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      responseSnapshot: attemptSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'navlungo');
+  if (!adapter.updateShipment) {
+    throw new Error('Navlungo shipment update is not supported by this adapter.');
+  }
+
+  try {
+    const result = await adapter.updateShipment({
+      providerShipmentId: existing.providerShipmentId,
+      requestSnapshot: payload,
+    });
+    const updatedAt = readString(result.responseSnapshot, ['navlungoUpdatedAt']) ?? new Date().toISOString();
+    const mergedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...result.responseSnapshot,
+        navlungoUpdateAttempted: true,
+        navlungoUpdateSucceeded: true,
+        navlungoUpdatedAt: updatedAt,
+        shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+        lastProviderStage: 'update_post',
+      },
+      {
+        label: 'Shipment updated',
+        status: 'created',
+      },
+    );
+
+    const nextStatus =
+      result.shipmentStatus === 'pending'
+        ? existing.shipmentStatus
+        : mapProviderStatus(result.shipmentStatus);
+
+    const updated = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        providerShipmentId: result.providerShipmentId ?? existing.providerShipmentId,
+        trackingNumber: result.trackingNumber ?? existing.trackingNumber,
+        trackingUrl: result.trackingUrl ?? existing.trackingUrl,
+        labelUrl: result.labelUrl ?? existing.labelUrl,
+        shipmentStatus: nextStatus,
+        responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution(updated);
+  } catch (error) {
+    const providerSnapshot = error instanceof ShippingProviderExecutionError
+      ? error.responseSnapshot
+      : {
+          providerError: error instanceof Error ? error.message : 'Unknown Navlungo update error.',
+        };
+    const mergedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...providerSnapshot,
+        navlungoUpdateAttempted: true,
+        navlungoUpdateSucceeded: false,
+        shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+        lastProviderStage: 'update_post',
+      },
+      {
+        label: 'Update needs review',
         status: 'failed',
       },
     );

@@ -33,7 +33,7 @@ import type {
   ShippingProvider,
   VendorShippingConfigUpdate,
 } from '../lib/api/contracts';
-import type { SubmitFulfillmentTrackingPayload } from './real/orders';
+import type { SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
 
 function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
@@ -497,6 +497,63 @@ export const runtimeServices = {
           navlungoCancelHttpStatus: 200,
           navlungoCancelledAt: submittedAt,
           shopifyFulfillmentCancelSyncSkippedReason: 'not_implemented',
+        },
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
+    async updateNavlungoShipmentExecution(
+      shipmentExecutionId: string,
+      payload: UpdateNavlungoShipmentPayload,
+      vendorId = getCurrentVendorId(),
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.updateNavlungoShipmentExecution(shipmentExecutionId, payload, { vendorId });
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-navlungo-/, ''),
+        vendorId,
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'navlungo' as const,
+        providerShipmentId: `mock-navlungo-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `NV-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'created' as const,
+        desi: '3.00',
+        cargoIntegrationId: null,
+        warehouseId: '55574',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        providerResponseSummary: {
+          httpStatus: 200,
+          ok: true,
+          contentType: 'application/json',
+          parsedBodyType: 'json:object',
+          responseKeys: ['navlungoUpdateAttempted', 'navlungoUpdateSucceeded'],
+          providerError: null,
+          dryRun: null,
+          disabledGates: [],
+          providerValidationErrors: [],
+          providerShipmentIdPresent: true,
+          trackingNumberPresent: true,
+          trackingUrlPresent: false,
+          labelPresent: false,
+          barcodePresent: false,
+          notificationUrlIncluded: null,
+          statusField: 'created',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdatedAt: submittedAt,
+          shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
         },
         createdAt: submittedAt,
         updatedAt: submittedAt,

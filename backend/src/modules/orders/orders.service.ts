@@ -491,6 +491,7 @@ function buildShipmentProviderResponseSummary(
   const createOrderDiagnostics = isRecord(snapshot?.createOrder) ? snapshot.createOrder : null;
   const createShipmentDiagnostics = isRecord(snapshot?.createShipment) ? snapshot.createShipment : null;
   const createPostDiagnostics = isRecord(snapshot?.createPost) ? snapshot.createPost : null;
+  const updatePostDiagnostics = isRecord(snapshot?.updatePost) ? snapshot.updatePost : null;
   const createShipmentRequestDiagnostics = isRecord(snapshot?.createShipmentRequestDiagnostics)
     ? snapshot.createShipmentRequestDiagnostics
     : null;
@@ -634,28 +635,35 @@ function buildShipmentProviderResponseSummary(
     readValidationStringArray(snapshot?.providerValidationErrors),
     readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
     readValidationStringArray(createPostDiagnostics?.validationErrorMessages),
+    readValidationStringArray(snapshot?.navlungoUpdateValidationMessages),
+    readValidationStringArray(updatePostDiagnostics?.validationErrorMessages),
   );
   const validationErrorKeys = mergeUniqueStrings(
     readStringArray(snapshot?.validationErrorKeys),
     readStringArray(createPostDiagnostics?.validationErrorKeys),
+    readStringArray(updatePostDiagnostics?.validationErrorKeys),
   );
   const validationErrorMessages = mergeUniqueStrings(
     readValidationStringArray(snapshot?.validationErrorMessages),
     readValidationStringArray(createPostDiagnostics?.validationErrorMessages),
     readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
+    readValidationStringArray(snapshot?.navlungoUpdateValidationMessages),
+    readValidationStringArray(updatePostDiagnostics?.validationErrorMessages),
   );
   const failedFieldNames = mergeUniqueStrings(
     readStringArray(snapshot?.failedFieldNames),
     readStringArray(createPostDiagnostics?.failedFieldNames),
+    readStringArray(snapshot?.navlungoUpdateValidationFields),
+    readStringArray(updatePostDiagnostics?.failedFieldNames),
   );
 
   return {
-    httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'statusCode']),
+    httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
     ok: typeof snapshot?.ok === 'boolean' ? snapshot.ok : null,
     contentType: typeof snapshot?.contentType === 'string' ? snapshot.contentType : null,
     parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
     responseKeys,
-    providerError: readString(snapshot, ['providerError', 'providerMessage', 'navlungoCancelProviderMessage', 'error', 'message', 'reason']),
+    providerError: readString(snapshot, ['providerError', 'providerMessage', 'navlungoCancelProviderMessage', 'navlungoUpdateProviderMessage', 'error', 'message', 'reason']),
     dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
     disabledGates,
     providerValidationErrors,
@@ -686,7 +694,10 @@ function buildShipmentProviderResponseSummary(
     providerErrorCode:
       readString(snapshot, ['providerErrorCode', 'errorCode', 'code']) ??
       readString(createPostDiagnostics, ['providerErrorCode', 'errorCode', 'code']),
-    providerTrackingId: readString(snapshot, ['providerTrackingId']) ?? readString(createPostDiagnostics, ['providerTrackingId']),
+    providerTrackingId:
+      readString(snapshot, ['providerTrackingId', 'navlungoUpdateProviderTrackingId']) ??
+      readString(createPostDiagnostics, ['providerTrackingId']) ??
+      readString(updatePostDiagnostics, ['providerTrackingId']),
     validationResponseShape: mappedValidationResponseShape,
     providerShipmentIdPresent: Boolean(execution.providerShipmentId),
     trackingNumberPresent: Boolean(execution.trackingNumber),
@@ -734,6 +745,17 @@ function buildShipmentProviderResponseSummary(
     navlungoCancelValidationMessages: readValidationStringArray(snapshot?.navlungoCancelValidationMessages),
     navlungoCancelProviderTrackingId: readString(snapshot, ['navlungoCancelProviderTrackingId']),
     navlungoCancelledAt: readString(snapshot, ['navlungoCancelledAt']),
+    navlungoUpdateAttempted:
+      typeof snapshot?.navlungoUpdateAttempted === 'boolean' ? snapshot.navlungoUpdateAttempted : null,
+    navlungoUpdateHttpStatus: readNumber(snapshot, ['navlungoUpdateHttpStatus']),
+    navlungoUpdateSucceeded:
+      typeof snapshot?.navlungoUpdateSucceeded === 'boolean' ? snapshot.navlungoUpdateSucceeded : null,
+    navlungoUpdateProviderMessage: readString(snapshot, ['navlungoUpdateProviderMessage']),
+    navlungoUpdateValidationFields: readStringArray(snapshot?.navlungoUpdateValidationFields),
+    navlungoUpdateValidationMessages: readValidationStringArray(snapshot?.navlungoUpdateValidationMessages),
+    navlungoUpdateProviderTrackingId: readString(snapshot, ['navlungoUpdateProviderTrackingId']),
+    navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
+    shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
       typeof snapshot?.createShipmentCalled === 'boolean'
