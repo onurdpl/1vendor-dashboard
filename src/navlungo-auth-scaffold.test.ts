@@ -865,6 +865,95 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(snapshot)).not.toContain('recipient@example.test');
   });
 
+  it('parses Navlungo validation details from errors arrays', async () => {
+    const fetchImpl = (async (url: RequestInfo | URL) => {
+      if (String(url).endsWith('/auth/api')) {
+        return new Response(JSON.stringify({ data: { access_token: 'secret-access-token' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({
+        message: 'Validation Errors',
+        status: false,
+        errors: [
+          {
+            field: 'posts.0.recipient.addressId',
+            message: 'Address id is not valid for returns.',
+          },
+          {
+            path: 'posts.0.sender.phone',
+            messages: ['Phone +90 532 123 45 67 is invalid.'],
+          },
+        ],
+      }), {
+        status: 422,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+
+    let thrown: unknown;
+    try {
+      await adapter.createShipment({
+        allocationId: 'allocation-1',
+        vendorId: 'vendor-1',
+        provider: 'navlungo',
+        requestSnapshot: {
+          platform: 'shopify',
+          posts: [
+            {
+              reference_id: 'REF-ERRORS-ARRAY',
+              carrier_id: 9,
+              post_type: 3,
+              sender: {
+                name: 'Sender',
+                phone: '+90 532 123 45 67',
+                email: 'sender@example.test',
+                address: 'Sender address',
+                country: 'tr',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                post_code: '',
+              },
+              recipient: {
+                addressId: 55574,
+              },
+              post: {
+                desi: 3,
+                package_count: 1,
+                price: '',
+                note: '',
+              },
+              barcode_format: 'pdf-A5',
+            },
+          ],
+        },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(Error);
+    const snapshot = (thrown as Error & { responseSnapshot?: Record<string, unknown> }).responseSnapshot;
+    expect(snapshot).toMatchObject({
+      createPostHttpStatus: 422,
+      providerMessage: 'Validation Errors',
+      validationErrorKeys: ['errors'],
+      failedFieldNames: ['posts.0.recipient.addressId', 'posts.0.sender.phone'],
+      validationErrorMessages: [
+        'posts.0.recipient.addressId validation failed',
+        'posts.0.sender.phone validation failed',
+      ],
+      validationResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['message', 'status', 'errors'],
+      },
+    });
+    expect(JSON.stringify(snapshot)).not.toContain('+90 532 123 45 67');
+    expect(JSON.stringify(snapshot)).not.toContain('sender@example.test');
+  });
+
   it('extracts Navlungo provider tracking id from 500 provider messages', async () => {
     const providerMessage =
       'Execution of ServiceCallout failed. Please report for error resolution with Tracking ID: #35440d91ec90403483413b548ba91844';

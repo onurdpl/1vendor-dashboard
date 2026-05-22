@@ -289,6 +289,7 @@ function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: Navlu
       versionTried: selectedVersion,
       baseUrlOverride: null,
       resolvedProviderPath,
+      resolvedProviderUrl: baseUrl ? `${baseUrl.replace(/\/$/, '')}/post/create` : null,
     };
   }
 
@@ -304,6 +305,7 @@ function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: Navlu
       versionTried: selectedVersion,
       baseUrlOverride: nextBaseUrl,
       resolvedProviderPath: `/${selectedVersion}/post/create`,
+      resolvedProviderUrl: `${nextBaseUrl}/post/create`,
     };
   } catch {
     return {
@@ -311,6 +313,7 @@ function resolveNavlungoDiagnosticBaseUrl(env: AppEnv, apiVersionOverride: Navlu
       versionTried: selectedVersion,
       baseUrlOverride: null,
       resolvedProviderPath: '/post/create',
+      resolvedProviderUrl: null,
     };
   }
 }
@@ -1069,6 +1072,7 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnRequestedPostType: built.summary.requestedPostType,
     navlungoReturnEndpointVersionTried: requestBase.versionTried,
     navlungoReturnResolvedProviderPath: requestBase.resolvedProviderPath,
+    navlungoReturnResolvedProviderUrl: requestBase.resolvedProviderUrl,
     navlungoReturnBaseUrlOverrideApplied: Boolean(requestBase.baseUrlOverride),
     recipientAddressIdValid: built.recipientAddressIdValid,
     returnRequestId: record.id,
@@ -1122,6 +1126,9 @@ export async function createNavlungoReturnPickupForReturn(
       providerMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
       navlungoReturnProviderMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
       navlungoReturnProviderTrackingId: readString(result.responseSnapshot, ['providerTrackingId']),
+      navlungoReturnValidationFields: readStringArray(result.responseSnapshot.failedFieldNames),
+      navlungoReturnValidationMessages: readStringArray(result.responseSnapshot.validationErrorMessages),
+      navlungoReturnValidationResponseShape: result.responseSnapshot.validationResponseShape ?? null,
       returnProviderIdPresent: Boolean(result.returnOrderId),
       returnTrackingPresent: Boolean(result.returnTrackingNumber || result.returnTrackingUrl),
       returnBarcodePresent: Boolean(result.returnBarcode),
@@ -1158,6 +1165,9 @@ export async function createNavlungoReturnPickupForReturn(
             providerMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
             navlungoReturnProviderMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
             navlungoReturnProviderTrackingId: readString(error.responseSnapshot, ['providerTrackingId']),
+            navlungoReturnValidationFields: readStringArray(error.responseSnapshot.failedFieldNames),
+            navlungoReturnValidationMessages: readStringArray(error.responseSnapshot.validationErrorMessages),
+            navlungoReturnValidationResponseShape: error.responseSnapshot.validationResponseShape ?? null,
             httpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
             responseKeys: Object.keys(error.responseSnapshot),
             rawResponseSummary: error.responseSnapshot,

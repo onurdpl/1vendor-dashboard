@@ -742,9 +742,16 @@ describe('ReturnDetailPage vendor review screen', () => {
         navlungoReturnAutoCreateAttempted: true,
         navlungoReturnCreateHttpStatus: 422,
         navlungoReturnCreateSucceeded: false,
+        navlungoReturnEndpointVersionTried: 'v2.1',
+        navlungoReturnResolvedProviderPath: '/v2.1/post/create',
+        navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/create',
         providerMessage: 'Validation Errors',
-        failedFieldNames: ['posts.0.sender.district'],
-        providerValidationErrors: ['Sender district is required.'],
+        navlungoReturnValidationFields: ['posts.0.sender.district'],
+        navlungoReturnValidationMessages: ['Sender district is required.'],
+        navlungoReturnValidationResponseShape: {
+          kind: 'json:object',
+          topLevelKeys: ['message', 'status', 'errors'],
+        },
         responseKeys: ['message', 'status', 'error'],
       },
     });
@@ -754,8 +761,12 @@ describe('ReturnDetailPage vendor review screen', () => {
     const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
     expect(within(diagnostics).getByText('422')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Validation Errors')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('v2.1')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('/v2.1/post/create')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('https://domestic-api.navlungo.com/v2.1/post/create')).toBeInTheDocument();
     expect(within(diagnostics).getByText('posts.0.sender.district')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Sender district is required.')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('json:object · message, status, errors')).toBeInTheDocument();
     expect(within(diagnostics).getByText(/responseKeys/)).toBeInTheDocument();
   });
 

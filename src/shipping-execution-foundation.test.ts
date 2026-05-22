@@ -6216,7 +6216,12 @@ describe('shipping execution foundation', () => {
         new ShippingProviderExecutionError('Navlungo return create failed.', {
           createPostHttpStatus: 422,
           providerMessage: 'Validation Errors',
+          failedFieldNames: ['posts.0.recipient.addressId'],
           validationErrorMessages: ['District is invalid'],
+          validationResponseShape: {
+            kind: 'json:object',
+            topLevelKeys: ['message', 'status', 'errors'],
+          },
         }),
       ),
     });
@@ -6246,6 +6251,12 @@ describe('shipping execution foundation', () => {
           navlungoReturnCreateSucceeded: false,
           navlungoReturnCreateHttpStatus: 422,
           providerMessage: 'Validation Errors',
+          navlungoReturnValidationFields: ['posts.0.recipient.addressId'],
+          navlungoReturnValidationMessages: ['District is invalid'],
+          navlungoReturnValidationResponseShape: {
+            kind: 'json:object',
+            topLevelKeys: ['message', 'status', 'errors'],
+          },
         }),
       }),
     }));

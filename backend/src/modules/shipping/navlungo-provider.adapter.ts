@@ -729,11 +729,30 @@ function collectNavlungoValidationDiagnostics(
   }
 
   if (Array.isArray(value)) {
-    value.forEach((item) => collectNavlungoValidationDiagnostics(item, path, output));
+    value.forEach((item) => {
+      if (isRecord(item)) {
+        const field = readString(item, ['field', 'path', 'key', 'attribute', 'property', 'name']);
+        const detail = item.message ?? item.messages ?? item.error ?? item.errors ?? item.detail ?? item.description;
+        if (field) {
+          output.fields.push(field);
+          collectNavlungoValidationDiagnostics(detail, [field], output);
+          return;
+        }
+      }
+      collectNavlungoValidationDiagnostics(item, path, output);
+    });
     return output;
   }
 
   if (isRecord(value)) {
+    const field = readString(value, ['field', 'path', 'key', 'attribute', 'property', 'name']);
+    const detail = value.message ?? value.messages ?? value.error ?? value.errors ?? value.detail ?? value.description;
+    if (field && detail !== undefined) {
+      output.fields.push(field);
+      collectNavlungoValidationDiagnostics(detail, [field], output);
+      return output;
+    }
+
     for (const [key, item] of Object.entries(value)) {
       if (/token|secret|authorization|bearer|api[_-]?key/i.test(key)) {
         continue;

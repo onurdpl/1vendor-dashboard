@@ -33,6 +33,10 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
 function formatDate(value: string | null | undefined) {
   if (!value) {
     return '—';
@@ -855,6 +859,7 @@ export function ReturnDetailPage() {
     returnProviderSnapshot.navlungoReturnRequestedPostType ?? navlungoReturnRequestSummary?.requestedPostType ?? null;
   const navlungoReturnEndpointVersionTried = readSnapshotString(returnProviderSnapshot, 'navlungoReturnEndpointVersionTried');
   const navlungoReturnResolvedProviderPath = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderPath');
+  const navlungoReturnResolvedProviderUrl = readSnapshotString(returnProviderSnapshot, 'navlungoReturnResolvedProviderUrl');
   const navlungoReturnProviderMessage =
     readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderMessage') ??
     readSnapshotString(returnProviderSnapshot, 'providerMessage');
@@ -872,6 +877,7 @@ export function ReturnDetailPage() {
     'providerValidationErrors',
     'validationErrorMessages',
   ]);
+  const navlungoReturnValidationResponseShape = returnProviderSnapshot.navlungoReturnValidationResponseShape;
   const returnProviderSnapshotResponseKeys = Object.keys(returnProviderSnapshot).sort();
   const shouldRenderNavlungoAutoCreateDiagnostics =
     isAdmin &&
@@ -1456,6 +1462,10 @@ export function ReturnDetailPage() {
                   <strong>{navlungoReturnResolvedProviderPath ?? '—'}</strong>
                 </div>
                 <div>
+                  <span>Resolved provider URL</span>
+                  <strong>{navlungoReturnResolvedProviderUrl ?? '—'}</strong>
+                </div>
+                <div>
                   <span>Requested barcode format</span>
                   <strong>{navlungoReturnRequestedBarcodeFormat ?? '—'}</strong>
                 </div>
@@ -1474,6 +1484,21 @@ export function ReturnDetailPage() {
                 <div>
                   <span>Validation messages</span>
                   <strong>{formatDiagnosticList(navlungoReturnValidationMessages)}</strong>
+                </div>
+                <div>
+                  <span>Validation response shape</span>
+                  <strong>
+                    {isRecord(navlungoReturnValidationResponseShape)
+                      ? [
+                          typeof navlungoReturnValidationResponseShape.kind === 'string'
+                            ? navlungoReturnValidationResponseShape.kind
+                            : null,
+                          Array.isArray(navlungoReturnValidationResponseShape.topLevelKeys)
+                            ? navlungoReturnValidationResponseShape.topLevelKeys.join(', ')
+                            : null,
+                        ].filter(Boolean).join(' · ') || '—'
+                      : '—'}
+                  </strong>
                 </div>
                 <div>
                   <span>Provider post number</span>
