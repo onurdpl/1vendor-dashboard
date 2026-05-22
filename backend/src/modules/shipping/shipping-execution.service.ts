@@ -837,14 +837,14 @@ function sanitizeTryOtoReferencePart(value: string | null | undefined, fallback:
   return sanitized || fallback;
 }
 
-function sanitizeNavlungoReferencePart(value: string | null | undefined, fallback: string, maxLength?: number) {
+function sanitizeNavlungoReferencePart(value: string | null | undefined, fallback: string, length?: number) {
   const sanitized = (value ?? '')
     .trim()
     .replace(/^#+/, '')
     .toUpperCase()
     .replace(/[^A-Z0-9]+/g, '');
   const safe = sanitized || fallback;
-  return maxLength ? safe.slice(0, maxLength) : safe;
+  return length ? safe.padEnd(length, '0').slice(0, length) : safe;
 }
 
 function buildNavlungoShortUniqueReferencePart() {
@@ -858,7 +858,7 @@ function buildNavlungoReferenceId(input: {
   providerMetadata?: unknown;
 }) {
   const metadataStoreShort = readString(input.providerMetadata, ['navlungoStoreShort', 'storeShort', 'store_short', 'storeCode']);
-  const storeShort = sanitizeNavlungoReferencePart(metadataStoreShort ?? input.vendorId, 'STR', 3);
+  const storeShort = sanitizeNavlungoReferencePart(metadataStoreShort ?? input.vendorId, 'ST', 2);
   const orderNumber = sanitizeNavlungoReferencePart(input.shopifyOrderNumber, 'ORDER');
   return `${storeShort}-${orderNumber}-${buildNavlungoShortUniqueReferencePart()}`;
 }

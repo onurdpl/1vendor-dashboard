@@ -220,9 +220,9 @@ Notes:
 - `reference_id` is documented as not required, but must be unique if sent. The sample validation error says already-registered `reference_id` is rejected.
 - New Navlungo shipments use a short customer-safe `reference_id` format:
   - `<storeShort>-<shopifyOrderNumber>-<shortUnique>`
-  - `storeShort` is uppercase, alphanumeric, and max 3 characters.
-  - `shortUnique` is 5-6 uppercase alphanumeric characters.
-  - Example shape: `SPO-1057-N8K2Q1`.
+  - `storeShort` is exactly 2 uppercase alphanumeric characters.
+  - `shortUnique` is exactly 6 uppercase alphanumeric characters.
+  - Example shape: `SP-1057-N8K2Q1`.
   - Internal allocation IDs, execution IDs, timestamps, and full vendor identifiers must not be embedded in new `reference_id` values.
   - Existing stored provider references are not migrated or rewritten.
 - `carrier_id`, `post_type`, sender fields, recipient fields, `post.desi`, and `post.package_count` are documented as required.

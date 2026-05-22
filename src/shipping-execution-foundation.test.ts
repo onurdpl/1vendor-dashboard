@@ -4033,9 +4033,9 @@ describe('shipping execution foundation', () => {
     expect(preview.payload.posts[0].post).toHaveProperty('note', '');
     expect(preview.payload.posts[0].sender).toEqual({ addressId: 55574 });
     const referenceId = preview.payload.posts[0].reference_id;
-    expect(referenceId).toMatch(/^[A-Z0-9]{1,3}-1027-[A-Z0-9]{5,6}$/);
+    expect(referenceId).toMatch(/^[A-Z0-9]{2}-1027-[A-Z0-9]{6}$/);
     expect(referenceId.length).toBeLessThanOrEqual(32);
-    expect(referenceId.startsWith('SPO-1027-')).toBe(true);
+    expect(referenceId.startsWith('SP-1027-')).toBe(true);
     expect(referenceId.toLowerCase()).not.toContain('alloc');
     expect(referenceId.toLowerCase()).not.toContain('sporjinal');
     expect(referenceId).not.toContain('alloc-1');
@@ -4056,7 +4056,7 @@ describe('shipping execution foundation', () => {
         vendorId: 'sporjinal',
       },
     );
-    expect(secondPreview.payload.posts[0].reference_id).toMatch(/^[A-Z0-9]{1,3}-1027-[A-Z0-9]{5,6}$/);
+    expect(secondPreview.payload.posts[0].reference_id).toMatch(/^[A-Z0-9]{2}-1027-[A-Z0-9]{6}$/);
     expect(secondPreview.payload.posts[0].reference_id).not.toBe(referenceId);
 
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
