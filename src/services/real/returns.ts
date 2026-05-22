@@ -16,6 +16,12 @@ type ReturnSummaryDto = {
   status: string;
   reason?: string | null;
   returnReasonNote?: string | null;
+  returnProvider?: string | null;
+  returnProviderShipmentId?: string | null;
+  returnLabel?: string | null;
+  returnReferenceId?: string | null;
+  navlungoReturnCreatedAt?: string | null;
+  returnProviderSnapshot?: Record<string, unknown> | null;
   returnCarrierName?: string | null;
   returnTrackingNumber?: string | null;
   returnTrackingUrl?: string | null;
@@ -275,6 +281,12 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
     customer: 'Customer unavailable',
     reason: formatReturnReason(dto.reason) || `${sourceLabel} · ${sourceId}`,
     returnReasonNote: readDtoText(dto.returnReasonNote) || null,
+    returnProvider: readDtoText(dto.returnProvider) || null,
+    returnProviderShipmentId: readDtoText(dto.returnProviderShipmentId) || null,
+    returnLabel: readDtoText(dto.returnLabel) || null,
+    returnReferenceId: readDtoText(dto.returnReferenceId) || null,
+    navlungoReturnCreatedAt: dto.navlungoReturnCreatedAt ?? null,
+    returnProviderSnapshot: dto.returnProviderSnapshot ?? null,
     returnCarrierName: readDtoText(dto.returnCarrierName) || null,
     returnTrackingNumber: readDtoText(dto.returnTrackingNumber) || null,
     returnTrackingUrl: readDtoText(dto.returnTrackingUrl) || null,
@@ -357,6 +369,50 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     ],
   };
   return detail;
+}
+
+export async function createNavlungoReturnPickup(
+  returnId: string,
+  input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+  options: { vendorId?: string | null } = {},
+): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input, requestOptions)
+    : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input));
+  const summary = mapSummary(response);
+  const refundedItems = response.refundedItems.map((item) => ({
+    id: item.id,
+    originalVendorId: response.originalVendorId,
+    assignedVendorId: response.assignedVendorId,
+    vendorId: response.assignedVendorId,
+    sku: item.sku ?? 'UNKNOWN-SKU',
+    variantTitle: resolveReturnItemVariant(item),
+    name: resolveReturnItemName(item),
+    quantity: item.quantity,
+    condition: 'Opened' as const,
+    refundAmount: formatCurrency(item.refundAmount),
+  }));
+
+  return {
+    ...summary,
+    originalVendorId: response.originalVendorId,
+    resolution: response.returnReasonNote ?? '',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Original payment method (Shopify refund flow)',
+    processedBy: '',
+    refundedItems,
+    items: refundedItems,
+    timeline: [
+      {
+        label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',
+        at: response.requestCreatedAt ?? response.createdAt,
+      },
+      { label: 'Latest backend update', at: response.updatedAt },
+    ],
+  };
 }
 
 export async function markReturnReceived(

@@ -7,6 +7,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import {
   getReturn,
+  createNavlungoReturnPickup,
   markReturnReceived,
   reviewReturn,
   type ReturnDetail,
@@ -248,6 +249,7 @@ export function ReturnDetailPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
+  const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const { data: returnRequest, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
     () => {
@@ -315,6 +317,32 @@ export function ReturnDetailPage() {
       },
     },
   );
+  const navlungoReturnPickupMutation = useMutationAction(
+    (input: { dryRun?: boolean }) => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return createNavlungoReturnPickup(returnId, input, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: async (data, variables) => {
+        await refetch();
+        showFeedback(
+          variables.dryRun
+            ? 'Navlungo return pickup preview generated. No provider call was made.'
+            : 'Navlungo return pickup created.',
+          variables.dryRun ? 'info' : 'success',
+        );
+        if (!variables.dryRun && data.returnProviderShipmentId) {
+          setNavlungoReturnPickupLiveConfirmed(false);
+        }
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Navlungo return pickup could not be created.', 'error');
+      },
+    },
+  );
 
   if (!authContextReady || isLoading) {
     return (
@@ -347,8 +375,18 @@ export function ReturnDetailPage() {
   const returnedItems = getReturnedItems(returnRequest);
   const timeline = getTimeline(returnRequest);
   const hasReturnShipment = Boolean(
-    returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
+    returnRequest.returnCarrierName ||
+      returnRequest.returnTrackingNumber ||
+      returnRequest.returnTrackingUrl ||
+      returnRequest.returnProviderShipmentId,
   );
+  const returnProviderSnapshot = returnRequest.returnProviderSnapshot ?? {};
+  const navlungoReturnPickupPayloadSummary = returnProviderSnapshot.navlungoReturnPickupPayloadSummary as
+    | Record<string, unknown>
+    | undefined;
+  const navlungoReturnPickupMissingFields = Array.isArray(returnProviderSnapshot.navlungoReturnPickupMissingFields)
+    ? returnProviderSnapshot.navlungoReturnPickupMissingFields.filter((field): field is string => typeof field === 'string')
+    : [];
   const canReviewReturn =
     currentUser?.role === 'admin' ||
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
@@ -432,6 +470,20 @@ export function ReturnDetailPage() {
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
       href: `${supportBasePath}/${ticket.id}`,
     })),
+    ...(returnRequest.navlungoReturnCreatedAt
+      ? [
+          {
+            id: `navlungo-return-${returnRequest.id}`,
+            title: 'Navlungo return pickup created',
+            description: returnRequest.returnCarrierName
+              ? `Provider shipment created · ${returnRequest.returnCarrierName}`
+              : 'Provider shipment created',
+            at: returnRequest.navlungoReturnCreatedAt,
+            status: 'Created',
+            tone: 'success' as const,
+          },
+        ]
+      : []),
   ];
   const returnRecommendations: OperationsRecommendation[] = [];
   if (!hasReceivedReturn) {
@@ -621,6 +673,18 @@ export function ReturnDetailPage() {
                 </div>
               </div>
               <div className="return-review-summary-list">
+                {returnRequest.returnProvider ? (
+                  <div>
+                    <span>Provider</span>
+                    <strong>{returnRequest.returnProvider === 'navlungo' ? 'Navlungo' : returnRequest.returnProvider}</strong>
+                  </div>
+                ) : null}
+                {returnRequest.returnProviderShipmentId ? (
+                  <div>
+                    <span>Provider ID</span>
+                    <strong>{returnRequest.returnProviderShipmentId}</strong>
+                  </div>
+                ) : null}
                 <div>
                   <span>Carrier</span>
                   <strong>{returnRequest.returnCarrierName ?? 'Not provided'}</strong>
@@ -635,7 +699,121 @@ export function ReturnDetailPage() {
                     <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>
                   )}
                 </div>
+                {returnRequest.returnReferenceId ? (
+                  <div>
+                    <span>Reference</span>
+                    <strong>{returnRequest.returnReferenceId}</strong>
+                  </div>
+                ) : null}
+                {returnRequest.returnLabel ? (
+                  <div>
+                    <span>Barcode / label</span>
+                    <strong>Available</strong>
+                  </div>
+                ) : null}
               </div>
+            </article>
+          ) : null}
+
+          {isAdmin && returnRequest.sourceType === 'shopify_return_request' ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Navlungo return pickup</p>
+                  <h3>Provider return shipment</h3>
+                </div>
+              </div>
+              {returnRequest.returnProviderShipmentId ? (
+                <div className="return-review-summary-list">
+                  <div>
+                    <span>Status</span>
+                    <strong>Created</strong>
+                  </div>
+                  <div>
+                    <span>Shopify return sync</span>
+                    <strong>
+                      {typeof returnProviderSnapshot.shopifyReturnSyncSkippedReason === 'string'
+                        ? returnProviderSnapshot.shopifyReturnSyncSkippedReason
+                        : 'not_implemented'}
+                    </strong>
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <p className="muted">Preview the return pickup payload from this return request before creating a live Navlungo return shipment.</p>
+                  <div className="return-review-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={navlungoReturnPickupMutation.isPending}
+                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: true })}
+                    >
+                      {navlungoReturnPickupMutation.isPending ? 'Previewing...' : 'Preview Navlungo return pickup'}
+                    </button>
+                  </div>
+                  {navlungoReturnPickupPayloadSummary ? (
+                    <div className="provider-response-summary" aria-label="Navlungo return pickup payload summary">
+                      <div className="summary-row">
+                        <span>Endpoint</span>
+                        <strong>{String(navlungoReturnPickupPayloadSummary.endpointPath ?? '/post/create')}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Post type</span>
+                        <strong>{String(navlungoReturnPickupPayloadSummary.requestedPostType ?? '—')}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Carrier</span>
+                        <strong>{String(navlungoReturnPickupPayloadSummary.requestedCarrierId ?? '—')}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Sender keys</span>
+                        <strong>
+                          {Array.isArray(navlungoReturnPickupPayloadSummary.senderKeys)
+                            ? navlungoReturnPickupPayloadSummary.senderKeys.join(', ')
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Recipient addressId</span>
+                        <strong>{returnProviderSnapshot.recipientAddressIdValid === true ? 'valid' : 'missing'}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Custom data</span>
+                        <strong>
+                          {[
+                            navlungoReturnPickupPayloadSummary.customData1Present ? 'order' : null,
+                            navlungoReturnPickupPayloadSummary.customData2Present ? 'return' : null,
+                            navlungoReturnPickupPayloadSummary.customData3Present ? 'shopify return' : null,
+                            navlungoReturnPickupPayloadSummary.customData4Present ? 'flow' : null,
+                          ].filter(Boolean).join(', ') || '—'}
+                        </strong>
+                      </div>
+                      {navlungoReturnPickupMissingFields.length ? (
+                        <div className="summary-row">
+                          <span>Missing fields</span>
+                          <strong>{navlungoReturnPickupMissingFields.join(', ')}</strong>
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+                  <label className="checkbox-row">
+                    <input
+                      type="checkbox"
+                      checked={navlungoReturnPickupLiveConfirmed}
+                      onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
+                    />
+                    <span>I understand this creates a live Navlungo return pickup.</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={navlungoReturnPickupMutation.isPending || !navlungoReturnPickupLiveConfirmed}
+                    onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false })}
+                  >
+                    {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
+                  </button>
+                </>
+              )}
             </article>
           ) : null}
 

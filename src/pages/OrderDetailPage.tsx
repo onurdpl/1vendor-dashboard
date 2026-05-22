@@ -1839,11 +1839,7 @@ export function OrderDetailPage() {
     Boolean(visibleShipmentExecution.providerShipmentId || visibleShipmentExecution.trackingNumber) &&
     !visibleShipmentExecution.returnShipment;
   const canCreateNavlungoReturnPickup =
-    isAdmin &&
-    visibleShipmentExecution?.provider === 'navlungo' &&
-    ['delivered'].includes(visibleShipmentStatus) &&
-    Boolean(visibleShipmentExecution.providerShipmentId) &&
-    !visibleShipmentExecution.returnShipment;
+    false;
   const hasShopifyReturnIdForLabelProbe = Boolean(order?.shopifyReturnSignal?.returnIdPresent);
   const hasReturnTrackingForLabelProbe = Boolean(
     visibleShipmentExecution?.returnShipment?.trackingNumber || visibleShipmentExecution?.returnShipment?.barcode,
@@ -4035,7 +4031,11 @@ export function OrderDetailPage() {
       id: `return-${returnRecord.id}`,
       eyebrow: 'Return',
       title: `Return for ${formatShopifyOrderNumber(returnRecord.sourceShopifyOrderNumber)}`,
-      description: [returnRecord.status, returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item'].filter(Boolean).join(' · '),
+      description: [
+        returnRecord.status,
+        returnRecord.returnProviderShipmentId ? 'Navlungo pickup created' : null,
+        returnRecord.displayTitle ?? returnRecord.itemTitle ?? 'Returned item',
+      ].filter(Boolean).join(' · '),
       actionLabel: 'Open return detail',
       href: `/returns/${returnRecord.id}`,
       status: returnRecord.status === 'Closed' || returnRecord.status === 'Refunded' ? 'Return closed' : 'Return linked',

@@ -19,3 +19,11 @@ export async function reviewReturn(
 ) {
   return runtimeServices.returns.review(returnId, input, options.vendorId ?? undefined);
 }
+
+export async function createNavlungoReturnPickup(
+  returnId: string,
+  input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.returns.createNavlungoReturnPickup(returnId, input, options.vendorId ?? undefined);
+}

@@ -1217,6 +1217,59 @@ export const runtimeServices = {
         vendorDecisionReason: input.decision === 'rejected' ? input.reason ?? null : null,
       };
     },
+    async createNavlungoReturnPickup(
+      returnId: string,
+      input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> } = {},
+      vendorId = getCurrentVendorId(),
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.createNavlungoReturnPickup(returnId, input, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      if (input.dryRun) {
+        return {
+          ...returnRecord,
+          returnProviderSnapshot: {
+            navlungoReturnPickupDryRun: true,
+            navlungoReturnPickupAttempted: false,
+            navlungoReturnPickupSucceeded: false,
+            navlungoReturnPickupMissingFields: [],
+            navlungoReturnPickupPayloadSummary: {
+              endpointPath: '/post/create',
+              method: 'POST',
+              senderKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+              recipientKeys: ['addressId'],
+              requestedPostType: 3,
+              customData1Present: true,
+              customData2Present: true,
+              customData3Present: true,
+              customData4Present: true,
+            },
+          },
+        };
+      }
+      return {
+        ...returnRecord,
+        returnProvider: 'navlungo',
+        returnProviderShipmentId: 'MOCK-RETURN-POST',
+        returnReferenceId: 'MO-RET-1023-ABC123',
+        returnCarrierName: 'Navlungo',
+        returnTrackingNumber: 'MOCK-RETURN-POST',
+        returnTrackingUrl: 'https://example.test/track/MOCK-RETURN-POST',
+        returnLabel: 'mock-barcode',
+        navlungoReturnCreatedAt: new Date().toISOString(),
+        returnProviderSnapshot: {
+          navlungoReturnPickupDryRun: false,
+          navlungoReturnPickupAttempted: true,
+          navlungoReturnPickupSucceeded: true,
+          shopifyReturnSyncSkippedReason: 'not_implemented',
+        },
+      };
+    },
   },
   finance: {
     dashboard: (vendorId = getCurrentVendorId()) =>

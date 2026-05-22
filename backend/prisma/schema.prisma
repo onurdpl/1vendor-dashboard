@@ -485,6 +485,12 @@ model ReturnRecord {
   status                   String
   reason                   String?
   returnReasonNote         String?
+  returnProvider           String?
+  returnProviderShipmentId String?
+  returnLabel              String?
+  returnReferenceId        String?
+  navlungoReturnCreatedAt  DateTime?
+  returnProviderSnapshot   Json?
   returnCarrierName        String?
   returnTrackingNumber     String?
   returnTrackingUrl        String?

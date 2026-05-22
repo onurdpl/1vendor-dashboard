@@ -4390,7 +4390,7 @@ export async function createTryOtoReturnShipmentLabel(
   }
 
   if (existing.provider === ShippingProvider.NAVLUNGO) {
-    return createNavlungoReturnPickup(existing, options);
+    throw new Error('Navlungo return pickup creation must be started from the internal return request.');
   }
 
   if (existing.provider !== ShippingProvider.TRY_OTO) {

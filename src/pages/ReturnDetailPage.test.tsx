@@ -12,6 +12,9 @@ const markReturnReceivedMock = vi.fn<(returnId: string) => Promise<ReturnDetail>
 const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
 >();
+const createNavlungoReturnPickupMock = vi.fn<
+  (returnId: string, input: { dryRun?: boolean }) => Promise<ReturnDetail>
+>();
 const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -25,6 +28,8 @@ vi.mock('../features/returns/api', async () => {
     markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
     reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
       reviewReturnMock(returnId, input),
+    createNavlungoReturnPickup: (returnId: string, input: { dryRun?: boolean }) =>
+      createNavlungoReturnPickupMock(returnId, input),
   };
 });
 
@@ -62,6 +67,12 @@ const returnDetail: ReturnDetail = {
   updatedAt: '2026-05-13T05:00:00Z',
   customer: 'Customer unavailable',
   reason: 'Shopify return request lifecycle - Return 23165600081',
+  returnProvider: null,
+  returnProviderShipmentId: null,
+  returnLabel: null,
+  returnReferenceId: null,
+  navlungoReturnCreatedAt: null,
+  returnProviderSnapshot: null,
   returnCarrierName: null,
   returnTrackingNumber: null,
   returnTrackingUrl: null,
@@ -132,6 +143,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     getReturnMock.mockReset();
     markReturnReceivedMock.mockReset();
     reviewReturnMock.mockReset();
+    createNavlungoReturnPickupMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -180,6 +192,71 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Shopify order ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Shopify return ID/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
+  });
+
+  it('renders existing Navlungo return pickup evidence on Return Detail', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-1',
+      returnTrackingNumber: 'NAV-RET-1',
+      returnTrackingUrl: 'https://tracking.example/NAV-RET-1',
+      returnLabel: 'barcode-string',
+      returnCarrierName: 'Sürat Kargo',
+      returnReferenceId: 'SP-RET-1023-ABC123',
+      navlungoReturnCreatedAt: '2026-05-22T09:00:00Z',
+      returnProviderSnapshot: {
+        shopifyReturnSyncSkippedReason: 'not_implemented',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Provider ID')).toBeInTheDocument();
+    expect(screen.getAllByText('NAV-RET-1').length).toBeGreaterThan(0);
+    expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
+    expect(screen.getByText('SP-RET-1023-ABC123')).toBeInTheDocument();
+    expect(screen.getAllByText('Navlungo return pickup created').length).toBeGreaterThan(0);
+  });
+
+  it('lets admin preview Navlungo return pickup from the return request context', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+    createNavlungoReturnPickupMock.mockResolvedValueOnce({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupDryRun: true,
+        navlungoReturnPickupMissingFields: [],
+        recipientAddressIdValid: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/create',
+          requestedPostType: 3,
+          requestedCarrierId: 9,
+          senderKeys: ['name', 'phone', 'email', 'address', 'country', 'city', 'district', 'post_code'],
+          recipientKeys: ['addressId'],
+          customData1Present: true,
+          customData2Present: true,
+          customData3Present: true,
+          customData4Present: true,
+        },
+      },
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Preview Navlungo return pickup' }));
+
+    expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, { dryRun: true });
+    expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
   });
 
   it('links to Orders with a query parameter when the related order id is a Shopify id', async () => {

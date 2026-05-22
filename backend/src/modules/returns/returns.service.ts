@@ -1,4 +1,16 @@
+import { Prisma } from '@prisma/client';
+import { randomBytes } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
+import type { AppEnv } from '../../config/env.js';
+import {
+  createShippingProviderAdapter,
+  ShippingProviderExecutionError,
+  type ShippingProviderAdapter,
+} from '../shipping/shipping-provider.adapter.js';
+import {
+  summarizeNavlungoCreatePostRequest,
+  type NavlungoCreatePostPayload,
+} from '../shipping/navlungo-provider.adapter.js';
 import type { ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 
 export class ReturnReviewError extends Error {
@@ -14,6 +26,21 @@ export class ReturnReviewError extends Error {
 export type ReturnActorScope = {
   role: 'admin' | 'vendor' | 'support' | 'finance';
   vendorId?: string | null;
+};
+
+export type NavlungoReturnPickupInput = {
+  dryRun?: boolean;
+  adapter?: ShippingProviderAdapter;
+  customerOverrides?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    country?: string;
+    postcode?: string;
+    city?: string;
+    district?: string;
+    address?: string;
+  };
 };
 
 function toAmountString(value: number) {
@@ -69,6 +96,137 @@ function readText(value: string | null | undefined) {
   return text;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readString(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      return raw.trim();
+    }
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(raw);
+    }
+  }
+  return null;
+}
+
+function readNumber(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    const raw = value[key];
+    const numeric = Number(raw);
+    if (Number.isFinite(numeric)) {
+      return numeric;
+    }
+  }
+  return null;
+}
+
+function readSnapshot(value: unknown): Record<string, unknown> | null {
+  return isRecord(value) ? value : null;
+}
+
+function sanitizeNavlungoReferencePart(value: string | null | undefined, fallback: string, length?: number) {
+  const sanitized = (value ?? '')
+    .trim()
+    .replace(/^#+/, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, '');
+  const safe = sanitized || fallback;
+  return length ? safe.padEnd(length, '0').slice(0, length) : safe;
+}
+
+function buildNavlungoShortUniqueReferencePart() {
+  const numeric = randomBytes(4).readUInt32BE(0);
+  return numeric.toString(36).toUpperCase().replace(/[^A-Z0-9]/g, '').padStart(6, '0').slice(-6);
+}
+
+function buildNavlungoReturnReferenceId(input: {
+  vendorId: string;
+  shopifyOrderNumber: string | null;
+  providerMetadata?: unknown;
+}) {
+  const metadataStoreShort = readString(input.providerMetadata, [
+    'navlungoStoreShort',
+    'storeShort',
+    'store_short',
+    'storeCode',
+  ]);
+  const storeShort = sanitizeNavlungoReferencePart(metadataStoreShort ?? input.vendorId, 'ST', 2);
+  const orderNumber = sanitizeNavlungoReferencePart(input.shopifyOrderNumber, 'ORDER');
+  return `${storeShort}-RET-${orderNumber}-${buildNavlungoShortUniqueReferencePart()}`;
+}
+
+function normalizeNavlungoPhone(value: string | null | undefined) {
+  const digits = value?.replace(/\D+/g, '') ?? '';
+  const national = digits.startsWith('90') && digits.length === 12
+    ? digits.slice(2)
+    : digits.startsWith('0') && digits.length === 11
+      ? digits.slice(1)
+      : digits.startsWith('5') && digits.length === 10
+        ? digits
+        : digits;
+  if (national.length === 10 && national.startsWith('5')) {
+    return `+90 ${national.slice(0, 3)} ${national.slice(3, 6)} ${national.slice(6, 8)} ${national.slice(8, 10)}`;
+  }
+  return value?.trim() || null;
+}
+
+function composeShipmentAddress(order: {
+  shippingAddress: string | null;
+}) {
+  return order.shippingAddress?.trim() || null;
+}
+
+function resolveNavlungoSenderAddressId(config: {
+  defaultWarehouseId: string | null;
+  providerMetadata: unknown;
+  warehouses: Array<{ warehouseId: string; provider: string; isDefault: boolean }>;
+}, env: AppEnv) {
+  return (
+    readString(config.providerMetadata, ['navlungoSenderAddressId', 'senderAddressId', 'sender_address_id']) ??
+    config.warehouses.find((warehouse) => warehouse.provider.toLowerCase() === 'navlungo' && warehouse.isDefault)?.warehouseId ??
+    config.warehouses.find((warehouse) => warehouse.provider.toLowerCase() === 'navlungo')?.warehouseId ??
+    config.defaultWarehouseId ??
+    env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID ??
+    null
+  );
+}
+
+function parsePositiveInteger(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+  const numeric = Number(value.trim());
+  return Number.isInteger(numeric) && numeric > 0 ? numeric : null;
+}
+
+function resolveNavlungoCarrierId(providerMetadata: unknown, env: AppEnv) {
+  return parsePositiveInteger(
+    readString(providerMetadata, ['navlungoCarrierId', 'carrierId', 'carrier_id']) ?? env.NAVLUNGO_DEFAULT_CARRIER_ID ?? '9',
+  );
+}
+
+function resolveNavlungoBarcodeFormat(providerMetadata: unknown, env: AppEnv) {
+  return readString(providerMetadata, ['navlungoBarcodeFormat', 'barcodeFormat', 'barcode_format']) ?? env.NAVLUNGO_DEFAULT_BARCODE_FORMAT ?? 'pdf-A6';
+}
+
+function safeShopifyReturnIdShort(value: string | null) {
+  const normalized = value?.trim() ?? '';
+  if (!normalized) {
+    return '';
+  }
+  return normalized.split('/').filter(Boolean).at(-1)?.replace(/[^A-Za-z0-9_-]/g, '') ?? '';
+}
+
 function readProductText(value: string | null | undefined, sku: string | null | undefined) {
   const text = readText(value)
     ?.replace(/\s*\/\s*default(?:\s+title)?$/i, '')
@@ -116,6 +274,14 @@ function withReturnedItemDisplayFields<T extends {
     displayTitle,
     variantTitle: resolveReturnedItemVariantTitle(item),
   };
+}
+
+function mapReturnProviderSnapshot(value: unknown): Record<string, unknown> | null {
+  const snapshot = readSnapshot(value);
+  if (!snapshot) {
+    return null;
+  }
+  return snapshot;
 }
 
 type ReturnRecordLineItemSource = {
@@ -322,6 +488,12 @@ export async function listVendorReturns(
       status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
       reason: record.reason,
       returnReasonNote: record.returnReasonNote,
+      returnProvider: record.returnProvider,
+      returnProviderShipmentId: record.returnProviderShipmentId,
+      returnLabel: record.returnLabel,
+      returnReferenceId: record.returnReferenceId,
+      navlungoReturnCreatedAt: record.navlungoReturnCreatedAt ? record.navlungoReturnCreatedAt.toISOString() : null,
+      returnProviderSnapshot: mapReturnProviderSnapshot(record.returnProviderSnapshot),
       returnCarrierName: record.returnCarrierName,
       returnTrackingNumber: record.returnTrackingNumber,
       returnTrackingUrl: record.returnTrackingUrl,
@@ -410,6 +582,12 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
     reason: record.reason,
     returnReasonNote: record.returnReasonNote,
+    returnProvider: record.returnProvider,
+    returnProviderShipmentId: record.returnProviderShipmentId,
+    returnLabel: record.returnLabel,
+    returnReferenceId: record.returnReferenceId,
+    navlungoReturnCreatedAt: record.navlungoReturnCreatedAt ? record.navlungoReturnCreatedAt.toISOString() : null,
+    returnProviderSnapshot: mapReturnProviderSnapshot(record.returnProviderSnapshot),
     returnCarrierName: record.returnCarrierName,
     returnTrackingNumber: record.returnTrackingNumber,
     returnTrackingUrl: record.returnTrackingUrl,
@@ -549,5 +727,264 @@ export async function reviewReturn(
     throw new ReturnReviewError('Return record not found.', 404);
   }
 
+  return updated;
+}
+
+async function getVendorShippingConfigForReturn(vendorId: string) {
+  const config = await prisma.vendorShippingConfig.findUnique({
+    where: { vendorId },
+    include: {
+      warehouses: true,
+    },
+  });
+
+  return {
+    defaultDesi: config?.defaultDesi?.toString() ?? '1',
+    defaultWarehouseId: config?.defaultWarehouseId ?? null,
+    providerMetadata: config?.providerMetadata ?? null,
+    warehouses: (config?.warehouses ?? []).map((warehouse) => ({
+      warehouseId: warehouse.warehouseId,
+      provider: warehouse.provider,
+      isDefault: warehouse.isDefault,
+    })),
+  };
+}
+
+function buildNavlungoReturnPickupPayload(input: {
+  record: {
+    id: string;
+    sourceShopifyOrderNumber: string;
+    sourceShopifyReturnId: string | null;
+    sourceShopifyReturnGid: string | null;
+    vendorAllocation: {
+      assignedVendorId: string;
+      order: {
+        customerName: string | null;
+        customerEmail: string | null;
+        customerPhone: string | null;
+        shippingCountry: string | null;
+        shippingPostcode: string | null;
+        shippingCity: string | null;
+        shippingDistrict: string | null;
+        shippingAddress: string | null;
+      };
+    };
+  };
+  config: Awaited<ReturnType<typeof getVendorShippingConfigForReturn>>;
+  env: AppEnv;
+  customerOverrides?: NavlungoReturnPickupInput['customerOverrides'];
+}) {
+  const order = input.record.vendorAllocation.order;
+  const overrides = input.customerOverrides ?? {};
+  const senderAddress = overrides.address?.trim() || composeShipmentAddress(order);
+  const sender = {
+    name: overrides.name?.trim() || order.customerName?.trim() || '',
+    phone: normalizeNavlungoPhone(overrides.phone || order.customerPhone) ?? '',
+    email: overrides.email?.trim() || order.customerEmail?.trim() || '',
+    address: senderAddress ?? '',
+    country: overrides.country?.trim() || order.shippingCountry?.trim() || 'tr',
+    city: overrides.city?.trim() || order.shippingCity?.trim() || '',
+    district: overrides.district?.trim() || order.shippingDistrict?.trim() || '',
+    post_code: overrides.postcode?.trim() || order.shippingPostcode?.trim() || '',
+  };
+  const recipientAddressId = parsePositiveInteger(resolveNavlungoSenderAddressId(input.config, input.env));
+  const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
+  const barcodeFormat = resolveNavlungoBarcodeFormat(input.config.providerMetadata, input.env);
+  const desi = Number(input.config.defaultDesi || 1);
+  const referenceId = buildNavlungoReturnReferenceId({
+    vendorId: input.record.vendorAllocation.assignedVendorId,
+    shopifyOrderNumber: input.record.sourceShopifyOrderNumber,
+    providerMetadata: input.config.providerMetadata,
+  });
+  const missingFields = [
+    sender.name ? null : 'sender.name',
+    sender.phone ? null : 'sender.phone',
+    sender.email ? null : 'sender.email',
+    sender.address ? null : 'sender.address',
+    sender.country ? null : 'sender.country',
+    sender.city ? null : 'sender.city',
+    sender.district ? null : 'sender.district',
+    recipientAddressId ? null : 'recipient.addressId',
+    carrierId ? null : 'carrier_id',
+    Number.isFinite(desi) && desi > 0 ? null : 'post.desi',
+  ].filter((field): field is string => Boolean(field));
+  const payload: NavlungoCreatePostPayload = {
+    platform: 'shopify',
+    posts: [
+      {
+        reference_id: referenceId,
+        carrier_id: carrierId ?? 9,
+        post_type: 3,
+        cod_payment_type: '',
+        sender,
+        recipient: recipientAddressId ? { addressId: recipientAddressId } : { addressId: 0 },
+        post: {
+          desi: Number.isFinite(desi) && desi > 0 ? desi : 1,
+          package_count: 1,
+          price: '',
+          note: '',
+        },
+        barcode_format: barcodeFormat,
+        custom_data_1: sanitizeNavlungoReferencePart(input.record.sourceShopifyOrderNumber, 'ORDER'),
+        custom_data_2: sanitizeNavlungoReferencePart(input.record.id, 'RETURN'),
+        custom_data_3: safeShopifyReturnIdShort(input.record.sourceShopifyReturnGid ?? input.record.sourceShopifyReturnId),
+        custom_data_4: 'navlungo-return',
+      },
+    ],
+  };
+
+  return {
+    payload,
+    missingFields,
+    referenceId,
+    summary: summarizeNavlungoCreatePostRequest(payload, input.env),
+    recipientAddressIdValid: Boolean(recipientAddressId),
+  };
+}
+
+export async function createNavlungoReturnPickupForReturn(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  input: NavlungoReturnPickupInput = {},
+): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: {
+        include: {
+          order: true,
+        },
+      },
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for Navlungo return pickup creation.', 403);
+  }
+
+  if (record.returnProvider === 'navlungo' && record.returnProviderShipmentId && !input.dryRun) {
+    const existing = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+    if (!existing) {
+      throw new ReturnReviewError('Return record not found.', 404);
+    }
+    return existing;
+  }
+
+  const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  const built = buildNavlungoReturnPickupPayload({
+    record,
+    config,
+    env,
+    customerOverrides: input.customerOverrides,
+  });
+  const attemptedAt = new Date().toISOString();
+  const diagnostics = {
+    provider: 'navlungo',
+    flow: 'return_pickup',
+    endpoint: '/post/create',
+    dryRun: input.dryRun === true,
+    navlungoReturnPickupDryRun: input.dryRun === true,
+    navlungoReturnPickupAttempted: input.dryRun !== true,
+    navlungoReturnPickupSucceeded: false,
+    navlungoReturnPickupMissingFields: built.missingFields,
+    navlungoReturnPickupPayloadSummary: built.summary,
+    recipientAddressIdValid: built.recipientAddressIdValid,
+    returnRequestId: record.id,
+    shopifyReturnIdPresent: Boolean(record.sourceShopifyReturnId || record.sourceShopifyReturnGid),
+    shopifyReturnSyncSkippedReason: 'not_implemented',
+    attemptedAt,
+  };
+
+  if (input.dryRun) {
+    const detail = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+    if (!detail) {
+      throw new ReturnReviewError('Return record not found.', 404);
+    }
+    return {
+      ...detail,
+      returnProviderSnapshot: diagnostics,
+    };
+  }
+
+  if (built.missingFields.length > 0) {
+    throw new ReturnReviewError(
+      [
+        'Missing required Navlungo return pickup fields:',
+        ...built.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before create call.',
+      ].join('\n'),
+      400,
+    );
+  }
+
+  try {
+    const adapter = input.adapter ?? createShippingProviderAdapter(env, 'navlungo');
+    if (!adapter.createReturnShipment) {
+      throw new Error('Navlungo return pickup creation is not supported by this adapter.');
+    }
+    const result = await adapter.createReturnShipment({
+      orderId: record.id,
+      items: [],
+      requestSnapshot: built.payload as unknown as Record<string, unknown>,
+    });
+    const providerSnapshot = {
+      ...diagnostics,
+      dryRun: false,
+      navlungoReturnPickupSucceeded: Boolean(result.returnOrderId),
+      httpStatus: readNumber(result.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
+      responseKeys: Object.keys(result.responseSnapshot),
+      providerMessage: readString(result.responseSnapshot, ['providerMessage', 'providerError']),
+      returnProviderIdPresent: Boolean(result.returnOrderId),
+      returnTrackingPresent: Boolean(result.returnTrackingNumber || result.returnTrackingUrl),
+      returnBarcodePresent: Boolean(result.returnBarcode),
+      returnStatus: result.returnStatus,
+      rawResponseSummary: result.responseSnapshot,
+      shopifyReturnSyncSkippedReason: 'not_implemented',
+    };
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProvider: 'navlungo',
+        returnProviderShipmentId: result.returnOrderId,
+        returnTrackingNumber: result.returnTrackingNumber,
+        returnTrackingUrl: result.returnTrackingUrl,
+        returnLabel: result.returnBarcode ?? result.returnLabelUrl,
+        returnCarrierName: result.returnCarrierName ?? 'Navlungo',
+        returnReferenceId: built.referenceId,
+        navlungoReturnCreatedAt: new Date(attemptedAt),
+        returnProviderSnapshot: providerSnapshot as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ShippingProviderExecutionError) {
+      await prisma.returnRecord.update({
+        where: { id: returnId },
+        data: {
+          returnProviderSnapshot: {
+            ...diagnostics,
+            dryRun: false,
+            navlungoReturnPickupSucceeded: false,
+            providerMessage: readString(error.responseSnapshot, ['providerMessage', 'providerError']),
+            httpStatus: readNumber(error.responseSnapshot, ['createPostHttpStatus', 'httpStatus']),
+            responseKeys: Object.keys(error.responseSnapshot),
+            rawResponseSummary: error.responseSnapshot,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      throw new ReturnReviewError(error.message, 400);
+    }
+    throw new ReturnReviewError(error instanceof Error ? error.message : 'Navlungo return pickup could not be created.', 400);
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
   return updated;
 }

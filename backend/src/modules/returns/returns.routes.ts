@@ -7,6 +7,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import { resolveRequestVendorContext } from '../vendor-access/vendor-access.service.js';
 import {
   getVendorReturnById,
+  createNavlungoReturnPickupForReturn,
   listVendorReturns,
   markReturnReceived,
   type ReturnActorScope,
@@ -30,6 +31,20 @@ type DuplicateReturnCleanupBody = {
 type ReturnReviewBody = {
   decision?: string;
   reason?: string;
+};
+
+type NavlungoReturnPickupBody = {
+  dryRun?: boolean;
+  customerOverrides?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    country?: string;
+    postcode?: string;
+    city?: string;
+    district?: string;
+    address?: string;
+  };
 };
 
 function sendReviewError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
@@ -167,6 +182,28 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return await reviewReturn(request.params.returnId, actor.actor, {
           decision,
           reason: request.body?.reason,
+        });
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { returnId: string }; Body: NavlungoReturnPickupBody }>(
+    '/returns/:returnId/navlungo-return-pickup',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await createNavlungoReturnPickupForReturn(request.params.returnId, actor.actor, env, {
+          dryRun: request.body?.dryRun === true,
+          customerOverrides: request.body?.customerOverrides,
         });
       } catch (error) {
         return sendReviewError(error, reply);

@@ -25,6 +25,8 @@ const prismaMock = vi.hoisted(() => ({
   },
   returnRecord: {
     findFirst: vi.fn(),
+    findUnique: vi.fn(),
+    update: vi.fn(),
   },
   $transaction: vi.fn(),
 }));
@@ -70,6 +72,7 @@ const {
 const { KargoEntegratorAdapter, ShippingProviderExecutionError, TryOtoAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
 const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
 const { clearKargonomiLocationLookupCache } = await import('../backend/src/modules/shipping/kargonomi-provider.adapter.js');
+const { createNavlungoReturnPickupForReturn } = await import('../backend/src/modules/returns/returns.service.js');
 
 const env = {
   NODE_ENV: 'test' as const,
@@ -258,6 +261,8 @@ describe('shipping execution foundation', () => {
     prismaMock.shipmentShippingCost.upsert.mockReset();
     prismaMock.fulfillment.upsert.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
+    prismaMock.returnRecord.findUnique.mockReset();
+    prismaMock.returnRecord.update.mockReset();
     prismaMock.$transaction.mockReset();
     shopifyAdminMock.fetchFulfillmentOrders.mockReset();
     shopifyAdminMock.createFulfillmentTracking.mockReset();
@@ -5457,31 +5462,89 @@ describe('shipping execution foundation', () => {
     ).rejects.toThrow('Return label creation is only available for Try OTO shipments.');
   });
 
-  it('previews Navlungo return pickup payload without calling provider or persisting evidence', async () => {
+  it('blocks detached Navlungo return pickup creation from the shipment path', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-alloc-1',
       provider: 'NAVLUNGO',
       shipmentStatus: 'DELIVERED',
       providerShipmentId: 'NAV-1001',
     });
-    const adapter = buildAdapter({
-      provider: 'NAVLUNGO' as const,
-      createReturnShipment: vi.fn(),
-    });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
-    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
-      fulfillmentStatus: 'Fulfilled',
-      order: {
-        id: 'order-1',
-        customerName: 'Test Customer',
-        customerEmail: 'customer@example.com',
-        customerPhone: '+90 532 123 45 67',
-        shippingAddress: 'Test Mah. No: 1',
-        shippingCity: 'Istanbul',
-        shippingDistrict: 'Kadikoy',
-        shippingCountry: 'tr',
+
+    await expect(
+      createTryOtoReturnShipmentLabel(existing.id, {
+        env,
+        vendorId: 'sporjinal',
+      }),
+    ).rejects.toThrow('Navlungo return pickup creation must be started from the internal return request.');
+  });
+
+  it('previews Navlungo return pickup from return request context without provider calls', async () => {
+    const returnRecord = {
+      id: 'return-request-1',
+      vendorAllocationId: 'alloc-1',
+      sourceShopifyOrderId: 'order-1',
+      sourceShopifyOrderNumber: '1054',
+      sourceShopifyRefundId: null,
+      sourceShopifyReturnId: '23165600081',
+      sourceShopifyReturnGid: 'gid://shopify/Return/23165600081',
+      sourceShopifyLineItemId: 'line-1',
+      returnLifecycleStatus: 'requested',
+      returnRequestSource: 'shopify_return_request',
+      requestCreatedAt: new Date('2026-05-22T08:00:00.000Z'),
+      requestUpdatedAt: null,
+      status: 'requested',
+      reason: 'Size issue',
+      returnReasonNote: null,
+      returnProvider: null,
+      returnProviderShipmentId: null,
+      returnLabel: null,
+      returnReferenceId: null,
+      navlungoReturnCreatedAt: null,
+      returnProviderSnapshot: null,
+      returnCarrierName: null,
+      returnTrackingNumber: null,
+      returnTrackingUrl: null,
+      vendorReceivedAt: null,
+      vendorReviewedAt: null,
+      vendorDecision: null,
+      vendorDecisionReason: null,
+      createdAt: new Date('2026-05-22T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-22T08:00:00.000Z'),
+      vendorAllocation: {
+        id: 'alloc-1',
+        assignedVendorId: 'sporjinal',
+        originalVendorId: 'sporjinal',
+        sourceShopifyOrderId: 'order-1',
+        sourceShopifyOrderNumber: '1054',
+        order: {
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 532 123 45 67',
+          shippingAddress: 'Test Mah. No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'tr',
+          shippingPostcode: '',
+        },
+        lineItems: [
+          {
+            id: 'alloc-line-1',
+            quantity: 1,
+            lineAmount: 0,
+            shopifyOrderLineItem: {
+              sourceLineItemId: 'line-1',
+              sourceVariantId: null,
+              sku: 'SKU-1',
+              title: 'Return item',
+            },
+          },
+        ],
+        refundRecords: [],
       },
-    }));
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue(returnRecord);
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'NAVLUNGO',
@@ -5494,22 +5557,29 @@ describe('shipping execution foundation', () => {
       warehouses: [],
       updatedAt: new Date('2026-05-22T09:00:00.000Z'),
     });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
 
-    const result = await createTryOtoReturnShipmentLabel(existing.id, {
-      env: {
+    const result = await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      {
         ...env,
         NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2.1',
         NAVLUNGO_API_USERNAME: 'user',
         NAVLUNGO_API_PASSWORD: 'pass',
       },
-      vendorId: 'sporjinal',
-      adapter,
-      dryRun: true,
-    });
+      {
+        adapter,
+        dryRun: true,
+      },
+    );
 
     expect(adapter.createReturnShipment).not.toHaveBeenCalled();
-    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
-    expect(result.providerResponseSummary).toMatchObject({
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalled();
+    expect(result.returnProviderSnapshot).toMatchObject({
       navlungoReturnPickupDryRun: true,
       navlungoReturnPickupAttempted: false,
       navlungoReturnPickupSucceeded: false,
@@ -5524,16 +5594,72 @@ describe('shipping execution foundation', () => {
         packageCountPresent: true,
       }),
     });
-    expect(result.returnShipment).toBeNull();
   });
 
-  it('creates live Navlungo return pickup through provider when dry-run is off', async () => {
-    const existing = buildShipmentExecution({
-      id: 'shipment-navlungo-alloc-1',
-      provider: 'NAVLUNGO',
-      shipmentStatus: 'DELIVERED',
-      providerShipmentId: 'NAV-1001',
-    });
+  it('persists live Navlungo return pickup evidence on the return request', async () => {
+    const returnRecord = {
+      id: 'return-request-1',
+      vendorAllocationId: 'alloc-1',
+      sourceShopifyOrderId: 'order-1',
+      sourceShopifyOrderNumber: '1054',
+      sourceShopifyRefundId: null,
+      sourceShopifyReturnId: '23165600081',
+      sourceShopifyReturnGid: 'gid://shopify/Return/23165600081',
+      sourceShopifyLineItemId: 'line-1',
+      returnLifecycleStatus: 'requested',
+      returnRequestSource: 'shopify_return_request',
+      requestCreatedAt: new Date('2026-05-22T08:00:00.000Z'),
+      requestUpdatedAt: null,
+      status: 'requested',
+      reason: 'Size issue',
+      returnReasonNote: null,
+      returnProvider: null,
+      returnProviderShipmentId: null,
+      returnLabel: null,
+      returnReferenceId: null,
+      navlungoReturnCreatedAt: null,
+      returnProviderSnapshot: null,
+      returnCarrierName: null,
+      returnTrackingNumber: null,
+      returnTrackingUrl: null,
+      vendorReceivedAt: null,
+      vendorReviewedAt: null,
+      vendorDecision: null,
+      vendorDecisionReason: null,
+      createdAt: new Date('2026-05-22T08:00:00.000Z'),
+      updatedAt: new Date('2026-05-22T08:00:00.000Z'),
+      vendorAllocation: {
+        id: 'alloc-1',
+        assignedVendorId: 'sporjinal',
+        originalVendorId: 'sporjinal',
+        sourceShopifyOrderId: 'order-1',
+        sourceShopifyOrderNumber: '1054',
+        order: {
+          customerName: 'Test Customer',
+          customerEmail: 'customer@example.com',
+          customerPhone: '+90 532 123 45 67',
+          shippingAddress: 'Test Mah. No: 1',
+          shippingCity: 'Istanbul',
+          shippingDistrict: 'Kadikoy',
+          shippingCountry: 'tr',
+          shippingPostcode: '',
+        },
+        lineItems: [
+          {
+            id: 'alloc-line-1',
+            quantity: 1,
+            lineAmount: 0,
+            shopifyOrderLineItem: {
+              sourceLineItemId: 'line-1',
+              sourceVariantId: null,
+              sku: 'SKU-1',
+              title: 'Return item',
+            },
+          },
+        ],
+        refundRecords: [],
+      },
+    };
     const adapter = buildAdapter({
       provider: 'NAVLUNGO' as const,
       createReturnShipment: vi.fn().mockResolvedValue({
@@ -5550,20 +5676,18 @@ describe('shipping execution foundation', () => {
         },
       }),
     });
-    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
-    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
-      fulfillmentStatus: 'Fulfilled',
-      order: {
-        id: 'order-1',
-        customerName: 'Test Customer',
-        customerEmail: 'customer@example.com',
-        customerPhone: '+90 532 123 45 67',
-        shippingAddress: 'Test Mah. No: 1',
-        shippingCity: 'Istanbul',
-        shippingDistrict: 'Kadikoy',
-        shippingCountry: 'tr',
-      },
-    }));
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RETURN-1',
+      returnTrackingNumber: 'RET-TRACK-1',
+      returnTrackingUrl: 'https://tracking.example/RET-TRACK-1',
+      returnLabel: 'barcode-string',
+      returnCarrierName: 'Sürat Kargo',
+      returnReferenceId: 'SP-RET-1054-ABC123',
+      navlungoReturnCreatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',
       preferredProvider: 'NAVLUNGO',
@@ -5576,13 +5700,13 @@ describe('shipping execution foundation', () => {
       warehouses: [],
       updatedAt: new Date('2026-05-22T09:00:00.000Z'),
     });
-    storedExecution = existing;
 
-    const result = await createTryOtoReturnShipmentLabel(existing.id, {
+    const result = await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
       env,
-      vendorId: 'sporjinal',
-      adapter,
-    });
+      { adapter },
+    );
 
     expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
       requestSnapshot: expect.objectContaining({
@@ -5594,10 +5718,21 @@ describe('shipping execution foundation', () => {
         ],
       }),
     }));
-    expect(result.returnShipment).toMatchObject({
-      provider: 'navlungo',
-      returnOrderId: 'NAV-RETURN-1',
-      trackingNumber: 'RET-TRACK-1',
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProvider: 'navlungo',
+        returnProviderShipmentId: 'NAV-RETURN-1',
+        returnTrackingNumber: 'RET-TRACK-1',
+        returnLabel: 'barcode-string',
+        returnReferenceId: expect.stringMatching(/^SP-RET-1054-[A-Z0-9]{6}$/),
+      }),
+    }));
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RETURN-1',
+      returnTrackingNumber: 'RET-TRACK-1',
     });
   });
 

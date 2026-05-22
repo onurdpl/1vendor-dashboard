@@ -829,6 +829,12 @@ export type ReturnSummary = {
   customer: string;
   reason: string;
   returnReasonNote?: string | null;
+  returnProvider?: string | null;
+  returnProviderShipmentId?: string | null;
+  returnLabel?: string | null;
+  returnReferenceId?: string | null;
+  navlungoReturnCreatedAt?: string | null;
+  returnProviderSnapshot?: Record<string, unknown> | null;
   returnCarrierName?: string | null;
   returnTrackingNumber?: string | null;
   returnTrackingUrl?: string | null;
