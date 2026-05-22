@@ -437,6 +437,57 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(await screen.findByText('Return pickup address saved.')).toBeInTheDocument();
   });
 
+  it('renders admin completion fields from alternate Navlungo missing-field diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnMissingFields: ['sender.district'],
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByLabelText('Return pickup address completion')).toBeInTheDocument();
+    expect(screen.getByLabelText('District')).toBeInTheDocument();
+  });
+
+  it('renders admin completion fields after live create reports missing sender district', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+    createNavlungoReturnPickupMock.mockRejectedValueOnce(
+      new Error('Missing required Navlungo return pickup fields:\n- sender.district\n\nProvider request blocked before create call.'),
+    );
+
+    renderPage();
+
+    await screen.findByRole('heading', { name: 'Provider return shipment' });
+    await user.click(screen.getByLabelText('Creates a live Navlungo return pickup.'));
+    await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
+
+    expect(await screen.findByText(/Missing required Navlungo return pickup fields/)).toBeInTheDocument();
+    expect(screen.getByLabelText('Return pickup address completion')).toBeInTheDocument();
+    expect(screen.getByLabelText('District')).toBeInTheDocument();
+  });
+
   it('does not render return pickup completion fields for vendors', async () => {
     getReturnMock.mockResolvedValue({
       ...returnDetail,

@@ -318,6 +318,28 @@ const RETURN_PICKUP_COMPLETION_FIELDS = [
   { field: 'sender.post_code', key: 'postcode', label: 'Post code', required: false },
 ] as const;
 
+function normalizeReturnPickupMissingField(value: string) {
+  return value.trim().replace(/^-\s*/, '');
+}
+
+function readSnapshotStringArray(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map(normalizeReturnPickupMissingField)
+    : [];
+}
+
+function parseReturnPickupMissingFieldsFromMessage(value: string | null | undefined) {
+  if (!value?.includes('Missing required Navlungo return pickup fields')) {
+    return [];
+  }
+  return value
+    .split('\n')
+    .map(normalizeReturnPickupMissingField)
+    .filter((line) => line.startsWith('sender.') || line.startsWith('recipient.') || line === 'carrier_id' || line.startsWith('post.'));
+}
+
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const location = useLocation();
@@ -508,9 +530,11 @@ export function ReturnDetailPage() {
   const navlungoReturnPickupPayloadSummary = returnProviderSnapshot.navlungoReturnPickupPayloadSummary as
     | Record<string, unknown>
     | undefined;
-  const navlungoReturnPickupMissingFields = Array.isArray(returnProviderSnapshot.navlungoReturnPickupMissingFields)
-    ? returnProviderSnapshot.navlungoReturnPickupMissingFields.filter((field): field is string => typeof field === 'string')
-    : [];
+  const navlungoReturnPickupMissingFields = Array.from(new Set([
+    ...readSnapshotStringArray(returnProviderSnapshot.navlungoReturnPickupMissingFields),
+    ...readSnapshotStringArray(returnProviderSnapshot.navlungoReturnMissingFields),
+    ...parseReturnPickupMissingFieldsFromMessage(message),
+  ]));
   const returnPickupCompletionFields = RETURN_PICKUP_COMPLETION_FIELDS.filter(
     (field) => navlungoReturnPickupMissingFields.includes(field.field) || (!field.required && navlungoReturnPickupMissingFields.length > 0),
   );
@@ -1122,7 +1146,7 @@ export function ReturnDetailPage() {
                       type="button"
                       className="button button-secondary"
                       disabled={navlungoReturnPickupMutation.isPending}
-                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: true })}
+                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: true }).catch(() => undefined)}
                     >
                       {navlungoReturnPickupMutation.isPending ? 'Previewing...' : 'Preview Navlungo return pickup'}
                     </button>
@@ -1190,7 +1214,7 @@ export function ReturnDetailPage() {
                         !navlungoReturnPickupLiveConfirmed ||
                         navlungoReturnPickupMissingFields.some((field) => field.startsWith('sender.'))
                       }
-                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false })}
+                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false }).catch(() => undefined)}
                     >
                       {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
                     </button>
