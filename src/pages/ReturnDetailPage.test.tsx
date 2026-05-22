@@ -461,6 +461,119 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByLabelText('District')).toBeInTheDocument();
   });
 
+  it('keeps completion fields and typed district visible across background refetch', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock
+      .mockResolvedValueOnce({
+        ...returnDetail,
+        returnProviderSnapshot: {
+          navlungoReturnMissingFields: ['sender.district'],
+          navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+        },
+      })
+      .mockResolvedValue({
+        ...returnDetail,
+        returnProviderSnapshot: {
+          navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+        },
+      });
+    createNavlungoReturnPickupMock.mockResolvedValueOnce({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupDryRun: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/create',
+          requestedPostType: 3,
+          requestedCarrierId: 9,
+        },
+      },
+    });
+
+    renderPage();
+
+    const districtInput = await screen.findByLabelText('District');
+    await user.type(districtInput, 'Kartal');
+    await user.click(screen.getByRole('button', { name: 'Preview Navlungo return pickup' }));
+
+    expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Return pickup address completion')).toBeInTheDocument();
+    expect(screen.getByLabelText('District')).toHaveValue('Kartal');
+  });
+
+  it('hides completion fields after saved completion resolves missing sender district', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    const missingReturn = {
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnMissingFields: ['sender.district'],
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+      },
+    } satisfies ReturnDetail;
+    const resolvedReturn = {
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: [],
+        navlungoReturnMissingFields: [],
+        navlungoReturnPickupCustomerOverrideKeys: ['district'],
+        navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+        navlungoReturnPickupStatus: 'ready',
+      },
+    } satisfies ReturnDetail;
+    getReturnMock.mockResolvedValueOnce(missingReturn).mockResolvedValue(resolvedReturn);
+    saveNavlungoReturnPickupAddressCompletionMock.mockResolvedValueOnce(resolvedReturn);
+
+    renderPage();
+
+    await user.type(await screen.findByLabelText('District'), 'Kartal');
+    await user.click(screen.getByRole('button', { name: 'Save return pickup address' }));
+
+    expect(await screen.findByText('Return pickup address saved.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Return pickup address completion')).not.toBeInTheDocument();
+  });
+
+  it('hides completion fields when Navlungo return pickup evidence exists', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-1',
+      returnProviderSnapshot: {
+        navlungoReturnMissingFields: ['sender.district'],
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Provider ID')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Return pickup address completion')).not.toBeInTheDocument();
+  });
+
   it('renders admin completion fields after live create reports missing sender district', async () => {
     const user = userEvent.setup();
     setCurrentUser({

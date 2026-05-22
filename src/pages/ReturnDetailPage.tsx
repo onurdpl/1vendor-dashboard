@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { DataStatePanel } from '../components/DataStatePanel';
 import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
@@ -340,6 +340,14 @@ function parseReturnPickupMissingFieldsFromMessage(value: string | null | undefi
     .filter((line) => line.startsWith('sender.') || line.startsWith('recipient.') || line === 'carrier_id' || line.startsWith('post.'));
 }
 
+function collectReturnPickupMissingFields(snapshot: Record<string, unknown>, message?: string | null) {
+  return Array.from(new Set([
+    ...readSnapshotStringArray(snapshot.navlungoReturnPickupMissingFields),
+    ...readSnapshotStringArray(snapshot.navlungoReturnMissingFields),
+    ...parseReturnPickupMissingFieldsFromMessage(message),
+  ]));
+}
+
 export function ReturnDetailPage() {
   const { returnId } = useParams();
   const location = useLocation();
@@ -353,6 +361,7 @@ export function ReturnDetailPage() {
   const [supportOpen, setSupportOpen] = useState(false);
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
+  const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
   const { data: returnRequest, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     returnId ? queryKeys.returns.detail(returnId, currentVendor.vendorId) : queryKeys.returns.list(currentVendor.vendorId),
     () => {
@@ -438,6 +447,7 @@ export function ReturnDetailPage() {
           variables.dryRun ? 'info' : 'success',
         );
         if (!variables.dryRun && data.returnProviderShipmentId) {
+          setRetainedReturnPickupMissingFields([]);
           setNavlungoReturnPickupLiveConfirmed(false);
         }
       },
@@ -461,7 +471,12 @@ export function ReturnDetailPage() {
       );
     },
     {
-      onSuccess: async () => {
+      onSuccess: async (data) => {
+        const nextMissingFields = collectReturnPickupMissingFields(data.returnProviderSnapshot ?? {});
+        setRetainedReturnPickupMissingFields(nextMissingFields);
+        if (nextMissingFields.length === 0 || data.returnProviderShipmentId) {
+          setReturnPickupCompletion({});
+        }
         await refetch();
         showFeedback('Return pickup address saved.', 'success');
       },
@@ -488,6 +503,34 @@ export function ReturnDetailPage() {
       },
     },
   );
+  const currentReturnProviderSnapshot = returnRequest?.returnProviderSnapshot ?? {};
+  const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
+  const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
+  const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
+
+  useEffect(() => {
+    setRetainedReturnPickupMissingFields([]);
+    setReturnPickupCompletion({});
+  }, [returnId]);
+
+  useEffect(() => {
+    if (returnRequest?.returnProviderShipmentId) {
+      if (retainedReturnPickupMissingFieldsKey) {
+        setRetainedReturnPickupMissingFields([]);
+      }
+      return;
+    }
+    if (currentReturnPickupMissingFields.length === 0) {
+      return;
+    }
+    setRetainedReturnPickupMissingFields((current) =>
+      Array.from(new Set([...current, ...currentReturnPickupMissingFields])),
+    );
+  }, [
+    currentReturnPickupMissingFieldsKey,
+    retainedReturnPickupMissingFieldsKey,
+    returnRequest?.returnProviderShipmentId,
+  ]);
 
   if (!authContextReady || isLoading) {
     return (
@@ -526,15 +569,13 @@ export function ReturnDetailPage() {
       returnRequest.returnTrackingUrl ||
       returnRequest.returnProviderShipmentId,
   );
-  const returnProviderSnapshot = returnRequest.returnProviderSnapshot ?? {};
+  const returnProviderSnapshot = currentReturnProviderSnapshot;
   const navlungoReturnPickupPayloadSummary = returnProviderSnapshot.navlungoReturnPickupPayloadSummary as
     | Record<string, unknown>
     | undefined;
-  const navlungoReturnPickupMissingFields = Array.from(new Set([
-    ...readSnapshotStringArray(returnProviderSnapshot.navlungoReturnPickupMissingFields),
-    ...readSnapshotStringArray(returnProviderSnapshot.navlungoReturnMissingFields),
-    ...parseReturnPickupMissingFieldsFromMessage(message),
-  ]));
+  const navlungoReturnPickupMissingFields = returnRequest.returnProviderShipmentId
+    ? []
+    : Array.from(new Set([...currentReturnPickupMissingFields, ...retainedReturnPickupMissingFields]));
   const returnPickupCompletionFields = RETURN_PICKUP_COMPLETION_FIELDS.filter(
     (field) => navlungoReturnPickupMissingFields.includes(field.field) || (!field.required && navlungoReturnPickupMissingFields.length > 0),
   );
