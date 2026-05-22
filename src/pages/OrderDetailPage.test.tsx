@@ -1053,6 +1053,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         provider: 'navlungo',
         providerShipmentId: 'NAV-1028',
         trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
+        labelUrl: 'barcode-pdf',
         shipmentStatus: 'created',
       },
     });
@@ -1085,6 +1087,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect((await screen.findAllByText('Navlungo shipment updated')).length).toBeGreaterThan(0);
+    expect(await screen.findByText('Update Post')).toBeInTheDocument();
+    expect(screen.getByText(/attempted yes · HTTP 200 · succeeded yes/i)).toBeInTheDocument();
+    expect(screen.getByText('Updated at')).toBeInTheDocument();
   });
 
   it('hides the Navlungo shipment update form from vendors while preserving cancellation', async () => {
@@ -1116,7 +1121,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByLabelText('District *')).not.toBeInTheDocument();
   });
 
-  it('uses provider message for failed Navlungo update feedback', async () => {
+  it('renders failed Navlungo update diagnostics after provider rejection', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1135,6 +1140,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         provider: 'navlungo',
         providerShipmentId: 'NAV-1028',
         trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
+        labelUrl: 'barcode-pdf',
         shipmentStatus: 'created',
       },
     });
@@ -1142,14 +1149,24 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ...orderWithShipmentSummary.shipmentExecution!,
       provider: 'navlungo',
       providerShipmentId: 'NAV-1028',
+      trackingNumber: 'NAV-1028',
+      trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
+      labelUrl: 'barcode-pdf',
       shipmentStatus: 'created',
       providerResponseSummary: {
         ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
         navlungoUpdateAttempted: true,
         navlungoUpdateSucceeded: false,
-        navlungoUpdateHttpStatus: 500,
-        navlungoUpdateProviderMessage: 'Navlungo shipment can only be updated before pickup.',
-        providerError: 'Navlungo shipment can only be updated before pickup.',
+        navlungoUpdateHttpStatus: 422,
+        navlungoUpdateProviderMessage: 'Doğrulama Hatası',
+        navlungoUpdateValidationFields: ['posts.0.recipient.district'],
+        navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
+        navlungoUpdateProviderTrackingId: '#update422',
+        navlungoUpdateResponseShape: {
+          kind: 'json:object',
+          topLevelKeys: ['message', 'status', 'error'],
+        },
+        providerError: 'Doğrulama Hatası',
       },
     });
 
@@ -1159,7 +1176,52 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.click(screen.getByLabelText(/Update only the Navlungo shipment/i));
     await user.click(screen.getAllByRole('button', { name: 'Update Navlungo shipment' })[0]);
 
-    expect((await screen.findAllByText('Navlungo shipment can only be updated before pickup.')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Doğrulama Hatası')).length).toBeGreaterThan(0);
+    expect(await screen.findByText(/attempted yes · HTTP 422 · succeeded no/i)).toBeInTheDocument();
+    expect(screen.getByText('#update422')).toBeInTheDocument();
+    expect(screen.getByText('json:object · message, status, error')).toBeInTheDocument();
+    expect(screen.getByText('posts.0.recipient.district')).toBeInTheDocument();
+    expect(screen.getByText('posts.0.recipient.district validation failed')).toBeInTheDocument();
+  });
+
+  it('renders Navlungo update provider tracking id for 500 diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        trackingUrl: 'https://tracking.navlungo.example/NAV-1028',
+        labelUrl: 'barcode-pdf',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoUpdateAttempted: true,
+          navlungoUpdateSucceeded: false,
+          navlungoUpdateHttpStatus: 500,
+          navlungoUpdateProviderMessage: 'Execution of ServiceCallout failed.',
+          navlungoUpdateProviderTrackingId: '#update500',
+          providerError: 'Execution of ServiceCallout failed.',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText(/attempted yes · HTTP 500 · succeeded no/i)).toBeInTheDocument();
+    expect(screen.getAllByText('Execution of ServiceCallout failed.').length).toBeGreaterThan(0);
+    expect(screen.getByText('#update500')).toBeInTheDocument();
   });
 
   it('renders Navlungo cancel validation diagnostics safely', async () => {

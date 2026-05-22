@@ -314,6 +314,10 @@ export type OrderShipmentExecutionDto = {
     navlungoUpdateValidationFields?: string[];
     navlungoUpdateValidationMessages?: string[];
     navlungoUpdateProviderTrackingId?: string | null;
+    navlungoUpdateResponseShape?: {
+      kind: string;
+      topLevelKeys: string[];
+    } | null;
     navlungoUpdatedAt?: string | null;
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     lastProviderStage?: string | null;

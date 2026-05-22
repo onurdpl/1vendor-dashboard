@@ -1798,6 +1798,10 @@ describe('shipping execution foundation', () => {
         navlungoUpdateValidationFields: ['posts.0.recipient.district'],
         navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
         navlungoUpdateProviderTrackingId: '#update123',
+        navlungoUpdateResponseShape: {
+          kind: 'json:object',
+          topLevelKeys: ['message', 'status', 'error'],
+        },
         providerTrackingId: '#update123',
       })),
     });
@@ -1833,6 +1837,10 @@ describe('shipping execution foundation', () => {
           navlungoUpdateValidationFields: ['posts.0.recipient.district'],
           navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
           navlungoUpdateProviderTrackingId: '#update123',
+          navlungoUpdateResponseShape: {
+            kind: 'json:object',
+            topLevelKeys: ['message', 'status', 'error'],
+          },
           providerTrackingId: '#update123',
           shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
         },
@@ -1850,6 +1858,10 @@ describe('shipping execution foundation', () => {
       navlungoUpdateValidationFields: ['posts.0.recipient.district'],
       navlungoUpdateValidationMessages: ['posts.0.recipient.district validation failed'],
       navlungoUpdateProviderTrackingId: '#update123',
+      navlungoUpdateResponseShape: {
+        kind: 'json:object',
+        topLevelKeys: ['message', 'status', 'error'],
+      },
       providerTrackingId: '#update123',
     });
   });

@@ -1540,6 +1540,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       navlungoUpdateHttpStatus: updateResponse.status,
       navlungoUpdateContentType: updateResponse.contentType,
       navlungoUpdateResponseKeys: isRecord(updateResponse.body) ? Object.keys(updateResponse.body) : [],
+      navlungoUpdateResponseShape: summarizeResponseShape(updateResponse.body),
       navlungoUpdateDataKeys: Object.keys(updateData),
       navlungoUpdateProviderMessage: providerMessage,
       providerMessage,

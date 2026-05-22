@@ -631,6 +631,22 @@ function buildShipmentProviderResponseSummary(
         topLevelKeys: readStringArray(validationResponseShape.topLevelKeys),
       }
     : null;
+  const navlungoUpdateResponseShape = isRecord(snapshot?.navlungoUpdateResponseShape)
+    ? {
+        kind: readString(snapshot.navlungoUpdateResponseShape, ['kind']) ?? 'unknown',
+        topLevelKeys: readStringArray(snapshot.navlungoUpdateResponseShape.topLevelKeys),
+      }
+    : isRecord(updatePostDiagnostics?.navlungoUpdateResponseShape)
+      ? {
+          kind: readString(updatePostDiagnostics.navlungoUpdateResponseShape, ['kind']) ?? 'unknown',
+          topLevelKeys: readStringArray(updatePostDiagnostics.navlungoUpdateResponseShape.topLevelKeys),
+        }
+      : isRecord(updatePostDiagnostics?.responseShape)
+        ? {
+            kind: readString(updatePostDiagnostics.responseShape, ['kind']) ?? 'unknown',
+            topLevelKeys: readStringArray(updatePostDiagnostics.responseShape.topLevelKeys),
+          }
+        : null;
   const providerValidationErrors = mergeUniqueStrings(
     readValidationStringArray(snapshot?.providerValidationErrors),
     readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
@@ -754,6 +770,7 @@ function buildShipmentProviderResponseSummary(
     navlungoUpdateValidationFields: readStringArray(snapshot?.navlungoUpdateValidationFields),
     navlungoUpdateValidationMessages: readValidationStringArray(snapshot?.navlungoUpdateValidationMessages),
     navlungoUpdateProviderTrackingId: readString(snapshot, ['navlungoUpdateProviderTrackingId']),
+    navlungoUpdateResponseShape,
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),

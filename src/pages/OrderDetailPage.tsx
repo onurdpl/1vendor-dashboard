@@ -1639,6 +1639,7 @@ export function OrderDetailPage() {
       visibleShipmentExecution &&
         (['pending', 'failed', 'unknown'].includes(visibleShipmentStatus) ||
           shipmentProviderSummary?.navlungoCancelAttempted === true ||
+          shipmentProviderSummary?.navlungoUpdateAttempted === true ||
           !visibleShipmentExecution.providerShipmentId ||
           !visibleShipmentExecution.trackingNumber ||
           !visibleShipmentExecution.labelUrl),
@@ -2587,7 +2588,10 @@ export function OrderDetailPage() {
           summary.providerCallHttpStatus >= 400) ||
         (summary.realPathCreatePostHttpStatus !== null &&
           summary.realPathCreatePostHttpStatus !== undefined &&
-          summary.realPathCreatePostHttpStatus >= 400),
+          summary.realPathCreatePostHttpStatus >= 400) ||
+        (summary.navlungoUpdateHttpStatus !== null &&
+          summary.navlungoUpdateHttpStatus !== undefined &&
+          summary.navlungoUpdateHttpStatus >= 400),
     );
 
     return (
@@ -2685,6 +2689,18 @@ export function OrderDetailPage() {
         <div className="summary-row">
           <span>Update tracking ID</span>
           <strong>{summary.navlungoUpdateProviderTrackingId || summary.providerTrackingId || '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Update response shape</span>
+          <strong>
+            {summary.navlungoUpdateResponseShape
+              ? `${summary.navlungoUpdateResponseShape.kind} · ${
+                  summary.navlungoUpdateResponseShape.topLevelKeys.length
+                    ? summary.navlungoUpdateResponseShape.topLevelKeys.join(', ')
+                    : 'no keys'
+                }`
+              : '—'}
+          </strong>
         </div>
         <div className="summary-row">
           <span>Update validation fields</span>

@@ -598,6 +598,21 @@ function mapProviderResponseSummary(
           : [],
       }
     : null;
+  const navlungoUpdateResponseShapeSource = isRecord(snapshot.navlungoUpdateResponseShape)
+    ? snapshot.navlungoUpdateResponseShape
+    : isRecord(updatePostSnapshot?.navlungoUpdateResponseShape)
+      ? updatePostSnapshot.navlungoUpdateResponseShape
+      : isRecord(updatePostSnapshot?.responseShape)
+        ? updatePostSnapshot.responseShape
+        : null;
+  const navlungoUpdateResponseShape = navlungoUpdateResponseShapeSource
+    ? {
+        kind: readString(navlungoUpdateResponseShapeSource, ['kind']) ?? 'unknown',
+        topLevelKeys: Array.isArray(navlungoUpdateResponseShapeSource.topLevelKeys)
+          ? navlungoUpdateResponseShapeSource.topLevelKeys.filter((key): key is string => typeof key === 'string')
+          : [],
+      }
+    : null;
 
   return {
     httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
@@ -699,6 +714,7 @@ function mapProviderResponseSummary(
     navlungoUpdateValidationFields: readStringArray(snapshot.navlungoUpdateValidationFields),
     navlungoUpdateValidationMessages: readValidationStringArray(snapshot.navlungoUpdateValidationMessages),
     navlungoUpdateProviderTrackingId: readString(snapshot, ['navlungoUpdateProviderTrackingId']),
+    navlungoUpdateResponseShape,
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
