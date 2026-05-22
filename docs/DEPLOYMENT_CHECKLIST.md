@@ -92,8 +92,9 @@ Expected safe fields:
 
 ## Migration Safety
 
-- Runtime health checks confirm database and `_prisma_migrations` table reachability only.
-- They do not prove whether every local migration file has been applied. Use `npm run backend:db:deploy` during backend deploy for authoritative Prisma migration application.
+- Runtime health checks report database reachability, `_prisma_migrations` table reachability, and required operational columns such as `ShopifyOrder.customerPhone` and Navlungo return evidence fields on `ReturnRecord`.
+- `schemaReady=false` or a non-empty `missingColumns` list means production is running with unapplied schema changes. Apply migrations before testing return pickup evidence or Shopify order ingestion.
+- Health checks still do not prove whether every local migration file has been applied. Use `npm run backend:db:deploy` during backend deploy for authoritative Prisma migration application.
 - If `migrationsReachable=false` but `dbReachable=true`, do not proceed with frontend verification until the backend migration deploy path is checked.
 
 ## Rollback Guidance

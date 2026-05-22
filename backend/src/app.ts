@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import type { OriginFunction } from '@fastify/cors';
 import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { loadEnv } from './config/env.js';
 import { prisma } from './db/prisma.js';
 import { registerAuthRoutes } from './modules/auth/auth.routes.js';
@@ -65,11 +66,92 @@ function getBackendBuildInfo(env: ReturnType<typeof loadEnv>) {
   };
 }
 
+const REQUIRED_SCHEMA_COLUMNS = [
+  {
+    tableName: 'ShopifyOrder',
+    columnName: 'customerPhone',
+    migration: '20260518120000_add_shopify_order_shipping_address',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'returnProvider',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'returnProviderShipmentId',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'returnLabel',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'returnReferenceId',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'navlungoReturnCreatedAt',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+  {
+    tableName: 'ReturnRecord',
+    columnName: 'returnProviderSnapshot',
+    migration: '20260522130000_add_return_provider_evidence',
+  },
+] as const;
+
+async function getSchemaReadiness() {
+  const tableNames = Array.from(new Set(REQUIRED_SCHEMA_COLUMNS.map((column) => column.tableName)));
+  const columnNames = Array.from(new Set(REQUIRED_SCHEMA_COLUMNS.map((column) => column.columnName)));
+
+  try {
+    const rows = await prisma.$queryRaw<Array<{ table_name: string; column_name: string }>>(Prisma.sql`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name IN (${Prisma.join(tableNames)})
+        AND column_name IN (${Prisma.join(columnNames)})
+    `);
+    const present = new Set(rows.map((row) => `${row.table_name}.${row.column_name}`));
+    const missingColumns = REQUIRED_SCHEMA_COLUMNS.filter(
+      (column) => !present.has(`${column.tableName}.${column.columnName}`),
+    ).map((column) => ({
+      tableName: column.tableName,
+      columnName: column.columnName,
+      expectedMigration: column.migration,
+    }));
+
+    return {
+      schemaReady: missingColumns.length === 0,
+      requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
+      missingColumns,
+    };
+  } catch {
+    return {
+      schemaReady: false,
+      requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
+      missingColumns: REQUIRED_SCHEMA_COLUMNS.map((column) => ({
+        tableName: column.tableName,
+        columnName: column.columnName,
+        expectedMigration: column.migration,
+      })),
+      message: 'Schema readiness check failed.',
+    };
+  }
+}
+
 async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
   if (!env.DATABASE_URL) {
     return {
       dbReachable: false,
       migrationsReachable: false,
+      schemaReady: false,
+      requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
+      missingColumns: [],
     };
   }
 
@@ -79,19 +161,26 @@ async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
     return {
       dbReachable: false,
       migrationsReachable: false,
+      schemaReady: false,
+      requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
+      missingColumns: [],
     };
   }
+
+  const schema = await getSchemaReadiness();
 
   try {
     await prisma.$queryRaw`SELECT COUNT(*) FROM "_prisma_migrations"`;
     return {
       dbReachable: true,
       migrationsReachable: true,
+      ...schema,
     };
   } catch {
     return {
       dbReachable: true,
       migrationsReachable: false,
+      ...schema,
     };
   }
 }
@@ -175,7 +264,7 @@ export function createApp() {
 
   app.get('/health', async () => {
     const database = await getDatabaseHealth(env);
-    const status = database.dbReachable ? 'ok' : 'degraded';
+    const status = database.dbReachable && database.schemaReady ? 'ok' : 'degraded';
 
     return {
       ok: true,
@@ -183,6 +272,10 @@ export function createApp() {
       ...getBackendBuildInfo(env),
       dbReachable: database.dbReachable,
       migrationsReachable: database.migrationsReachable,
+      schemaReady: database.schemaReady,
+      requiredColumnCount: database.requiredColumnCount,
+      missingColumns: database.missingColumns,
+      schemaReadinessMessage: 'message' in database ? database.message : undefined,
     };
   });
 
