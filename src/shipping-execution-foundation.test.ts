@@ -75,6 +75,7 @@ const { clearKargonomiLocationLookupCache } = await import('../backend/src/modul
 const {
   autoCreateNavlungoReturnPickupForApprovedReturn,
   createNavlungoReturnPickupForReturn,
+  saveNavlungoReturnPickupAddressCompletion,
   syncNavlungoReturnPickupStatusForReturn,
 } = await import('../backend/src/modules/returns/returns.service.js');
 
@@ -5918,6 +5919,175 @@ describe('shipping execution foundation', () => {
         }),
       }),
     }));
+  });
+
+  it('saves missing Navlungo return pickup address fields and clears diagnostics when resolved', async () => {
+    const base = buildNavlungoReturnRecord();
+    const returnRecord = {
+      ...base,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: ['sender.district'],
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+      },
+      vendorAllocation: {
+        ...base.vendorAllocation,
+        order: {
+          ...base.vendorAllocation.order,
+          shippingDistrict: null,
+        },
+      },
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: [],
+        navlungoReturnPickupCustomerOverrideKeys: ['district'],
+      },
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await saveNavlungoReturnPickupAddressCompletion(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { district: 'Kadikoy' },
+    );
+
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnPickupCustomerOverrides: { district: 'Kadikoy' },
+          navlungoReturnPickupCustomerOverrideKeys: ['district'],
+          navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+          navlungoReturnPickupMissingFields: [],
+          navlungoReturnMissingFields: [],
+          navlungoReturnAutoCreateSkippedReason: null,
+          navlungoReturnPickupStatus: 'ready',
+        }),
+      }),
+    }));
+  });
+
+  it('uses saved Navlungo return pickup completion values in dry-run payloads', async () => {
+    const base = buildNavlungoReturnRecord();
+    const returnRecord = {
+      ...base,
+      returnProviderSnapshot: {
+        navlungoReturnPickupCustomerOverrides: {
+          district: 'Kadikoy',
+        },
+      },
+      vendorAllocation: {
+        ...base.vendorAllocation,
+        order: {
+          ...base.vendorAllocation.order,
+          shippingDistrict: null,
+        },
+      },
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    const result = await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { dryRun: true },
+    );
+
+    expect(result.returnProviderSnapshot).toMatchObject({
+      navlungoReturnPickupMissingFields: [],
+      navlungoReturnPickupPayloadSummary: expect.objectContaining({
+        senderKeys: expect.arrayContaining(['district']),
+      }),
+    });
+  });
+
+  it('uses completed Navlungo return pickup fields in live create payload', async () => {
+    const base = buildNavlungoReturnRecord();
+    const returnRecord = {
+      ...base,
+      returnProviderSnapshot: {
+        navlungoReturnPickupCustomerOverrides: {
+          district: 'Kadikoy',
+        },
+      },
+      vendorAllocation: {
+        ...base.vendorAllocation,
+        order: {
+          ...base.vendorAllocation.order,
+          shippingDistrict: null,
+        },
+      },
+    };
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn().mockResolvedValue({
+        returnOrderId: 'NAV-RETURN-COMPLETE-1',
+        returnTrackingNumber: 'NAV-RETURN-COMPLETE-1',
+        returnTrackingUrl: 'https://tracking.example/NAV-RETURN-COMPLETE-1',
+        returnBarcode: 'barcode-string',
+        returnCarrierName: 'Sürat Kargo',
+        returnStatus: 'created',
+        responseSnapshot: {
+          createPostHttpStatus: 201,
+          providerMessage: 'Created',
+        },
+      }),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnProviderShipmentId: 'NAV-RETURN-COMPLETE-1',
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { adapter },
+    );
+
+    const requestSnapshot = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].requestSnapshot;
+    expect(requestSnapshot.posts[0].sender.district).toBe('Kadikoy');
+    expect(adapter.createReturnShipment).toHaveBeenCalledOnce();
   });
 
   it('does not create duplicate Navlungo return pickup when provider evidence already exists', async () => {

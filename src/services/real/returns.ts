@@ -415,6 +415,50 @@ export async function createNavlungoReturnPickup(
   };
 }
 
+export async function saveNavlungoReturnPickupAddressCompletion(
+  returnId: string,
+  input: { customerOverrides?: Record<string, string | undefined> } = {},
+  options: { vendorId?: string | null } = {},
+): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options.vendorId);
+  const response = await (requestOptions
+    ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input, requestOptions)
+    : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input));
+  const summary = mapSummary(response);
+  const refundedItems = response.refundedItems.map((item) => ({
+    id: item.id,
+    originalVendorId: response.originalVendorId,
+    assignedVendorId: response.assignedVendorId,
+    vendorId: response.assignedVendorId,
+    sku: item.sku ?? 'UNKNOWN-SKU',
+    variantTitle: resolveReturnItemVariant(item),
+    name: resolveReturnItemName(item),
+    quantity: item.quantity,
+    condition: 'Opened' as const,
+    refundAmount: formatCurrency(item.refundAmount),
+  }));
+
+  return {
+    ...summary,
+    originalVendorId: response.originalVendorId,
+    resolution: response.returnReasonNote ?? '',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Original payment method (Shopify refund flow)',
+    processedBy: '',
+    refundedItems,
+    items: refundedItems,
+    timeline: [
+      {
+        label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',
+        at: response.requestCreatedAt ?? response.createdAt,
+      },
+      { label: 'Latest backend update', at: response.updatedAt },
+    ],
+  };
+}
+
 export async function syncNavlungoReturnStatus(
   returnId: string,
   options: { vendorId?: string | null } = {},

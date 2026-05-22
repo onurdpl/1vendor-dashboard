@@ -13,7 +13,10 @@ const reviewReturnMock = vi.fn<
   (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) => Promise<ReturnDetail>
 >();
 const createNavlungoReturnPickupMock = vi.fn<
-  (returnId: string, input: { dryRun?: boolean }) => Promise<ReturnDetail>
+  (returnId: string, input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> }) => Promise<ReturnDetail>
+>();
+const saveNavlungoReturnPickupAddressCompletionMock = vi.fn<
+  (returnId: string, input: { customerOverrides?: Record<string, string | undefined> }) => Promise<ReturnDetail>
 >();
 const syncNavlungoReturnStatusMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const createSupportTicketMock = vi.fn();
@@ -29,8 +32,12 @@ vi.mock('../features/returns/api', async () => {
     markReturnReceived: (returnId: string) => markReturnReceivedMock(returnId),
     reviewReturn: (returnId: string, input: { decision: 'approved' | 'rejected'; reason?: string }) =>
       reviewReturnMock(returnId, input),
-    createNavlungoReturnPickup: (returnId: string, input: { dryRun?: boolean }) =>
+    createNavlungoReturnPickup: (returnId: string, input: { dryRun?: boolean; customerOverrides?: Record<string, string | undefined> }) =>
       createNavlungoReturnPickupMock(returnId, input),
+    saveNavlungoReturnPickupAddressCompletion: (
+      returnId: string,
+      input: { customerOverrides?: Record<string, string | undefined> },
+    ) => saveNavlungoReturnPickupAddressCompletionMock(returnId, input),
     syncNavlungoReturnStatus: (returnId: string) => syncNavlungoReturnStatusMock(returnId),
   };
 });
@@ -146,6 +153,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     markReturnReceivedMock.mockReset();
     reviewReturnMock.mockReset();
     createNavlungoReturnPickupMock.mockReset();
+    saveNavlungoReturnPickupAddressCompletionMock.mockReset();
     syncNavlungoReturnStatusMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
@@ -382,6 +390,67 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, { dryRun: true });
     expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
+  });
+
+  it('renders admin completion fields for missing Navlungo return pickup customer address data', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: ['sender.district'],
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+      },
+    });
+    saveNavlungoReturnPickupAddressCompletionMock.mockResolvedValueOnce({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: [],
+        navlungoReturnPickupCustomerOverrideKeys: ['district'],
+        navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+        navlungoReturnPickupStatus: 'ready',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByLabelText('Return pickup address completion')).toBeInTheDocument();
+    expect(screen.getByLabelText('District')).toBeInTheDocument();
+    expect(screen.queryByLabelText('City')).not.toBeInTheDocument();
+
+    await user.type(screen.getByLabelText('District'), 'Kadikoy');
+    await user.click(screen.getByRole('button', { name: 'Save return pickup address' }));
+
+    expect(saveNavlungoReturnPickupAddressCompletionMock).toHaveBeenCalledWith(returnDetail.id, {
+      customerOverrides: {
+        district: 'Kadikoy',
+      },
+    });
+    expect(await screen.findByText('Return pickup address saved.')).toBeInTheDocument();
+  });
+
+  it('does not render return pickup completion fields for vendors', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnPickupMissingFields: ['sender.district'],
+        navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Return pickup address completion')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Save return pickup address' })).not.toBeInTheDocument();
   });
 
   it('links to Orders with a query parameter when the related order id is a Shopify id', async () => {

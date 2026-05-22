@@ -38,6 +38,7 @@ export type NavlungoReturnPickupInput = {
     email?: string;
     country?: string;
     postcode?: string;
+    post_code?: string;
     city?: string;
     district?: string;
     address?: string;
@@ -47,6 +48,8 @@ export type NavlungoReturnPickupInput = {
 export type NavlungoReturnStatusSyncInput = {
   adapter?: ShippingProviderAdapter;
 };
+
+export type NavlungoReturnPickupCompletionInput = NonNullable<NavlungoReturnPickupInput['customerOverrides']>;
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -312,7 +315,18 @@ function mapReturnProviderSnapshot(value: unknown): Record<string, unknown> | nu
   if (!snapshot) {
     return null;
   }
-  return snapshot;
+  if (!isRecord(snapshot.navlungoReturnPickupCustomerOverrides)) {
+    return snapshot;
+  }
+  const overrideKeys = Object.keys(snapshot.navlungoReturnPickupCustomerOverrides)
+    .filter((key) => typeof key === 'string')
+    .sort();
+  return {
+    ...snapshot,
+    navlungoReturnPickupCustomerOverrides: undefined,
+    navlungoReturnPickupCustomerOverrideKeys: overrideKeys,
+    navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+  };
 }
 
 type ReturnRecordLineItemSource = {
@@ -787,6 +801,50 @@ function isNavlungoReturnProviderConfig(config: Awaited<ReturnType<typeof getVen
   return config.shippingEnabled && config.preferredProvider === 'navlungo';
 }
 
+function normalizeNavlungoReturnPickupCompletion(input: NavlungoReturnPickupCompletionInput | undefined) {
+  const source = input ?? {};
+  const normalized = {
+    name: source.name?.trim(),
+    phone: source.phone?.trim(),
+    email: source.email?.trim(),
+    country: source.country?.trim(),
+    postcode: source.postcode?.trim() || source.post_code?.trim(),
+    city: source.city?.trim(),
+    district: source.district?.trim(),
+    address: source.address?.trim(),
+  };
+  return Object.fromEntries(
+    Object.entries(normalized).filter((entry): entry is [string, string] => Boolean(entry[1])),
+  ) as NavlungoReturnPickupCompletionInput;
+}
+
+function readNavlungoReturnPickupCompletion(snapshot: unknown): NavlungoReturnPickupCompletionInput {
+  const raw = readSnapshot(snapshot)?.navlungoReturnPickupCustomerOverrides;
+  if (!isRecord(raw)) {
+    return {};
+  }
+  return normalizeNavlungoReturnPickupCompletion({
+    name: readString(raw, ['name']) ?? undefined,
+    phone: readString(raw, ['phone']) ?? undefined,
+    email: readString(raw, ['email']) ?? undefined,
+    country: readString(raw, ['country']) ?? undefined,
+    postcode: readString(raw, ['postcode', 'post_code']) ?? undefined,
+    city: readString(raw, ['city']) ?? undefined,
+    district: readString(raw, ['district']) ?? undefined,
+    address: readString(raw, ['address']) ?? undefined,
+  });
+}
+
+function mergeNavlungoReturnPickupCompletion(
+  saved: NavlungoReturnPickupCompletionInput,
+  incoming: NavlungoReturnPickupCompletionInput | undefined,
+) {
+  return {
+    ...saved,
+    ...normalizeNavlungoReturnPickupCompletion(incoming),
+  };
+}
+
 function buildNavlungoReturnPickupPayload(input: {
   record: {
     id: string;
@@ -822,7 +880,7 @@ function buildNavlungoReturnPickupPayload(input: {
     country: overrides.country?.trim() || order.shippingCountry?.trim() || 'tr',
     city: overrides.city?.trim() || order.shippingCity?.trim() || '',
     district: overrides.district?.trim() || order.shippingDistrict?.trim() || '',
-    post_code: overrides.postcode?.trim() || order.shippingPostcode?.trim() || '',
+    post_code: overrides.postcode?.trim() || overrides.post_code?.trim() || order.shippingPostcode?.trim() || '',
   };
   const recipientAddressId = parsePositiveInteger(resolveNavlungoSenderAddressId(input.config, input.env));
   const carrierId = resolveNavlungoCarrierId(input.config.providerMetadata, input.env);
@@ -912,11 +970,12 @@ export async function createNavlungoReturnPickupForReturn(
   }
 
   const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  const savedCompletion = readNavlungoReturnPickupCompletion(record.returnProviderSnapshot);
   const built = buildNavlungoReturnPickupPayload({
     record,
     config,
     env,
-    customerOverrides: input.customerOverrides,
+    customerOverrides: mergeNavlungoReturnPickupCompletion(savedCompletion, input.customerOverrides),
   });
   const attemptedAt = new Date().toISOString();
   const diagnostics = {
@@ -1084,6 +1143,7 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
     record,
     config,
     env,
+    customerOverrides: readNavlungoReturnPickupCompletion(record.returnProviderSnapshot),
   });
 
   if (built.missingFields.length > 0) {
@@ -1129,6 +1189,74 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
   } catch {
     return { attempted: true, skippedReason: 'provider_create_failed' };
   }
+}
+
+export async function saveNavlungoReturnPickupAddressCompletion(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  completionInput: NavlungoReturnPickupCompletionInput,
+): Promise<ReturnDetailDto> {
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for return pickup address completion.', 403);
+  }
+
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: {
+        include: {
+          order: true,
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  const existingSnapshot = readSnapshot(record.returnProviderSnapshot) ?? {};
+  const existingCompletion = readNavlungoReturnPickupCompletion(existingSnapshot);
+  const nextCompletion = mergeNavlungoReturnPickupCompletion(existingCompletion, completionInput);
+  if (Object.keys(nextCompletion).length === 0) {
+    throw new ReturnReviewError('At least one return pickup address field is required.', 400);
+  }
+
+  const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
+  const built = buildNavlungoReturnPickupPayload({
+    record,
+    config,
+    env,
+    customerOverrides: nextCompletion,
+  });
+  const resolved = built.missingFields.length === 0;
+
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      returnProviderSnapshot: {
+        ...existingSnapshot,
+        navlungoReturnPickupCustomerOverrides: nextCompletion,
+        navlungoReturnPickupCustomerOverrideKeys: Object.keys(nextCompletion).sort(),
+        navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+        navlungoReturnPickupCompletionSavedAt: new Date().toISOString(),
+        navlungoReturnPickupMissingFields: built.missingFields,
+        navlungoReturnMissingFields: built.missingFields,
+        navlungoReturnPickupPayloadSummary: built.summary,
+        navlungoReturnRequestSummary: built.summary,
+        navlungoReturnAutoCreateSkippedReason: resolved ? null : 'missing_required_fields',
+        navlungoReturnPickupStatus: resolved ? 'ready' : 'needs_attention',
+        recipientAddressIdValid: built.recipientAddressIdValid,
+      } as Prisma.InputJsonValue,
+    },
+  });
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+  return updated;
 }
 
 function mapNavlungoReturnStatusLogTimelineEvents(snapshot: Record<string, unknown>) {

@@ -6139,6 +6139,49 @@ summary.provider-response-heading::-webkit-details-marker {
   width: 100%;
 }
 
+.return-pickup-completion-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #fcd34d;
+  border-radius: 11px;
+  background: #fffbeb;
+}
+
+.return-pickup-completion-form > strong {
+  color: #92400e;
+  font-size: 0.82rem;
+}
+
+.return-pickup-completion-form > span {
+  color: #a16207;
+  font-size: 0.72rem;
+  line-height: 1.3;
+}
+
+.return-pickup-completion-form label {
+  display: grid;
+  gap: 4px;
+}
+
+.return-pickup-completion-form label span {
+  color: #78350f;
+  font-size: 0.7rem;
+  font-weight: 800;
+}
+
+.return-pickup-completion-form input {
+  width: 100%;
+  min-height: 32px;
+  border: 1px solid #fbbf24;
+  border-radius: 9px;
+  padding: 6px 8px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
 .return-review-timeline {
   position: relative;
   display: grid;

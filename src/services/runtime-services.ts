@@ -1270,6 +1270,39 @@ export const runtimeServices = {
         },
       };
     },
+    async saveNavlungoReturnPickupAddressCompletion(
+      returnId: string,
+      input: { customerOverrides?: Record<string, string | undefined> } = {},
+      vendorId = getCurrentVendorId(),
+    ) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.saveNavlungoReturnPickupAddressCompletion(returnId, input, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      const overrideKeys = Object.entries(input.customerOverrides ?? {})
+        .filter(([, value]) => typeof value === 'string' && value.trim())
+        .map(([key]) => key)
+        .sort();
+      const remainingMissing = (returnRecord.returnProviderSnapshot?.navlungoReturnPickupMissingFields as string[] | undefined ?? [])
+        .filter((field) => !overrideKeys.includes(field.replace(/^sender\./, '').replace('post_code', 'postcode')));
+      return {
+        ...returnRecord,
+        returnProviderSnapshot: {
+          ...(returnRecord.returnProviderSnapshot ?? {}),
+          navlungoReturnPickupCustomerOverrideKeys: overrideKeys,
+          navlungoReturnPickupCustomerOverrideValuesRedacted: true,
+          navlungoReturnPickupCompletionSavedAt: new Date().toISOString(),
+          navlungoReturnPickupMissingFields: remainingMissing,
+          navlungoReturnMissingFields: remainingMissing,
+          navlungoReturnAutoCreateSkippedReason: remainingMissing.length ? 'missing_required_fields' : null,
+          navlungoReturnPickupStatus: remainingMissing.length ? 'needs_attention' : 'ready',
+        },
+      };
+    },
     async syncNavlungoReturnStatus(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.syncNavlungoReturnStatus(returnId, { vendorId });

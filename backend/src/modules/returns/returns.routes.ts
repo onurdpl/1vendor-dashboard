@@ -13,6 +13,7 @@ import {
   type ReturnActorScope,
   ReturnReviewError,
   reviewReturn,
+  saveNavlungoReturnPickupAddressCompletion,
   syncNavlungoReturnPickupStatusForReturn,
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
@@ -46,6 +47,10 @@ type NavlungoReturnPickupBody = {
     district?: string;
     address?: string;
   };
+};
+
+type NavlungoReturnPickupAddressCompletionBody = {
+  customerOverrides?: NavlungoReturnPickupBody['customerOverrides'];
 };
 
 function sendReviewError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
@@ -206,6 +211,30 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
           dryRun: request.body?.dryRun === true,
           customerOverrides: request.body?.customerOverrides,
         });
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { returnId: string }; Body: NavlungoReturnPickupAddressCompletionBody }>(
+    '/returns/:returnId/navlungo-return-pickup/address-completion',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await saveNavlungoReturnPickupAddressCompletion(
+          request.params.returnId,
+          actor.actor,
+          env,
+          request.body?.customerOverrides ?? {},
+        );
       } catch (error) {
         return sendReviewError(error, reply);
       }
