@@ -91,6 +91,16 @@ function getCompactCustomerLabel(value?: string) {
   return normalized;
 }
 
+function getSafeProviderTimelineDescription(value: string | null | undefined, fallback: string) {
+  const normalized = value
+    ?.replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
+    .replace(/\+?\d[\d\s().-]{7,}\d/g, '[redacted-phone]')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized ? normalized.slice(0, 140) : fallback;
+}
+
 function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
   const grouped: OperationalEventInput[] = [];
   const seenGroupedEvents = new Set<string>();
@@ -3575,6 +3585,32 @@ export function OrderDetailPage() {
       description: [formatTrackingCarrierLabel(order.carrier), order.trackingNumber].filter(Boolean).join(' / ') || 'Tracking link available.',
       at: order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date,
       tone: 'success',
+    });
+  }
+  if (visibleShipmentExecution?.provider === 'navlungo' && shipmentProviderSummary?.navlungoUpdateSucceeded === true) {
+    orderTimelineEvents.push({
+      id: `navlungo-shipment-updated-${visibleShipmentExecution.id}`,
+      title: 'Shipment updated',
+      description: getSafeProviderTimelineDescription(
+        shipmentProviderSummary.navlungoUpdateProviderMessage,
+        'Recipient/shipment details updated',
+      ),
+      at: shipmentProviderSummary.navlungoUpdatedAt ?? visibleShipmentExecution.updatedAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
+      status: 'Updated',
+      tone: 'info',
+    });
+  }
+  if (visibleShipmentExecution?.provider === 'navlungo' && shipmentProviderSummary?.navlungoCancelSucceeded === true) {
+    orderTimelineEvents.push({
+      id: `navlungo-shipment-cancelled-${visibleShipmentExecution.id}`,
+      title: 'Shipment cancelled',
+      description: getSafeProviderTimelineDescription(
+        shipmentProviderSummary.navlungoCancelProviderMessage,
+        'Provider shipment cancelled',
+      ),
+      at: shipmentProviderSummary.navlungoCancelledAt ?? visibleShipmentExecution.updatedAt ?? visibleShipmentExecution.lastProviderResponseAt ?? order.date,
+      status: 'Cancelled',
+      tone: 'warning',
     });
   }
   if (order.shippingStatus === 'Delivered' || visibleShipmentExecution?.shipmentStatus === 'delivered') {

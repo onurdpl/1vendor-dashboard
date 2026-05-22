@@ -1265,6 +1265,122 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('not_implemented')).toBeInTheDocument();
   });
 
+  it('adds successful Navlungo update events to the Order Detail timeline without leaking PII', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoUpdateAttempted: true,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+          navlungoUpdateProviderMessage: 'Recipient phone +90 532 123 45 67 updated',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getByText('Shipment updated')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Updated')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Recipient phone [redacted-phone] updated')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText(/\+90 532/)).not.toBeInTheDocument();
+  });
+
+  it('adds successful Navlungo cancel events to the Order Detail timeline', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'cancelled',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoCancelAttempted: true,
+          navlungoCancelSucceeded: true,
+          navlungoCancelHttpStatus: 200,
+          navlungoCancelledAt: '2026-05-22T10:00:00.000Z',
+          navlungoCancelProviderMessage: 'Provider shipment cancelled',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).getByText('Shipment cancelled')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Provider shipment cancelled')).toBeInTheDocument();
+  });
+
+  it('does not add successful Navlungo update or cancel timeline events when provider actions fail', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoUpdateAttempted: true,
+          navlungoUpdateSucceeded: false,
+          navlungoUpdateHttpStatus: 422,
+          navlungoCancelAttempted: true,
+          navlungoCancelSucceeded: false,
+          navlungoCancelHttpStatus: 422,
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    expect(timeline).not.toBeNull();
+    expect(within(timeline as HTMLElement).queryByText('Shipment updated')).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).queryByText('Shipment cancelled')).not.toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
+  });
+
   it('uses vendor-safe customer wording and hides raw provider timeline events', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
