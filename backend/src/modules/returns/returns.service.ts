@@ -44,6 +44,10 @@ export type NavlungoReturnPickupInput = {
   };
 };
 
+export type NavlungoReturnStatusSyncInput = {
+  adapter?: ShippingProviderAdapter;
+};
+
 function toAmountString(value: number) {
   return value.toFixed(2);
 }
@@ -131,8 +135,34 @@ function readNumber(value: unknown, keys: string[]) {
   return null;
 }
 
+function readBoolean(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'boolean') {
+      return raw;
+    }
+  }
+  return null;
+}
+
+function readStringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0) : [];
+}
+
 function readSnapshot(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
+}
+
+function readIsoDate(value: unknown, keys: string[]) {
+  const raw = readString(value, keys);
+  if (!raw) {
+    return null;
+  }
+  const date = new Date(raw);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function sanitizeNavlungoReferencePart(value: string | null | undefined, fallback: string, length?: number) {
@@ -1099,4 +1129,214 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
   } catch {
     return { attempted: true, skippedReason: 'provider_create_failed' };
   }
+}
+
+function mapNavlungoReturnStatusLogTimelineEvents(snapshot: Record<string, unknown>) {
+  const logs = Array.isArray(snapshot.navlungoReturnStatusLogs)
+    ? snapshot.navlungoReturnStatusLogs.filter(isRecord)
+    : [];
+  const existingTimeline = Array.isArray(snapshot.timeline) ? snapshot.timeline.filter(isRecord) : [];
+  const existingFingerprints = Array.isArray(snapshot.timelineEventFingerprints)
+    ? snapshot.timelineEventFingerprints.filter((value): value is string => typeof value === 'string')
+    : [];
+  const nextTimeline = [...existingTimeline];
+  const nextFingerprints = [...existingFingerprints];
+
+  for (const log of logs) {
+    const statusCode = readNumber(log, ['status_code', 'statusCode']) ?? readString(log, ['status_code', 'statusCode']);
+    const action = readString(log, ['action']);
+    const actionResult = readString(log, ['action_result', 'actionResult']);
+    const createdAt = readString(log, ['created_at', 'createdAt']);
+    const numeric = typeof statusCode === 'number' ? statusCode : Number(statusCode);
+    const label = (() => {
+      switch (numeric) {
+        case 2:
+          return 'Delivered';
+        case 4:
+          return 'Out for delivery';
+        case 9:
+        case 21:
+          return 'Returned to warehouse';
+        case 10:
+          return 'Cancelled';
+        case 16:
+          return 'Picked up';
+        case 17:
+          return 'In transit';
+        case 18:
+          return 'Waiting at branch';
+        default:
+          break;
+      }
+      const normalizedAction = action?.toLowerCase() ?? '';
+      if (/cancel|iptal/.test(normalizedAction)) return 'Cancelled';
+      if (/return|iade/.test(normalizedAction)) return 'Returned to warehouse';
+      if (/deliver|teslim/.test(normalizedAction)) return 'Delivered';
+      if (/pickup|picked|teslim al/.test(normalizedAction)) return 'Picked up';
+      if (/branch|şube|sube/.test(normalizedAction)) return 'Waiting at branch';
+      if (/transit|yolda|transfer/.test(normalizedAction)) return 'In transit';
+      return action || 'Return pickup status updated';
+    })();
+    const fingerprint = ['navlungo_return_status_log', action ?? '', statusCode ?? '', createdAt ?? ''].join('|');
+    if (nextFingerprints.includes(fingerprint)) {
+      continue;
+    }
+    nextTimeline.push({
+      label,
+      at: createdAt ?? new Date().toISOString(),
+      status: actionResult ?? (statusCode === null ? null : String(statusCode)),
+    });
+    nextFingerprints.push(fingerprint);
+  }
+
+  return {
+    ...snapshot,
+    timeline: nextTimeline,
+    timelineEventFingerprints: nextFingerprints,
+  };
+}
+
+function buildNavlungoReturnStatusSnapshot(input: {
+  existingSnapshot: Record<string, unknown>;
+  providerSnapshot: Record<string, unknown>;
+  succeeded: boolean;
+}) {
+  const { existingSnapshot, providerSnapshot, succeeded } = input;
+  const statusCode = readNumber(providerSnapshot, ['navlungoProviderStatusCode']);
+  const statusName = readString(providerSnapshot, ['navlungoProviderStatusName']);
+  const normalizedStatus = readString(providerSnapshot, ['navlungoNormalizedStatus']);
+  const logs = Array.isArray(providerSnapshot.navlungoStatusLogs) ? providerSnapshot.navlungoStatusLogs.filter(isRecord) : [];
+  const findLogDate = (codes: number[]) => {
+    const value = logs.find((log) => {
+      const code = readNumber(log, ['status_code', 'statusCode']);
+      return code !== null && codes.includes(code);
+    });
+    return value ? readString(value, ['created_at', 'createdAt']) : null;
+  };
+  const pickedUpAt = readIsoDate(providerSnapshot, ['picked_up_date', 'pickedUpDate'])
+    ?? findLogDate([16]);
+  const deliveredAt = readIsoDate(providerSnapshot, ['delivered_date', 'deliveredDate'])
+    ?? findLogDate([2, 9, 21]);
+  const cancelledAt = readIsoDate(providerSnapshot, ['cancel_date', 'cancelDate'])
+    ?? findLogDate([10]);
+  const merged = {
+    ...existingSnapshot,
+    navlungoReturnStatusSyncAttempted: true,
+    navlungoReturnStatusSyncSucceeded: succeeded,
+    navlungoReturnStatusSyncHttpStatus: readNumber(providerSnapshot, ['navlungoStatusSyncHttpStatus']),
+    navlungoReturnProviderStatusCode: statusCode,
+    navlungoReturnProviderStatusName: statusName,
+    navlungoReturnNormalizedStatus: normalizedStatus,
+    navlungoReturnPickedUpAt: pickedUpAt,
+    navlungoReturnDeliveredAt: deliveredAt,
+    navlungoReturnCancelledAt: cancelledAt,
+    navlungoReturnLastStatusSyncedAt: new Date().toISOString(),
+    navlungoReturnLogsCount: readNumber(providerSnapshot, ['navlungoLogsCount']) ?? logs.length,
+    navlungoReturnStatusLogs: logs,
+    navlungoReturnTrackingEnriched: readBoolean(providerSnapshot, ['navlungoTrackingEnriched']) === true,
+    navlungoReturnStatusSyncValidationFields: readStringArray(providerSnapshot.navlungoStatusSyncValidationFields),
+    navlungoReturnStatusSyncValidationMessages: readStringArray(providerSnapshot.navlungoStatusSyncValidationMessages),
+    navlungoReturnStatusSyncProviderTrackingId: readString(providerSnapshot, ['navlungoStatusSyncProviderTrackingId', 'providerTrackingId']),
+    navlungoReturnStatusSyncProviderMessage: readString(providerSnapshot, ['navlungoStatusSyncProviderMessage', 'providerMessage', 'providerError']),
+    navlungoReturnStatusSyncResponseShape: isRecord(providerSnapshot.navlungoStatusSyncResponseShape)
+      ? providerSnapshot.navlungoStatusSyncResponseShape
+      : null,
+    navlungoReturnStatusSyncDataKeys: readStringArray(providerSnapshot.navlungoStatusSyncDataKeys),
+    navlungoReturnCarrierTrackingPresent: readBoolean(providerSnapshot, ['navlungoCarrierTrackingPresent']),
+    navlungoReturnBarcodeStatus: readString(providerSnapshot, ['barcodeStatus']),
+    shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+  };
+
+  return mapNavlungoReturnStatusLogTimelineEvents(merged);
+}
+
+export async function syncNavlungoReturnPickupStatusForReturn(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  input: NavlungoReturnStatusSyncInput = {},
+): Promise<ReturnDetailDto> {
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for Navlungo return status sync.', 403);
+  }
+
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: {
+        select: {
+          assignedVendorId: true,
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (record.returnProvider?.toLowerCase() !== 'navlungo') {
+    throw new ReturnReviewError('Navlungo return status sync is only available for Navlungo return pickups.', 400);
+  }
+
+  const postNumber = record.returnProviderShipmentId?.trim();
+  if (!postNumber) {
+    const blockedSnapshot = {
+      ...(readSnapshot(record.returnProviderSnapshot) ?? {}),
+      navlungoReturnStatusSyncAttempted: false,
+      navlungoReturnStatusSyncSkippedReason: 'missing_return_provider_shipment_id',
+      shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+    };
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: blockedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+    throw new ReturnReviewError('Navlungo return status sync requires a stored return post number.', 400);
+  }
+
+  const adapter = input.adapter ?? createShippingProviderAdapter(env, 'navlungo');
+  const existingSnapshot = readSnapshot(record.returnProviderSnapshot) ?? {};
+  try {
+    const result = await adapter.getShipmentStatus(postNumber);
+    const providerSnapshot = readSnapshot(result.responseSnapshot) ?? {};
+    const mergedSnapshot = buildNavlungoReturnStatusSnapshot({
+      existingSnapshot,
+      providerSnapshot,
+      succeeded: true,
+    });
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnTrackingNumber: result.trackingNumber ?? record.returnTrackingNumber,
+        returnTrackingUrl: result.trackingUrl ?? record.returnTrackingUrl,
+        returnLabel: result.labelUrl ?? record.returnLabel,
+        returnCarrierName: readString(providerSnapshot, ['carrierName']) ?? record.returnCarrierName,
+        returnProviderSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ShippingProviderExecutionError) {
+      const failedSnapshot = buildNavlungoReturnStatusSnapshot({
+        existingSnapshot,
+        providerSnapshot: readSnapshot(error.responseSnapshot) ?? {},
+        succeeded: false,
+      });
+      await prisma.returnRecord.update({
+        where: { id: returnId },
+        data: {
+          returnProviderSnapshot: failedSnapshot as Prisma.InputJsonValue,
+        },
+      });
+      throw new ReturnReviewError(error.message, 400);
+    }
+    throw error;
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+  return updated;
 }

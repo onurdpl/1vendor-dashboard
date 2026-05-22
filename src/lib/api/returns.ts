@@ -27,3 +27,10 @@ export async function createNavlungoReturnPickup(
 ) {
   return runtimeServices.returns.createNavlungoReturnPickup(returnId, input, options.vendorId ?? undefined);
 }
+
+export async function syncNavlungoReturnStatus(
+  returnId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.returns.syncNavlungoReturnStatus(returnId, options.vendorId ?? undefined);
+}

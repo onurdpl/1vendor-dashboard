@@ -75,6 +75,7 @@ const { clearKargonomiLocationLookupCache } = await import('../backend/src/modul
 const {
   autoCreateNavlungoReturnPickupForApprovedReturn,
   createNavlungoReturnPickupForReturn,
+  syncNavlungoReturnPickupStatusForReturn,
 } = await import('../backend/src/modules/returns/returns.service.js');
 
 const env = {
@@ -5981,6 +5982,188 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.returnRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         returnProvider: 'navlungo',
+      }),
+    }));
+  });
+
+  it('syncs Navlungo return pickup status with the stored return post number', async () => {
+    const returnRecord = buildNavlungoReturnRecord({
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-STATUS-1',
+      returnTrackingNumber: null,
+      returnTrackingUrl: null,
+      returnLabel: null,
+      returnProviderSnapshot: {
+        navlungoReturnPickupSucceeded: true,
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      getShipmentStatus: vi.fn().mockResolvedValue({
+        providerShipmentId: 'NAV-RET-STATUS-1',
+        trackingNumber: 'CARRIER-RET-1',
+        trackingUrl: 'https://tracking.example/CARRIER-RET-1',
+        labelUrl: 'barcode-string',
+        shipmentStatus: 'in_transit',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          navlungoStatusSyncAttempted: true,
+          navlungoStatusSyncHttpStatus: 200,
+          navlungoProviderStatusCode: 17,
+          navlungoProviderStatusName: 'Transfer Aşamasında',
+          navlungoNormalizedStatus: 'in_transit',
+          navlungoTrackingEnriched: true,
+          navlungoLogsCount: 2,
+          navlungoStatusLogs: [
+            {
+              status_code: 16,
+              action: 'Teslim Alındı',
+              action_result: 'Pickup completed',
+              created_at: '2026-05-22T10:00:00.000Z',
+            },
+            {
+              status_code: 17,
+              action: 'Transfer Aşamasında',
+              action_result: 'In transit',
+              created_at: '2026-05-22T11:00:00.000Z',
+            },
+          ],
+          barcodeStatus: 'created',
+          carrierName: 'Sürat Kargo',
+          shopifyDeliveryStatusSyncSkippedReason: 'not_implemented',
+        },
+      }),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.update.mockResolvedValue({
+      ...returnRecord,
+      returnTrackingNumber: 'CARRIER-RET-1',
+      returnTrackingUrl: 'https://tracking.example/CARRIER-RET-1',
+      returnLabel: 'barcode-string',
+      returnCarrierName: 'Sürat Kargo',
+    });
+    prismaMock.returnRecord.findFirst.mockResolvedValue({
+      ...returnRecord,
+      returnTrackingNumber: 'CARRIER-RET-1',
+      returnTrackingUrl: 'https://tracking.example/CARRIER-RET-1',
+      returnLabel: 'barcode-string',
+      returnCarrierName: 'Sürat Kargo',
+    });
+
+    await syncNavlungoReturnPickupStatusForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { adapter },
+    );
+
+    expect(adapter.getShipmentStatus).toHaveBeenCalledWith('NAV-RET-STATUS-1');
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnTrackingNumber: 'CARRIER-RET-1',
+        returnTrackingUrl: 'https://tracking.example/CARRIER-RET-1',
+        returnLabel: 'barcode-string',
+        returnCarrierName: 'Sürat Kargo',
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnStatusSyncAttempted: true,
+          navlungoReturnStatusSyncHttpStatus: 200,
+          navlungoReturnProviderStatusCode: 17,
+          navlungoReturnProviderStatusName: 'Transfer Aşamasında',
+          navlungoReturnNormalizedStatus: 'in_transit',
+          navlungoReturnTrackingEnriched: true,
+          navlungoReturnLogsCount: 2,
+          navlungoReturnStatusLogs: expect.arrayContaining([
+            expect.objectContaining({ status_code: 16 }),
+            expect.objectContaining({ status_code: 17 }),
+          ]),
+          shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+        }),
+      }),
+    }));
+  });
+
+  it('blocks Navlungo return status sync when return provider shipment id is missing', async () => {
+    const returnRecord = buildNavlungoReturnRecord({
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: null,
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      getShipmentStatus: vi.fn(),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+
+    await expect(
+      syncNavlungoReturnPickupStatusForReturn(
+        'return-request-1',
+        { role: 'admin', vendorId: null },
+        env,
+        { adapter },
+      ),
+    ).rejects.toThrow('Navlungo return status sync requires a stored return post number.');
+
+    expect(adapter.getShipmentStatus).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnStatusSyncAttempted: false,
+          navlungoReturnStatusSyncSkippedReason: 'missing_return_provider_shipment_id',
+          shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+        }),
+      }),
+    }));
+  });
+
+  it('persists Navlungo return status sync provider failures without changing evidence', async () => {
+    const returnRecord = buildNavlungoReturnRecord({
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-STATUS-1',
+      returnTrackingNumber: 'existing-tracking',
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      getShipmentStatus: vi.fn().mockRejectedValue(
+        new ShippingProviderExecutionError('Navlungo detailed Check Post failed with HTTP 422.', {
+          navlungoStatusSyncAttempted: true,
+          navlungoStatusSyncHttpStatus: 422,
+          navlungoProviderStatusCode: 999,
+          navlungoProviderStatusName: 'Unknown Provider Status',
+          navlungoStatusSyncValidationFields: ['post.post_number'],
+          navlungoStatusSyncValidationMessages: ['post.post_number validation failed'],
+        }),
+      ),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+
+    await expect(
+      syncNavlungoReturnPickupStatusForReturn(
+        'return-request-1',
+        { role: 'admin', vendorId: null },
+        env,
+        { adapter },
+      ),
+    ).rejects.toThrow('Navlungo detailed Check Post failed with HTTP 422.');
+
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnStatusSyncAttempted: true,
+          navlungoReturnStatusSyncSucceeded: false,
+          navlungoReturnStatusSyncHttpStatus: 422,
+          navlungoReturnProviderStatusCode: 999,
+          navlungoReturnStatusSyncValidationFields: ['post.post_number'],
+          navlungoReturnStatusSyncValidationMessages: ['post.post_number validation failed'],
+        }),
+      }),
+    }));
+    expect(prismaMock.returnRecord.update).not.toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        returnTrackingNumber: expect.any(String),
       }),
     }));
   });

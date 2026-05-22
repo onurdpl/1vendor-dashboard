@@ -1270,6 +1270,43 @@ export const runtimeServices = {
         },
       };
     },
+    async syncNavlungoReturnStatus(returnId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.syncNavlungoReturnStatus(returnId, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      if (!returnRecord.returnProviderShipmentId) {
+        throw new ApiError('Navlungo return status sync requires a stored return post number.', 'server', { status: 400 });
+      }
+      return {
+        ...returnRecord,
+        returnTrackingNumber: returnRecord.returnTrackingNumber ?? returnRecord.returnProviderShipmentId,
+        returnTrackingUrl: returnRecord.returnTrackingUrl ?? `https://example.test/track/${returnRecord.returnProviderShipmentId}`,
+        returnProviderSnapshot: {
+          ...(returnRecord.returnProviderSnapshot ?? {}),
+          navlungoReturnStatusSyncAttempted: true,
+          navlungoReturnStatusSyncHttpStatus: 200,
+          navlungoReturnStatusSyncSucceeded: true,
+          navlungoReturnProviderStatusCode: 17,
+          navlungoReturnProviderStatusName: 'Transfer Aşamasında',
+          navlungoReturnNormalizedStatus: 'in_transit',
+          navlungoReturnLogsCount: 1,
+          navlungoReturnStatusLogs: [
+            {
+              status_code: 17,
+              action: 'Transfer Aşamasında',
+              action_result: 'In transit',
+              created_at: new Date().toISOString(),
+            },
+          ],
+          shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+        },
+      };
+    },
   },
   finance: {
     dashboard: (vendorId = getCurrentVendorId()) =>

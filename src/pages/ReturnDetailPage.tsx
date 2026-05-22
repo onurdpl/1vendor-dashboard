@@ -10,6 +10,7 @@ import {
   createNavlungoReturnPickup,
   markReturnReceived,
   reviewReturn,
+  syncNavlungoReturnStatus,
   type ReturnDetail,
   type ReturnLineItem,
 } from '../features/returns/api';
@@ -137,6 +138,74 @@ function getTimelineLabel(label: string) {
     return 'Vendor reviewed';
   }
   return '';
+}
+
+function readSnapshotString(snapshot: Record<string, unknown>, key: string) {
+  const value = snapshot[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readSnapshotNumber(snapshot: Record<string, unknown>, key: string) {
+  const value = snapshot[key];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : null;
+}
+
+function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
+  const logs = Array.isArray(snapshot.navlungoReturnStatusLogs)
+    ? snapshot.navlungoReturnStatusLogs.filter((log): log is Record<string, unknown> => Boolean(log) && typeof log === 'object' && !Array.isArray(log))
+    : [];
+  const seen = new Set<string>();
+  return logs
+    .map((log) => {
+      const statusCode = readSnapshotNumber(log, 'status_code') ?? readSnapshotNumber(log, 'statusCode');
+      const action = readSnapshotString(log, 'action');
+      const actionResult = readSnapshotString(log, 'action_result') ?? readSnapshotString(log, 'actionResult');
+      const createdAt = readSnapshotString(log, 'created_at') ?? readSnapshotString(log, 'createdAt');
+      const title = (() => {
+        switch (statusCode) {
+          case 2:
+            return 'Delivered';
+          case 4:
+            return 'Out for delivery';
+          case 9:
+          case 21:
+            return 'Returned to warehouse';
+          case 10:
+            return 'Cancelled';
+          case 16:
+            return 'Picked up';
+          case 17:
+            return 'In transit';
+          case 18:
+            return 'Waiting at branch';
+          default:
+            break;
+        }
+        const normalizedAction = action?.toLowerCase() ?? '';
+        if (/cancel|iptal/.test(normalizedAction)) return 'Cancelled';
+        if (/return|iade/.test(normalizedAction)) return 'Returned to warehouse';
+        if (/deliver|teslim/.test(normalizedAction)) return 'Delivered';
+        if (/pickup|picked|teslim al/.test(normalizedAction)) return 'Picked up';
+        if (/branch|şube|sube/.test(normalizedAction)) return 'Waiting at branch';
+        if (/transit|yolda|transfer/.test(normalizedAction)) return 'In transit';
+        return action || 'Return pickup status updated';
+      })();
+      return {
+        title,
+        description: actionResult ?? action ?? (statusCode === null ? 'Provider lifecycle update' : `Status ${statusCode}`),
+        at: createdAt,
+        status: actionResult ?? (statusCode === null ? null : String(statusCode)),
+        fingerprint: `${action ?? ''}|${statusCode ?? ''}|${createdAt ?? ''}`,
+      };
+    })
+    .filter((event) => {
+      if (seen.has(event.fingerprint)) {
+        return false;
+      }
+      seen.add(event.fingerprint);
+      return true;
+    });
 }
 
 function getTimeline(returnRequest: ReturnDetail) {
@@ -343,6 +412,24 @@ export function ReturnDetailPage() {
       },
     },
   );
+  const navlungoReturnStatusSyncMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return syncNavlungoReturnStatus(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: async () => {
+        await refetch();
+        showFeedback('Navlungo return status synced.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Navlungo return status could not be synced.', 'error');
+      },
+    },
+  );
 
   if (!authContextReady || isLoading) {
     return (
@@ -393,6 +480,13 @@ export function ReturnDetailPage() {
     typeof returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason === 'string'
       ? returnProviderSnapshot.navlungoReturnAutoCreateSkippedReason
       : null;
+  const navlungoReturnStatusLogs = readNavlungoReturnLogs(returnProviderSnapshot);
+  const navlungoReturnNormalizedStatus = readSnapshotString(returnProviderSnapshot, 'navlungoReturnNormalizedStatus');
+  const navlungoReturnProviderStatusName = readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderStatusName');
+  const navlungoReturnProviderStatusCode = readSnapshotNumber(returnProviderSnapshot, 'navlungoReturnProviderStatusCode');
+  const navlungoReturnStatusSyncedAt = readSnapshotString(returnProviderSnapshot, 'navlungoReturnLastStatusSyncedAt');
+  const navlungoReturnStatusHttpStatus = readSnapshotNumber(returnProviderSnapshot, 'navlungoReturnStatusSyncHttpStatus');
+  const shopifyReturnStatusSyncSkippedReason = readSnapshotString(returnProviderSnapshot, 'shopifyReturnStatusSyncSkippedReason');
   const canReviewReturn =
     currentUser?.role === 'admin' ||
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
@@ -504,6 +598,19 @@ export function ReturnDetailPage() {
           },
         ]
       : []),
+    ...navlungoReturnStatusLogs.map((event) => ({
+      id: `navlungo-return-log-${returnRequest.id}-${event.fingerprint}`,
+      title: event.title,
+      description: event.description,
+      at: event.at ?? returnRequest.updatedAt ?? returnRequest.date,
+      status: event.status ?? undefined,
+      tone:
+        event.title === 'Cancelled'
+          ? ('danger' as const)
+          : event.title === 'Delivered' || event.title === 'Returned to warehouse'
+            ? ('success' as const)
+            : ('info' as const),
+    })),
   ];
   const returnRecommendations: OperationsRecommendation[] = [];
   if (!hasReceivedReturn) {
@@ -719,6 +826,26 @@ export function ReturnDetailPage() {
                     <strong>{returnRequest.returnTrackingNumber ?? 'Not provided'}</strong>
                   )}
                 </div>
+                {navlungoReturnProviderStatusName || navlungoReturnNormalizedStatus || navlungoReturnProviderStatusCode !== null ? (
+                  <div>
+                    <span>Provider status</span>
+                    <strong>
+                      {navlungoReturnProviderStatusName ?? navlungoReturnNormalizedStatus ?? `Status ${navlungoReturnProviderStatusCode}`}
+                    </strong>
+                  </div>
+                ) : null}
+                {navlungoReturnStatusSyncedAt ? (
+                  <div>
+                    <span>Last status sync</span>
+                    <strong>{formatDate(navlungoReturnStatusSyncedAt)}</strong>
+                  </div>
+                ) : null}
+                {typeof returnProviderSnapshot.navlungoReturnBarcodeStatus === 'string' ? (
+                  <div>
+                    <span>Barcode status</span>
+                    <strong>{returnProviderSnapshot.navlungoReturnBarcodeStatus}</strong>
+                  </div>
+                ) : null}
                 {returnRequest.returnReferenceId ? (
                   <div>
                     <span>Reference</span>
@@ -729,6 +856,24 @@ export function ReturnDetailPage() {
                   <div>
                     <span>Barcode / label</span>
                     <strong>Available</strong>
+                  </div>
+                ) : null}
+                {shopifyReturnStatusSyncSkippedReason ? (
+                  <div>
+                    <span>Shopify return status sync</span>
+                    <strong>{shopifyReturnStatusSyncSkippedReason}</strong>
+                  </div>
+                ) : null}
+                {isAdmin && returnRequest.returnProvider === 'navlungo' && returnRequest.returnProviderShipmentId ? (
+                  <div className="return-review-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={navlungoReturnStatusSyncMutation.isPending}
+                      onClick={() => void navlungoReturnStatusSyncMutation.mutateAsync(undefined)}
+                    >
+                      {navlungoReturnStatusSyncMutation.isPending ? 'Syncing...' : 'Sync Navlungo return status'}
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -784,6 +929,18 @@ export function ReturnDetailPage() {
                         : 'not_implemented'}
                     </strong>
                   </div>
+                  {navlungoReturnStatusHttpStatus !== null ? (
+                    <div>
+                      <span>Status sync HTTP</span>
+                      <strong>{navlungoReturnStatusHttpStatus}</strong>
+                    </div>
+                  ) : null}
+                  {navlungoReturnStatusLogs.length ? (
+                    <div>
+                      <span>Status logs</span>
+                      <strong>{navlungoReturnStatusLogs.length}</strong>
+                    </div>
+                  ) : null}
                 </div>
               ) : (
                 <>

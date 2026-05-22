@@ -15,6 +15,7 @@ const reviewReturnMock = vi.fn<
 const createNavlungoReturnPickupMock = vi.fn<
   (returnId: string, input: { dryRun?: boolean }) => Promise<ReturnDetail>
 >();
+const syncNavlungoReturnStatusMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -30,6 +31,7 @@ vi.mock('../features/returns/api', async () => {
       reviewReturnMock(returnId, input),
     createNavlungoReturnPickup: (returnId: string, input: { dryRun?: boolean }) =>
       createNavlungoReturnPickupMock(returnId, input),
+    syncNavlungoReturnStatus: (returnId: string) => syncNavlungoReturnStatusMock(returnId),
   };
 });
 
@@ -144,6 +146,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     markReturnReceivedMock.mockReset();
     reviewReturnMock.mockReset();
     createNavlungoReturnPickupMock.mockReset();
+    syncNavlungoReturnStatusMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -217,6 +220,89 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Sürat Kargo')).toBeInTheDocument();
     expect(screen.getByText('SP-RET-1023-ABC123')).toBeInTheDocument();
     expect(screen.getAllByText('Navlungo return pickup created').length).toBeGreaterThan(0);
+  });
+
+  it('renders Navlungo return lifecycle logs and lets admin sync status', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    const syncedReturn = {
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-1',
+      returnTrackingNumber: 'CARRIER-RET-1',
+      returnTrackingUrl: 'https://tracking.example/CARRIER-RET-1',
+      returnLabel: 'barcode-string',
+      returnCarrierName: 'Sürat Kargo',
+      navlungoReturnCreatedAt: '2026-05-22T09:00:00Z',
+      returnProviderSnapshot: {
+        navlungoReturnStatusSyncHttpStatus: 200,
+        navlungoReturnProviderStatusCode: 17,
+        navlungoReturnProviderStatusName: 'Transfer Aşamasında',
+        navlungoReturnNormalizedStatus: 'in_transit',
+        navlungoReturnLastStatusSyncedAt: '2026-05-22T12:00:00Z',
+        navlungoReturnStatusLogs: [
+          {
+            status_code: 16,
+            action: 'Teslim Alındı',
+            action_result: 'Pickup completed',
+            created_at: '2026-05-22T10:00:00Z',
+          },
+          {
+            status_code: 17,
+            action: 'Transfer Aşamasında',
+            action_result: 'In transit',
+            created_at: '2026-05-22T11:00:00Z',
+          },
+          {
+            status_code: 17,
+            action: 'Transfer Aşamasında',
+            action_result: 'In transit',
+            created_at: '2026-05-22T11:00:00Z',
+          },
+        ],
+        shopifyReturnStatusSyncSkippedReason: 'not_implemented',
+      },
+    } satisfies ReturnDetail;
+    getReturnMock.mockResolvedValue(syncedReturn);
+    syncNavlungoReturnStatusMock.mockResolvedValueOnce(syncedReturn);
+
+    renderPage();
+
+    expect(await screen.findByText('Transfer Aşamasında')).toBeInTheDocument();
+    expect(screen.getByText('Provider status')).toBeInTheDocument();
+    expect(screen.getByText('Shopify return status sync')).toBeInTheDocument();
+    expect(screen.getAllByText('not_implemented').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Picked up')).toHaveLength(1);
+    expect(screen.getAllByText('In transit').length).toBeGreaterThan(0);
+
+    await user.click(screen.getByRole('button', { name: 'Sync Navlungo return status' }));
+
+    expect(syncNavlungoReturnStatusMock).toHaveBeenCalledWith(returnDetail.id);
+    expect(await screen.findByText('Navlungo return status synced.')).toBeInTheDocument();
+  });
+
+  it('keeps Navlungo return status sync action admin-only', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'navlungo',
+      returnProviderShipmentId: 'NAV-RET-1',
+      returnTrackingNumber: 'NAV-RET-1',
+      returnCarrierName: 'Sürat Kargo',
+      navlungoReturnCreatedAt: '2026-05-22T09:00:00Z',
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Customer shipment')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Sync Navlungo return status' })).not.toBeInTheDocument();
   });
 
   it('lets admin preview Navlungo return pickup from the return request context', async () => {
