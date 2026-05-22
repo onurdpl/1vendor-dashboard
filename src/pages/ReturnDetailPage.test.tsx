@@ -707,6 +707,86 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(within(diagnostics).getByText(/responseKeys/)).toBeInTheDocument();
   });
 
+  it('renders sanitized Navlungo return request summary without PII', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        navlungoReturnAutoCreateAttempted: true,
+        navlungoReturnCreateHttpStatus: 500,
+        navlungoReturnCreateSucceeded: false,
+        providerMessage: 'Execution of ServiceCallout failed. Tracking ID: #safe123',
+        navlungoReturnRequestedBarcodeFormat: 'pdf-A6',
+        navlungoReturnRequestedCarrierId: 9,
+        navlungoReturnRequestedPostType: 3,
+        recipientAddressIdValid: true,
+        navlungoReturnRequestSummary: {
+          baseUrl: 'domestic-api.navlungo.com/v2',
+          endpointPath: '/post/create',
+          method: 'POST',
+          topLevelBodyKeys: ['platform', 'posts'],
+          postKeys: [
+            'barcode_format',
+            'carrier_id',
+            'cod_payment_type',
+            'custom_data_1',
+            'custom_data_2',
+            'custom_data_3',
+            'custom_data_4',
+            'post',
+            'post_type',
+            'recipient',
+            'reference_id',
+            'sender',
+          ],
+          senderKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+          recipientKeys: ['addressId'],
+          postPayloadKeys: ['desi', 'note', 'package_count', 'price'],
+          requestedCarrierId: 9,
+          requestedPostType: 3,
+          requestedBarcodeFormat: 'pdf-A6',
+          desiPresent: true,
+          desiType: 'number',
+          requestedDesi: 1,
+          packageCountPresent: true,
+          packageCountType: 'number',
+          requestedPackageCount: 1,
+          postPricePresent: true,
+          postPriceType: 'string-empty',
+          customData1Present: true,
+          customData2Present: true,
+          customData3Present: true,
+          customData4Present: true,
+        },
+      },
+    });
+
+    renderPage();
+
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('3')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('9')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('pdf-A6')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('domestic-api.navlungo.com/v2')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('/post/create')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('addressId')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('valid')).toBeInTheDocument();
+    expect(within(diagnostics).getAllByText('1 (number)').length).toBeGreaterThanOrEqual(2);
+    expect(within(diagnostics).getByText('string-empty')).toBeInTheDocument();
+    expect(screen.queryByText('John Doe')).not.toBeInTheDocument();
+    expect(screen.queryByText('+90 535 123 45 67')).not.toBeInTheDocument();
+    expect(screen.queryByText('recipient@firma.com')).not.toBeInTheDocument();
+    expect(screen.queryByText('Deneme Mahallesi, Ural Sk. No:999')).not.toBeInTheDocument();
+  });
+
   it('shows successful Navlungo return provider evidence in diagnostics', async () => {
     setCurrentUser({
       email: 'admin@example.com',

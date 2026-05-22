@@ -242,6 +242,7 @@ export type NavlungoCreatePostRequestSummary = {
   postPriceType: string | null;
   requestedCarrierId: number | string | null;
   requestedPostType: number | string | null;
+  requestedBarcodeFormat: string | null;
   senderUsesAddressId: boolean;
   senderFullObjectKeysPresent: boolean;
   customData1Present: boolean;
@@ -364,6 +365,7 @@ export function summarizeNavlungoCreatePostRequest(
     postPriceType: safeValueType(postPayload?.price),
     requestedCarrierId: post?.carrier_id ?? null,
     requestedPostType: post?.post_type ?? null,
+    requestedBarcodeFormat: typeof post?.barcode_format === 'string' ? post.barcode_format : null,
     senderUsesAddressId: isRecord(sender) && 'addressId' in sender,
     senderFullObjectKeysPresent: senderKeys.some((key) => key !== 'addressId'),
     customData1Present: post?.custom_data_1 !== undefined,

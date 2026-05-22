@@ -31,6 +31,7 @@ export type NavlungoCreatePostRequestSummary = {
   postPriceType: string | null;
   requestedCarrierId: number | string | null;
   requestedPostType: number | string | null;
+  requestedBarcodeFormat?: string | null;
   senderUsesAddressId: boolean;
   senderFullObjectKeysPresent: boolean;
   customData1Present: boolean;

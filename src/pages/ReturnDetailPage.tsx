@@ -810,6 +810,12 @@ export function ReturnDetailPage() {
       returnRequest.returnProviderShipmentId,
   );
   const returnProviderSnapshot = currentReturnProviderSnapshot;
+  const navlungoReturnRequestSummary = (
+    returnProviderSnapshot.navlungoReturnRequestSummary ??
+    returnProviderSnapshot.navlungoReturnPickupPayloadSummary
+  ) as
+    | Record<string, unknown>
+    | undefined;
   const navlungoReturnPickupPayloadSummary = returnProviderSnapshot.navlungoReturnPickupPayloadSummary as
     | Record<string, unknown>
     | undefined;
@@ -829,6 +835,15 @@ export function ReturnDetailPage() {
     readSnapshotNumber(returnProviderSnapshot, 'navlungoReturnCreateHttpStatus') ??
     readSnapshotNumber(returnProviderSnapshot, 'httpStatus');
   const navlungoReturnCreateSucceeded = readSnapshotBoolean(returnProviderSnapshot, 'navlungoReturnCreateSucceeded');
+  const navlungoReturnRequestedBarcodeFormat =
+    readSnapshotString(returnProviderSnapshot, 'navlungoReturnRequestedBarcodeFormat') ??
+    (typeof navlungoReturnRequestSummary?.requestedBarcodeFormat === 'string'
+      ? navlungoReturnRequestSummary.requestedBarcodeFormat
+      : null);
+  const navlungoReturnRequestedCarrierId =
+    returnProviderSnapshot.navlungoReturnRequestedCarrierId ?? navlungoReturnRequestSummary?.requestedCarrierId ?? null;
+  const navlungoReturnRequestedPostType =
+    returnProviderSnapshot.navlungoReturnRequestedPostType ?? navlungoReturnRequestSummary?.requestedPostType ?? null;
   const navlungoReturnProviderMessage =
     readSnapshotString(returnProviderSnapshot, 'navlungoReturnProviderMessage') ??
     readSnapshotString(returnProviderSnapshot, 'providerMessage');
@@ -1411,6 +1426,18 @@ export function ReturnDetailPage() {
                   <strong>{formatDiagnosticBoolean(navlungoReturnCreateSucceeded)}</strong>
                 </div>
                 <div>
+                  <span>Requested post type</span>
+                  <strong>{navlungoReturnRequestedPostType !== null ? String(navlungoReturnRequestedPostType) : '—'}</strong>
+                </div>
+                <div>
+                  <span>Requested carrier</span>
+                  <strong>{navlungoReturnRequestedCarrierId !== null ? String(navlungoReturnRequestedCarrierId) : '—'}</strong>
+                </div>
+                <div>
+                  <span>Requested barcode format</span>
+                  <strong>{navlungoReturnRequestedBarcodeFormat ?? '—'}</strong>
+                </div>
+                <div>
                   <span>Provider message</span>
                   <strong>{navlungoReturnProviderMessage ?? '—'}</strong>
                 </div>
@@ -1444,6 +1471,97 @@ export function ReturnDetailPage() {
                   <span>Snapshot response keys</span>
                   <strong>{formatDiagnosticList(returnProviderSnapshotResponseKeys)}</strong>
                 </div>
+                {navlungoReturnRequestSummary ? (
+                  <>
+                    <div>
+                      <span>Request base URL</span>
+                      <strong>{String(navlungoReturnRequestSummary.baseUrl ?? '—')}</strong>
+                    </div>
+                    <div>
+                      <span>Request endpoint</span>
+                      <strong>{String(navlungoReturnRequestSummary.endpointPath ?? '/post/create')}</strong>
+                    </div>
+                    <div>
+                      <span>Top-level body keys</span>
+                      <strong>
+                        {Array.isArray(navlungoReturnRequestSummary.topLevelBodyKeys)
+                          ? navlungoReturnRequestSummary.topLevelBodyKeys.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Post keys</span>
+                      <strong>
+                        {Array.isArray(navlungoReturnRequestSummary.postKeys)
+                          ? navlungoReturnRequestSummary.postKeys.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Sender keys</span>
+                      <strong>
+                        {Array.isArray(navlungoReturnRequestSummary.senderKeys)
+                          ? navlungoReturnRequestSummary.senderKeys.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Recipient keys</span>
+                      <strong>
+                        {Array.isArray(navlungoReturnRequestSummary.recipientKeys)
+                          ? navlungoReturnRequestSummary.recipientKeys.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Recipient addressId</span>
+                      <strong>{returnProviderSnapshot.recipientAddressIdValid === true ? 'valid' : 'missing'}</strong>
+                    </div>
+                    <div>
+                      <span>Post payload keys</span>
+                      <strong>
+                        {Array.isArray(navlungoReturnRequestSummary.postPayloadKeys)
+                          ? navlungoReturnRequestSummary.postPayloadKeys.join(', ')
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Desi</span>
+                      <strong>
+                        {navlungoReturnRequestSummary.desiPresent === true
+                          ? `${String(navlungoReturnRequestSummary.requestedDesi ?? 'present')} (${String(navlungoReturnRequestSummary.desiType ?? 'unknown')})`
+                          : 'missing'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Package count</span>
+                      <strong>
+                        {navlungoReturnRequestSummary.packageCountPresent === true
+                          ? `${String(navlungoReturnRequestSummary.requestedPackageCount ?? 'present')} (${String(navlungoReturnRequestSummary.packageCountType ?? 'unknown')})`
+                          : 'missing'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Price field</span>
+                      <strong>
+                        {navlungoReturnRequestSummary.postPricePresent === true
+                          ? String(navlungoReturnRequestSummary.postPriceType ?? 'present')
+                          : 'missing'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Custom data</span>
+                      <strong>
+                        {[
+                          navlungoReturnRequestSummary.customData1Present ? 'custom_data_1' : null,
+                          navlungoReturnRequestSummary.customData2Present ? 'custom_data_2' : null,
+                          navlungoReturnRequestSummary.customData3Present ? 'custom_data_3' : null,
+                          navlungoReturnRequestSummary.customData4Present ? 'custom_data_4' : null,
+                        ].filter(Boolean).join(', ') || '—'}
+                      </strong>
+                    </div>
+                  </>
+                ) : null}
               </div>
             </article>
           ) : null}
