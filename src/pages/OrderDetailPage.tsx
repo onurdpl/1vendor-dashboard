@@ -2313,9 +2313,25 @@ export function OrderDetailPage() {
       summary.lastSuccessfulNavlungoRequestSummary,
       summary.navlungoRequestSummary,
     );
+    const shouldOpenNavlungoRetryDiagnostics = Boolean(
+      hasNavlungoRequestDiagnostics ||
+        summary.providerTrackingId ||
+        summary.providerError ||
+        (summary.httpStatus !== null && summary.httpStatus !== undefined && summary.httpStatus >= 400) ||
+        (summary.providerCallHttpStatus !== null &&
+          summary.providerCallHttpStatus !== undefined &&
+          summary.providerCallHttpStatus >= 400) ||
+        (summary.realPathCreatePostHttpStatus !== null &&
+          summary.realPathCreatePostHttpStatus !== undefined &&
+          summary.realPathCreatePostHttpStatus >= 400),
+    );
 
     return (
-      <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Navlungo retry diagnostics">
+      <details
+        className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel"
+        aria-label="Navlungo retry diagnostics"
+        open={shouldOpenNavlungoRetryDiagnostics}
+      >
         <summary className="provider-response-heading">
           <strong>Navlungo retry diagnostics</strong>
           <span>Safe vendor create/retry trace</span>
@@ -2388,6 +2404,10 @@ export function OrderDetailPage() {
           <div className="summary-row">
             <span>Last successful summary source</span>
             <strong>{summary.lastSuccessfulNavlungoRequestSummarySource || '—'}</strong>
+          </div>
+          <div className="summary-row">
+            <span>Last successful summary reason</span>
+            <strong>{summary.lastSuccessfulNavlungoRequestSummaryReason || '—'}</strong>
           </div>
           <div className="summary-row">
             <span>Sender address ID</span>

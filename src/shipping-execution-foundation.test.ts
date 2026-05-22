@@ -1735,6 +1735,125 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(storedExecution.responseSnapshot)).not.toContain('Test Mahallesi');
   });
 
+  it('ignores incomplete Navlungo successful-looking summaries when building failed retry diagnostics', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'FAILED',
+      responseSnapshot: {
+        ok: false,
+        provider: 'navlungo',
+        providerError: 'Previous provider failure.',
+      },
+    });
+    const incompleteSummary = {
+      endpointPath: '/post/create',
+      method: 'POST',
+      headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+      topLevelBodyKeys: ['platform', 'posts'],
+      postKeys: ['barcode_format', 'carrier_id', 'post_type', 'reference_id', 'sender'],
+      senderKeys: ['addressId'],
+      recipientKeys: [],
+      postPayloadKeys: [],
+      requestedCarrierId: 9,
+      requestedPostType: 2,
+      senderUsesAddressId: true,
+      recipientDistrictPresent: false,
+      recipientCityPresent: false,
+      recipientAddressPresent: false,
+      packageCountPresent: false,
+      desiPresent: false,
+    };
+    const incompleteSuccessfulExecution = buildShipmentExecution({
+      id: 'shipment-navlungo-success-incomplete',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NAV-SUCCESS-INCOMPLETE',
+      trackingUrl: 'https://track.navlungo.test/NAV-SUCCESS-INCOMPLETE',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        ok: true,
+        provider: 'navlungo',
+        navlungoRequestSummary: incompleteSummary,
+      },
+      updatedAt: new Date('2026-05-15T11:00:00.000Z'),
+    });
+    storedExecution = existing;
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.shipmentExecution.findMany.mockResolvedValue([incompleteSuccessfulExecution]);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
+      order: {
+        id: 'order-1',
+        customerName: 'Test Customer',
+        customerEmail: 'customer@example.com',
+        customerPhone: '+90 555 111 22 33',
+        shippingCountry: 'tr',
+        shippingCity: 'Istanbul',
+        shippingDistrict: null,
+        shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      },
+    }));
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+    });
+    adapter.createShipment.mockRejectedValue(new ShippingProviderExecutionError('Navlungo Create Post failed with HTTP 500.', {
+      provider: 'navlungo',
+      createPostHttpStatus: 500,
+      providerError: 'Execution of ServiceCallout failed.',
+      navlungoRequestSummary: {
+        ...incompleteSummary,
+        recipientDistrictPresent: true,
+        recipientCityPresent: true,
+        recipientAddressPresent: true,
+        recipientKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+        postKeys: ['barcode_format', 'carrier_id', 'post', 'post_type', 'recipient', 'reference_id', 'sender'],
+        postPayloadKeys: ['desi', 'note', 'package_count', 'price'],
+        packageCountPresent: true,
+        desiPresent: true,
+      },
+      lastSuccessfulNavlungoRequestSummary: incompleteSummary,
+    }));
+
+    const result = await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'navlungo',
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+      customerOverrides: {
+        district: 'Kartal',
+      },
+    });
+
+    expect(result.providerResponseSummary).toMatchObject({
+      lastSuccessfulNavlungoRequestSummary: null,
+      lastSuccessfulNavlungoRequestSummarySource: null,
+      lastSuccessfulNavlungoRequestSummaryReason: 'no_valid_successful_real_navlungo_summary',
+    });
+    expect(storedExecution.responseSnapshot).toMatchObject({
+      lastSuccessfulNavlungoRequestSummary: null,
+      lastSuccessfulNavlungoRequestSummarySource: null,
+      lastSuccessfulNavlungoRequestSummaryReason: 'no_valid_successful_real_navlungo_summary',
+    });
+    expect(JSON.stringify(storedExecution.responseSnapshot)).not.toContain('customer@example.com');
+    expect(JSON.stringify(storedExecution.responseSnapshot)).not.toContain('Test Mahallesi');
+  });
+
   it('does not call the provider again when an existing pending dry-run shipment is present', async () => {
     const existing = buildShipmentExecution({
       provider: 'KARGO_ENTEGRATOR',

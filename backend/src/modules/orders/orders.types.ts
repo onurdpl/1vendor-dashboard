@@ -287,6 +287,7 @@ export type OrderShipmentExecutionDto = {
     navlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     lastSuccessfulNavlungoRequestSummarySource?: string | null;
+    lastSuccessfulNavlungoRequestSummaryReason?: string | null;
     senderAddressIdPresent?: boolean | null;
     senderAddressIdValid?: boolean | null;
     senderUsesAddressId?: boolean | null;

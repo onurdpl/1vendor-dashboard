@@ -5128,6 +5128,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(visibleSummary).getByText('Last successful vs current request diff').closest('.summary-row')).toHaveTextContent(
       'safe fields compared',
     );
+    expect((screen.getByLabelText('Navlungo retry diagnostics') as HTMLDetailsElement).open).toBe(true);
   });
 
   it('renders current-only Navlungo request diagnostics when no last successful summary exists', async () => {
@@ -5166,6 +5167,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             barcodeFormatType: 'string',
           }),
           lastSuccessfulNavlungoRequestSummary: null,
+          lastSuccessfulNavlungoRequestSummaryReason: 'no_valid_successful_real_navlungo_summary',
         },
       },
     });
@@ -5185,9 +5187,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const diff = screen.getByLabelText('Navlungo successful failing request diff');
     const visibleSummary = screen.getByLabelText('Navlungo request summary diagnostics');
+    expect((screen.getByLabelText('Navlungo retry diagnostics') as HTMLDetailsElement).open).toBe(true);
     expect(within(visibleSummary).getByText('Request summary present').closest('.summary-row')).toHaveTextContent('yes');
     expect(within(visibleSummary).getByText('Last successful summary present').closest('.summary-row')).toHaveTextContent('no');
     expect(within(visibleSummary).getByText('Last successful summary source').closest('.summary-row')).toHaveTextContent('—');
+    expect(within(visibleSummary).getByText('Last successful summary reason').closest('.summary-row')).toHaveTextContent(
+      'no_valid_successful_real_navlungo_summary',
+    );
     expect(within(visibleSummary).getByText('Current Navlungo request summary').closest('.summary-row')).toHaveTextContent(
       'available',
     );

@@ -394,6 +394,7 @@ export type ShipmentExecutionDto = {
     navlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     lastSuccessfulNavlungoRequestSummarySource?: string | null;
+    lastSuccessfulNavlungoRequestSummaryReason?: string | null;
     providerApiCallAttempted?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;

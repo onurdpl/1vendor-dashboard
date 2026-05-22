@@ -683,6 +683,7 @@ function mapProviderResponseSummary(
     navlungoRequestSummary: mapNavlungoRequestSummary(snapshot.navlungoRequestSummary),
     lastSuccessfulNavlungoRequestSummary: mapNavlungoRequestSummary(snapshot.lastSuccessfulNavlungoRequestSummary),
     lastSuccessfulNavlungoRequestSummarySource: readString(snapshot, ['lastSuccessfulNavlungoRequestSummarySource']),
+    lastSuccessfulNavlungoRequestSummaryReason: readString(snapshot, ['lastSuccessfulNavlungoRequestSummaryReason']),
     providerApiCallAttempted: readOptionalBoolean(snapshot, ['providerApiCallAttempted']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
@@ -2273,11 +2274,60 @@ function buildProviderFailureSnapshot(error: unknown, provider: ShippingProvider
   });
 }
 
+type NavlungoMappedRequestSummary = NonNullable<ShipmentExecutionDto['providerResponseSummary']>['navlungoRequestSummary'];
+
+function hasRequiredNavlungoSummaryKeys(summary: NavlungoMappedRequestSummary) {
+  if (!summary) {
+    return false;
+  }
+
+  return (
+    summary.senderKeys.length > 0 &&
+    summary.recipientKeys.includes('district') &&
+    summary.recipientKeys.includes('city') &&
+    summary.recipientKeys.includes('address') &&
+    summary.postKeys.includes('recipient') &&
+    summary.postKeys.includes('sender') &&
+    summary.postKeys.includes('post') &&
+    summary.postPayloadKeys.includes('desi') &&
+    summary.postPayloadKeys.includes('package_count')
+  );
+}
+
+function isValidSuccessfulNavlungoRequestSummary(summary: NavlungoMappedRequestSummary) {
+  return Boolean(
+    summary &&
+      hasRequiredNavlungoSummaryKeys(summary) &&
+      summary.recipientDistrictPresent &&
+      summary.recipientCityPresent &&
+      summary.recipientAddressPresent &&
+      summary.desiPresent &&
+      summary.packageCountPresent,
+  );
+}
+
+function isSuccessfulNavlungoExecutionStatus(status: ShipmentExecutionStatus) {
+  return (
+    status === ShipmentExecutionStatus.CREATED ||
+    status === ShipmentExecutionStatus.IN_TRANSIT ||
+    status === ShipmentExecutionStatus.DELIVERED ||
+    status === ShipmentExecutionStatus.RETURNED
+  );
+}
+
 async function findLatestSuccessfulNavlungoRequestSummary(vendorId: string, excludeExecutionId?: string | null) {
   const executions = await prisma.shipmentExecution.findMany({
     where: {
       vendorId,
       provider: ShippingProvider.NAVLUNGO,
+      shipmentStatus: {
+        in: [
+          ShipmentExecutionStatus.CREATED,
+          ShipmentExecutionStatus.IN_TRANSIT,
+          ShipmentExecutionStatus.DELIVERED,
+          ShipmentExecutionStatus.RETURNED,
+        ],
+      },
       ...(excludeExecutionId ? { id: { not: excludeExecutionId } } : {}),
     },
     orderBy: {
@@ -2291,12 +2341,15 @@ async function findLatestSuccessfulNavlungoRequestSummary(vendorId: string, excl
   }
 
   for (const execution of executions) {
+    if (!isSuccessfulNavlungoExecutionStatus(execution.shipmentStatus)) {
+      continue;
+    }
     if (!hasPersistedShipmentEvidence(execution)) {
       continue;
     }
     const snapshot = isRecord(execution.responseSnapshot) ? execution.responseSnapshot : null;
     const summary = mapNavlungoRequestSummary(snapshot?.navlungoRequestSummary);
-    if (summary) {
+    if (isValidSuccessfulNavlungoRequestSummary(summary)) {
       return summary;
     }
   }
@@ -2314,11 +2367,7 @@ async function buildProviderFailureSnapshotWithDurableDiagnostics(
   },
 ) {
   const snapshot: Record<string, unknown> = buildProviderFailureSnapshot(error, provider, baseSnapshot);
-  if (
-    provider !== ShippingProvider.NAVLUNGO ||
-    !options?.vendorId ||
-    isRecord(snapshot.lastSuccessfulNavlungoRequestSummary)
-  ) {
+  if (provider !== ShippingProvider.NAVLUNGO || !options?.vendorId) {
     return snapshot;
   }
 
@@ -2328,8 +2377,14 @@ async function buildProviderFailureSnapshotWithDurableDiagnostics(
         ...snapshot,
         lastSuccessfulNavlungoRequestSummary: latestSummary,
         lastSuccessfulNavlungoRequestSummarySource: 'latest_successful_vendor_execution',
+        lastSuccessfulNavlungoRequestSummaryReason: null,
       }
-    : snapshot;
+    : {
+        ...snapshot,
+        lastSuccessfulNavlungoRequestSummary: null,
+        lastSuccessfulNavlungoRequestSummarySource: null,
+        lastSuccessfulNavlungoRequestSummaryReason: 'no_valid_successful_real_navlungo_summary',
+      };
 }
 
 function readTryOtoForwardDeliveryOptionMetadata(snapshot: Record<string, unknown>) {
