@@ -249,6 +249,25 @@ function buildNavlungoRequestSummary(overrides: Partial<NonNullable<NonNullable<
     customData2Present: true,
     customData3Present: true,
     customData4Present: true,
+    recipientDistrictPresent: true,
+    recipientCityPresent: true,
+    recipientCountryPresent: true,
+    recipientPostCodePresent: false,
+    recipientPhonePresent: true,
+    recipientPhoneFormatValid: true,
+    recipientEmailPresent: true,
+    recipientEmailFormatValid: true,
+    recipientAddressPresent: true,
+    recipientAddressLength: 38,
+    packageCountPresent: true,
+    packageCountType: 'number',
+    requestedPackageCount: 1,
+    desiPresent: true,
+    desiType: 'number',
+    requestedDesi: 3,
+    postNotePresent: true,
+    postNoteType: 'string-empty',
+    postNoteLength: 0,
     ...overrides,
   };
 }
@@ -5027,10 +5046,28 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             senderKeys: ['addressId'],
             senderUsesAddressId: true,
             senderFullObjectKeysPresent: false,
+            recipientAddressLength: 42,
             codPaymentTypePresent: true,
             codPaymentType: 'string-empty',
             postPricePresent: true,
             postPriceType: 'string-empty',
+          }),
+          lastSuccessfulNavlungoRequestSummary: buildNavlungoRequestSummary({
+            senderKeys: ['addressId'],
+            senderUsesAddressId: true,
+            senderFullObjectKeysPresent: false,
+            recipientDistrictPresent: true,
+            recipientCityPresent: true,
+            recipientCountryPresent: true,
+            recipientPostCodePresent: false,
+            recipientPhoneFormatValid: true,
+            recipientEmailPresent: true,
+            recipientAddressPresent: true,
+            recipientAddressLength: 38,
+            requestedDesi: 3,
+            requestedPackageCount: 1,
+            requestedCarrierId: 9,
+            requestedPostType: 2,
           }),
         },
       },
@@ -5059,6 +5096,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'different · probe: address, city, country, district, email, name, phone, post_code · real: addressId',
     );
     expect(within(diff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('different · probe: no · real: yes');
+    expect(within(diff).getByText('recipient phone format').closest('.summary-row')).toHaveTextContent('same · probe: yes · real: yes');
+    expect(within(diff).getByText('recipient address length').closest('.summary-row')).toHaveTextContent('different · probe: 38 · real: 42');
     expect(within(diff).getByText('cod_payment_type').closest('.summary-row')).toHaveTextContent(
       'different · probe: missing · — · real: present · string-empty',
     );
@@ -5069,6 +5108,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('recipient.test@example.invalid')).not.toBeInTheDocument();
     expect(screen.queryByText('Navlungo Test Recipient')).not.toBeInTheDocument();
     expect(screen.queryByText('Navlungo manual probe recipient address')).not.toBeInTheDocument();
+    const successDiff = screen.getByLabelText('Navlungo successful failing request diff');
+    expect(within(successDiff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('same · success: yes · current: yes');
+    expect(within(successDiff).getByText('recipient address length').closest('.summary-row')).toHaveTextContent('different · success: 38 · current: 42');
+    expect(within(successDiff).getByText('recipient district present').closest('.summary-row')).toHaveTextContent('same · success: yes · current: yes');
   });
 
   it('renders Navlungo provider tracking id in admin retry diagnostics', async () => {

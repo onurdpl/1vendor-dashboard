@@ -199,11 +199,32 @@ export type NavlungoCreatePostRequestSummary = {
   customData2Present: boolean;
   customData3Present: boolean;
   customData4Present: boolean;
+  recipientDistrictPresent: boolean;
+  recipientCityPresent: boolean;
+  recipientCountryPresent: boolean;
+  recipientPostCodePresent: boolean;
+  recipientPhonePresent: boolean;
+  recipientPhoneFormatValid: boolean;
+  recipientEmailPresent: boolean;
+  recipientEmailFormatValid: boolean;
+  recipientAddressPresent: boolean;
+  recipientAddressLength: number;
+  packageCountPresent: boolean;
+  packageCountType: string | null;
+  requestedPackageCount: number | string | null;
+  desiPresent: boolean;
+  desiType: string | null;
+  requestedDesi: number | string | null;
+  postNotePresent: boolean;
+  postNoteType: string | null;
+  postNoteLength: number;
 };
 
 export type NavlungoHttpClientOptions = {
   fetchImpl?: typeof fetch;
 };
+
+let lastSuccessfulNavlungoCreatePostRequestSummary: NavlungoCreatePostRequestSummary | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -233,6 +254,27 @@ function safeValueType(value: unknown) {
     return 'string-empty';
   }
   return Array.isArray(value) ? 'array' : typeof value;
+}
+
+function hasTrimmedString(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function safeStringLength(value: unknown) {
+  return typeof value === 'string' ? value.trim().length : 0;
+}
+
+function isSafeEmailFormat(value: unknown) {
+  return typeof value === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isSafeTurkishPhoneFormat(value: unknown) {
+  if (typeof value !== 'string') {
+    return false;
+  }
+  const normalized = value.trim();
+  const digits = normalized.replace(/\D+/g, '');
+  return /^\+90\s?\d/.test(normalized) && digits.length === 12;
 }
 
 function sortedRecordKeys(value: unknown) {
@@ -278,6 +320,25 @@ export function summarizeNavlungoCreatePostRequest(
     customData2Present: post?.custom_data_2 !== undefined,
     customData3Present: post?.custom_data_3 !== undefined,
     customData4Present: post?.custom_data_4 !== undefined,
+    recipientDistrictPresent: hasTrimmedString(recipient?.district),
+    recipientCityPresent: hasTrimmedString(recipient?.city),
+    recipientCountryPresent: hasTrimmedString(recipient?.country),
+    recipientPostCodePresent: hasTrimmedString(recipient?.post_code),
+    recipientPhonePresent: hasTrimmedString(recipient?.phone),
+    recipientPhoneFormatValid: isSafeTurkishPhoneFormat(recipient?.phone),
+    recipientEmailPresent: hasTrimmedString(recipient?.email),
+    recipientEmailFormatValid: isSafeEmailFormat(recipient?.email),
+    recipientAddressPresent: hasTrimmedString(recipient?.address),
+    recipientAddressLength: safeStringLength(recipient?.address),
+    packageCountPresent: postPayload?.package_count !== undefined,
+    packageCountType: safeValueType(postPayload?.package_count),
+    requestedPackageCount: postPayload?.package_count ?? null,
+    desiPresent: postPayload?.desi !== undefined,
+    desiType: safeValueType(postPayload?.desi),
+    requestedDesi: postPayload?.desi ?? null,
+    postNotePresent: postPayload?.note !== undefined,
+    postNoteType: safeValueType(postPayload?.note),
+    postNoteLength: safeStringLength(postPayload?.note),
   };
 }
 
@@ -1007,6 +1068,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
 
     const payload = input.requestSnapshot as NavlungoCreatePostPayload;
     const client = new NavlungoHttpClient(this.env, this.options);
+    const requestSummary = summarizeNavlungoCreatePostRequest(payload, this.env);
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
       flow: 'forward',
@@ -1021,7 +1083,8 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       senderAddressIdPresent: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderAddressIdValid: readSenderAddressId(payload.posts?.[0]?.sender) !== null,
       senderUsesAddressId: isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender,
-      navlungoRequestSummary: summarizeNavlungoCreatePostRequest(payload, this.env),
+      navlungoRequestSummary: requestSummary,
+      lastSuccessfulNavlungoRequestSummary: lastSuccessfulNavlungoCreatePostRequestSummary,
     };
 
     let accessToken: string | null = null;
@@ -1135,6 +1198,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       readString(createPost, ['carrier_name']) ??
       NAVLUNGO_PROVIDER_DISPLAY_NAME;
     const carrierId = readNumberOrString(checkPost, ['carrier_id']) ?? readNumberOrString(createPost, ['carrier_id']);
+    lastSuccessfulNavlungoCreatePostRequestSummary = requestSummary;
 
     return {
       providerShipmentId: postNumber,

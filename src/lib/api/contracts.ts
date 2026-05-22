@@ -37,6 +37,25 @@ export type NavlungoCreatePostRequestSummary = {
   customData2Present: boolean;
   customData3Present: boolean;
   customData4Present: boolean;
+  recipientDistrictPresent: boolean;
+  recipientCityPresent: boolean;
+  recipientCountryPresent: boolean;
+  recipientPostCodePresent: boolean;
+  recipientPhonePresent: boolean;
+  recipientPhoneFormatValid: boolean;
+  recipientEmailPresent: boolean;
+  recipientEmailFormatValid: boolean;
+  recipientAddressPresent: boolean;
+  recipientAddressLength: number;
+  packageCountPresent: boolean;
+  packageCountType: string | null;
+  requestedPackageCount: number | string | null;
+  desiPresent: boolean;
+  desiType: string | null;
+  requestedDesi: number | string | null;
+  postNotePresent: boolean;
+  postNoteType: string | null;
+  postNoteLength: number;
 };
 
 export type ShipmentExecution = {
@@ -293,6 +312,7 @@ export type ShipmentExecution = {
     requestTargetHostname?: string | null;
     providerMode?: string | null;
     navlungoRequestSummary?: NavlungoCreatePostRequestSummary | null;
+    lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummary | null;
     providerApiCallAttempted?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;

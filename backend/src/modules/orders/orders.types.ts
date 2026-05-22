@@ -1,4 +1,5 @@
 import type { FinanceLedgerPreviewDto } from '../finance/finance-ledger-preview.types.js';
+import type { NavlungoCreatePostRequestSummaryDto } from '../shipping/shipping-execution.types.js';
 
 export type OrderSummaryDto = {
   id: string;
@@ -283,6 +284,8 @@ export type OrderShipmentExecutionDto = {
     requestTargetHostname?: string | null;
     providerMode?: string | null;
     providerApiCallAttempted?: boolean | null;
+    navlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
+    lastSuccessfulNavlungoRequestSummary?: NavlungoCreatePostRequestSummaryDto | null;
     senderAddressIdPresent?: boolean | null;
     senderAddressIdValid?: boolean | null;
     senderUsesAddressId?: boolean | null;

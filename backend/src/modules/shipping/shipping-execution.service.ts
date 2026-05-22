@@ -496,6 +496,25 @@ function mapNavlungoRequestSummary(value: unknown): NonNullable<ShipmentExecutio
     customData2Present: Boolean(value.customData2Present),
     customData3Present: Boolean(value.customData3Present),
     customData4Present: Boolean(value.customData4Present),
+    recipientDistrictPresent: Boolean(value.recipientDistrictPresent),
+    recipientCityPresent: Boolean(value.recipientCityPresent),
+    recipientCountryPresent: Boolean(value.recipientCountryPresent),
+    recipientPostCodePresent: Boolean(value.recipientPostCodePresent),
+    recipientPhonePresent: Boolean(value.recipientPhonePresent),
+    recipientPhoneFormatValid: Boolean(value.recipientPhoneFormatValid),
+    recipientEmailPresent: Boolean(value.recipientEmailPresent),
+    recipientEmailFormatValid: Boolean(value.recipientEmailFormatValid),
+    recipientAddressPresent: Boolean(value.recipientAddressPresent),
+    recipientAddressLength: readNumber(value, ['recipientAddressLength']) ?? 0,
+    packageCountPresent: Boolean(value.packageCountPresent),
+    packageCountType: readString(value, ['packageCountType']),
+    requestedPackageCount: readNumber(value, ['requestedPackageCount']) ?? readString(value, ['requestedPackageCount']),
+    desiPresent: Boolean(value.desiPresent),
+    desiType: readString(value, ['desiType']),
+    requestedDesi: readNumber(value, ['requestedDesi']) ?? readString(value, ['requestedDesi']),
+    postNotePresent: Boolean(value.postNotePresent),
+    postNoteType: readString(value, ['postNoteType']),
+    postNoteLength: readNumber(value, ['postNoteLength']) ?? 0,
   };
 }
 
@@ -662,6 +681,7 @@ function mapProviderResponseSummary(
     requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
     providerMode: readString(snapshot, ['providerMode']),
     navlungoRequestSummary: mapNavlungoRequestSummary(snapshot.navlungoRequestSummary),
+    lastSuccessfulNavlungoRequestSummary: mapNavlungoRequestSummary(snapshot.lastSuccessfulNavlungoRequestSummary),
     providerApiCallAttempted: readOptionalBoolean(snapshot, ['providerApiCallAttempted']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:

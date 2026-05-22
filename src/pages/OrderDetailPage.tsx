@@ -298,7 +298,20 @@ function buildNavlungoRequestDiff(
     compareNavlungoRequestField('posts[0] keys', probe.postKeys, real.postKeys),
     compareNavlungoRequestField('sender keys', probe.senderKeys, real.senderKeys),
     compareNavlungoRequestField('recipient keys', probe.recipientKeys, real.recipientKeys),
+    compareNavlungoRequestField('recipient district present', probe.recipientDistrictPresent, real.recipientDistrictPresent),
+    compareNavlungoRequestField('recipient city present', probe.recipientCityPresent, real.recipientCityPresent),
+    compareNavlungoRequestField('recipient country present', probe.recipientCountryPresent, real.recipientCountryPresent),
+    compareNavlungoRequestField('recipient post_code present', probe.recipientPostCodePresent, real.recipientPostCodePresent),
+    compareNavlungoRequestField('recipient phone present', probe.recipientPhonePresent, real.recipientPhonePresent),
+    compareNavlungoRequestField('recipient phone format', probe.recipientPhoneFormatValid, real.recipientPhoneFormatValid),
+    compareNavlungoRequestField('recipient email present', probe.recipientEmailPresent, real.recipientEmailPresent),
+    compareNavlungoRequestField('recipient email format', probe.recipientEmailFormatValid, real.recipientEmailFormatValid),
+    compareNavlungoRequestField('recipient address present', probe.recipientAddressPresent, real.recipientAddressPresent),
+    compareNavlungoRequestField('recipient address length', probe.recipientAddressLength, real.recipientAddressLength),
     compareNavlungoRequestField('post keys', probe.postPayloadKeys, real.postPayloadKeys),
+    compareNavlungoRequestField('desi', `${probe.desiPresent ? 'present' : 'missing'} · ${probe.desiType ?? '—'} · ${probe.requestedDesi ?? '—'}`, `${real.desiPresent ? 'present' : 'missing'} · ${real.desiType ?? '—'} · ${real.requestedDesi ?? '—'}`),
+    compareNavlungoRequestField('package_count', `${probe.packageCountPresent ? 'present' : 'missing'} · ${probe.packageCountType ?? '—'} · ${probe.requestedPackageCount ?? '—'}`, `${real.packageCountPresent ? 'present' : 'missing'} · ${real.packageCountType ?? '—'} · ${real.requestedPackageCount ?? '—'}`),
+    compareNavlungoRequestField('post.note', `${probe.postNotePresent ? 'present' : 'missing'} · ${probe.postNoteType ?? '—'} · length ${probe.postNoteLength}`, `${real.postNotePresent ? 'present' : 'missing'} · ${real.postNoteType ?? '—'} · length ${real.postNoteLength}`),
     compareNavlungoRequestField(
       'barcode_format',
       formatNavlungoFormatField(probe, 'barcodeFormatPresent', 'barcodeFormatType'),
@@ -2247,6 +2260,10 @@ export function OrderDetailPage() {
       navlungoCreatePostProbeDiagnostics?.requestSummary,
       summary.navlungoRequestSummary,
     );
+    const successfulRequestDiffRows = buildNavlungoRequestDiff(
+      summary.lastSuccessfulNavlungoRequestSummary,
+      summary.navlungoRequestSummary,
+    );
 
     return (
       <details className="provider-response-summary admin-diagnostics-panel diagnostics-nested-panel" aria-label="Navlungo retry diagnostics">
@@ -2341,8 +2358,42 @@ export function OrderDetailPage() {
               <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.recipientKeys)}</strong>
             </div>
             <div className="summary-row">
+              <span>recipient presence</span>
+              <strong>
+                district {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientDistrictPresent)} · city{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientCityPresent)} · country{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientCountryPresent)} · post code{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientPostCodePresent)}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>recipient contact shape</span>
+              <strong>
+                phone {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientPhonePresent)} · phone format{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientPhoneFormatValid)} · email{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientEmailPresent)} · email format{' '}
+                {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientEmailFormatValid)}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>recipient address shape</span>
+              <strong>
+                present {formatDiagnosticPresence(summary.navlungoRequestSummary.recipientAddressPresent)} · length{' '}
+                {summary.navlungoRequestSummary.recipientAddressLength}
+              </strong>
+            </div>
+            <div className="summary-row">
               <span>post keys</span>
               <strong>{formatNavlungoRequestSummaryValue(summary.navlungoRequestSummary.postPayloadKeys)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>package shape</span>
+              <strong>
+                desi {summary.navlungoRequestSummary.desiPresent ? 'present' : 'missing'} ·{' '}
+                {summary.navlungoRequestSummary.desiType ?? '—'} · {summary.navlungoRequestSummary.requestedDesi ?? '—'} · package{' '}
+                {summary.navlungoRequestSummary.packageCountPresent ? 'present' : 'missing'} ·{' '}
+                {summary.navlungoRequestSummary.packageCountType ?? '—'} · {summary.navlungoRequestSummary.requestedPackageCount ?? '—'}
+              </strong>
             </div>
             <div className="summary-row">
               <span>custom data</span>
@@ -2378,6 +2429,33 @@ export function OrderDetailPage() {
                 <span>{row.label}</span>
                 <strong>
                   {row.same ? 'same' : 'different'} · probe: {row.probe} · real: {row.real}
+                </strong>
+              </div>
+            ))}
+          </details>
+        ) : null}
+        {successfulRequestDiffRows.length ? (
+          <details className="provider-response-summary diagnostics-nested-panel" aria-label="Navlungo successful failing request diff">
+            <summary className="provider-response-heading">
+              <strong>Last successful vs current request diff</strong>
+              <span>Sanitized shape comparison</span>
+            </summary>
+            <div className="summary-row">
+              <span>Current provider result</span>
+              <strong>
+                HTTP {summary.realPathCreatePostHttpStatus ?? summary.providerCallHttpStatus ?? summary.httpStatus ?? '—'} · tracking ID{' '}
+                {summary.providerTrackingId || '—'}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>Current provider message</span>
+              <strong>{summary.providerError || '—'}</strong>
+            </div>
+            {successfulRequestDiffRows.map((row) => (
+              <div className="summary-row" key={row.label}>
+                <span>{row.label}</span>
+                <strong>
+                  {row.same ? 'same' : 'different'} · success: {row.probe} · current: {row.real}
                 </strong>
               </div>
             ))}

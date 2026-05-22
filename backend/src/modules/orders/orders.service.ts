@@ -409,6 +409,59 @@ function mapReturnShipment(snapshot: Record<string, unknown> | null): OrderShipm
   };
 }
 
+function mapNavlungoRequestSummary(value: unknown): NonNullable<OrderShipmentExecutionDto['providerResponseSummary']>['navlungoRequestSummary'] {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    baseUrl: readString(value, ['baseUrl']),
+    baseUrlHost: readString(value, ['baseUrlHost']),
+    baseUrlPath: readString(value, ['baseUrlPath']),
+    endpointPath: readString(value, ['endpointPath']) ?? '—',
+    method: readString(value, ['method']) ?? '—',
+    headerKeys: readStringArray(value.headerKeys),
+    topLevelBodyKeys: readStringArray(value.topLevelBodyKeys),
+    postKeys: readStringArray(value.postKeys),
+    senderKeys: readStringArray(value.senderKeys),
+    recipientKeys: readStringArray(value.recipientKeys),
+    postPayloadKeys: readStringArray(value.postPayloadKeys),
+    barcodeFormatPresent: Boolean(value.barcodeFormatPresent),
+    barcodeFormatType: readString(value, ['barcodeFormatType']),
+    codPaymentTypePresent: Boolean(value.codPaymentTypePresent),
+    codPaymentType: readString(value, ['codPaymentType']),
+    postPricePresent: Boolean(value.postPricePresent),
+    postPriceType: readString(value, ['postPriceType']),
+    requestedCarrierId: readNumber(value, ['requestedCarrierId']) ?? readString(value, ['requestedCarrierId']),
+    requestedPostType: readNumber(value, ['requestedPostType']) ?? readString(value, ['requestedPostType']),
+    senderUsesAddressId: Boolean(value.senderUsesAddressId),
+    senderFullObjectKeysPresent: Boolean(value.senderFullObjectKeysPresent),
+    customData1Present: Boolean(value.customData1Present),
+    customData2Present: Boolean(value.customData2Present),
+    customData3Present: Boolean(value.customData3Present),
+    customData4Present: Boolean(value.customData4Present),
+    recipientDistrictPresent: Boolean(value.recipientDistrictPresent),
+    recipientCityPresent: Boolean(value.recipientCityPresent),
+    recipientCountryPresent: Boolean(value.recipientCountryPresent),
+    recipientPostCodePresent: Boolean(value.recipientPostCodePresent),
+    recipientPhonePresent: Boolean(value.recipientPhonePresent),
+    recipientPhoneFormatValid: Boolean(value.recipientPhoneFormatValid),
+    recipientEmailPresent: Boolean(value.recipientEmailPresent),
+    recipientEmailFormatValid: Boolean(value.recipientEmailFormatValid),
+    recipientAddressPresent: Boolean(value.recipientAddressPresent),
+    recipientAddressLength: readNumber(value, ['recipientAddressLength']) ?? 0,
+    packageCountPresent: Boolean(value.packageCountPresent),
+    packageCountType: readString(value, ['packageCountType']),
+    requestedPackageCount: readNumber(value, ['requestedPackageCount']) ?? readString(value, ['requestedPackageCount']),
+    desiPresent: Boolean(value.desiPresent),
+    desiType: readString(value, ['desiType']),
+    requestedDesi: readNumber(value, ['requestedDesi']) ?? readString(value, ['requestedDesi']),
+    postNotePresent: Boolean(value.postNotePresent),
+    postNoteType: readString(value, ['postNoteType']),
+    postNoteLength: readNumber(value, ['postNoteLength']) ?? 0,
+  };
+}
+
 function buildShipmentProviderResponseSummary(
   execution: {
     providerShipmentId: string | null;
@@ -649,6 +702,8 @@ function buildShipmentProviderResponseSummary(
     selectedEnvironment: readString(snapshot, ['selectedEnvironment']),
     requestTargetHostname: readString(snapshot, ['requestTargetHostname']),
     providerMode: readString(snapshot, ['providerMode']),
+    navlungoRequestSummary: mapNavlungoRequestSummary(snapshot?.navlungoRequestSummary),
+    lastSuccessfulNavlungoRequestSummary: mapNavlungoRequestSummary(snapshot?.lastSuccessfulNavlungoRequestSummary),
     providerApiCallAttempted:
       typeof snapshot?.providerApiCallAttempted === 'boolean' ? snapshot.providerApiCallAttempted : null,
     senderAddressIdPresent: typeof snapshot?.senderAddressIdPresent === 'boolean' ? snapshot.senderAddressIdPresent : null,
