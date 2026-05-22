@@ -776,7 +776,44 @@ export function ReturnDetailPage() {
           />
         </main>
 
-        <aside className="return-review-side">
+        <aside className="return-review-side" aria-label="Return operational sidebar">
+          <article className="return-review-card return-review-summary-card">
+            <div className="return-review-card-header">
+              <div>
+                <p className="eyebrow">Summary</p>
+                <h3>Return details</h3>
+              </div>
+            </div>
+            <div className="return-review-summary-list">
+              <div>
+                <span>Order number</span>
+                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
+              </div>
+              <div>
+                <span>Requested</span>
+                <strong>{formatDate(returnRequest.date)}</strong>
+              </div>
+              <div>
+                <span>Return status</span>
+                <strong>{getStatusLabel(returnRequest)}</strong>
+              </div>
+              <div>
+                <span>Refund status</span>
+                <strong>{getRefundStatus(returnRequest)}</strong>
+              </div>
+              <div>
+                <span>Vendor</span>
+                <strong>{currentVendor.vendorName}</strong>
+              </div>
+            </div>
+          </article>
+
+          <OperationalTimeline
+            title="Timeline"
+            events={unifiedTimelineEvents}
+            audience={audience}
+          />
+
           <OperationalRecommendations
             title="Operations"
             recommendations={returnRecommendations}
@@ -785,11 +822,77 @@ export function ReturnDetailPage() {
 
           <AdminCollaborationNotes contextType="return" contextId={returnRequest.id} currentUser={currentUser} />
 
-          <OperationalTimeline
-            title="Timeline"
-            events={unifiedTimelineEvents}
-            audience={audience}
-          />
+          <article className="return-review-card return-review-action-card">
+            <p className="eyebrow">Next action</p>
+            <h3>Vendor review</h3>
+            <p>Vendor review only. Shopify refund is not issued here.</p>
+            <div className="return-review-summary-list return-review-state-list">
+              <div>
+                <span>Receipt</span>
+                <strong>{returnRequest.vendorReceivedAt ? `Received ${formatDate(returnRequest.vendorReceivedAt)}` : 'Not received yet'}</strong>
+              </div>
+              <div>
+                <span>Decision</span>
+                <strong>
+                  {returnRequest.vendorDecision
+                    ? `${returnRequest.vendorDecision === 'approved' ? 'Approved' : 'Rejected'}${returnRequest.vendorReviewedAt ? ` ${formatDate(returnRequest.vendorReviewedAt)}` : ''}`
+                    : 'Pending vendor review'}
+                </strong>
+              </div>
+              {returnRequest.vendorDecision === 'rejected' && returnRequest.vendorDecisionReason ? (
+                <div>
+                  <span>Reason</span>
+                  <strong>{returnRequest.vendorDecisionReason}</strong>
+                </div>
+              ) : null}
+            </div>
+            {message ? <p className={`action-feedback action-${tone}`}>{message}</p> : null}
+            <div className="return-review-actions">
+              {canReviewReturn ? (
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={markReceivedMutation.isPending || hasReceivedReturn}
+                  onClick={() => void markReceivedMutation.mutateAsync(undefined)}
+                >
+                  {markReceivedMutation.isPending ? 'Marking...' : hasReceivedReturn ? 'Received' : 'Mark received'}
+                </button>
+              ) : null}
+              {canReviewReturn ? (
+                <button
+                  type="button"
+                  className="button button-primary"
+                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn}
+                  onClick={() => void reviewMutation.mutateAsync({ decision: 'approved' })}
+                >
+                  Approve return
+                </button>
+              ) : null}
+              <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
+                Contact support
+              </button>
+            </div>
+            {canReviewReturn && hasReceivedReturn && !hasReviewedReturn ? (
+              <div className="return-review-reject-box">
+                <label htmlFor="return-reject-reason">Reject reason</label>
+                <textarea
+                  id="return-reject-reason"
+                  value={rejectReason}
+                  onChange={(event) => setRejectReason(event.target.value)}
+                  placeholder="Required when rejecting this return"
+                  rows={3}
+                />
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={reviewMutation.isPending || !rejectReason.trim()}
+                  onClick={() => void reviewMutation.mutateAsync({ decision: 'rejected', reason: rejectReason })}
+                >
+                  Reject return
+                </button>
+              </div>
+            ) : null}
+          </article>
 
           {hasReturnShipment ? (
             <article className="return-review-card">
@@ -908,7 +1011,7 @@ export function ReturnDetailPage() {
           ) : null}
 
           {isAdmin && returnRequest.sourceType === 'shopify_return_request' ? (
-            <article className="return-review-card">
+            <article className="return-review-card return-review-navlungo-card">
               <div className="return-review-card-header">
                 <div>
                   <p className="eyebrow">Navlungo return pickup</p>
@@ -944,8 +1047,8 @@ export function ReturnDetailPage() {
                 </div>
               ) : (
                 <>
-                  <p className="muted">Preview the return pickup payload from this return request before creating a live Navlungo return shipment.</p>
-                  <div className="return-review-actions">
+                  <p className="muted">Preview safely before live create.</p>
+                  <div className="return-review-actions return-review-preview-actions">
                     <button
                       type="button"
                       className="button button-secondary"
@@ -1000,129 +1103,30 @@ export function ReturnDetailPage() {
                       ) : null}
                     </div>
                   ) : null}
-                  <label className="checkbox-row">
-                    <input
-                      type="checkbox"
-                      checked={navlungoReturnPickupLiveConfirmed}
-                      onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
-                    />
-                    <span>I understand this creates a live Navlungo return pickup.</span>
-                  </label>
-                  <button
-                    type="button"
-                    className="button button-primary"
-                    disabled={navlungoReturnPickupMutation.isPending || !navlungoReturnPickupLiveConfirmed}
-                    onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false })}
-                  >
-                    {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
-                  </button>
+                  <div className="return-review-live-create">
+                    <span>Live create</span>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={navlungoReturnPickupLiveConfirmed}
+                        onChange={(event) => setNavlungoReturnPickupLiveConfirmed(event.target.checked)}
+                      />
+                      <span>Creates a live Navlungo return pickup.</span>
+                    </label>
+                    <button
+                      type="button"
+                      className="button button-primary"
+                      disabled={navlungoReturnPickupMutation.isPending || !navlungoReturnPickupLiveConfirmed}
+                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: false })}
+                    >
+                      {navlungoReturnPickupMutation.isPending ? 'Creating...' : 'Create live Navlungo return pickup'}
+                    </button>
+                  </div>
                 </>
               )}
             </article>
           ) : null}
 
-          <article className="return-review-card">
-            <div className="return-review-card-header">
-              <div>
-                <p className="eyebrow">Summary</p>
-                <h3>Return details</h3>
-              </div>
-            </div>
-            <div className="return-review-summary-list">
-              <div>
-                <span>Order number</span>
-                <strong>{formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber)}</strong>
-              </div>
-              <div>
-                <span>Requested</span>
-                <strong>{formatDate(returnRequest.date)}</strong>
-              </div>
-              <div>
-                <span>Return status</span>
-                <strong>{getStatusLabel(returnRequest)}</strong>
-              </div>
-              <div>
-                <span>Refund status</span>
-                <strong>{getRefundStatus(returnRequest)}</strong>
-              </div>
-              <div>
-                <span>Vendor</span>
-                <strong>{currentVendor.vendorName}</strong>
-              </div>
-            </div>
-          </article>
-
-          <article className="return-review-card return-review-action-card">
-            <p className="eyebrow">Next action</p>
-            <h3>Vendor review</h3>
-            <p>Vendor review only. Shopify refund is not issued here.</p>
-            <div className="return-review-summary-list return-review-state-list">
-              <div>
-                <span>Receipt</span>
-                <strong>{returnRequest.vendorReceivedAt ? `Received ${formatDate(returnRequest.vendorReceivedAt)}` : 'Not received yet'}</strong>
-              </div>
-              <div>
-                <span>Decision</span>
-                <strong>
-                  {returnRequest.vendorDecision
-                    ? `${returnRequest.vendorDecision === 'approved' ? 'Approved' : 'Rejected'}${returnRequest.vendorReviewedAt ? ` ${formatDate(returnRequest.vendorReviewedAt)}` : ''}`
-                    : 'Pending vendor review'}
-                </strong>
-              </div>
-              {returnRequest.vendorDecision === 'rejected' && returnRequest.vendorDecisionReason ? (
-                <div>
-                  <span>Reason</span>
-                  <strong>{returnRequest.vendorDecisionReason}</strong>
-                </div>
-              ) : null}
-            </div>
-            {message ? <p className={`action-feedback action-${tone}`}>{message}</p> : null}
-            <div className="return-review-actions">
-              {canReviewReturn ? (
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  disabled={markReceivedMutation.isPending || hasReceivedReturn}
-                  onClick={() => void markReceivedMutation.mutateAsync(undefined)}
-                >
-                  {markReceivedMutation.isPending ? 'Marking...' : hasReceivedReturn ? 'Received' : 'Mark received'}
-                </button>
-              ) : null}
-              {canReviewReturn ? (
-                <button
-                  type="button"
-                  className="button button-primary"
-                  disabled={reviewMutation.isPending || !hasReceivedReturn || hasReviewedReturn}
-                  onClick={() => void reviewMutation.mutateAsync({ decision: 'approved' })}
-                >
-                  Approve return
-                </button>
-              ) : null}
-              <button type="button" className="button button-secondary" onClick={() => setSupportOpen(true)}>
-                Contact support
-              </button>
-            </div>
-            {canReviewReturn && hasReceivedReturn && !hasReviewedReturn ? (
-              <div className="return-review-reject-box">
-                <label htmlFor="return-reject-reason">Reject reason</label>
-                <textarea
-                  id="return-reject-reason"
-                  value={rejectReason}
-                  onChange={(event) => setRejectReason(event.target.value)}
-                  placeholder="Required when rejecting this return"
-                  rows={3}
-                />
-                <button
-                  type="button"
-                  className="button button-secondary"
-                  disabled={reviewMutation.isPending || !rejectReason.trim()}
-                  onClick={() => void reviewMutation.mutateAsync({ decision: 'rejected', reason: rejectReason })}
-                >
-                  Reject return
-                </button>
-              </div>
-            ) : null}
-          </article>
         </aside>
       </div>
       <SupportTicketModal

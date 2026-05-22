@@ -222,6 +222,45 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getAllByText('Navlungo return pickup created').length).toBeGreaterThan(0);
   });
 
+  it('renders Return Detail as a main column plus one ordered operational sidebar', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getReturnMock.mockResolvedValue(returnDetail);
+
+    const { container } = renderPage();
+
+    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    const grid = container.querySelector('.return-review-grid');
+    const main = container.querySelector('.return-review-main');
+    const sidebar = screen.getByLabelText('Return operational sidebar');
+    expect(grid).toBeInTheDocument();
+    expect(main).toBeInTheDocument();
+    expect(sidebar).toHaveClass('return-review-side');
+
+    const summary = screen.getByRole('heading', { name: 'Return details' });
+    const timeline = screen.getAllByText('Timeline')[0];
+    const operations = screen.getAllByText('Operations')[0];
+    const nextAction = screen.getByRole('heading', { name: 'Vendor review' });
+    const navlungo = screen.getByRole('heading', { name: 'Provider return shipment' });
+
+    expect(sidebar).toContainElement(summary.closest('article'));
+    expect(sidebar).toContainElement(timeline.closest('article'));
+    expect(sidebar).toContainElement(operations.closest('article'));
+    expect(sidebar).toContainElement(navlungo.closest('article'));
+    expect(navlungo.closest('article')).toHaveClass('return-review-navlungo-card');
+    expect(summary.compareDocumentPosition(timeline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timeline.compareDocumentPosition(operations) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(operations.compareDocumentPosition(nextAction) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(nextAction.compareDocumentPosition(navlungo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('renders Navlungo return lifecycle logs and lets admin sync status', async () => {
     const user = userEvent.setup();
     setCurrentUser({
