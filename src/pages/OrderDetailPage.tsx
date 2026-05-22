@@ -4355,103 +4355,105 @@ export function OrderDetailPage() {
         </main>
 
         <aside className="order-detail-right-rail" aria-label="Order timeline and support">
-          <OperationalTimeline
-            title="Timeline"
-            subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
-            events={groupOrderDetailTimelineEvents([
-              ...order.timeline
-                .filter((entry) => !isRawProviderTimelineLabel(entry.label))
-                .map((entry) => ({
-                  id: `order-native-${entry.label}-${entry.at}`,
-                  title: getVendorTimelineLabel(entry.label),
-                  at: entry.at,
-                  tone: 'neutral' as const,
-                  visibility: getNativeTimelineVisibility(entry.label),
-                })),
-              ...orderTimelineEvents,
-            ])}
-            audience={audience}
-            emptyMessage="No records available."
-          />
+          <div className="order-detail-sidebar-flow">
+            <OperationalTimeline
+              title="Timeline"
+              subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
+              events={groupOrderDetailTimelineEvents([
+                ...order.timeline
+                  .filter((entry) => !isRawProviderTimelineLabel(entry.label))
+                  .map((entry) => ({
+                    id: `order-native-${entry.label}-${entry.at}`,
+                    title: getVendorTimelineLabel(entry.label),
+                    at: entry.at,
+                    tone: 'neutral' as const,
+                    visibility: getNativeTimelineVisibility(entry.label),
+                  })),
+                ...orderTimelineEvents,
+              ])}
+              audience={audience}
+              emptyMessage="No records available."
+            />
 
-          <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
-            <div className="order-card-heading">
-              <div>
-                <h2>Support</h2>
-                <p>{isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.'}</p>
-              </div>
-            </div>
-            <div className="order-support-compact-stack">
-              {isVendorAssignedOwner ? (
-                <>
-                  <button
-                    type="button"
-                    className="button button-secondary button-compact order-support-contact-button"
-                    onClick={() => setSupportOpen(true)}
-                    disabled={!canReportIssue}
-                  >
-                    Contact support
-                  </button>
-                  {!canReportIssue ? (
-                    <span className="muted">Support is available for active or fulfilled assigned orders.</span>
-                  ) : (
-                    <span className="muted">Order, shipment, return, and sync context attached.</span>
-                  )}
-                </>
-              ) : null}
-
-              {relatedSupportTickets.length ? (
-                <div className="order-support-ticket-list" aria-label="Support ticket summary">
-                  <strong>Tickets · {relatedSupportTickets.length}</strong>
-                  {relatedSupportTickets.slice(0, 3).map((ticket) => (
-                    <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                      <span>{ticket.status.replace(/_/g, ' ')}</span>
-                      <strong>{ticket.subject}</strong>
-                    </Link>
-                  ))}
+            <article className="order-detail-card-v2 order-support-card" aria-label="Shipment and return support">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Support</h2>
+                  <p>{isAdmin ? 'Support context and diagnostics.' : 'Shipment and return context attached.'}</p>
                 </div>
-              ) : (
-                <span className="muted">No support tickets linked to this order yet.</span>
-              )}
+              </div>
+              <div className="order-support-compact-stack">
+                {isVendorAssignedOwner ? (
+                  <>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact order-support-contact-button"
+                      onClick={() => setSupportOpen(true)}
+                      disabled={!canReportIssue}
+                    >
+                      Contact support
+                    </button>
+                    {!canReportIssue ? (
+                      <span className="muted">Support is available for active or fulfilled assigned orders.</span>
+                    ) : (
+                      <span className="muted">Order, shipment, return, and sync context attached.</span>
+                    )}
+                  </>
+                ) : null}
 
-              {isAdmin ? (
-                <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
-                  <summary className="provider-response-heading">
-                    <strong>Admin support context</strong>
-                    <span>Copy utilities</span>
-                  </summary>
-                  {relatedSupportTickets[0] ? (
-                    <>
-                      <div className="summary-row">
-                        <span>Latest vendor note</span>
-                        <strong>{relatedSupportTickets[0].message || '—'}</strong>
-                      </div>
-                      <div className="summary-row">
-                        <span>Latest status</span>
-                        <strong>{relatedSupportTickets[0].status.replace(/_/g, ' ')}</strong>
-                      </div>
-                    </>
-                  ) : null}
-                  <div className="order-inline-actions">
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('diagnostics')}>
-                      Copy diagnostics
-                    </button>
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment-summary')}>
-                      Copy shipment summary
-                    </button>
-                    <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return-summary')}>
-                      Copy return summary
-                    </button>
+                {relatedSupportTickets.length ? (
+                  <div className="order-support-ticket-list" aria-label="Support ticket summary">
+                    <strong>Tickets · {relatedSupportTickets.length}</strong>
+                    {relatedSupportTickets.slice(0, 3).map((ticket) => (
+                      <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span>{ticket.status.replace(/_/g, ' ')}</span>
+                        <strong>{ticket.subject}</strong>
+                      </Link>
+                    ))}
                   </div>
-                  {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics}.</span> : null}
-                </details>
-              ) : null}
-            </div>
-          </article>
+                ) : (
+                  <span className="muted">No support tickets linked to this order yet.</span>
+                )}
 
-          {order ? (
-            <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
-          ) : null}
+                {isAdmin ? (
+                  <details className="provider-response-summary admin-diagnostics-panel" aria-label="Admin support diagnostics">
+                    <summary className="provider-response-heading">
+                      <strong>Admin support context</strong>
+                      <span>Copy utilities</span>
+                    </summary>
+                    {relatedSupportTickets[0] ? (
+                      <>
+                        <div className="summary-row">
+                          <span>Latest vendor note</span>
+                          <strong>{relatedSupportTickets[0].message || '—'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Latest status</span>
+                          <strong>{relatedSupportTickets[0].status.replace(/_/g, ' ')}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    <div className="order-inline-actions">
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('diagnostics')}>
+                        Copy diagnostics
+                      </button>
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('shipment-summary')}>
+                        Copy shipment summary
+                      </button>
+                      <button type="button" className="button button-secondary button-compact" onClick={() => handleCopyDiagnostics('return-summary')}>
+                        Copy return summary
+                      </button>
+                    </div>
+                    {copiedDiagnostics ? <span className="muted">Copied {copiedDiagnostics}.</span> : null}
+                  </details>
+                ) : null}
+              </div>
+            </article>
+
+            {order ? (
+              <AdminCollaborationNotes contextType="order" contextId={order.id} currentUser={currentUser} />
+            ) : null}
+          </div>
 
           <article className="order-detail-card-v2 order-primary-action-card order-workspace-panel">
             <div className="order-card-heading">

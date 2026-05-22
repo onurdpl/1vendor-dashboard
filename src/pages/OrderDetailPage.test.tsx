@@ -1284,6 +1284,40 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('Shipment recovery')).not.toBeInTheDocument();
   });
 
+  it('keeps support directly below timeline in the right sidebar flow', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      timeline: Array.from({ length: 16 }, (_, index) => ({
+        label: index % 2 === 0 ? 'Order received' : 'Shipment created',
+        at: `2026-05-15T12:${String(index).padStart(2, '0')}:00.000Z`,
+      })),
+    });
+
+    renderOrderDetail();
+
+    const rail = await screen.findByLabelText('Order timeline and support');
+    const sidebarFlow = rail.querySelector('.order-detail-sidebar-flow');
+    expect(sidebarFlow).toBeInstanceOf(HTMLElement);
+
+    const timelineCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Timeline' }).closest('article');
+    const supportCard = within(sidebarFlow as HTMLElement).getByRole('heading', { name: 'Support' }).closest('article');
+
+    expect(timelineCard).not.toBeNull();
+    expect(supportCard).not.toBeNull();
+    expect(timelineCard?.parentElement).toBe(sidebarFlow);
+    expect(supportCard?.parentElement).toBe(sidebarFlow);
+    expect(Boolean(timelineCard!.compareDocumentPosition(supportCard!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
   it('collapses provider-heavy admin diagnostics by default', async () => {
     setCurrentUser({
       email: 'admin@demo.com',

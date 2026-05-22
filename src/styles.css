@@ -4952,6 +4952,18 @@ h3 {
   min-width: 0;
 }
 
+.order-detail-sidebar-flow {
+  display: grid;
+  grid-column: 2;
+  grid-row: 1 / span 5;
+  gap: 12px;
+  align-content: start;
+  align-self: start;
+  min-width: 0;
+  position: sticky;
+  top: 16px;
+}
+
 .order-primary-action-card {
   grid-column: 1;
   grid-row: 2;
@@ -4999,6 +5011,15 @@ h3 {
   z-index: 0;
 }
 
+.order-detail-sidebar-flow > .operational-timeline-card,
+.order-detail-sidebar-flow > .order-support-card,
+.order-detail-sidebar-flow > .admin-collab-card {
+  grid-column: auto;
+  grid-row: auto;
+  order: initial;
+  min-width: 0;
+}
+
 .return-review-side .operational-timeline-card {
   grid-column: auto;
   grid-row: auto;
@@ -5009,6 +5030,8 @@ h3 {
   grid-column: 2;
   grid-row: 4;
   order: 2;
+  position: static;
+  margin-top: 0;
 }
 
 .order-support-card.order-detail-card-v2 {
@@ -5683,6 +5706,7 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-template-columns: 1fr;
   }
 
+  .order-detail-sidebar-flow,
   .order-primary-action-card,
   .order-line-items-card,
   .order-financial-summary-card,
@@ -5695,6 +5719,7 @@ summary.provider-response-heading::-webkit-details-marker {
     grid-row: auto;
   }
 
+  .order-detail-sidebar-flow,
   .operational-timeline-card {
     position: static;
   }
