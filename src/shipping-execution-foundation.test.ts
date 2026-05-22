@@ -97,6 +97,23 @@ const env = {
   NAVLUNGO_DEFAULT_CARRIER_ID: undefined,
 };
 
+function buildNavlungoProviderMetadata(overrides: Record<string, unknown> = {}) {
+  return {
+    navlungoSenderAddressId: '55574',
+    navlungoSenderName: 'Sporjinal Warehouse',
+    navlungoSenderPhone: '+90 532 123 45 67',
+    navlungoSenderEmail: 'warehouse@example.test',
+    navlungoSenderAddress: 'Sporjinal Depo Sokak No: 1',
+    navlungoSenderCountry: 'tr',
+    navlungoSenderCity: 'Istanbul',
+    navlungoSenderDistrict: 'Kadikoy',
+    navlungoSenderPostCode: '',
+    navlungoBarcodeFormat: 'pdf-A6',
+    navlungoCarrierId: '9',
+    ...overrides,
+  };
+}
+
 function buildAllocation(overrides: Record<string, unknown> = {}) {
   return {
     id: 'alloc-1',
@@ -1278,11 +1295,7 @@ describe('shipping execution foundation', () => {
           updatedAt: new Date('2026-05-15T10:00:00.000Z'),
         },
       ],
-      providerMetadata: {
-        navlungoSenderAddressId: '55578',
-        navlungoCarrierId: '9',
-        navlungoBarcodeFormat: 'pdf-A6',
-      },
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
     });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -1403,11 +1416,7 @@ describe('shipping execution foundation', () => {
           updatedAt: new Date('2026-05-15T10:00:00.000Z'),
         },
       ],
-      providerMetadata: {
-        navlungoSenderAddressId: '55578',
-        navlungoCarrierId: '9',
-        navlungoBarcodeFormat: 'pdf-A6',
-      },
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
     });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -1701,11 +1710,7 @@ describe('shipping execution foundation', () => {
           updatedAt: new Date('2026-05-15T10:00:00.000Z'),
         },
       ],
-      providerMetadata: {
-        navlungoSenderAddressId: '55578',
-        navlungoCarrierId: '9',
-        navlungoBarcodeFormat: 'pdf-A6',
-      },
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
     });
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -2571,11 +2576,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: '55574',
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: '55574',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata(),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [
@@ -2640,11 +2641,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: '55574',
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: '55574',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata(),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -2678,11 +2675,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: '55574',
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: '55574',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata(),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -2716,7 +2709,7 @@ describe('shipping execution foundation', () => {
     expect(JSON.stringify(diagnostics)).not.toContain('55574');
   });
 
-  it('reports Navlungo not ready when sender address id is non-numeric', async () => {
+  it('does not require Navlungo sender address id when full sender fields are configured', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -2726,11 +2719,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: null,
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: 'sender-address',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: 'sender-address' }),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -2751,11 +2740,12 @@ describe('shipping execution foundation', () => {
 
     expect(diagnostics).toMatchObject({
       provider: 'navlungo',
-      executionReady: false,
-      missing: expect.arrayContaining(['VENDOR_NAVLUNGO_SENDER_ADDRESS_ID_NUMERIC']),
+      executionReady: true,
+      missing: [],
       navlungo: {
         defaultSenderAddressIdConfigured: true,
         defaultSenderAddressIdValid: false,
+        senderFieldsConfigured: true,
       },
     });
     expect(JSON.stringify(diagnostics)).not.toContain('sender-address');
@@ -2811,11 +2801,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: '55574',
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: '55574',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata(),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -2862,9 +2848,16 @@ describe('shipping execution foundation', () => {
             carrier_id: 9,
             post_type: 2,
             barcode_format: 'pdf-A6',
-            sender: {
-              addressId: 55574,
-            },
+            sender: expect.objectContaining({
+              name: 'Sporjinal Warehouse',
+              phone: '+90 532 123 45 67',
+              email: 'warehouse@example.test',
+              address: 'Sporjinal Depo Sokak No: 1',
+              country: 'tr',
+              city: 'Istanbul',
+              district: 'Kadikoy',
+              post_code: '',
+            }),
             recipient: expect.objectContaining({
               name: 'Test Customer',
               phone: '+90 555 111 22 33',
@@ -2884,10 +2877,7 @@ describe('shipping execution foundation', () => {
     expect(preview.payload.posts[0].cod_payment_type).not.toBe(2);
     expect(preview.payload.posts[0].post).toHaveProperty('price', '');
     expect(preview.payload.posts[0].post).toHaveProperty('note', '');
-    expect(preview.payload.posts[0].sender).not.toHaveProperty('name');
-    expect(preview.payload.posts[0].sender).not.toHaveProperty('phone');
-    expect(preview.payload.posts[0].sender).not.toHaveProperty('email');
-    expect(preview.payload.posts[0].sender).not.toHaveProperty('address');
+    expect(preview.payload.posts[0].sender).not.toHaveProperty('addressId');
 
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation({
       order: {
@@ -2937,9 +2927,15 @@ describe('shipping execution foundation', () => {
         requestSnapshot: expect.objectContaining({
           posts: [
             expect.objectContaining({
-              sender: {
-                addressId: 55574,
-              },
+              sender: expect.objectContaining({
+                name: 'Sporjinal Warehouse',
+                phone: '+90 532 123 45 67',
+                email: 'warehouse@example.test',
+                address: 'Sporjinal Depo Sokak No: 1',
+                country: 'tr',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+              }),
               recipient: expect.objectContaining({
                 city: 'Istanbul',
                 district: null,
@@ -2956,7 +2952,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('blocks Navlungo shipment execution when sender address id is invalid', async () => {
+  it('blocks Navlungo shipment execution when a required sender field is missing', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       id: 'ship-config-navlungo',
       vendorId: 'sporjinal',
@@ -2966,11 +2962,7 @@ describe('shipping execution foundation', () => {
       cargoIntegrationId: null,
       defaultWarehouseId: null,
       shippingVatPercent: 18,
-      providerMetadata: {
-        navlungoSenderAddressId: 'address-55574',
-        navlungoBarcodeFormat: 'pdf-A6',
-        navlungoCarrierId: '9',
-      },
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderDistrict: '' }),
       createdAt: new Date('2026-05-15T10:00:00.000Z'),
       updatedAt: new Date('2026-05-15T10:00:00.000Z'),
       warehouses: [],
@@ -3007,7 +2999,7 @@ describe('shipping execution foundation', () => {
         vendorId: 'sporjinal',
         adapter: navlungoAdapter,
       },
-    )).rejects.toThrow('Navlungo sender address ID must be a positive numeric addressId.');
+    )).rejects.toThrow('Missing required shipment fields:\n- sender.district');
 
     expect(navlungoAdapter.createShipment).not.toHaveBeenCalled();
   });

@@ -4995,13 +4995,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           realPathCodPaymentIncluded: true,
           realPathPriceIncluded: true,
           navlungoRequestSummary: buildNavlungoRequestSummary({
-            senderKeys: ['addressId'],
-            senderUsesAddressId: true,
-            senderFullObjectKeysPresent: false,
+            senderKeys: ['address', 'city', 'country', 'district', 'email', 'name', 'phone', 'post_code'],
+            senderUsesAddressId: false,
+            senderFullObjectKeysPresent: true,
             codPaymentTypePresent: true,
-            codPaymentType: 'number',
+            codPaymentType: 'string-empty',
             postPricePresent: true,
-            postPriceType: 'number',
+            postPriceType: 'string-empty',
           }),
         },
       },
@@ -5027,14 +5027,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'probe HTTP 201 · real HTTP 500 · tracking ID #e41c3430fb2d4e9c98bd023a94d29a60',
     );
     expect(within(diff).getByText('sender keys').closest('.summary-row')).toHaveTextContent(
-      'different · probe: address, city, country, district, email, name, phone, post_code · real: addressId',
+      'same · probe: address, city, country, district, email, name, phone, post_code · real: address, city, country, district, email, name, phone, post_code',
     );
-    expect(within(diff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('different · probe: no · real: yes');
+    expect(within(diff).getByText('sender uses addressId').closest('.summary-row')).toHaveTextContent('same · probe: no · real: no');
     expect(within(diff).getByText('cod_payment_type').closest('.summary-row')).toHaveTextContent(
-      'different · probe: missing · — · real: present · number',
+      'different · probe: missing · — · real: present · string-empty',
     );
     expect(within(diff).getByText('post.price').closest('.summary-row')).toHaveTextContent(
-      'different · probe: missing · — · real: present · number',
+      'different · probe: missing · — · real: present · string-empty',
     );
     expect(screen.queryByText('+90 532 123 45 68')).not.toBeInTheDocument();
     expect(screen.queryByText('recipient.test@example.invalid')).not.toBeInTheDocument();
@@ -5064,9 +5064,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           realPathCreatePostHttpStatus: 500,
           providerCallHttpStatus: 500,
           providerTrackingId: '#35440d91ec90403483413b548ba91844',
-          senderAddressIdPresent: true,
-          senderAddressIdValid: true,
-          senderUsesAddressId: true,
+          senderAddressIdPresent: false,
+          senderAddressIdValid: false,
+          senderUsesAddressId: false,
           realPathRequestedCarrierId: 9,
           realPathRequestedPostType: 2,
           realPathRequestedBarcodeFormat: 'pdf-A6',
@@ -5092,7 +5092,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText(providerMessage).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Provider tracking ID').length).toBeGreaterThan(0);
     expect(screen.getAllByText('#35440d91ec90403483413b548ba91844').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('present yes · valid yes · addressId sender yes').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('present no · valid no · addressId sender no').length).toBeGreaterThan(0);
     expect(screen.getAllByText('carrier 9 · post 2 · barcode pdf-A6').length).toBeGreaterThan(0);
     expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
   });

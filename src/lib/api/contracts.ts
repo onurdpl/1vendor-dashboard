@@ -438,6 +438,7 @@ export type ShippingProviderDiagnostics = {
     passwordConfigured: boolean;
     defaultSenderAddressIdConfigured: boolean;
     defaultSenderAddressIdValid?: boolean;
+    senderFieldsConfigured?: boolean;
     defaultBarcodeFormat: string | null;
     defaultCarrierId: string | null;
     authDiagnosticsAvailable: boolean;
