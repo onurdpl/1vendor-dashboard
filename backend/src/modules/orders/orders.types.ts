@@ -293,6 +293,11 @@ export type OrderShipmentExecutionDto = {
     senderUsesAddressId?: boolean | null;
     senderMode?: string | null;
     fullSenderRetryRequested?: boolean | null;
+    shopifyFulfillmentSyncAttempted?: boolean | null;
+    shopifyFulfillmentSyncSkippedReason?: string | null;
+    shopifyFulfillmentSynced?: boolean | null;
+    fulfillmentTrackingNumberPresent?: boolean | null;
+    fulfillmentTrackingUrlPresent?: boolean | null;
     lastProviderStage?: string | null;
     createShipmentCalled?: boolean | null;
     priceComparisonCalled?: boolean | null;

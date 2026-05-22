@@ -714,6 +714,15 @@ function buildShipmentProviderResponseSummary(
     senderMode: readString(snapshot, ['senderMode']),
     fullSenderRetryRequested:
       typeof snapshot?.fullSenderRetryRequested === 'boolean' ? snapshot.fullSenderRetryRequested : null,
+    shopifyFulfillmentSyncAttempted:
+      typeof snapshot?.shopifyFulfillmentSyncAttempted === 'boolean' ? snapshot.shopifyFulfillmentSyncAttempted : null,
+    shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
+    shopifyFulfillmentSynced:
+      typeof snapshot?.shopifyFulfillmentSynced === 'boolean' ? snapshot.shopifyFulfillmentSynced : null,
+    fulfillmentTrackingNumberPresent:
+      typeof snapshot?.fulfillmentTrackingNumberPresent === 'boolean' ? snapshot.fulfillmentTrackingNumberPresent : null,
+    fulfillmentTrackingUrlPresent:
+      typeof snapshot?.fulfillmentTrackingUrlPresent === 'boolean' ? snapshot.fulfillmentTrackingUrlPresent : null,
     lastProviderStage: readString(snapshot, ['lastProviderStage']),
     createShipmentCalled:
       typeof snapshot?.createShipmentCalled === 'boolean'

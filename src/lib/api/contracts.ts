@@ -297,6 +297,11 @@ export type ShipmentExecution = {
     senderUsesAddressId?: boolean | null;
     senderMode?: string | null;
     fullSenderRetryRequested?: boolean | null;
+    shopifyFulfillmentSyncAttempted?: boolean | null;
+    shopifyFulfillmentSyncSkippedReason?: string | null;
+    shopifyFulfillmentSynced?: boolean | null;
+    fulfillmentTrackingNumberPresent?: boolean | null;
+    fulfillmentTrackingUrlPresent?: boolean | null;
     realPathPostNumberPresent?: boolean | null;
     realPathTrackingUrlPresent?: boolean | null;
     realPathBarcodePresent?: boolean | null;

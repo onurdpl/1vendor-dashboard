@@ -2664,6 +2664,16 @@ export function OrderDetailPage() {
             {formatDiagnosticPresence(summary.realPathBarcodePresent)}
           </strong>
         </div>
+        <div className="summary-row">
+          <span>Shopify fulfillment sync</span>
+          <strong>
+            attempted {formatDiagnosticPresence(summary.shopifyFulfillmentSyncAttempted)} · synced{' '}
+            {formatDiagnosticPresence(summary.shopifyFulfillmentSynced)} · tracking number{' '}
+            {formatDiagnosticPresence(summary.fulfillmentTrackingNumberPresent)} · tracking URL{' '}
+            {formatDiagnosticPresence(summary.fulfillmentTrackingUrlPresent)}
+            {summary.shopifyFulfillmentSyncSkippedReason ? ` · ${summary.shopifyFulfillmentSyncSkippedReason}` : ''}
+          </strong>
+        </div>
         {hasValidationDiagnostics ? (
           <>
             <div className="summary-row">

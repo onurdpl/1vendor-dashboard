@@ -29,8 +29,18 @@ const prismaMock = vi.hoisted(() => ({
   $transaction: vi.fn(),
 }));
 
+const shopifyAdminMock = vi.hoisted(() => ({
+  fetchFulfillmentOrders: vi.fn(),
+  createFulfillmentTracking: vi.fn(),
+  probeReturnLabelUpload: vi.fn(),
+}));
+
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
+}));
+
+vi.mock('../backend/src/modules/shopify/shopify-admin.service.js', () => ({
+  createShopifyAdminService: () => shopifyAdminMock,
 }));
 
 const {
@@ -145,6 +155,35 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildAllocationWithShopifyFulfillmentData(overrides: Record<string, unknown> = {}) {
+  return buildAllocation({
+    sourceShopifyOrderId: 'gid://shopify/Order/1055',
+    order: {
+      id: 'order-1',
+      sourceShopifyOrderId: 'gid://shopify/Order/1055',
+      customerName: 'Test Customer',
+      customerEmail: 'customer@example.com',
+      customerPhone: '+90 555 111 22 33',
+      shippingCountry: 'tr',
+      shippingCity: 'Istanbul',
+      shippingDistrict: 'Kartal',
+      shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+    },
+    lineItems: [
+      {
+        quantity: 1,
+        lineAmount: 4999,
+        shopifyOrderLineItem: {
+          title: 'Nike Air Max Alpha Trainer 6',
+          sku: 'FQ1833-200-41',
+          sourceLineItemId: 'gid://shopify/LineItem/line-1055',
+        },
+      },
+    ],
+    ...overrides,
+  });
+}
+
 function buildShipmentExecution(overrides: Record<string, unknown> = {}) {
   return {
     id: 'shipment-hepsijet-alloc-1',
@@ -216,6 +255,9 @@ describe('shipping execution foundation', () => {
     prismaMock.fulfillment.upsert.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.$transaction.mockReset();
+    shopifyAdminMock.fetchFulfillmentOrders.mockReset();
+    shopifyAdminMock.createFulfillmentTracking.mockReset();
+    shopifyAdminMock.probeReturnLabelUpload.mockReset();
 
     prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocation());
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(null);
@@ -246,6 +288,30 @@ describe('shipping execution foundation', () => {
     }));
     prismaMock.returnRecord.findFirst.mockResolvedValue(null);
     prismaMock.$transaction.mockImplementation(async (callback) => callback(prismaMock));
+    shopifyAdminMock.fetchFulfillmentOrders.mockResolvedValue({
+      fulfillmentOrders: [
+        {
+          id: 'gid://shopify/FulfillmentOrder/fo-1055',
+          status: 'OPEN',
+          lineItems: [
+            {
+              id: 'gid://shopify/FulfillmentOrderLineItem/foli-1055',
+              lineItemId: 'gid://shopify/LineItem/line-1055',
+              quantity: 1,
+            },
+          ],
+        },
+      ],
+    });
+    shopifyAdminMock.createFulfillmentTracking.mockResolvedValue({
+      fulfillmentId: 'gid://shopify/Fulfillment/fulfillment-1055',
+      status: 'submitted',
+      source: 'shopify_admin',
+      fulfillmentCreated: true,
+      skippedReason: null,
+      fulfillmentOrderIdPresent: true,
+      fulfillmentIdPresent: true,
+    });
   });
 
   it('creates a shipment execution and links confirmed provider cost to finance shipping cost input', async () => {
@@ -1839,6 +1905,261 @@ describe('shipping execution foundation', () => {
           }),
         }),
       ],
+    });
+  });
+
+  it('syncs successful Navlungo create tracking to Shopify fulfillment automatically', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-1055',
+      trackingNumber: 'NAV-TRACK-1055',
+      trackingUrl: 'https://track.navlungo.test/NAV-1055',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        carrierName: 'Sürat Kargo',
+        barcode: 'barcode-string',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_EXECUTION_ENABLED: true,
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allocationId: 'alloc-1',
+        shopifyOrderId: 'gid://shopify/Order/1055',
+        trackingNumber: 'NAV-TRACK-1055',
+        carrier: 'Sürat Kargo',
+        trackingUrl: 'https://track.navlungo.test/NAV-1055',
+        notifyCustomer: false,
+      }),
+    );
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
+      fulfillmentTrackingNumberPresent: true,
+      fulfillmentTrackingUrlPresent: true,
+    });
+  });
+
+  it('syncs successful Navlungo retry tracking to Shopify fulfillment automatically', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-alloc-1',
+      provider: 'NAVLUNGO',
+      shipmentStatus: 'FAILED',
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData({
+      shippingStatus: 'Awaiting Shipment',
+    }));
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-RETRY-1055',
+      trackingNumber: 'NAV-RETRY-TRACK-1055',
+      trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1055',
+      labelUrl: 'retry-barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        carrierName: 'Sürat Kargo',
+        barcode: 'retry-barcode-string',
+      },
+    });
+
+    const result = await retryFailedShipmentExecution(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'api-user',
+        NAVLUNGO_API_PASSWORD: 'secret-password',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        trackingNumber: 'NAV-RETRY-TRACK-1055',
+        carrier: 'Sürat Kargo',
+        trackingUrl: 'https://track.navlungo.test/NAV-RETRY-1055',
+      }),
+    );
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
+      fulfillmentTrackingNumberPresent: true,
+    });
+  });
+
+  it('does not duplicate Shopify fulfillment for an already synced Navlungo shipment', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData({
+      fulfillment: {
+        shopifyFulfillmentId: 'gid://shopify/Fulfillment/existing-1055',
+        shopifyFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/fo-1055',
+        fulfillmentStatus: 'fulfillment_submitted',
+        trackingNumber: 'NAV-TRACK-1055',
+        carrier: 'Sürat Kargo',
+        trackingUrl: 'https://track.navlungo.test/NAV-1055',
+        notifyCustomer: false,
+        fulfilledAt: new Date('2026-05-18T10:00:00.000Z'),
+        shipmentCreatedAt: new Date('2026-05-18T09:55:00.000Z'),
+        shipmentUpdatedAt: new Date('2026-05-18T10:00:00.000Z'),
+      },
+    }));
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: 'NAV-1055',
+      trackingNumber: 'NAV-TRACK-1055',
+      trackingUrl: 'https://track.navlungo.test/NAV-1055',
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        carrierName: 'Sürat Kargo',
+        barcode: 'barcode-string',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_EXECUTION_ENABLED: true,
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
+      shopifyFulfillmentSyncSkippedReason: 'already_synced',
+    });
+  });
+
+  it('skips Shopify fulfillment sync when successful Navlungo response has no tracking number', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55578',
+      shippingVatPercent: 18,
+      warehouses: [],
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55578' }),
+    });
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    const adapter = buildAdapter({ provider: 'NAVLUNGO' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: 'barcode-string',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        barcode: 'barcode-string',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'navlungo',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_EXECUTION_ENABLED: true,
+          NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+          NAVLUNGO_API_USERNAME: 'api-user',
+          NAVLUNGO_API_PASSWORD: 'secret-password',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: false,
+      shopifyFulfillmentSynced: false,
+      shopifyFulfillmentSyncSkippedReason: 'missing_tracking_number',
     });
   });
 

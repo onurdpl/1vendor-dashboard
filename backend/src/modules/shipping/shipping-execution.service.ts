@@ -20,6 +20,7 @@ import {
 } from './kargonomi-provider.adapter.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { mapShopifyShippingAddress } from '../shopify/order-ingestion.service.js';
+import { createFulfillmentService } from '../fulfillments/fulfillment.service.js';
 import type { ShopifyOrdersCreateWebhookPayload } from '../shopify/order-ingestion.types.js';
 import type { ProbeShopifyReturnLabelUploadResult } from '../shopify/shopify-admin.types.js';
 import type {
@@ -666,6 +667,11 @@ function mapProviderResponseSummary(
     senderUsesAddressId: readOptionalBoolean(snapshot, ['senderUsesAddressId']),
     senderMode: readString(snapshot, ['senderMode']),
     fullSenderRetryRequested: readOptionalBoolean(snapshot, ['fullSenderRetryRequested']),
+    shopifyFulfillmentSyncAttempted: readOptionalBoolean(snapshot, ['shopifyFulfillmentSyncAttempted']),
+    shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
+    shopifyFulfillmentSynced: readOptionalBoolean(snapshot, ['shopifyFulfillmentSynced']),
+    fulfillmentTrackingNumberPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingNumberPresent']),
+    fulfillmentTrackingUrlPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingUrlPresent']),
     realPathPostNumberPresent: readOptionalBoolean(snapshot, ['realPathPostNumberPresent']),
     realPathTrackingUrlPresent: readOptionalBoolean(snapshot, ['realPathTrackingUrlPresent']),
     realPathBarcodePresent: readOptionalBoolean(snapshot, ['realPathBarcodePresent']),
@@ -3302,6 +3308,7 @@ export async function ingestTryOtoWebhook(
 
 async function persistProviderShipmentResult(input: {
   executionId: string;
+  env: AppEnv;
   allocation: {
     id: string;
     assignedVendorId: string;
@@ -3450,7 +3457,107 @@ async function persistProviderShipmentResult(input: {
     return execution;
   });
 
+  const shopifyFulfillmentSyncDiagnostics = await maybeSyncNavlungoShipmentToShopify({
+    allocationId: allocation.id,
+    vendorId: allocation.assignedVendorId,
+    provider,
+    result,
+    env: input.env,
+  });
+
+  if (shopifyFulfillmentSyncDiagnostics) {
+    const updatedSnapshot = {
+      ...responseSnapshot,
+      ...shopifyFulfillmentSyncDiagnostics,
+    };
+    const syncedExecution = await prisma.shipmentExecution.update({
+      where: {
+        id: executionId,
+      },
+      data: {
+        responseSnapshot: updatedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution({
+      ...syncedExecution,
+      shippingCostLinked: Boolean('shippingCostLinked' in updated && updated.shippingCostLinked),
+    });
+  }
+
   return mapShipmentExecution(updated);
+}
+
+async function maybeSyncNavlungoShipmentToShopify(input: {
+  allocationId: string;
+  vendorId: string;
+  provider: ShippingProvider;
+  result: Awaited<ReturnType<ShippingProviderAdapter['createShipment']>>;
+  env: AppEnv;
+}) {
+  if (input.provider !== ShippingProvider.NAVLUNGO) {
+    return null;
+  }
+
+  const trackingNumber = input.result.trackingNumber?.trim() || input.result.providerShipmentId?.trim() || null;
+  const trackingUrl = input.result.trackingUrl?.trim() || null;
+  const carrier =
+    readString(input.result.responseSnapshot, ['carrierName', 'shippingProviderName', 'providerName']) ??
+    'Navlungo';
+
+  if (!trackingNumber) {
+    return {
+      shopifyFulfillmentSyncAttempted: false,
+      shopifyFulfillmentSyncSkippedReason: 'missing_tracking_number',
+      shopifyFulfillmentSynced: false,
+      fulfillmentTrackingNumberPresent: false,
+      fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
+    };
+  }
+
+  try {
+    const fulfillmentService = createFulfillmentService(input.env);
+    const syncResult = await fulfillmentService.updateAllocationTracking({
+      allocationId: input.allocationId,
+      body: {
+        trackingNumber,
+        carrier,
+        trackingUrl,
+        notifyCustomer: false,
+      },
+      authUser: {
+        id: 'system-navlungo-fulfillment-sync',
+        email: 'system@local',
+        name: 'System',
+        role: 'admin',
+        status: 'active',
+      },
+      vendorContext: {
+        vendorId: input.vendorId,
+        vendorName: input.vendorId,
+        role: 'vendor',
+        accessScope: 'vendor',
+      },
+    });
+
+    return {
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSyncSkippedReason: syncResult.ok ? syncResult.shopifyFulfillmentSkippedReason : syncResult.message,
+      shopifyFulfillmentSynced: syncResult.ok,
+      shopifyFulfillmentIdPresent: syncResult.ok ? syncResult.shopifyFulfillmentIdPresent : false,
+      shopifyFulfillmentOrderIdPresent: syncResult.ok ? syncResult.shopifyFulfillmentOrderIdPresent : false,
+      fulfillmentTrackingNumberPresent: true,
+      fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
+    };
+  } catch (error) {
+    return {
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSyncSkippedReason: error instanceof Error ? error.message : 'Shopify fulfillment sync failed.',
+      shopifyFulfillmentSynced: false,
+      fulfillmentTrackingNumberPresent: true,
+      fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
+    };
+  }
 }
 
 function resolveTryOtoStatusOrderId(execution: ShipmentExecution) {
@@ -5207,6 +5314,7 @@ export async function createShipmentExecution(
       if (recoveredEvidence) {
         return persistProviderShipmentResult({
           executionId: existing.id,
+          env: options.env,
           allocation,
           provider,
           result: {
@@ -5267,6 +5375,7 @@ export async function createShipmentExecution(
         });
         return persistProviderShipmentResult({
           executionId: existing.id,
+          env: options.env,
           allocation,
           provider,
           result,
@@ -5332,6 +5441,7 @@ export async function createShipmentExecution(
     });
     return persistProviderShipmentResult({
       executionId,
+      env: options.env,
       allocation,
       provider,
       result,
@@ -5478,6 +5588,7 @@ export async function retryDryRunShipmentExecution(
 
     return persistProviderShipmentResult({
       executionId: existing.id,
+      env: options.env,
       allocation,
       provider,
       result,
@@ -5651,6 +5762,7 @@ export async function retryFailedShipmentExecution(
 
     return persistProviderShipmentResult({
       executionId: existing.id,
+      env: options.env,
       allocation,
       provider,
       result: {
