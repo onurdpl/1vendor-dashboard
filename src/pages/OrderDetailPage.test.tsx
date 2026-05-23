@@ -235,6 +235,16 @@ function renderOrderDetail() {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function buildNavlungoRequestSummary(overrides: Partial<NonNullable<NonNullable<OrderDetail['shipmentExecution']>['providerResponseSummary']>['navlungoRequestSummary']> = {}) {
   return {
     baseUrl: 'domestic-api.navlungo.com/v2',
@@ -951,6 +961,30 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     });
   });
 
+  it('renders the Order Detail frame before primary data and defers provider diagnostics', () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    const orderResult = deferred<OrderDetail>();
+    getOrderMock.mockReturnValue(orderResult.promise);
+
+    renderOrderDetail();
+
+    expect(screen.getByLabelText('Order detail render frame')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Order detail' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Order summary skeleton')).toBeInTheDocument();
+    expect(screen.getByLabelText('Order line item skeleton')).toBeInTheDocument();
+    expect(screen.getByLabelText('Order timeline skeleton')).toBeInTheDocument();
+    expect(getShippingProviderDiagnosticsMock).not.toHaveBeenCalled();
+    expect(getVendorShippingConfigMock).not.toHaveBeenCalled();
+  });
+
   it('shows safe provider response summary to admins for pending shipments without identifiers', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1367,7 +1401,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    await screen.findByText('Shipment updated');
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment updated')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Updated')).toBeInTheDocument();
@@ -1406,7 +1441,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    await screen.findByText('Shipment cancelled');
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).getByText('Shipment cancelled')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Cancelled')).toBeInTheDocument();
@@ -1445,7 +1481,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const timeline = (await screen.findByRole('heading', { name: 'Timeline' })).closest('article');
+    await screen.findByText('Order created');
+    const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText('Shipment updated')).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText('Shipment cancelled')).not.toBeInTheDocument();

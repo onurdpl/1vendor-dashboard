@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { EmptyStatePanel, SectionErrorRetry, SectionSkeleton, StatusBadge } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SkeletonText, StatusBadge } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -695,7 +695,7 @@ export function ReturnDetailPage() {
     />
   );
   const renderReturnRouteFrame = (title: string, description: string, body: ReactNode) => (
-    <section className="return-detail-page return-detail-loading-frame">
+    <section className="return-detail-page return-detail-loading-frame" aria-label="Return detail render frame">
       <div className="return-detail-header compact">
         <div>
           <p className="eyebrow">Returns</p>
@@ -706,7 +706,61 @@ export function ReturnDetailPage() {
           Back to returns
         </Link>
       </div>
-      {body}
+      <div className="return-review-layout">
+        <main className="return-review-main" aria-label="Return primary content">
+          <article className="return-review-card">
+            <div className="return-review-card-header">
+              <div>
+                <p className="eyebrow">Returned items</p>
+                <h3>Items</h3>
+              </div>
+            </div>
+            {body}
+          </article>
+        </main>
+        <aside className="return-review-side" aria-label="Return operational sidebar">
+          <article className="return-review-card return-review-summary-card">
+            <div className="return-review-card-header">
+              <div>
+                <p className="eyebrow">Summary</p>
+                <h3>Return details</h3>
+              </div>
+            </div>
+            <div className="return-review-summary-list" aria-label="Return summary skeleton">
+              {['Order number', 'Requested', 'Return status', 'Refund status'].map((label) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>
+                    <SkeletonText width={label === 'Order number' ? '6rem' : '5rem'} />
+                  </strong>
+                </div>
+              ))}
+            </div>
+          </article>
+          <article className="return-review-card operational-timeline-card">
+            <div className="return-review-card-header">
+              <div>
+                <p className="eyebrow">Timeline</p>
+                <h3>Timeline</h3>
+              </div>
+            </div>
+            <div className="return-review-summary-list" aria-label="Return timeline skeleton">
+              <div>
+                <span>Event</span>
+                <strong>
+                  <SkeletonText width="8rem" />
+                </strong>
+              </div>
+              <div>
+                <span>Updated</span>
+                <strong>
+                  <SkeletonText width="6rem" />
+                </strong>
+              </div>
+            </div>
+          </article>
+        </aside>
+      </div>
     </section>
   );
 
@@ -750,25 +804,29 @@ export function ReturnDetailPage() {
   }
 
   if (!authContextReady || (isLoading && !returnRequest)) {
-    if (loadingTimedOut) {
-      return renderReturnRouteFrame(
-        'Return request is taking longer than expected',
-        'The detail request did not finish in time. Retry the request or inspect the route diagnostics.',
-        <>
+    return renderReturnRouteFrame(
+      'Return request',
+      'Preparing the selected return for review.',
+      <>
+        {loadingTimedOut ? (
           <SectionErrorRetry
             title="Request timed out"
             description="The detail request did not finish in time."
             onRetry={() => void refetch()}
           />
-          {routeDiagnosticsNode}
-        </>,
-      );
-    }
-    return renderReturnRouteFrame(
-      'Loading return request',
-      'Preparing the selected return for review.',
-      <>
-        <SectionSkeleton title="Preparing return details" description="Fetching return details in the background." />
+        ) : (
+          <div className="return-review-items" aria-label="Return item skeleton">
+            {Array.from({ length: 2 }, (_, index) => (
+              <div key={`return-detail-item-skeleton-${index}`} className="return-review-item-row op-skeleton-row">
+                <div>
+                  <SkeletonText width="12rem" />
+                  <SkeletonText width="7rem" />
+                </div>
+                <SkeletonText width="4rem" />
+              </div>
+            ))}
+          </div>
+        )}
         {routeDiagnosticsNode}
       </>,
     );
@@ -1415,13 +1473,13 @@ export function ReturnDetailPage() {
           ) : null}
 
           {shouldRenderNavlungoAutoCreateDiagnostics ? (
-            <article className="return-review-card" aria-label="Navlungo return auto-create diagnostics">
-              <div className="return-review-card-header">
+            <details className="return-review-card provider-response-summary admin-diagnostics-panel" aria-label="Navlungo return auto-create diagnostics">
+              <summary className="return-review-card-header">
                 <div>
                   <p className="eyebrow">Navlungo diagnostics</p>
                   <h3>Return pickup auto-create</h3>
                 </div>
-              </div>
+              </summary>
               <div className="return-review-summary-list">
                 <div>
                   <span>Auto-create attempted</span>
@@ -1616,7 +1674,7 @@ export function ReturnDetailPage() {
                   </>
                 ) : null}
               </div>
-            </article>
+            </details>
           ) : null}
 
           {isAdmin && returnRequest.sourceType === 'shopify_return_request' ? (

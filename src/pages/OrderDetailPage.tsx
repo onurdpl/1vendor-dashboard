@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
-import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
+import { SectionErrorRetry, SkeletonText } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
@@ -1397,7 +1397,7 @@ export function OrderDetailPage() {
     queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
     ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
     {
-      enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId),
+      enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId) && Boolean(order),
     },
   );
   const diagnosticsProvider =
@@ -1410,28 +1410,28 @@ export function OrderDetailPage() {
     queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
     ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider, signal }),
     {
-      enabled: authContextReady && isAdmin,
+      enabled: authContextReady && isAdmin && Boolean(order),
     },
   );
   const { data: tryOtoOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('try_oto', currentVendor.vendorId),
     ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto', signal }),
     {
-      enabled: authContextReady && isAdmin,
+      enabled: authContextReady && isAdmin && Boolean(order),
     },
   );
   const { data: kargonomiOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('kargonomi', currentVendor.vendorId),
     ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi', signal }),
     {
-      enabled: authContextReady && isAdmin,
+      enabled: authContextReady && isAdmin && Boolean(order),
     },
   );
   const { data: navlungoOptionDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig('navlungo', currentVendor.vendorId),
     ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'navlungo', signal }),
     {
-      enabled: authContextReady && isAdmin,
+      enabled: authContextReady && isAdmin && Boolean(order),
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
@@ -3780,43 +3780,117 @@ export function OrderDetailPage() {
     setShipmentActionState(null);
   }, [order?.id]);
 
-  if (!authContextReady || (isLoading && !order)) {
-    return (
-      <section className="order-detail-page">
-        <div className="order-detail-header compact">
-          <div>
-            <p className="eyebrow">Orders</p>
-            <h1>Order detail</h1>
-            <p>Fetching the selected order from the central data layer.</p>
+  const renderOrderDetailFrame = (body?: ReactNode) => (
+    <section className="order-detail-workspace order-detail-cockpit order-detail-dense" aria-label="Order detail render frame">
+      <header className="order-detail-topbar">
+        <Link className="order-detail-back" to="/orders">
+          Back to orders
+        </Link>
+        <div className="order-detail-title-row">
+          <div className="order-detail-title-stack">
+            <div className="order-detail-heading-line">
+              <h1>Order detail</h1>
+              <span className="order-source-pill">Loading</span>
+            </div>
+            <div className="order-detail-meta-strip" aria-label="Order summary skeleton">
+              {['Created', 'Vendor', 'Customer', 'Shopify ID'].map((label) => (
+                <div key={label}>
+                  <span>{label}</span>
+                  <strong>
+                    <SkeletonText width={label === 'Shopify ID' ? '7rem' : '5rem'} />
+                  </strong>
+                </div>
+              ))}
+            </div>
+            <div className="order-ship-to-note" aria-label="Shipping address summary">
+              <span>Ship to</span>
+              <strong>
+                <SkeletonText width="14rem" />
+              </strong>
+            </div>
           </div>
-          <Link className="button button-secondary" to="/orders">
-            Back to orders
-          </Link>
         </div>
-        <SectionSkeleton title="Loading order" description="Preparing order operations in the background." />
-      </section>
-    );
+        <div className="order-detail-status-pills" aria-label="Order status skeleton">
+          <span className="status-badge status-pending">Loading</span>
+          <span className="status-badge status-pending">Fulfillment</span>
+          <span className="status-badge status-pending">Shipping</span>
+        </div>
+      </header>
+
+      <div className="order-status-summary-grid" aria-label="Order KPI skeleton">
+        {['Lifecycle', 'Shipping', 'Tracking', 'Finance'].map((label) => (
+          <article key={label} className="order-status-summary-card order-status-neutral">
+            <span className="order-status-icon" aria-hidden="true">
+              -
+            </span>
+            <div>
+              <span>{label}</span>
+              <strong>
+                <SkeletonText width="5rem" />
+              </strong>
+              <p>
+                <SkeletonText width="8rem" />
+              </p>
+            </div>
+          </article>
+        ))}
+      </div>
+
+      <div className="order-detail-main-grid">
+        <main className="order-detail-main-column" aria-label="Order operations">
+          <article className="order-detail-card-v2 order-line-items-card">
+            <div className="order-card-heading">
+              <h2>Line items</h2>
+            </div>
+            {body ?? (
+              <div className="order-line-items-list" aria-label="Order line item skeleton">
+                {Array.from({ length: 3 }, (_, index) => (
+                  <div key={`order-detail-line-skeleton-${index}`} className="order-line-item-row op-skeleton-row">
+                    <div>
+                      <SkeletonText width="12rem" />
+                      <SkeletonText width="7rem" />
+                    </div>
+                    <SkeletonText width="4rem" />
+                  </div>
+                ))}
+              </div>
+            )}
+          </article>
+        </main>
+        <aside className="order-detail-rail" aria-label="Order operational rail">
+          <div className="order-detail-sidebar-flow">
+            <article className="operational-timeline-card order-detail-card-v2">
+              <div className="order-card-heading">
+                <h2>Timeline</h2>
+              </div>
+              <div className="order-timeline-list" aria-label="Order timeline skeleton">
+                <SkeletonText width="70%" />
+                <SkeletonText width="55%" />
+              </div>
+            </article>
+            <article className="order-support-card order-detail-card-v2">
+              <div className="order-card-heading">
+                <h2>Support</h2>
+              </div>
+              <SkeletonText width="75%" />
+            </article>
+          </div>
+        </aside>
+      </div>
+    </section>
+  );
+
+  if (!authContextReady || (isLoading && !order)) {
+    return renderOrderDetailFrame();
   }
 
   if (isError || !order) {
-    return (
-      <section className="order-detail-page">
-        <div className="order-detail-header compact">
-          <div>
-            <p className="eyebrow">Orders</p>
-            <h1>Order detail</h1>
-            <p>The selected order could not be loaded.</p>
-          </div>
-          <Link className="button button-secondary" to="/orders">
-            Back to orders
-          </Link>
-        </div>
-        <SectionErrorRetry
-          title="Order unavailable"
-          description={error ?? 'The selected order could not be loaded.'}
-          onRetry={() => void refetch()}
-        />
-      </section>
+    return renderOrderDetailFrame(
+      <SectionErrorRetry
+        title="Order unavailable"
+        description={error ?? 'The selected order could not be loaded.'}
+        onRetry={() => void refetch()}
+      />,
     );
   }
 

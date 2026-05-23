@@ -201,6 +201,16 @@ function renderPageAt(path: string) {
   );
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('ReturnDetailPage vendor review screen', () => {
   beforeEach(() => {
     cleanup();
@@ -244,13 +254,28 @@ describe('ReturnDetailPage vendor review screen', () => {
     });
   });
 
+  it('renders the Return Detail frame before primary data hydrates', () => {
+    const returnResult = deferred<ReturnDetail>();
+    getReturnMock.mockReturnValue(returnResult.promise);
+
+    renderPage();
+
+    expect(screen.getByLabelText('Return detail render frame')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(screen.getByLabelText('Return item skeleton')).toBeInTheDocument();
+    expect(screen.getByLabelText('Return summary skeleton')).toBeInTheDocument();
+    expect(screen.getByLabelText('Return timeline skeleton')).toBeInTheDocument();
+    expect(getFinanceDashboardMock).not.toHaveBeenCalled();
+    expect(listVendorSupportTicketsMock).not.toHaveBeenCalled();
+  });
+
   it('renders a vendor-facing return review without internal lifecycle wording', async () => {
     getReturnMock.mockResolvedValue(returnDetail);
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
-    expect(screen.getAllByText('Order #1023').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.getByText('White / 42')).toBeInTheDocument();
@@ -301,19 +326,24 @@ describe('ReturnDetailPage vendor review screen', () => {
 
   it('shows a bounded retry fallback when loading takes too long', async () => {
     vi.useFakeTimers();
-    getReturnMock.mockReturnValue(new Promise(() => undefined));
+    try {
+      getReturnMock.mockReturnValue(new Promise(() => undefined));
 
-    renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
+      renderPageAt('/returns/return-request-23391502673-yalispor-20393734144337');
 
-    expect(screen.getByRole('heading', { name: 'Loading return request' })).toBeInTheDocument();
-    act(() => {
-      vi.advanceTimersByTime(8100);
-    });
+      expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+      expect(screen.getByLabelText('Return item skeleton')).toBeInTheDocument();
+      act(() => {
+        vi.advanceTimersByTime(8100);
+      });
 
-    expect(screen.getByRole('heading', { name: 'Return request is taking longer than expected' })).toBeInTheDocument();
-    expect(screen.getByText('return-request-23391502673-yalispor-20393734144337')).toBeInTheDocument();
-    expect(screen.getByText('Query enabled')).toBeInTheDocument();
-    vi.useRealTimers();
+      expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+      expect(screen.getByText('Request timed out')).toBeInTheDocument();
+      expect(screen.getByText('return-request-23391502673-yalispor-20393734144337')).toBeInTheDocument();
+      expect(screen.getByText('Query enabled')).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows not found when the return API returns 404', async () => {
@@ -428,7 +458,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     const { container } = renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
     const grid = container.querySelector('.return-review-grid');
     const main = container.querySelector('.return-review-main');
     const sidebar = screen.getByLabelText('Return operational sidebar');
@@ -1091,7 +1121,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    await screen.findByRole('heading', { name: 'Return request' });
+    await screen.findByText('Nike Air Force 1 07');
     const orderLinks = screen
       .getAllByText('Order #1023')
       .map((element) => element.closest('a'))
@@ -1105,7 +1135,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    await screen.findByRole('heading', { name: 'Return request' });
+    await screen.findByText('Nike Air Force 1 07');
     const orderLinks = screen
       .getAllByText('Order #1023')
       .map((element) => element.closest('a'))
@@ -1155,7 +1185,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    expect(await screen.findByRole('heading', { name: 'Return request' })).toBeInTheDocument();
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
     expect(screen.queryByText('Customer shipment')).not.toBeInTheDocument();
     expect(screen.queryByText('Return shipment created')).not.toBeInTheDocument();
   });
