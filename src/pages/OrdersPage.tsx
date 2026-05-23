@@ -552,9 +552,6 @@ export function OrdersPage() {
             </div>
             <p>Manage shipments and tracking</p>
           </div>
-          <div className="op-heading-meta">
-            <StatusBadge tone={summary.blocked > 0 ? 'warning' : 'success'}>{summary.blocked} attention</StatusBadge>
-          </div>
         </div>
 
         <div className="op-control-layout orders-control-layout orders-workspace-grid">
@@ -706,7 +703,7 @@ export function OrdersPage() {
           <SideDetailPanel
             eyebrow={selectedOrder ? currentVendor.vendorName : 'Order detail'}
             title={selectedOrder ? formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber) : 'No order selected'}
-            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>Open canonical detail</Link> : null}
+            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>İNCELE</Link> : null}
           >
           {selectedOrder ? (
             (() => {

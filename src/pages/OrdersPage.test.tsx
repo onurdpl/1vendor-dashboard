@@ -180,7 +180,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.getByRole('link', { name: 'İNCELE' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.queryByText('0 attention')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
   });
 
