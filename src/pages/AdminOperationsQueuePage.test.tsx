@@ -189,7 +189,7 @@ describe('AdminOperationsQueuePage attention center', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: /operational attention center/i })).toBeInTheDocument();
-    expect(screen.getAllByText('Overdue support ticket').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Overdue support ticket')).length).toBeGreaterThan(0);
     expect(screen.getByText('Shipment pending carrier identifiers')).toBeInTheDocument();
     expect(screen.getByText('Recommended actions')).toBeInTheDocument();
     expect(screen.getByText('Escalate overdue support request')).toBeInTheDocument();

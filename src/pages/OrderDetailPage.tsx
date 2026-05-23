@@ -1,7 +1,7 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
@@ -3780,29 +3780,43 @@ export function OrderDetailPage() {
     setShipmentActionState(null);
   }, [order?.id]);
 
-  if (!authContextReady || isLoading) {
+  if (!authContextReady || (isLoading && !order)) {
     return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Orders"
-        title="Loading order"
-        description="Fetching the selected order from the central data layer."
-      />
+      <section className="order-detail-page">
+        <div className="order-detail-header compact">
+          <div>
+            <p className="eyebrow">Orders</p>
+            <h1>Order detail</h1>
+            <p>Fetching the selected order from the central data layer.</p>
+          </div>
+          <Link className="button button-secondary" to="/orders">
+            Back to orders
+          </Link>
+        </div>
+        <SectionSkeleton title="Loading order" description="Preparing order operations in the background." />
+      </section>
     );
   }
 
   if (isError || !order) {
     return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Orders"
-        title="Order unavailable"
-        description={error ?? 'The selected order could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-        actionLabel="Back to orders"
-        actionTo="/orders"
-      />
+      <section className="order-detail-page">
+        <div className="order-detail-header compact">
+          <div>
+            <p className="eyebrow">Orders</p>
+            <h1>Order detail</h1>
+            <p>The selected order could not be loaded.</p>
+          </div>
+          <Link className="button button-secondary" to="/orders">
+            Back to orders
+          </Link>
+        </div>
+        <SectionErrorRetry
+          title="Order unavailable"
+          description={error ?? 'The selected order could not be loaded.'}
+          onRetry={() => void refetch()}
+        />
+      </section>
     );
   }
 

@@ -1,6 +1,5 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   FilterBar,
@@ -8,6 +7,8 @@ import {
   OperationalTableRow,
   OperationalToolbar,
   SearchInput,
+  SectionErrorRetry,
+  SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -128,7 +129,7 @@ export function isAdminSupportEscalated(ticket: SupportTicket) {
 export function AdminSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
-  const { data: tickets, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.support.tickets(),
     ({ signal }) => listAdminSupportTickets({ signal }),
     { enabled: appReadiness.ready },
@@ -183,30 +184,6 @@ export function AdminSupportTicketsPage() {
       return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
     });
   }, [assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
-
-  if (!appReadiness.ready || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Support"
-        title="Loading support tickets"
-        description="Collecting vendor support requests."
-      />
-    );
-  }
-
-  if (isError || !tickets) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Support"
-        title="Support tickets unavailable"
-        description={error ?? 'Unable to load support tickets.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
 
   return (
     <section className="op-page support-ops-page">
@@ -263,7 +240,15 @@ export function AdminSupportTicketsPage() {
         </FilterBar>
       </OperationalToolbar>
 
-      {filteredTickets.length ? (
+      {isError && !tickets ? (
+        <SectionErrorRetry
+          title="Support tickets unavailable"
+          description={error ?? 'Unable to load support tickets.'}
+          onRetry={() => void refetch()}
+        />
+      ) : !appReadiness.ready || isLoading ? (
+        <SectionSkeleton title="Loading support tickets" description="Collecting vendor support requests in the background." />
+      ) : filteredTickets.length ? (
         <OperationalTable
           columns={['Ticket', 'Vendor', 'Context', 'Category', 'Priority', 'Status', 'SLA', 'Assignee', 'Last reply', 'Updated', 'Action']}
           className="support-admin-table"

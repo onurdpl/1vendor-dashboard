@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, FilterBar, OperationalTable, OperationalTableRow, OperationalToolbar, StatusBadge } from '../components/OperationalPrimitives';
+import {
+  EmptyStatePanel,
+  FilterBar,
+  OperationalTable,
+  OperationalTableRow,
+  OperationalToolbar,
+  SectionErrorRetry,
+  SectionSkeleton,
+  StatusBadge,
+} from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -33,7 +41,7 @@ export function VendorSupportTicketsPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const [unreadOnly, setUnreadOnly] = useState(false);
-  const { data: tickets, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
     { enabled: appReadiness.ready },
@@ -42,30 +50,6 @@ export function VendorSupportTicketsPage() {
   const filteredTickets = useMemo(() => {
     return (tickets ?? []).filter((ticket) => !unreadOnly || isVendorSupportUnread(ticket));
   }, [tickets, unreadOnly]);
-
-  if (!appReadiness.ready || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Support"
-        title="Loading support requests"
-        description="Collecting your vendor support requests."
-      />
-    );
-  }
-
-  if (isError || !tickets) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Support"
-        title="Support requests unavailable"
-        description={error ?? 'Unable to load support requests.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
 
   return (
     <section className="op-page support-ops-page">
@@ -86,7 +70,15 @@ export function VendorSupportTicketsPage() {
         </FilterBar>
       </OperationalToolbar>
 
-      {filteredTickets.length ? (
+      {isError && !tickets ? (
+        <SectionErrorRetry
+          title="Support requests unavailable"
+          description={error ?? 'Unable to load support requests.'}
+          onRetry={() => void refetch()}
+        />
+      ) : !appReadiness.ready || isLoading ? (
+        <SectionSkeleton title="Loading support requests" description="Collecting your vendor support requests in the background." />
+      ) : filteredTickets.length ? (
         <OperationalTable columns={['Ticket', 'Subject', 'Category', 'Status', 'Last reply', 'Updated']} className="support-vendor-table">
           {filteredTickets.map((ticket: SupportTicket) => (
             <OperationalTableRow key={ticket.id}>

@@ -1,7 +1,15 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, FilterBar, KPIStatCard, OperationalToolbar, SearchInput, StatusBadge } from '../components/OperationalPrimitives';
+import {
+  EmptyStatePanel,
+  FilterBar,
+  KPIStatCard,
+  OperationalToolbar,
+  SearchInput,
+  SectionErrorRetry,
+  SectionSkeleton,
+  StatusBadge,
+} from '../components/OperationalPrimitives';
 import { getFinanceDashboard } from '../features/finance/api';
 import { listOrders } from '../features/orders/api';
 import { listReturns } from '../features/returns/api';
@@ -113,34 +121,6 @@ export function VendorInboxPage() {
   const selectedEvent = filteredFeed.find((event) => event.id === selectedEventId) ?? filteredFeed[0] ?? null;
   const summary = getCommunicationSummary(feed);
 
-  if (isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Inbox"
-        title="Loading communication center"
-        description="Collecting support replies and operational updates."
-      />
-    );
-  }
-
-  if (firstError) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Inbox"
-        title="Communication center unavailable"
-        description={firstError}
-        onRetry={() => {
-          void supportQuery.refetch();
-          void ordersQuery.refetch();
-          void returnsQuery.refetch();
-          void financeQuery.refetch();
-        }}
-      />
-    );
-  }
-
   return (
     <section className="op-page communication-page">
       <header className="communication-header">
@@ -183,7 +163,20 @@ export function VendorInboxPage() {
 
       <div className="communication-layout">
         <main className="communication-feed">
-          {filteredFeed.length ? (
+          {firstError && feed.length === 0 ? (
+            <SectionErrorRetry
+              title="Communication center unavailable"
+              description={firstError}
+              onRetry={() => {
+                void supportQuery.refetch();
+                void ordersQuery.refetch();
+                void returnsQuery.refetch();
+                void financeQuery.refetch();
+              }}
+            />
+          ) : isLoading ? (
+            <SectionSkeleton title="Loading communication center" description="Collecting support replies and operational updates." />
+          ) : filteredFeed.length ? (
             filteredFeed.map((event) => (
               <button
                 key={event.id}

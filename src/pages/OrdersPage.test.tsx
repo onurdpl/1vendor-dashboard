@@ -140,7 +140,7 @@ describe('OrdersPage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /^orders$/i })).toBeInTheDocument();
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
-    expect(screen.getAllByText('#1002').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);

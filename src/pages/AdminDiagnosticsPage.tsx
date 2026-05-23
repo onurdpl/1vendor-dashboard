@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   FilterBar,
@@ -14,6 +13,8 @@ import {
   OperationalTableRow,
   OperationalToolbar,
   SearchInput,
+  SectionErrorRetry,
+  SectionSkeleton,
   SeverityBadge,
   SideDetailPanel,
   StatusBadge,
@@ -332,35 +333,60 @@ export function AdminDiagnosticsPage() {
 
   if (!isRealMode) {
     return (
-      <DataStatePanel
-        tone="info"
-        eyebrow="Admin diagnostics"
-        title="Diagnostics are available in real mode"
-        description="This workspace reads live backend webhook, reconciliation, and sync visibility. Switch to real API mode to inspect operational recovery state."
-      />
+      <section className="op-page diagnostics-control-center">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Admin diagnostics</p>
+            <h2>Diagnostics are available in real mode</h2>
+            <p className="page-description">
+              This workspace reads live backend webhook, reconciliation, and sync visibility.
+            </p>
+          </div>
+        </div>
+        <EmptyStatePanel
+          title="Switch to real API mode"
+          description="Inspect operational recovery state after switching modes."
+        />
+      </section>
     );
   }
 
   if (isLoading) {
     return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Admin diagnostics"
-        title="Loading diagnostics workspace"
-        description="Collecting live webhook, reconciliation, and sync recovery signals."
-      />
+      <section className="op-page diagnostics-control-center">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Admin diagnostics</p>
+            <h2>Diagnostics workspace</h2>
+            <p className="page-description">Collecting live webhook, reconciliation, and sync recovery signals.</p>
+          </div>
+        </div>
+        <SectionSkeleton title="Loading diagnostics workspace" description="Fetching diagnostics in the background." />
+      </section>
     );
   }
 
   if (pageError || !webhooksQuery.data || !reconciliationQuery.data || !syncEventsQuery.data) {
     return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Admin diagnostics"
-        title="Diagnostics unavailable"
-        description={pageError ?? 'Diagnostics workspace could not be loaded.'}
-        diagnostics={pageDiagnostics}
-      />
+      <section className="op-page diagnostics-control-center">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Admin diagnostics</p>
+            <h2>Diagnostics workspace</h2>
+            <p className="page-description">Diagnostics workspace could not be loaded.</p>
+          </div>
+        </div>
+        <SectionErrorRetry
+          title="Diagnostics unavailable"
+          description={pageError ?? 'Diagnostics workspace could not be loaded.'}
+        />
+        {pageDiagnostics?.endpoint ? (
+          <MetadataGroup>
+            <MetadataRow label="Endpoint" value={pageDiagnostics.endpoint} />
+            <MetadataRow label="HTTP status" value={pageDiagnostics.status ?? 'Unknown'} />
+          </MetadataGroup>
+        ) : null}
+      </section>
     );
   }
 

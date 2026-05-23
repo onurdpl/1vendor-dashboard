@@ -1,11 +1,12 @@
 import { Link } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   KPIStatCard,
   OperationalActionGroup,
   OperationalTable,
   OperationalTableRow,
+  SectionErrorRetry,
+  SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
@@ -85,34 +86,28 @@ function attentionLink(item: { destinationPath: string | null }, label: string) 
 
 export function AdminOperationsQueuePage() {
   const appReadiness = useAppReadiness();
-  const { data, isLoading, isError, error, diagnostics, refetch } = useQueryResource(queryKeys.admin.operations.attention(), ({ signal }) =>
+  const { data, isLoading, isError, error, refetch } = useQueryResource(queryKeys.admin.operations.attention(), ({ signal }) =>
     runtimeServices.operations.attention({ signal }),
     { enabled: appReadiness.ready },
   );
 
-  if (!appReadiness.ready || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Admin operations"
-        title="Loading attention center"
-        description="Deriving operational attention signals from orders, returns, finance, shipments, and support."
-      />
-    );
-  }
-
-  if (isError || !data) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Admin operations"
-        title="Attention center unavailable"
-        description={error ?? 'Operational attention signals could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
+  const dataView = data ?? {
+    generatedAt: new Date().toISOString(),
+    summary: {
+      total: 0,
+      critical: 0,
+      warning: 0,
+      overdueSupport: 0,
+      shipmentIssues: 0,
+      returnBacklog: 0,
+      financeReview: 0,
+    },
+    recommendations: [],
+    queue: [],
+    sections: [],
+    vendorRisks: [],
+    recentActivity: [],
+  };
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -125,27 +120,39 @@ export function AdminOperationsQueuePage() {
           </p>
         </div>
         <div className="op-heading-meta">
-          <StatusBadge tone="danger">Critical {data.summary.critical}</StatusBadge>
-          <StatusBadge tone="warning">Warning {data.summary.warning}</StatusBadge>
-          <StatusBadge tone="info">Generated {formatDate(data.generatedAt)}</StatusBadge>
+          <StatusBadge tone="danger">Critical {dataView.summary.critical}</StatusBadge>
+          <StatusBadge tone="warning">Warning {dataView.summary.warning}</StatusBadge>
+          <StatusBadge tone="info">Generated {formatDate(dataView.generatedAt)}</StatusBadge>
         </div>
       </div>
 
       <div className="op-kpi-row attention-kpi-row">
-        <KPIStatCard label="Total attention" value={data.summary.total} detail="Derived active signals" tone="info" />
-        <KPIStatCard label="Critical" value={data.summary.critical} detail="Highest priority" tone="danger" />
-        <KPIStatCard label="Overdue support" value={data.summary.overdueSupport} detail="SLA breached" tone="warning" />
-        <KPIStatCard label="Shipment issues" value={data.summary.shipmentIssues} detail="Tracking or carrier state" tone="attention" />
-        <KPIStatCard label="Return backlog" value={data.summary.returnBacklog} detail="Waiting review" tone="info" />
-        <KPIStatCard label="Finance review" value={data.summary.financeReview} detail="Payout or invoice attention" tone="warning" />
+        <KPIStatCard label="Total attention" value={dataView.summary.total} detail="Derived active signals" tone="info" />
+        <KPIStatCard label="Critical" value={dataView.summary.critical} detail="Highest priority" tone="danger" />
+        <KPIStatCard label="Overdue support" value={dataView.summary.overdueSupport} detail="SLA breached" tone="warning" />
+        <KPIStatCard label="Shipment issues" value={dataView.summary.shipmentIssues} detail="Tracking or carrier state" tone="attention" />
+        <KPIStatCard label="Return backlog" value={dataView.summary.returnBacklog} detail="Waiting review" tone="info" />
+        <KPIStatCard label="Finance review" value={dataView.summary.financeReview} detail="Payout or invoice attention" tone="warning" />
       </div>
+      {isError && !data ? (
+        <SectionErrorRetry
+          title="Attention center unavailable"
+          description={error ?? 'Operational attention signals could not be loaded.'}
+          onRetry={() => void refetch()}
+        />
+      ) : !appReadiness.ready || isLoading ? (
+        <SectionSkeleton
+          title="Loading attention center"
+          description="Deriving operational signals from orders, returns, finance, shipments, and support."
+        />
+      ) : null}
 
       <div className="attention-layout">
         <main className="attention-main-column">
           <OperationalRecommendations
             title="Recommended actions"
             subtitle="Read-only operator suggestions derived from active attention signals."
-            recommendations={data.recommendations}
+            recommendations={dataView.recommendations}
             audience="admin"
             emptyMessage="No operational recommendations right now."
           />
@@ -158,12 +165,12 @@ export function AdminOperationsQueuePage() {
                 <span>Sorted by severity and unresolved age.</span>
               </div>
             </div>
-            {data.queue.length ? (
+            {dataView.queue.length ? (
               <OperationalTable
                 columns={['Severity', 'Type', 'Vendor', 'Reference', 'Age', 'Recommended action', 'Action']}
                 className="attention-op-table"
               >
-                {data.queue.map((item) => (
+                {dataView.queue.map((item) => (
                   <OperationalTableRow key={item.id}>
                     <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
                     <span>
@@ -192,7 +199,7 @@ export function AdminOperationsQueuePage() {
           </article>
 
           <div className="attention-sections-grid">
-            {data.sections.map((section) => (
+            {dataView.sections.map((section) => (
               <article key={section.key} className="attention-card">
                 <div className="attention-card-heading">
                   <div>
@@ -233,8 +240,8 @@ export function AdminOperationsQueuePage() {
               </div>
             </div>
             <div className="attention-risk-list">
-              {data.vendorRisks.length ? (
-                data.vendorRisks.map((vendor) => (
+              {dataView.vendorRisks.length ? (
+                dataView.vendorRisks.map((vendor) => (
                   <div key={vendor.vendorId} className="attention-risk-row">
                     <div>
                       <strong>{vendor.vendorName}</strong>
@@ -257,8 +264,8 @@ export function AdminOperationsQueuePage() {
               </div>
             </div>
             <div className="attention-activity-feed">
-              {data.recentActivity.length ? (
-                data.recentActivity.map((item) => (
+              {dataView.recentActivity.length ? (
+                dataView.recentActivity.map((item) => (
                   <div key={item.id} className="attention-activity-row">
                     <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                     <div>

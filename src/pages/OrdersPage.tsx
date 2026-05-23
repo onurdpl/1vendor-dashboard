@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   FilterBar,
   OperationalActionGroup,
   OperationalSection,
+  SectionErrorRetry,
+  SectionSkeleton,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -328,30 +329,6 @@ export function OrdersPage() {
 
   const recentOrders = filteredOrders.slice(0, 3);
 
-  if (!authContextReady || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Orders"
-        title="Loading orders"
-        description="Fetching a structured order list from the central data layer."
-      />
-    );
-  }
-
-  if (isError || !orders) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Orders"
-        title="Orders unavailable"
-        description={error ?? 'Unable to load orders.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
-
   return (
     <section className="op-page orders-control-center orders-enterprise-workspace">
       <div className="orders-workspace-shell">
@@ -436,7 +413,15 @@ export function OrdersPage() {
             </div>
 
             <div className="op-main-column orders-table-shell">
-            {filteredOrders.length === 0 ? (
+            {isError && !orders ? (
+              <SectionErrorRetry
+                title="Orders unavailable"
+                description={error ?? 'Unable to load orders.'}
+                onRetry={() => void refetch()}
+              />
+            ) : !authContextReady || isLoading ? (
+              <SectionSkeleton title="Loading orders" description="Fetching vendor-scoped orders in the background." />
+            ) : filteredOrders.length === 0 ? (
               <EmptyStatePanel
                 title="No orders in this view"
                 description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
@@ -627,6 +612,8 @@ export function OrdersPage() {
             </>
               );
             })()
+          ) : !authContextReady || isLoading ? (
+            <SectionSkeleton title="Loading order detail" description="Order detail will hydrate after the list finishes loading." />
           ) : (
             <EmptyStatePanel
               title={hasRequestedOrderTarget ? 'Linked order unavailable' : 'Select an order'}

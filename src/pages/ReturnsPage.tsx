@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   FilterBar,
   OperationalActionGroup,
+  SectionErrorRetry,
+  SectionSkeleton,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -573,36 +574,13 @@ export function ReturnsPage() {
   );
   const selectedDetail = detailQuery.data;
 
-  if (!authContextReady || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Returns"
-        title="Loading returns"
-        description="Fetching a structured return queue from the central data layer."
-      />
-    );
-  }
-
-  if (isError || !returns) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Returns"
-        title="Returns unavailable"
-        description={error ?? 'Unable to load returns.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
-
-  const pendingCount = returns.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
-  const approvedCount = returns.filter((item) => item.status === 'Approved').length;
-  const processedCount = returns.filter((item) => item.sourceType !== 'shopify_return_request').length;
-  const attentionCount = returns.filter(needsAttention).length;
-  const statuses = Array.from(new Set(returns.map((item) => item.status)));
-  const vendors = Array.from(new Set(returns.map((item) => item.assignedVendorId)));
+  const returnRows = returns ?? [];
+  const pendingCount = returnRows.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
+  const approvedCount = returnRows.filter((item) => item.status === 'Approved').length;
+  const processedCount = returnRows.filter((item) => item.sourceType !== 'shopify_return_request').length;
+  const attentionCount = returnRows.filter(needsAttention).length;
+  const statuses = Array.from(new Set(returnRows.map((item) => item.status)));
+  const vendors = Array.from(new Set(returnRows.map((item) => item.assignedVendorId)));
   const selectedItems = selectedReturn ? getItemPreview(selectedReturn, selectedDetail) : [];
   const selectedShipment = selectedReturn ? getReturnShipment(selectedReturn, selectedDetail ?? null) : null;
   const hasReturnShipment = Boolean(
@@ -703,7 +681,7 @@ export function ReturnsPage() {
 
           <div className="returns-filter-summary">
             <button type="button" className={sourceFilter === 'all' ? 'is-active' : ''} onClick={() => setSourceFilter('all')}>
-              All returns <strong>{returns.length}</strong>
+              All returns <strong>{returnRows.length}</strong>
             </button>
             <button type="button" className={sourceFilter === 'pending' ? 'is-active' : ''} onClick={() => setSourceFilter('pending')}>
               Pending review <strong>{pendingCount}</strong>
@@ -714,7 +692,15 @@ export function ReturnsPage() {
             <span>Needs action <strong>{attentionCount}</strong></span>
           </div>
 
-          {filteredReturns.length === 0 ? (
+          {isError && !returns ? (
+            <SectionErrorRetry
+              title="Returns unavailable"
+              description={error ?? 'Unable to load returns.'}
+              onRetry={() => void refetch()}
+            />
+          ) : !authContextReady || isLoading ? (
+            <SectionSkeleton title="Loading returns" description="Fetching return records in the background." />
+          ) : filteredReturns.length === 0 ? (
             <EmptyStatePanel
               title="No returns match this view"
               description="Adjust search or filters to find return requests and refunds."

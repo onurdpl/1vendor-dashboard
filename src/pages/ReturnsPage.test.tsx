@@ -227,7 +227,7 @@ describe('ReturnsPage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /return requests/i })).toBeInTheDocument();
     expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
-    expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Return requested')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Wireless label printer').length).toBeGreaterThan(0);
     expect(screen.getAllByText('SKU-A-1').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);

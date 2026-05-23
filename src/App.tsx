@@ -2,6 +2,7 @@ import { lazy, Suspense, type ReactNode } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { DataStatePanel } from './components/DataStatePanel';
 import { AppShell } from './components/AppShell';
+import { SectionSkeleton } from './components/OperationalPrimitives';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
@@ -49,12 +50,15 @@ const AutomationPage = lazy(() =>
 );
 
 const loadingFallback = (
-  <DataStatePanel
-    tone="loading"
-    eyebrow="Dashboard"
-    title="Loading workspace"
-    description="Preparing the selected dashboard section."
-  />
+  <section className="op-page route-loading-frame">
+    <div className="op-page-heading">
+      <div>
+        <p className="eyebrow">Dashboard</p>
+        <h2>Loading workspace</h2>
+      </div>
+    </div>
+    <SectionSkeleton title="Preparing section" description="The page frame is ready while this route loads." />
+  </section>
 );
 
 function resilientRoute(routeName: string, node: ReactNode) {

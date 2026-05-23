@@ -1,6 +1,6 @@
 import { Link, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
-import { DataStatePanel } from '../components/DataStatePanel';
+import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
 import { getAdminShopifyOrderBreakdown } from '../features/orders/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -34,7 +34,7 @@ export function AdminShopifyOrderPage() {
       },
     },
   );
-  const { data: breakdown, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: breakdown, isLoading, isError, error, refetch } = useQueryResource(
     shopifyOrderId ? queryKeys.admin.orders.breakdown(shopifyOrderId) : queryKeys.orders.list(),
     ({ signal }) => {
       if (!shopifyOrderId) {
@@ -48,29 +48,40 @@ export function AdminShopifyOrderPage() {
     },
   );
 
-  if (!appReadiness.ready || isLoading) {
+  if (!appReadiness.ready || (isLoading && !breakdown)) {
     return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Admin orders"
-        title="Loading Shopify breakdown"
-        description="Preparing cross-vendor order allocations for operations review."
-      />
+      <section className="dashboard order-detail">
+        <div className="hero-card operational-card">
+          <div>
+            <p className="eyebrow">Admin orders</p>
+            <h2>Shopify order breakdown</h2>
+            <p className="page-description">Preparing cross-vendor order allocations for operations review.</p>
+          </div>
+        </div>
+        <SectionSkeleton title="Loading Shopify breakdown" description="Fetching allocation data in the background." />
+      </section>
     );
   }
 
   if (isError || !breakdown) {
     return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Admin orders"
-        title="Breakdown unavailable"
-        description={error ?? 'The requested Shopify order could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-        actionLabel="Back to orders"
-        actionTo="/orders"
-      />
+      <section className="dashboard order-detail">
+        <div className="hero-card operational-card">
+          <div>
+            <p className="eyebrow">Admin orders</p>
+            <h2>Shopify order breakdown</h2>
+            <p className="page-description">The requested Shopify order could not be loaded.</p>
+          </div>
+          <Link className="button button-secondary" to="/orders">
+            Back to orders
+          </Link>
+        </div>
+        <SectionErrorRetry
+          title="Breakdown unavailable"
+          description={error ?? 'The requested Shopify order could not be loaded.'}
+          onRetry={() => void refetch()}
+        />
+      </section>
     );
   }
 

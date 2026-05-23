@@ -211,6 +211,34 @@ export function EmptyStatePanel({ title, description }: { title: string; descrip
   );
 }
 
+export function SectionSkeleton({ title = 'Loading section', description = 'Data is loading in the background.' }: { title?: string; description?: string }) {
+  return <EmptyStatePanel title={title} description={description} />;
+}
+
+export function SectionErrorRetry({
+  title = 'This section could not load',
+  description,
+  onRetry,
+  retryLabel = 'Retry',
+}: {
+  title?: string;
+  description: string;
+  onRetry?: () => void;
+  retryLabel?: string;
+}) {
+  return (
+    <div className="op-empty-state op-tone-danger">
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {onRetry ? (
+        <button type="button" className="button button-secondary" onClick={onRetry}>
+          {retryLabel}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 export function OperationalActionGroup({ children }: { children: ReactNode }) {
   return <div className="op-action-group">{children}</div>;
 }

@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   MetadataRow,
   OperationalSection,
+  SectionErrorRetry,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
@@ -347,7 +347,7 @@ export function DashboardPage() {
     }
   }
 
-  if (!appReadiness.ready || isLoading) {
+  if (!appReadiness.ready || (isLoading && !dashboard)) {
     return (
       <DashboardLoadingSkeleton
         userName={currentUser?.name}
@@ -357,39 +357,34 @@ export function DashboardPage() {
     );
   }
 
-  if (isError || !dashboard) {
-    return (
-      <section className="dashboard dashboard-workspace">
-        <DataStatePanel
-          tone="error"
-          eyebrow="Dashboard"
-          title="Operational overview unavailable"
-          description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
-          diagnostics={diagnostics}
-          onRetry={() => void refetchDashboard()}
-        />
-        {message ? <ActionFeedback tone={tone} message={message} /> : null}
-      </section>
-    );
-  }
+  const dashboardView = dashboard ?? {
+    vendorId,
+    vendorName: currentVendor.vendorName,
+    title: 'Operations dashboard',
+    description: 'Operational overview is loading.',
+    stats: [],
+    recentActivity: [],
+    workspaceStatus: 'Dashboard data is loading.',
+    priorityWork: [],
+  };
 
-  const blockedAllocations = getPriorityValue(dashboard.priorityWork, 'Blocked allocations');
-  const refundAttention = getPriorityValue(dashboard.priorityWork, 'Refund attention');
+  const blockedAllocations = getPriorityValue(dashboardView.priorityWork, 'Blocked allocations');
+  const refundAttention = getPriorityValue(dashboardView.priorityWork, 'Refund attention');
   const needsAttention = blockedAllocations + refundAttention;
-  const attentionItems = dashboard.priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
-  const health = dashboard.observabilitySummary?.health ?? 'Unknown';
-  const dashboardKpis = dashboard.stats.slice(0, 5);
+  const attentionItems = dashboardView.priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
+  const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
+  const dashboardKpis = dashboardView.stats.slice(0, 5);
 
   return (
     <section className="op-page dashboard-command-center dashboard-enterprise-shell">
       <header className="dashboard-enterprise-header">
         <div className="dashboard-enterprise-title">
-          <h1>{dashboard.title}</h1>
-          <p className="page-description">{dashboard.description}</p>
+          <h1>{dashboardView.title}</h1>
+          <p className="page-description">{dashboardView.description}</p>
           <div className="dashboard-role-badges" aria-label="Workspace context">
             <StatusBadge tone="info">User {currentUser?.name ?? 'Unknown'}</StatusBadge>
             <StatusBadge tone="attention">Role {currentUser?.role ?? 'Unknown'}</StatusBadge>
-            <StatusBadge tone="info">Vendor {dashboard.vendorName ?? 'Unknown'}</StatusBadge>
+            <StatusBadge tone="info">Vendor {dashboardView.vendorName ?? 'Unknown'}</StatusBadge>
           </div>
         </div>
         <div className="dashboard-status-strip" aria-label="Dashboard status">
@@ -418,7 +413,13 @@ export function DashboardPage() {
             title="Operational priority queue"
             description="High priority operational items that require attention."
           >
-            {dashboard.priorityWork.length === 0 ? (
+            {isError && !dashboard ? (
+              <SectionErrorRetry
+                title="Operational overview unavailable"
+                description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
+                onRetry={() => void refetchDashboard()}
+              />
+            ) : dashboardView.priorityWork.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <div className="dashboard-priority-table">
@@ -430,7 +431,7 @@ export function DashboardPage() {
                   <span>Status</span>
                   <span>Action</span>
                 </div>
-                {dashboard.priorityWork.map((item) => (
+                {dashboardView.priorityWork.map((item) => (
                   <article key={item.label} className="dashboard-priority-row">
                     <div className="dashboard-priority-cell">
                       <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
@@ -451,11 +452,11 @@ export function DashboardPage() {
           </OperationalSection>
 
           <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
-            {dashboard.recentActivity.length === 0 ? (
+            {dashboardView.recentActivity.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
-                {dashboard.recentActivity.map((item) => {
+                {dashboardView.recentActivity.map((item) => {
                   const activity = formatRecentActivity(item);
 
                   return (
@@ -535,11 +536,11 @@ export function DashboardPage() {
                   </div>
                 )}
               </div>
-            ) : dashboard.notificationSummary ? (
+            ) : dashboardView.notificationSummary ? (
               <div className="op-meta-grid">
-                <MetadataRow label="Unread" value={dashboard.notificationSummary.unread} />
-                <MetadataRow label="High priority" value={dashboard.notificationSummary.highPriority} />
-                <MetadataRow label="Latest" value={dashboard.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
+                <MetadataRow label="Unread" value={dashboardView.notificationSummary.unread} />
+                <MetadataRow label="High priority" value={dashboardView.notificationSummary.highPriority} />
+                <MetadataRow label="Latest" value={dashboardView.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
               </div>
             ) : (
               <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
@@ -571,47 +572,47 @@ export function DashboardPage() {
             <div className="dashboard-status-metric-list dashboard-finance-rows">
               <div className="dashboard-status-metric-row">
                 <span>Gross sales</span>
-                <strong>{dashboard.financeSnapshot?.grossSales ?? '—'}</strong>
+                <strong>{dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Refunds</span>
-                <strong>{dashboard.financeSnapshot?.refunds ?? '—'}</strong>
+                <strong>{dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Net revenue</span>
-                <strong>{dashboard.financeSnapshot?.netRevenue ?? '—'}</strong>
+                <strong>{dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Payout estimate</span>
-                <strong>{dashboard.financeSnapshot?.payoutEstimate ?? '—'}</strong>
+                <strong>{dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
               </div>
             </div>
           </OperationalSection>
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Diagnostics summary" description="System health and reconciliation overview.">
-              {dashboard.diagnosticsSummary ? (
+              {dashboardView.diagnosticsSummary ? (
                 <div className="dashboard-status-metric-list dashboard-diagnostics-rows">
                   <div className="dashboard-status-metric-row">
                     <span>
-                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success')}`} aria-hidden="true" />
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboardView.diagnosticsSummary.failedWebhooks > 0 ? 'danger' : 'success')}`} aria-hidden="true" />
                       Failed webhooks
                     </span>
-                    <strong>{dashboard.diagnosticsSummary.failedWebhooks}</strong>
+                    <strong>{dashboardView.diagnosticsSummary.failedWebhooks}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>
-                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success')}`} aria-hidden="true" />
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboardView.diagnosticsSummary.stuckReceived > 0 ? 'attention' : 'success')}`} aria-hidden="true" />
                       Stuck received
                     </span>
-                    <strong>{dashboard.diagnosticsSummary.stuckReceived}</strong>
+                    <strong>{dashboardView.diagnosticsSummary.stuckReceived}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>
-                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboard.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success')}`} aria-hidden="true" />
+                      <i className={`dashboard-status-dot ${getStatusDotTone(dashboardView.diagnosticsSummary.fulfillmentSyncFailures > 0 ? 'warning' : 'success')}`} aria-hidden="true" />
                       Fulfillment sync failures
                     </span>
-                    <strong>{dashboard.diagnosticsSummary.fulfillmentSyncFailures}</strong>
+                    <strong>{dashboardView.diagnosticsSummary.fulfillmentSyncFailures}</strong>
                   </div>
                 </div>
               ) : (
@@ -622,41 +623,41 @@ export function DashboardPage() {
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Operational health" description="Uptime and operational metrics.">
-              {dashboard.observabilitySummary ? (
+              {dashboardView.observabilitySummary ? (
                 <div className="dashboard-status-metric-list dashboard-health-list">
                   <div className="dashboard-status-metric-row">
                     <span>
-                      <i className={`dashboard-status-dot ${getStatusDotTone(getHealthTone(dashboard.observabilitySummary.health))}`} aria-hidden="true" />
+                      <i className={`dashboard-status-dot ${getStatusDotTone(getHealthTone(dashboardView.observabilitySummary.health))}`} aria-hidden="true" />
                       Health
                     </span>
-                    <StatusBadge tone={getHealthTone(dashboard.observabilitySummary.health)}>{dashboard.observabilitySummary.health}</StatusBadge>
+                    <StatusBadge tone={getHealthTone(dashboardView.observabilitySummary.health)}>{dashboardView.observabilitySummary.health}</StatusBadge>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Success rate 24h</span>
-                    <strong>{formatRate(dashboard.observabilitySummary.successRate24h)}</strong>
+                    <strong>{formatRate(dashboardView.observabilitySummary.successRate24h)}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Failed webhooks 24h</span>
-                    <strong>{dashboard.observabilitySummary.failedWebhooks24h}</strong>
+                    <strong>{dashboardView.observabilitySummary.failedWebhooks24h}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Retry pressure</span>
-                    <strong>{dashboard.observabilitySummary.retryPressureScore}</strong>
+                    <strong>{dashboardView.observabilitySummary.retryPressureScore}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Dead-letter</span>
-                    <strong>{dashboard.observabilitySummary.deadLetterReady}</strong>
+                    <strong>{dashboardView.observabilitySummary.deadLetterReady}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Reconciliation backlog</span>
-                    <strong>{dashboard.observabilitySummary.reconciliationBacklog}</strong>
+                    <strong>{dashboardView.observabilitySummary.reconciliationBacklog}</strong>
                   </div>
                   <div className="dashboard-status-metric-row">
                     <span>Stale signals</span>
-                    <strong>{dashboard.observabilitySummary.staleStateCount}</strong>
+                    <strong>{dashboardView.observabilitySummary.staleStateCount}</strong>
                   </div>
-                  {dashboard.observabilitySummary.note ? (
-                    <p className="dashboard-status-note">{dashboard.observabilitySummary.note}</p>
+                  {dashboardView.observabilitySummary.note ? (
+                    <p className="dashboard-status-note">{dashboardView.observabilitySummary.note}</p>
                   ) : null}
                 </div>
               ) : (
@@ -671,7 +672,7 @@ export function DashboardPage() {
         <div className="dashboard-workspace-status-grid">
           <div>
             <span>Vendor</span>
-            <strong>{dashboard.vendorName ?? 'Unknown'}</strong>
+            <strong>{dashboardView.vendorName ?? 'Unknown'}</strong>
           </div>
           <div>
             <span>Scope</span>
@@ -679,7 +680,7 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Operational items</span>
-            <strong>{dashboard.priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
+            <strong>{dashboardView.priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
           </div>
           <div>
             <span>Pending attention</span>
@@ -687,13 +688,13 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Queue items</span>
-            <strong>{dashboard.priorityWork.length}</strong>
+            <strong>{dashboardView.priorityWork.length}</strong>
           </div>
         </div>
-        <p className="dashboard-workspace-status-copy">{dashboard.workspaceStatus}</p>
-        {dashboard.partialDataWarnings?.length ? (
+        <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>
+        {dashboardView.partialDataWarnings?.length ? (
           <ul className="dashboard-activity-list">
-            {dashboard.partialDataWarnings.map((warning) => (
+            {dashboardView.partialDataWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>

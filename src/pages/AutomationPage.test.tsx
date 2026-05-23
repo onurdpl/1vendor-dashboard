@@ -81,7 +81,7 @@ describe('AutomationPage suggested actions', () => {
     renderAutomationPage();
 
     expect(await screen.findByRole('heading', { name: 'Suggested actions' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Escalate' })).toBeDisabled();
+    expect(await screen.findByRole('button', { name: 'Escalate' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Create queue' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Summarize' })).toBeDisabled();
     expect(screen.getAllByText(/Action execution coming in a future phase/i).length).toBeGreaterThan(0);

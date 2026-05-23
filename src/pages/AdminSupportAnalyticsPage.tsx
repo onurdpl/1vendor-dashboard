@@ -1,10 +1,11 @@
 import { Link } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import {
   EmptyStatePanel,
   KPIStatCard,
   OperationalTable,
   OperationalTableRow,
+  SectionErrorRetry,
+  SectionSkeleton,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -43,37 +44,34 @@ function getCategoryTone(entry: SupportAnalyticsCategoryInsight) {
 
 export function AdminSupportAnalyticsPage() {
   const appReadiness = useAppReadiness();
-  const { data: analytics, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: analytics, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.admin.support.analytics(),
     ({ signal }) => getAdminSupportAnalytics({ signal }),
     { enabled: appReadiness.ready },
   );
 
-  if (!appReadiness.ready || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Support analytics"
-        title="Loading support analytics"
-        description="Aggregating support ticket trends and SLA health."
-      />
-    );
-  }
-
-  if (isError || !analytics) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Support analytics"
-        title="Support analytics unavailable"
-        description={error ?? 'Unable to load support analytics.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
-
-  const needsAttentionVendors = analytics.vendorInsights.filter((vendor) => vendor.needsAttention);
+  const analyticsView = analytics ?? {
+    kpis: {
+      openTickets: 0,
+      overdueTickets: 0,
+      avgFirstResponseHours: null,
+      avgResolutionHours: null,
+      waitingOnVendor: 0,
+      resolvedToday: 0,
+    },
+    trends: [],
+    slaInsights: {
+      overdueTickets: 0,
+      overduePercent: 0,
+      avgResponseDelayHours: null,
+      avgResolutionHours: null,
+      breachesByCategory: [],
+    },
+    vendorInsights: [],
+    categoryInsights: [],
+    assignmentInsights: [],
+  };
+  const needsAttentionVendors = analyticsView.vendorInsights.filter((vendor) => vendor.needsAttention);
 
   return (
     <section className="op-page support-ops-page support-analytics-page">
@@ -89,13 +87,22 @@ export function AdminSupportAnalyticsPage() {
       </div>
 
       <div className="support-analytics-kpis">
-        <KPIStatCard label="Open tickets" value={analytics.kpis.openTickets} detail="Unresolved support load" tone="info" />
-        <KPIStatCard label="Overdue tickets" value={analytics.kpis.overdueTickets} detail="SLA currently breached" tone={analytics.kpis.overdueTickets ? 'danger' : 'success'} />
-        <KPIStatCard label="Avg first response" value={formatHours(analytics.kpis.avgFirstResponseHours)} detail="First admin public reply" tone="neutral" />
-        <KPIStatCard label="Avg resolution" value={formatHours(analytics.kpis.avgResolutionHours)} detail="Resolved or closed tickets" tone="neutral" />
-        <KPIStatCard label="Waiting on vendor" value={analytics.kpis.waitingOnVendor} detail="Vendor response needed" tone="warning" />
-        <KPIStatCard label="Resolved today" value={analytics.kpis.resolvedToday} detail="Closed support work" tone="success" />
+        <KPIStatCard label="Open tickets" value={analyticsView.kpis.openTickets} detail="Unresolved support load" tone="info" />
+        <KPIStatCard label="Overdue tickets" value={analyticsView.kpis.overdueTickets} detail="SLA currently breached" tone={analyticsView.kpis.overdueTickets ? 'danger' : 'success'} />
+        <KPIStatCard label="Avg first response" value={formatHours(analyticsView.kpis.avgFirstResponseHours)} detail="First admin public reply" tone="neutral" />
+        <KPIStatCard label="Avg resolution" value={formatHours(analyticsView.kpis.avgResolutionHours)} detail="Resolved or closed tickets" tone="neutral" />
+        <KPIStatCard label="Waiting on vendor" value={analyticsView.kpis.waitingOnVendor} detail="Vendor response needed" tone="warning" />
+        <KPIStatCard label="Resolved today" value={analyticsView.kpis.resolvedToday} detail="Closed support work" tone="success" />
       </div>
+      {isError && !analytics ? (
+        <SectionErrorRetry
+          title="Support analytics unavailable"
+          description={error ?? 'Unable to load support analytics.'}
+          onRetry={() => void refetch()}
+        />
+      ) : !appReadiness.ready || isLoading ? (
+        <SectionSkeleton title="Loading support analytics" description="Aggregating support ticket trends in the background." />
+      ) : null}
 
       <div className="support-analytics-grid">
         <article className="support-card">
@@ -106,7 +113,7 @@ export function AdminSupportAnalyticsPage() {
             </div>
           </div>
           <div className="support-trend-list">
-            {analytics.trends.map((point) => (
+            {analyticsView.trends.map((point) => (
               <div key={point.date} className="support-trend-row">
                 <span>{formatDate(point.date)}</span>
                 <div>
@@ -132,30 +139,30 @@ export function AdminSupportAnalyticsPage() {
               <p className="eyebrow">SLA</p>
               <h3>Response health</h3>
             </div>
-            <StatusBadge tone={analytics.slaInsights.overdueTickets ? 'danger' : 'success'}>
-              {analytics.slaInsights.overdueTickets ? 'Attention' : 'Healthy'}
+            <StatusBadge tone={analyticsView.slaInsights.overdueTickets ? 'danger' : 'success'}>
+              {analyticsView.slaInsights.overdueTickets ? 'Attention' : 'Healthy'}
             </StatusBadge>
           </div>
           <div className="support-summary-grid">
             <div>
               <span>Overdue</span>
-              <strong>{analytics.slaInsights.overdueTickets}</strong>
+              <strong>{analyticsView.slaInsights.overdueTickets}</strong>
             </div>
             <div>
               <span>Overdue rate</span>
-              <strong>{formatPercent(analytics.slaInsights.overduePercent)}</strong>
+              <strong>{formatPercent(analyticsView.slaInsights.overduePercent)}</strong>
             </div>
             <div>
               <span>Avg delay</span>
-              <strong>{formatHours(analytics.slaInsights.avgResponseDelayHours)}</strong>
+              <strong>{formatHours(analyticsView.slaInsights.avgResponseDelayHours)}</strong>
             </div>
             <div>
               <span>Avg resolution</span>
-              <strong>{formatHours(analytics.slaInsights.avgResolutionHours)}</strong>
+              <strong>{formatHours(analyticsView.slaInsights.avgResolutionHours)}</strong>
             </div>
           </div>
           <div className="support-mini-list">
-            {analytics.slaInsights.breachesByCategory.length ? analytics.slaInsights.breachesByCategory.map((entry) => (
+            {analyticsView.slaInsights.breachesByCategory.length ? analyticsView.slaInsights.breachesByCategory.map((entry) => (
               <div key={entry.category}>
                 <span>{formatSupportLabel(entry.category)}</span>
                 <strong>{entry.overdueCount} overdue</strong>
@@ -174,9 +181,9 @@ export function AdminSupportAnalyticsPage() {
             <h3>Operational support load</h3>
           </div>
         </div>
-        {analytics.vendorInsights.length ? (
+        {analyticsView.vendorInsights.length ? (
           <OperationalTable columns={['Vendor', 'Tickets', 'Unresolved', 'Overdue', 'Overdue rate', 'Avg resolution', 'Signal']}>
-            {analytics.vendorInsights.map((vendor) => (
+            {analyticsView.vendorInsights.map((vendor) => (
               <OperationalTableRow key={vendor.vendorId}>
                 <td>
                   <strong>{vendor.vendorName ?? vendor.vendorId}</strong>
@@ -209,7 +216,7 @@ export function AdminSupportAnalyticsPage() {
             </div>
           </div>
           <OperationalTable columns={['Category', 'Tickets', 'Overdue', 'Overdue %', 'Avg resolution']}>
-            {analytics.categoryInsights.map((entry) => (
+            {analyticsView.categoryInsights.map((entry) => (
               <OperationalTableRow key={entry.category}>
                 <td>{formatSupportLabel(entry.category)}</td>
                 <td>{entry.ticketCount}</td>
@@ -230,9 +237,9 @@ export function AdminSupportAnalyticsPage() {
               <h3>Workload</h3>
             </div>
           </div>
-          {analytics.assignmentInsights.length ? (
+          {analyticsView.assignmentInsights.length ? (
             <OperationalTable columns={['Assignee', 'Tickets', 'Overdue', 'Avg response', 'Open unassigned']}>
-              {analytics.assignmentInsights.map((entry) => (
+              {analyticsView.assignmentInsights.map((entry) => (
                 <OperationalTableRow key={entry.assigneeName}>
                   <td>{entry.assigneeName}</td>
                   <td>{entry.ticketCount}</td>

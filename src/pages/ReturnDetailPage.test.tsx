@@ -377,7 +377,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Return response unavailable' })).toBeInTheDocument();
-    expect(screen.getByText('The return detail response was empty or malformed. Retry the request.')).toBeInTheDocument();
+    expect(screen.getAllByText('The return detail response was empty or malformed. Retry the request.').length).toBeGreaterThan(0);
   });
 
   it('does not show infinite loading for an unauthorized session', async () => {
@@ -386,7 +386,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Session required' })).toBeInTheDocument();
-    expect(screen.getByText('Sign in again to load this return request.')).toBeInTheDocument();
+    expect(screen.getAllByText('Sign in again to load this return request.').length).toBeGreaterThan(0);
   });
 
   it('renders existing Navlungo return pickup evidence on Return Detail', async () => {

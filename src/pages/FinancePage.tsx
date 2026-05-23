@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
   FilterBar,
   MetadataRow,
   OperationalActionGroup,
+  SectionErrorRetry,
+  SectionSkeleton,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -861,29 +862,36 @@ export function FinancePage() {
     }
   }
 
-  if (!authContextReady || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Finance"
-        title="Loading finance overview"
-        description="Fetching summary data and financial records from the central data layer."
-      />
-    );
-  }
-
-  if (isError || !finance) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Finance"
-        title="Finance unavailable"
-        description={error ?? 'The financial overview could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
+  const financeView = finance ?? {
+    summary: {
+      grossSales: '$0.00',
+      refunds: '$0.00',
+      netRevenue: '$0.00',
+      platformFee: '$0.00',
+      payoutEstimate: '$0.00',
+      totalRevenue: '$0.00',
+      availableBalance: '$0.00',
+      pendingPayouts: '$0.00',
+      refundsThisMonth: '$0.00',
+    },
+    transactions: [],
+    profile: {
+      vendorId: currentVendor.vendorId,
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+      deductShippingEnabled: false,
+      shippingMode: 'disabled' as const,
+      fixedShippingFee: null,
+      active: true,
+      source: 'default' as const,
+    },
+    payoutBatchSummary: {
+      eligibleRowCount: 0,
+      eligibleNetAmount: '$0.00',
+      blockedRowCount: 0,
+      latestBatch: null,
+    },
+  };
 
   return (
     <section className={`op-page finance-control-center finance-payout-workspace ${isVendorUser ? 'finance-vendor-workspace' : ''}`}>
@@ -914,35 +922,35 @@ export function FinancePage() {
           {
             icon: 'B',
             label: 'Available balance',
-            value: finance.summary.availableBalance ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate,
+            value: financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate,
             detail: 'Ready for payout',
             tone: 'success',
           },
           {
             icon: 'P',
             label: 'Pending payout',
-            value: finance.summary.pendingPayouts ?? finance.summary.heldBalance ?? '$0.00',
-            detail: `Includes ${finance.payoutBatchSummary?.eligibleRowCount ?? 0} items`,
+            value: financeView.summary.pendingPayouts ?? financeView.summary.heldBalance ?? '$0.00',
+            detail: `Includes ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} items`,
             tone: 'info',
           },
           {
             icon: 'R',
             label: 'Refund deductions',
-            value: formatDeductionValue(finance.summary.refundsThisMonth ?? finance.summary.refunds),
+            value: formatDeductionValue(financeView.summary.refundsThisMonth ?? financeView.summary.refunds),
             detail: 'This period',
             tone: 'attention',
           },
           {
             icon: 'D',
             label: 'Upcoming payout',
-            value: getUpcomingPayoutLabel(finance),
-            detail: getUpcomingPayoutDetail(finance),
+            value: getUpcomingPayoutLabel(financeView),
+            detail: getUpcomingPayoutDetail(financeView),
             tone: 'info',
           },
           {
             icon: '!',
             label: 'Needs review',
-            value: financeKpis.failed + (finance.payoutBatchSummary?.blockedRowCount ?? 0),
+            value: financeKpis.failed + (financeView.payoutBatchSummary?.blockedRowCount ?? 0),
             detail: 'Action required',
             tone: 'danger',
           },
@@ -1005,7 +1013,15 @@ export function FinancePage() {
             ))}
           </div>
 
-          {filteredRecords.length === 0 ? (
+          {isError && !finance ? (
+            <SectionErrorRetry
+              title="Finance unavailable"
+              description={error ?? 'The financial overview could not be loaded.'}
+              onRetry={() => void refetch()}
+            />
+          ) : !authContextReady || isLoading ? (
+            <SectionSkeleton title="Loading finance overview" description="Fetching finance records in the background." />
+          ) : filteredRecords.length === 0 ? (
             <EmptyStatePanel
               title="No payout activity in this view"
               description="Adjust the status, type, or search filters to review payout activity."
@@ -1070,9 +1086,9 @@ export function FinancePage() {
                 <p className="page-description">Applies to new payout estimates from now on. Past activity keeps its original rates.</p>
               </div>
               <div className="finance-profile-summary">
-                <MetadataRow label="Commission" value={`${finance.profile?.commissionPercent ?? '10.00'}%`} />
-                <MetadataRow label="Tax" value={`${finance.profile?.commissionVatPercent ?? '0.00'}%`} />
-                <MetadataRow label="Shipping" value={finance.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
+                <MetadataRow label="Commission" value={`${financeView.profile?.commissionPercent ?? '10.00'}%`} />
+                <MetadataRow label="Tax" value={`${financeView.profile?.commissionVatPercent ?? '0.00'}%`} />
+                <MetadataRow label="Shipping" value={financeView.profile?.deductShippingEnabled ? 'After fulfillment' : 'Disabled'} />
               </div>
               {isAdmin ? (
                 <form className="finance-profile-form" aria-label="Vendor finance profile settings" onSubmit={handleSaveVendorProfile}>
@@ -1146,14 +1162,14 @@ export function FinancePage() {
                 </p>
               </div>
               <div className="finance-profile-summary">
-                <MetadataRow label="Eligible rows" value={finance.payoutBatchSummary?.eligibleRowCount ?? 0} />
-                <MetadataRow label="Eligible net" value={finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate} />
-                <MetadataRow label="Needs review" value={finance.payoutBatchSummary?.blockedRowCount ?? 0} />
+                <MetadataRow label="Eligible rows" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
+                <MetadataRow label="Eligible net" value={financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate} />
+                <MetadataRow label="Needs review" value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
                 <MetadataRow
                   label={isVendorUser ? 'Latest payout' : 'Latest draft'}
                   value={
-                    finance.payoutBatchSummary?.latestBatch
-                      ? `${getPayoutBatchStatusLabel(finance.payoutBatchSummary.latestBatch.status)} · ${finance.payoutBatchSummary.latestBatch.netAmount}`
+                    financeView.payoutBatchSummary?.latestBatch
+                      ? `${getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
                       : 'No draft prepared'
                   }
                 />
@@ -1163,13 +1179,13 @@ export function FinancePage() {
                   <button
                     type="button"
                     className="button button-primary button-compact"
-                    disabled={preparePayoutBatchMutation.isPending || (finance.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
+                    disabled={preparePayoutBatchMutation.isPending || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
                     onClick={() => preparePayoutBatchMutation.mutate(undefined)}
                   >
                     {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft payout'}
                   </button>
-                  <StatusBadge tone={(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
-                    {(finance.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows ready' : 'No payable rows'}
+                  <StatusBadge tone={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
+                    {(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows ready' : 'No payable rows'}
                   </StatusBadge>
                 </div>
               ) : (
@@ -1300,11 +1316,11 @@ export function FinancePage() {
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow
-                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? finance.profile?.commissionPercent ?? '10.00'}%)`}
+                    label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commission ?? '$0.00')}</span>}
                   />
                   <MetadataRow
-                    label={`Tax (${selectedRecord.payoutCalculation?.commissionVatPercent ?? finance.profile?.commissionVatPercent ?? '0.00'}%)`}
+                    label={`Tax (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
                     value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commissionVat ?? '$0.00')}</span>}
                   />
                   <MetadataRow

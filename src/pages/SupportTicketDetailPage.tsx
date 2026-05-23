@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SectionSkeleton, StatusBadge } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { queryClient } from '../lib/api/queryClient';
@@ -417,27 +416,37 @@ export function SupportTicketDetailPage() {
     void queryClient.invalidateQueries({ queryKey: queryKeys.support.tickets(currentVendor.vendorId) });
   }, [currentVendor.vendorId, isAdmin, ticket?.id]);
 
-  if (!authContextReady || isLoading) {
+  if (!authContextReady || (isLoading && !ticket)) {
     return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Support"
-        title="Loading support ticket"
-        description="Preparing support ticket context."
-      />
+      <section className="op-page support-detail-page">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Support</p>
+            <h1>Support ticket</h1>
+            <p>Preparing support ticket context.</p>
+          </div>
+        </div>
+        <SectionSkeleton title="Loading support ticket" description="Fetching ticket details in the background." />
+      </section>
     );
   }
 
   if (isError || !ticket) {
     return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Support"
-        title="Support ticket unavailable"
-        description={error ?? 'Unable to load support ticket.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
+      <section className="op-page support-detail-page">
+        <div className="op-page-heading">
+          <div>
+            <p className="eyebrow">Support</p>
+            <h1>Support ticket</h1>
+            <p>Unable to load support ticket context.</p>
+          </div>
+        </div>
+        <SectionErrorRetry
+          title="Support ticket unavailable"
+          description={error ?? 'Unable to load support ticket.'}
+          onRetry={() => void refetch()}
+        />
+      </section>
     );
   }
 

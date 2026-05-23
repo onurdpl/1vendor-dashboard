@@ -1,5 +1,5 @@
-import { DataStatePanel } from '../components/DataStatePanel';
 import { ActionFeedback } from '../components/ActionFeedback';
+import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useActionFeedback } from '../lib/ui';
@@ -20,7 +20,7 @@ function formatDate(value: string) {
 export function AutomationPage() {
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
-  const { data: automation, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
+  const { data: automation, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.automation.alerts(currentVendor.vendorId),
     ({ signal }) => getAutomationDashboard({ signal }),
     { enabled: appReadiness.ready },
@@ -29,33 +29,10 @@ export function AutomationPage() {
   const canRunAutomationAction = canPerformAction('automation:write');
   const currentRole = appReadiness.currentUser?.role ?? 'vendor';
 
-  if (!appReadiness.ready || isLoading) {
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Automation"
-        title="Loading operational signals"
-        description="Fetching alerts and suggestions from the central data layer."
-      />
-    );
-  }
-
-  if (isError || !automation) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Automation"
-        title="Automation unavailable"
-        description={error ?? 'The automation feed could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-      />
-    );
-  }
-
-  const totalAlerts = automation.alerts.length;
-  const criticalAlerts = automation.alerts.filter((alert) => alert.type === 'Critical' || alert.status === 'New').length;
-  const suggestedActions = automation.suggestions.length;
+  const automationView = automation ?? { alerts: [], suggestions: [] };
+  const totalAlerts = automationView.alerts.length;
+  const criticalAlerts = automationView.alerts.filter((alert) => alert.type === 'Critical' || alert.status === 'New').length;
+  const suggestedActions = automationView.suggestions.length;
   const restrictedActions = canRunAutomationAction ? 0 : suggestedActions;
 
   return (
@@ -100,7 +77,15 @@ export function AutomationPage() {
           <div className="queue-list-header">
             <h3>Operational alerts</h3>
           </div>
-          {automation.alerts.length === 0 ? (
+          {isError && !automation ? (
+            <SectionErrorRetry
+              title="Automation unavailable"
+              description={error ?? 'The automation feed could not be loaded.'}
+              onRetry={() => void refetch()}
+            />
+          ) : !appReadiness.ready || isLoading ? (
+            <SectionSkeleton title="Loading operational signals" description="Fetching alerts and suggestions in the background." />
+          ) : automationView.alerts.length === 0 ? (
             <div className="queue-empty">
               <p className="eyebrow">Alerts</p>
               <h3>No automation alerts</h3>
@@ -110,7 +95,7 @@ export function AutomationPage() {
             </div>
           ) : (
             <div className="automation-alerts">
-              {automation.alerts.map((alert) => (
+              {automationView.alerts.map((alert) => (
                 <article key={alert.id} className="automation-alert queue-item">
                   <div className="automation-alert-top">
                     <div className={`status-badge automation-type automation-${alert.type.toLowerCase()}`}>
@@ -154,14 +139,22 @@ export function AutomationPage() {
             </p>
           ) : null}
           <div className="automation-actions">
-            {automation.suggestions.length === 0 ? (
+            {isError && !automation ? (
+            <SectionErrorRetry
+              title="Suggested actions unavailable"
+              description={error ?? 'The automation feed could not be loaded.'}
+              onRetry={() => void refetch()}
+            />
+          ) : !appReadiness.ready || isLoading ? (
+            <SectionSkeleton title="Loading suggested actions" description="Fetching recommended actions in the background." />
+          ) : automationView.suggestions.length === 0 ? (
             <div className="queue-empty">
               <p className="eyebrow">Actions</p>
               <h3>No suggested automation actions</h3>
               <p className="page-description">No immediate operational automation actions are suggested for this vendor scope.</p>
             </div>
           ) : (
-              automation.suggestions.map((item) => (
+              automationView.suggestions.map((item) => (
                 <article key={item.title} className="automation-action queue-item">
                   <div className="queue-title-block">
                     <h4>{item.title}</h4>

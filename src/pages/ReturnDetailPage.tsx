@@ -1,7 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { DataStatePanel } from '../components/DataStatePanel';
-import { EmptyStatePanel, StatusBadge } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SectionSkeleton, StatusBadge } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -695,80 +694,83 @@ export function ReturnDetailPage() {
       error={error}
     />
   );
+  const renderReturnRouteFrame = (title: string, description: string, body: ReactNode) => (
+    <section className="return-detail-page return-detail-loading-frame">
+      <div className="return-detail-header compact">
+        <div>
+          <p className="eyebrow">Returns</p>
+          <h1>{title}</h1>
+          <p>{description}</p>
+        </div>
+        <Link className="button button-secondary" to="/returns">
+          Back to returns
+        </Link>
+      </div>
+      {body}
+    </section>
+  );
 
   if (!returnId) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Returns"
-        title="Return request not found"
-        description="The route is missing a return request id."
-        actionNode={
-          <>
-            {routeDiagnosticsNode}
-            <Link className="button button-secondary" to="/returns">
-              Back to returns
-            </Link>
-          </>
-        }
-      />
+    return renderReturnRouteFrame(
+      'Return request not found',
+      'The route is missing a return request id.',
+      <>
+        <SectionErrorRetry title="Route is missing a return id" description="The route is missing a return request id." />
+        {routeDiagnosticsNode}
+      </>,
     );
   }
 
   if (appReadiness.unauthorized) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Returns"
-        title="Session required"
-        description="Sign in again to load this return request."
-        actionLabel="Go to login"
-        actionTo="/login"
-        actionNode={routeDiagnosticsNode}
-      />
+    return renderReturnRouteFrame(
+      'Session required',
+      'Sign in again to load this return request.',
+      <>
+        <SectionErrorRetry title="Authentication required" description="Sign in again to load this return request." />
+        {routeDiagnosticsNode}
+        <Link className="button button-secondary" to="/login">
+          Go to login
+        </Link>
+      </>,
     );
   }
 
   if (appReadiness.sessionReady && !appReadiness.vendorReady) {
-    return (
-      <DataStatePanel
-        tone="info"
-        eyebrow="Returns"
-        title="Waiting for vendor context"
-        description="The return request cannot load until a vendor context is selected."
-        actionNode={
-          <>
-            {routeDiagnosticsNode}
-            <button type="button" className="button button-secondary" onClick={() => void refetch()}>
-              Retry
-            </button>
-          </>
-        }
-      />
+    return renderReturnRouteFrame(
+      'Waiting for vendor context',
+      'The return request cannot load until a vendor context is selected.',
+      <>
+        <EmptyStatePanel title="Vendor context unavailable" description="Select or restore vendor context to continue." />
+        {routeDiagnosticsNode}
+        <button type="button" className="button button-secondary" onClick={() => void refetch()}>
+          Retry
+        </button>
+      </>,
     );
   }
 
-  if (!authContextReady || isLoading) {
+  if (!authContextReady || (isLoading && !returnRequest)) {
     if (loadingTimedOut) {
-      return (
-        <DataStatePanel
-          tone="error"
-          eyebrow="Returns"
-          title="Return request is taking longer than expected"
-          description="The detail request did not finish in time. Retry the request or inspect the route diagnostics."
-          onRetry={() => void refetch()}
-          actionNode={routeDiagnosticsNode}
-        />
+      return renderReturnRouteFrame(
+        'Return request is taking longer than expected',
+        'The detail request did not finish in time. Retry the request or inspect the route diagnostics.',
+        <>
+          <SectionErrorRetry
+            title="Request timed out"
+            description="The detail request did not finish in time."
+            onRetry={() => void refetch()}
+          />
+          {routeDiagnosticsNode}
+        </>,
       );
     }
-    return (
-      <DataStatePanel
-        tone="loading"
-        eyebrow="Returns"
-        title="Loading return request"
-        description="Preparing the selected return for review."
-        actionNode={routeDiagnosticsNode}
-      />
+    return renderReturnRouteFrame(
+      'Loading return request',
+      'Preparing the selected return for review.',
+      <>
+        <SectionSkeleton title="Preparing return details" description="Fetching return details in the background." />
+        {routeDiagnosticsNode}
+      </>,
     );
   }
 
@@ -780,43 +782,32 @@ export function ReturnDetailPage() {
         : errorStatus === 403
           ? 'Return access denied'
           : 'Return unavailable';
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Returns"
-        title={title}
-        description={error ?? 'The selected return could not be loaded.'}
-        diagnostics={diagnostics}
-        onRetry={() => void refetch()}
-        actionNode={
-          <>
-            {routeDiagnosticsNode}
-            <Link className="button button-secondary" to="/returns">
-              Back to returns
-            </Link>
-          </>
-        }
-      />
+    return renderReturnRouteFrame(
+      title,
+      error ?? 'The selected return could not be loaded.',
+      <>
+        <SectionErrorRetry
+          title="Return detail request failed"
+          description={error ?? 'The selected return could not be loaded.'}
+          onRetry={() => void refetch()}
+        />
+        {routeDiagnosticsNode}
+      </>,
     );
   }
 
   if (!isRenderableReturnDetail(returnRequest)) {
-    return (
-      <DataStatePanel
-        tone="error"
-        eyebrow="Returns"
-        title="Return response unavailable"
-        description="The return detail response was empty or malformed. Retry the request."
-        onRetry={() => void refetch()}
-        actionNode={
-          <>
-            {routeDiagnosticsNode}
-            <Link className="button button-secondary" to="/returns">
-              Back to returns
-            </Link>
-          </>
-        }
-      />
+    return renderReturnRouteFrame(
+      'Return response unavailable',
+      'The return detail response was empty or malformed. Retry the request.',
+      <>
+        <SectionErrorRetry
+          title="Malformed return response"
+          description="The return detail response was empty or malformed. Retry the request."
+          onRetry={() => void refetch()}
+        />
+        {routeDiagnosticsNode}
+      </>,
     );
   }
 
