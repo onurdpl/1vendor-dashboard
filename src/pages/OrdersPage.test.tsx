@@ -4,11 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrdersPage } from './OrdersPage';
-import type { OrderDetail, OrderSummary } from '../features/orders/api';
+import type { OrderDetail, OrderSummary, ShipmentExecution } from '../features/orders/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
+const createShipmentExecutionMock = vi.fn<(allocationId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
+const retryFailedShipmentExecutionMock = vi.fn<(shipmentExecutionId: string, options?: { vendorId?: string | null }) => Promise<ShipmentExecution>>();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -16,6 +18,10 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     listOrders: (options?: { vendorId?: string | null }) => listOrdersMock(options),
     getOrder: (orderId: string, options?: { vendorId?: string | null }) => getOrderMock(orderId, options),
+    createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) =>
+      createShipmentExecutionMock(allocationId, options),
+    retryFailedShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      retryFailedShipmentExecutionMock(shipmentExecutionId, options),
   };
 });
 
@@ -75,6 +81,32 @@ const orderDetail: OrderDetail = {
   timeline: [{ label: 'Order received', at: '2026-05-08T09:20:00Z' }],
 };
 
+const shipmentExecution: ShipmentExecution = {
+  id: 'shipment-1002',
+  allocationId: 'ORD-A-1002',
+  vendorId: 'demo-vendor-a',
+  sourceShopifyOrderId: 'gid://shopify/Order/1002',
+  sourceShopifyOrderNumber: '#1002',
+  sourceShopifyFulfillmentId: null,
+  provider: 'navlungo',
+  providerShipmentId: 'NVL-1002',
+  providerCarrierName: 'Sürat Kargo',
+  trackingNumber: 'TRK-A-1002',
+  trackingUrl: 'https://tracking.example/TRK-A-1002',
+  labelUrl: 'https://labels.example/TRK-A-1002.pdf',
+  shipmentStatus: 'created',
+  desi: '3.00',
+  cargoIntegrationId: null,
+  warehouseId: '55574',
+  shippingCost: null,
+  shippingVat: null,
+  currency: 'TRY',
+  shippingCostLinked: false,
+  providerStatus: 'To Be Picked Up',
+  barcode: null,
+  lastProviderResponseAt: '2026-05-09T12:25:00Z',
+};
+
 function toSummary(detail: OrderDetail): OrderSummary {
   const { shippingAddress: _shippingAddress, notes: _notes, lineItems: _lineItems, items: _items, timeline: _timeline, ...summary } = detail;
   return summary;
@@ -130,6 +162,8 @@ describe('OrdersPage control center', () => {
     });
     listOrdersMock.mockReset();
     getOrderMock.mockReset();
+    createShipmentExecutionMock.mockReset();
+    retryFailedShipmentExecutionMock.mockReset();
   });
 
   it('renders a dense operational orders table in mock-compatible mode', async () => {
@@ -142,7 +176,7 @@ describe('OrdersPage control center', () => {
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
-    expect(screen.getAllByText('Shipping').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'Open detail' })).toHaveAttribute('href', '/orders/ORD-A-1002');
@@ -215,7 +249,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Lifecycle' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText(/Unauthorized/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Orders unavailable')).not.toBeInTheDocument();
@@ -237,6 +271,88 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
+  });
+
+  it('opens an existing shipment label without creating a duplicate shipment', async () => {
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    const detailWithLabel = {
+      ...orderDetail,
+      shipmentExecution,
+    };
+    listOrdersMock.mockResolvedValue([toSummary(detailWithLabel)]);
+    getOrderMock.mockResolvedValue(detailWithLabel);
+
+    renderOrdersPage();
+
+    const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+    await userEvent.click(labelButton);
+
+    expect(openMock).toHaveBeenCalledWith('https://labels.example/TRK-A-1002.pdf', '_blank', 'noopener,noreferrer');
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+
+    openMock.mockRestore();
+  });
+
+  it('uses the existing shipment create flow for the smart label action when no shipment exists', async () => {
+    const createdShipment = {
+      ...shipmentExecution,
+      id: 'shipment-created',
+      labelUrl: 'https://labels.example/new-label.pdf',
+    };
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+    createShipmentExecutionMock.mockResolvedValue(createdShipment);
+
+    renderOrdersPage();
+
+    const labelButton = await screen.findByRole('button', { name: /Kargo etiketi yazdır/i });
+    await userEvent.click(labelButton);
+
+    await waitFor(() =>
+      expect(createShipmentExecutionMock).toHaveBeenCalledWith('ORD-A-1002', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
+    expect(openMock).toHaveBeenCalledWith('https://labels.example/new-label.pdf', '_blank', 'noopener,noreferrer');
+
+    openMock.mockRestore();
+  });
+
+  it('uses the existing shipment retry flow when label creation previously failed', async () => {
+    const failedShipment = {
+      ...shipmentExecution,
+      id: 'shipment-failed',
+      providerShipmentId: null,
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'failed' as const,
+    };
+    const retriedShipment = {
+      ...shipmentExecution,
+      id: 'shipment-retried',
+      labelUrl: 'https://labels.example/retried-label.pdf',
+    };
+    const detailWithFailedShipment = {
+      ...orderDetail,
+      shipmentExecution: failedShipment,
+    };
+    const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
+    listOrdersMock.mockResolvedValue([toSummary(detailWithFailedShipment)]);
+    getOrderMock.mockResolvedValue(detailWithFailedShipment);
+    retryFailedShipmentExecutionMock.mockResolvedValue(retriedShipment);
+
+    renderOrdersPage();
+
+    const labelButton = await screen.findByRole('button', { name: /Tekrar dene/i });
+    await userEvent.click(labelButton);
+
+    await waitFor(() =>
+      expect(retryFailedShipmentExecutionMock).toHaveBeenCalledWith('shipment-failed', expect.objectContaining({ vendorId: 'demo-vendor-a' })),
+    );
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(openMock).toHaveBeenCalledWith('https://labels.example/retried-label.pdf', '_blank', 'noopener,noreferrer');
+
+    openMock.mockRestore();
   });
 
   it('selects the order requested by query parameter instead of the first row', async () => {

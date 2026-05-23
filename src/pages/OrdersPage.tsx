@@ -18,11 +18,26 @@ import {
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getOrder, listOrders, type OrderDetail, type OrderSummary } from '../features/orders/api';
+import {
+  createShipmentExecution,
+  getOrder,
+  listOrders,
+  retryFailedShipmentExecution,
+  type OrderDetail,
+  type OrderSummary,
+  type ShipmentExecution,
+} from '../features/orders/api';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
+import { useMutationAction } from '../hooks/useMutationAction';
+
+type OrderQuickFilter = 'all' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
+type LabelActionFeedback = {
+  tone: 'success' | 'warning' | 'error';
+  message: string;
+};
 
 function formatDate(value?: string | null) {
   if (!value) {
@@ -169,6 +184,89 @@ function getItemInitials(name: string) {
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
 }
 
+function parseOperationalAmount(amount: string) {
+  const numeric = amount.replace(/[^\d.,-]/g, '');
+  const hasComma = numeric.includes(',');
+  const hasDot = numeric.includes('.');
+  const normalized = hasComma && hasDot
+    ? numeric.lastIndexOf('.') > numeric.lastIndexOf(',')
+      ? numeric.replace(/,/g, '')
+      : numeric.replace(/\./g, '').replace(',', '.')
+    : hasComma
+      ? numeric.replace(',', '.')
+      : numeric;
+  const value = Number.parseFloat(normalized);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function formatMetricShare(value: number, total: number) {
+  if (!total) {
+    return '0% of queue';
+  }
+  return `${Math.round((value / total) * 100)}% of queue`;
+}
+
+function MetricIcon({ tone }: { tone: string }) {
+  if (tone === 'awaiting') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v4l3 2" />
+      </svg>
+    );
+  }
+  if (tone === 'missing') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 7v6" />
+        <path d="M12 17h.01" />
+        <circle cx="12" cy="12" r="8" />
+      </svg>
+    );
+  }
+  if (tone === 'fulfilled') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="m7 12 3 3 7-7" />
+        <circle cx="12" cy="12" r="8" />
+      </svg>
+    );
+  }
+  if (tone === 'tracking') {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 7h11v8H4z" />
+        <path d="M15 10h3l2 3v2h-5z" />
+        <circle cx="8" cy="17" r="1.5" />
+        <circle cx="17" cy="17" r="1.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 7h12v10H6z" />
+      <path d="M9 7V5h6v2" />
+      <path d="M9 11h6" />
+    </svg>
+  );
+}
+
+function MetricSparkline({ tone }: { tone: string }) {
+  const pointsByTone: Record<string, string> = {
+    orders: '0,18 12,15 24,16 36,10 48,13 60,7 72,9 84,4',
+    awaiting: '0,16 12,17 24,14 36,15 48,10 60,12 72,8 84,9',
+    missing: '0,12 12,12 24,12 36,12 48,12 60,12 72,12 84,12',
+    fulfilled: '0,17 12,16 24,16 36,14 48,13 60,11 72,8 84,5',
+    tracking: '0,18 12,16 24,17 36,14 48,12 60,11 72,7 84,6',
+  };
+
+  return (
+    <svg className="orders-kpi-sparkline" viewBox="0 0 84 24" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={pointsByTone[tone] ?? pointsByTone.orders} />
+    </svg>
+  );
+}
+
 function orderMatchesTarget(order: OrderSummary, target: string | null) {
   if (!target) {
     return false;
@@ -212,7 +310,9 @@ export function OrdersPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
   const [shippingFilter, setShippingFilter] = useState('all');
+  const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
+  const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
   const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
   const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
   const requestedOrderTargetKey = requestedOrderTargets.join('|');
@@ -273,9 +373,16 @@ export function OrdersPage() {
         .join(' ')
         .toLowerCase();
 
-      return matchesStatus && matchesFulfillment && matchesShipping && (!query || searchableText.includes(query));
+      const matchesQuickFilter =
+        quickFilter === 'all' ||
+        (quickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
+        (quickFilter === 'tracking_missing' && !order.trackingNumber && !order.carrier) ||
+        (quickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
+        (quickFilter === 'returns' && searchableText.includes('return'));
+
+      return matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter && (!query || searchableText.includes(query));
     });
-  }, [currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
+  }, [currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
     const selectedByClick = selectedOrderId ? filteredOrders.find((order) => order.id === selectedOrderId) : null;
@@ -309,11 +416,42 @@ export function OrdersPage() {
 
   const selectedOrder = orderDetailQuery.data ?? selectedOrderSummary;
 
+  const { mutateAsync: createShipmentMutation, isPending: isCreatingShipmentLabel } = useMutationAction(
+    async (allocationId: string) =>
+      createShipmentExecution(allocationId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [
+        queryKeys.orders.list(currentVendor.vendorId),
+        selectedOrderSummary
+          ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
+          : queryKeys.orders.list(currentVendor.vendorId),
+      ],
+    },
+  );
+  const { mutateAsync: retryShipmentLabelMutation, isPending: isRetryingShipmentLabel } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      retryFailedShipmentExecution(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [
+        queryKeys.orders.list(currentVendor.vendorId),
+        selectedOrderSummary
+          ? queryKeys.orders.detail(selectedOrderSummary.id, currentVendor.vendorId)
+          : queryKeys.orders.list(currentVendor.vendorId),
+      ],
+    },
+  );
+  const isLabelActionPending = isCreatingShipmentLabel || isRetryingShipmentLabel;
+
   const summary = useMemo(() => {
     const source = orders ?? [];
     return {
       total: source.length,
       awaitingShipment: source.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
+      trackingMissing: source.filter((order) => !order.trackingNumber && !order.carrier).length,
       blocked: source.filter((order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked').length,
       fulfilled: source.filter((order) => order.fulfillmentStatus === 'Fulfilled').length,
       tracked: source.filter((order) => order.trackingNumber || order.carrier).length,
@@ -321,14 +459,87 @@ export function OrdersPage() {
   }, [orders]);
 
   const orderKpis = [
-    { label: 'Vendor orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders', icon: 'O' },
-    { label: 'Awaiting shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting', icon: 'A' },
-    { label: 'Blocked / attention', value: summary.blocked, detail: 'Reassignment or vendor block', tone: 'blocked', icon: 'B' },
-    { label: 'Fulfilled', value: summary.fulfilled, detail: 'Fulfillment complete', tone: 'fulfilled', icon: 'F' },
-    { label: 'Tracking visible', value: summary.tracked, detail: 'Carrier or tracking present', tone: 'tracking', icon: 'T' },
+    { label: 'Total orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders', trend: 'Live queue' },
+    { label: 'Awaiting shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting', trend: formatMetricShare(summary.awaitingShipment, summary.total) },
+    { label: 'Tracking missing', value: summary.trackingMissing, detail: 'No carrier evidence yet', tone: 'missing', trend: formatMetricShare(summary.trackingMissing, summary.total) },
+    { label: 'Fulfilled', value: summary.fulfilled, detail: 'Fulfillment complete', tone: 'fulfilled', trend: formatMetricShare(summary.fulfilled, summary.total) },
+    { label: 'Tracking visible', value: summary.tracked, detail: 'Carrier or tracking present', tone: 'tracking', trend: formatMetricShare(summary.tracked, summary.total) },
   ];
 
   const recentOrders = filteredOrders.slice(0, 3);
+
+  const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
+    { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
+    { key: 'awaiting', label: 'Awaiting shipment', count: summary.awaitingShipment },
+    { key: 'tracking_missing', label: 'Tracking missing', count: summary.trackingMissing },
+    { key: 'high_value', label: 'High value', count: (orders ?? []).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
+    { key: 'returns', label: 'Returns', count: (orders ?? []).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
+  ];
+
+  async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
+    const shipmentExecution = (order as OrderDetail).shipmentExecution;
+    const labelUrl = shipmentExecution?.labelUrl ?? null;
+
+    if (labelUrl) {
+      globalThis.open?.(labelUrl, '_blank', 'noopener,noreferrer');
+      setLabelActionFeedback({ tone: 'success', message: 'Existing label opened. No duplicate shipment was created.' });
+      return;
+    }
+
+    if (shipmentExecution) {
+      if (shipmentExecution.shipmentStatus === 'failed') {
+        try {
+          setLabelActionFeedback(null);
+          const shipment = await retryShipmentLabelMutation(shipmentExecution.id);
+          if (shipment.labelUrl) {
+            globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
+            setLabelActionFeedback({ tone: 'success', message: 'Shipment label created and opened.' });
+          } else {
+            setLabelActionFeedback({ tone: 'warning', message: 'Shipment retry completed. Label is still processing.' });
+          }
+          await orderDetailQuery.refetch();
+        } catch (mutationError) {
+          const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
+          setLabelActionFeedback({ tone: 'error', message });
+        }
+        return;
+      }
+
+      setLabelActionFeedback({
+        tone: 'warning',
+        message: 'Shipment exists, but the label is not available yet.',
+      });
+      return;
+    }
+
+    try {
+      setLabelActionFeedback(null);
+      const shipment = await createShipmentMutation(order.id);
+      if (shipment.labelUrl) {
+        globalThis.open?.(shipment.labelUrl, '_blank', 'noopener,noreferrer');
+        setLabelActionFeedback({ tone: 'success', message: 'Shipment label created and opened.' });
+      } else {
+        setLabelActionFeedback({ tone: 'warning', message: 'Shipment was created. Label is still processing.' });
+      }
+      await orderDetailQuery.refetch();
+    } catch (mutationError) {
+      const message = mutationError instanceof Error ? mutationError.message : 'Shipment label could not be created.';
+      setLabelActionFeedback({ tone: 'error', message });
+    }
+  }
+
+  function getSmartLabelButtonText(shipmentExecution?: ShipmentExecution | null) {
+    if (isLabelActionPending) {
+      return 'Etiket oluşturuluyor...';
+    }
+    if (shipmentExecution?.labelUrl) {
+      return 'Etiketi yazdır';
+    }
+    if (shipmentExecution?.shipmentStatus === 'failed' || labelActionFeedback?.tone === 'error') {
+      return 'Tekrar dene';
+    }
+    return 'Kargo etiketi yazdır';
+  }
 
   return (
     <section className="op-page orders-control-center orders-enterprise-workspace">
@@ -348,14 +559,20 @@ export function OrdersPage() {
 
         <div className="op-control-layout orders-control-layout orders-workspace-grid">
           <div className="orders-left-column">
-            <div className="orders-enterprise-kpis">
+            <div className="orders-enterprise-kpis" aria-label="Orders operational metrics">
               {orderKpis.map((metric) => (
                 <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
-                  <span className="orders-kpi-icon" aria-hidden="true">{metric.icon}</span>
-                  <div>
+                  <span className="orders-kpi-icon" aria-hidden="true">
+                    <MetricIcon tone={metric.tone} />
+                  </span>
+                  <div className="orders-kpi-copy">
                     <span>{metric.label}</span>
                     <strong>{metric.value}</strong>
                     <small>{metric.detail}</small>
+                  </div>
+                  <div className="orders-kpi-signal">
+                    <small>{metric.trend}</small>
+                    <MetricSparkline tone={metric.tone} />
                   </div>
                 </article>
               ))}
@@ -398,24 +615,32 @@ export function OrdersPage() {
                       setStatusFilter('all');
                       setFulfillmentFilter('all');
                       setShippingFilter('all');
+                      setQuickFilter('all');
                     }}
                   >
-                    Reset
+                    Filters
                   </button>
                 </FilterBar>
               </OperationalToolbar>
 
-              <div className="orders-filter-summary">
-                <span>{filteredOrders.length} orders</span>
-                <span>{statusFilter === 'all' ? 'All allocation states' : statusFilter.replace(/_/g, ' ')}</span>
-                <span>{fulfillmentFilter === 'all' ? 'All fulfillment states' : fulfillmentFilter}</span>
-                <span>{shippingFilter === 'all' ? 'All shipping states' : shippingFilter}</span>
+              <div className="orders-filter-summary" aria-label="Order quick filters">
+                {quickFilters.map((filter) => (
+                  <button
+                    key={filter.key}
+                    type="button"
+                    className={quickFilter === filter.key ? 'is-active' : ''}
+                    onClick={() => setQuickFilter(filter.key)}
+                  >
+                    {filter.label}
+                    <strong>{filter.count}</strong>
+                  </button>
+                ))}
               </div>
             </div>
 
             <div className="op-main-column orders-table-shell">
               <OperationalTable
-                columns={['Order', 'Lifecycle', 'Value', 'Shipping', 'Updated', 'Actions']}
+                columns={['Order', 'Status', 'Tracking', 'Value', 'Updated', 'Actions']}
                 className="orders-op-table orders-op-table-v3"
               >
                 {isError && !orders ? (
@@ -454,13 +679,13 @@ export function OrdersPage() {
                         <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
                         {lifecycleSecondary ? <small>{lifecycleSecondary}</small> : null}
                       </div>
-                      <span>
-                        <strong className="finance-amount-emphasis">{order.amount}</strong>
-                        <small>{getLineItemCount(order)} line items</small>
-                      </span>
                       <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
                         <strong>{shippingOperational.label}</strong>
                         {shippingOperational.helper ? <small>{shippingOperational.helper}</small> : null}
+                      </span>
+                      <span>
+                        <strong className="finance-amount-emphasis">{order.amount}</strong>
+                        <small>{getLineItemCount(order)} line items</small>
                       </span>
                       <span>
                         <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
@@ -493,6 +718,7 @@ export function OrdersPage() {
                 : shipmentExecution?.trackingNumber ?? '—';
               const trackingUrl = selectedOrder.trackingUrl ?? shipmentExecution?.trackingUrl ?? null;
               const labelUrl = shipmentExecution?.labelUrl ?? null;
+              const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
@@ -526,6 +752,40 @@ export function OrdersPage() {
                 <span>{shippingOperational.label}</span>
                 <span>Shopify {shopifyFulfillmentState.toLowerCase()}</span>
               </div>
+
+              <section className="orders-smart-label-card" aria-label="Smart label action">
+                <button
+                  type="button"
+                  className="orders-smart-label-button"
+                  disabled={smartLabelDisabled}
+                  onClick={() => void handleSmartLabelAction(selectedOrder)}
+                >
+                  <span className="orders-smart-label-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24">
+                      <path d="M7 8V4h10v4" />
+                      <path d="M7 17H5a2 2 0 0 1-2-2v-4a3 3 0 0 1 3-3h12a3 3 0 0 1 3 3v4a2 2 0 0 1-2 2h-2" />
+                      <path d="M7 14h10v6H7z" />
+                      <path d="M17 11h.01" />
+                    </svg>
+                  </span>
+                  <span>
+                    <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
+                    <small>
+                      {labelUrl
+                        ? 'Open existing label without creating a duplicate.'
+                        : shipmentExecution
+                          ? 'Shipment exists. Label availability is controlled by the provider.'
+                          : 'Create shipment and open label when available.'}
+                    </small>
+                  </span>
+                  <span className="orders-smart-label-arrow" aria-hidden="true">›</span>
+                </button>
+                {labelActionFeedback ? (
+                  <p className={`orders-smart-label-feedback orders-smart-label-${labelActionFeedback.tone}`}>
+                    {labelActionFeedback.message}
+                  </p>
+                ) : null}
+              </section>
 
               <section className="orders-detail-card">
                 <h4>Fulfillment and shipping</h4>
