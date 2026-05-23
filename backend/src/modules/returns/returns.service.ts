@@ -538,13 +538,48 @@ export async function listVendorReturns(
         assignedVendorId: vendorId,
       },
     },
-    include: {
+    select: {
+      id: true,
+      sourceShopifyOrderId: true,
+      sourceShopifyOrderNumber: true,
+      sourceShopifyRefundId: true,
+      sourceShopifyReturnId: true,
+      sourceShopifyReturnGid: true,
+      sourceShopifyLineItemId: true,
+      returnLifecycleStatus: true,
+      returnRequestSource: true,
+      status: true,
+      reason: true,
+      returnReasonNote: true,
+      returnProvider: true,
+      returnProviderShipmentId: true,
+      returnLabel: true,
+      returnReferenceId: true,
+      navlungoReturnCreatedAt: true,
+      returnCarrierName: true,
+      returnTrackingNumber: true,
+      returnTrackingUrl: true,
+      vendorReceivedAt: true,
+      vendorReviewedAt: true,
+      vendorDecision: true,
+      vendorDecisionReason: true,
+      createdAt: true,
+      updatedAt: true,
       vendorAllocation: {
-        include: {
+        select: {
+          assignedVendorId: true,
           refundRecords: {
-            include: {
+            select: {
+              sourceShopifyRefundId: true,
+              amount: true,
               lineItems: {
-                include: {
+                select: {
+	                  id: true,
+	                  sourceLineItemId: true,
+	                  sku: true,
+	                  title: true,
+                  quantity: true,
+                  subtotal: true,
                   shopifyOrderLineItem: true,
                 },
               },
@@ -554,7 +589,10 @@ export async function listVendorReturns(
             },
           },
           lineItems: {
-            include: {
+            select: {
+              id: true,
+              quantity: true,
+              lineAmount: true,
               shopifyOrderLineItem: true,
             },
           },
@@ -621,7 +659,6 @@ export async function listVendorReturns(
       returnLabel: record.returnLabel,
       returnReferenceId: record.returnReferenceId,
       navlungoReturnCreatedAt: record.navlungoReturnCreatedAt ? record.navlungoReturnCreatedAt.toISOString() : null,
-      returnProviderSnapshot: mapReturnProviderSnapshot(record.returnProviderSnapshot),
       returnCarrierName: record.returnCarrierName,
       returnTrackingNumber: record.returnTrackingNumber,
       returnTrackingUrl: record.returnTrackingUrl,

@@ -351,24 +351,51 @@ function mapSignalSeverity(severity: OperationalSignalSeverityDto): OperationsQu
 }
 
 export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
+  const offset = options.offset ?? 0;
+  const limit = options.limit ?? 100;
+  const candidateTake = offset + limit;
   const allocations = await prisma.vendorAllocation.findMany({
-    include: {
-      assignedVendor: true,
+    select: {
+      id: true,
+      assignedVendorId: true,
+      allocationStatus: true,
+      fulfillmentStatus: true,
+      shippingStatus: true,
+      reassignmentRequired: true,
+      updatedAt: true,
+      assignedVendor: {
+        select: {
+          name: true,
+        },
+      },
       returnRecords: {
+        select: {
+          id: true,
+        },
         orderBy: {
           createdAt: 'desc',
         },
+        take: 1,
       },
       refundRecords: {
+        select: {
+          sourceShopifyRefundId: true,
+        },
         orderBy: {
           createdAt: 'desc',
         },
+        take: 1,
       },
-      order: true,
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+        },
+      },
     },
     orderBy: {
       createdAt: 'desc',
     },
+    take: candidateTake,
   });
 
   const items: OperationsQueueItemDto[] = [];
@@ -445,15 +472,32 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
         in: ['pending', 'open', 'needs_review'],
       },
     },
-    include: {
+    select: {
+      id: true,
+      status: true,
+      createdAt: true,
       vendorAllocation: {
-        include: {
-          assignedVendor: true,
-          order: true,
+        select: {
+          id: true,
+          assignedVendorId: true,
+          assignedVendor: {
+            select: {
+              name: true,
+            },
+          },
+          order: {
+            select: {
+              sourceShopifyOrderId: true,
+            },
+          },
           refundRecords: {
+            select: {
+              sourceShopifyRefundId: true,
+            },
             orderBy: {
               createdAt: 'desc',
             },
+            take: 1,
           },
         },
       },
@@ -461,6 +505,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     orderBy: {
       createdAt: 'desc',
     },
+    take: candidateTake,
   });
 
   for (const returnRecord of pendingReturns) {
@@ -543,9 +588,6 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     }
     return a.createdAt < b.createdAt ? 1 : -1;
   });
-
-  const offset = options.offset ?? 0;
-  const limit = options.limit ?? 100;
 
   return {
     summary: createSummary(items),

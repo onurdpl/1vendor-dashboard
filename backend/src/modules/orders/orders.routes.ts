@@ -5,6 +5,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { getAdminShopifyOrderBreakdown, getVendorOrderByIdForUser, listVendorOrders } from './orders.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { withSlowEndpointTiming } from '../../lib/performance.js';
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -21,7 +22,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return listVendorOrders(vendorId, resolvePagination(request.query));
+      return withSlowEndpointTiming('GET /orders', () => listVendorOrders(vendorId, resolvePagination(request.query)));
     },
   );
 
@@ -36,10 +37,12 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      const order = await getVendorOrderByIdForUser(vendorId, request.params.orderId, {
-        includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
-        includeFinanceLedgerPreview: request.authUser?.role === 'admin',
-      });
+      const order = await withSlowEndpointTiming(`GET /orders/:orderId`, () =>
+        getVendorOrderByIdForUser(vendorId, request.params.orderId, {
+          includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
+          includeFinanceLedgerPreview: request.authUser?.role === 'admin',
+        }),
+      );
       if (!order) {
         return reply.code(404).send({ message: 'Order not found.' });
       }
@@ -58,7 +61,9 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      const breakdown = await getAdminShopifyOrderBreakdown(request.params.shopifyOrderId);
+      const breakdown = await withSlowEndpointTiming('GET /admin/orders/:shopifyOrderId', () =>
+        getAdminShopifyOrderBreakdown(request.params.shopifyOrderId),
+      );
       if (!breakdown) {
         return reply.code(404).send({ message: 'Shopify order not found.' });
       }

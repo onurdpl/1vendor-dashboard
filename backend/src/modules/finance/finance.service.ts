@@ -286,10 +286,10 @@ function mapRelatedReferences(record: {
 }) {
   const relatedOrderId = record.vendorAllocation?.sourceShopifyOrderId ?? null;
   const relatedOrderNumber = record.vendorAllocation?.sourceShopifyOrderNumber ?? null;
-  const relatedReturnId = record.vendorAllocation?.returnRecords[0]?.id ?? null;
+  const relatedReturnId = record.vendorAllocation?.returnRecords?.[0]?.id ?? null;
   const relatedRefundId =
-    record.vendorAllocation?.refundRecords[0]?.sourceShopifyRefundId ??
-    record.vendorAllocation?.refundRecords[0]?.id ??
+    record.vendorAllocation?.refundRecords?.[0]?.sourceShopifyRefundId ??
+    record.vendorAllocation?.refundRecords?.[0]?.id ??
     null;
 
   return {
@@ -664,17 +664,55 @@ export async function getVendorFinanceDashboard(
       where: {
         vendorId,
       },
-      include: {
+      select: {
+        id: true,
+        entryType: true,
+        amount: true,
+        payoutStatus: true,
+        description: true,
+        commissionPercentSnapshot: true,
+        commissionVatPercentSnapshot: true,
+        deductShippingEnabledSnapshot: true,
+        shippingModeSnapshot: true,
+        fixedShippingFeeSnapshot: true,
+        shippingCostSnapshot: true,
+        shippingVatAmountSnapshot: true,
+        shippingCostSourceSnapshot: true,
+        shippingCostProviderSnapshot: true,
+        settlementStatus: true,
+        settlementEligibleAt: true,
+        accruedAt: true,
+        payableAt: true,
+        settledAt: true,
+        settlementHoldReason: true,
+        createdAt: true,
         vendorAllocation: {
-          include: {
-            fulfillment: true,
+          select: {
+            sourceShopifyOrderId: true,
+            sourceShopifyOrderNumber: true,
+            allocationStatus: true,
+            fulfillmentStatus: true,
+            shippingStatus: true,
+            fulfillment: {
+              select: {
+                fulfilledAt: true,
+              },
+            },
             returnRecords: {
+              select: {
+                id: true,
+              },
               orderBy: {
                 createdAt: 'asc',
               },
               take: 1,
             },
             refundRecords: {
+              select: {
+                id: true,
+                sourceShopifyRefundId: true,
+                amount: true,
+              },
               orderBy: {
                 createdAt: 'asc',
               },
@@ -689,8 +727,15 @@ export async function getVendorFinanceDashboard(
               },
             },
           },
-          include: {
-            payoutBatch: true,
+          select: {
+            payoutBatch: {
+              select: {
+                id: true,
+                status: true,
+                netAmount: true,
+                createdAt: true,
+              },
+            },
           },
           orderBy: {
             createdAt: 'desc',
@@ -698,6 +743,16 @@ export async function getVendorFinanceDashboard(
           take: 1,
         },
         invoiceExecutions: {
+          select: {
+            id: true,
+            provider: true,
+            status: true,
+            providerInvoiceGuid: true,
+            providerInvoiceNo: true,
+            providerPdfUrl: true,
+            createdAt: true,
+            updatedAt: true,
+          },
           orderBy: {
             createdAt: 'desc',
           },

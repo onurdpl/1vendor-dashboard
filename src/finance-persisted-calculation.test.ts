@@ -189,13 +189,15 @@ describe('persisted vendor finance calculations', () => {
       };
       return activeProfile;
     });
-    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
-      if (args.select) {
-        return ledgerRows.map((row) => ({
-          entryType: row.entryType,
-          amount: row.amount,
-          payoutStatus: row.payoutStatus,
-          commissionPercentSnapshot: row.commissionPercentSnapshot,
+	    prismaMock.financeLedgerEntry.findMany.mockImplementation(async (args: { select?: unknown }) => {
+	      if (args.select) {
+	        return ledgerRows.map((row) => ({
+	          id: row.id,
+	          entryType: row.entryType,
+	          amount: row.amount,
+	          payoutStatus: row.payoutStatus,
+	          description: row.description,
+	          commissionPercentSnapshot: row.commissionPercentSnapshot,
           commissionVatPercentSnapshot: row.commissionVatPercentSnapshot,
           deductShippingEnabledSnapshot: row.deductShippingEnabledSnapshot,
           shippingModeSnapshot: row.shippingModeSnapshot,
@@ -211,18 +213,23 @@ describe('persisted vendor finance calculations', () => {
           settledAt: row.settledAt,
           settlementHoldReason: row.settlementHoldReason,
           createdAt: row.createdAt,
-          vendorAllocation: row.vendorAllocation
-            ? {
-                id: row.vendorAllocation.id,
-                allocationStatus: row.vendorAllocation.allocationStatus,
-                fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
-                shippingStatus: row.vendorAllocation.shippingStatus,
-                fulfillment: row.vendorAllocation.fulfillment,
-                refundRecords: row.vendorAllocation.refundRecords,
-              }
-            : null,
-        }));
-      }
+	          vendorAllocation: row.vendorAllocation
+	            ? {
+	                sourceShopifyOrderId: row.vendorAllocation.sourceShopifyOrderId,
+	                sourceShopifyOrderNumber: row.vendorAllocation.sourceShopifyOrderNumber,
+	                id: row.vendorAllocation.id,
+	                allocationStatus: row.vendorAllocation.allocationStatus,
+	                fulfillmentStatus: row.vendorAllocation.fulfillmentStatus,
+	                shippingStatus: row.vendorAllocation.shippingStatus,
+	                fulfillment: row.vendorAllocation.fulfillment,
+	                returnRecords: row.vendorAllocation.returnRecords,
+	                refundRecords: row.vendorAllocation.refundRecords,
+	              }
+	            : null,
+	          payoutBatchLines: row.payoutBatchLines ?? [],
+	          invoiceExecutions: row.invoiceExecutions ?? [],
+	        }));
+	      }
 
       return ledgerRows;
     });

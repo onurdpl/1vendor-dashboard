@@ -943,10 +943,37 @@ export async function listVendorOrders(
     where: {
       assignedVendorId: vendorId,
     },
-    include: {
-      order: true,
-      fulfillment: true,
-      lineItems: true,
+    select: {
+      id: true,
+      assignedVendorId: true,
+      originalVendorId: true,
+      allocationStatus: true,
+      fulfillmentStatus: true,
+      shippingStatus: true,
+      trackingNumber: true,
+      carrier: true,
+      createdAt: true,
+      updatedAt: true,
+      order: {
+        select: {
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+      fulfillment: {
+        select: {
+          trackingUrl: true,
+          fulfilledAt: true,
+          shipmentCreatedAt: true,
+          shipmentUpdatedAt: true,
+        },
+      },
+      lineItems: {
+        select: {
+          quantity: true,
+          lineAmount: true,
+        },
+      },
     },
     orderBy: {
       updatedAt: 'desc',

@@ -17,7 +17,7 @@ export type ReturnSummaryDto = {
   returnLabel: string | null;
   returnReferenceId: string | null;
   navlungoReturnCreatedAt: string | null;
-  returnProviderSnapshot: Record<string, unknown> | null;
+  returnProviderSnapshot?: Record<string, unknown> | null;
   returnCarrierName: string | null;
   returnTrackingNumber: string | null;
   returnTrackingUrl: string | null;
@@ -55,5 +55,6 @@ export type ReturnDetailDto = ReturnSummaryDto & {
   originalVendorId: string;
   requestCreatedAt: string | null;
   requestUpdatedAt: string | null;
+  returnProviderSnapshot: Record<string, unknown> | null;
   refundedItems: RefundedItemDto[];
 };

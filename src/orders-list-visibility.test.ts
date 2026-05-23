@@ -58,10 +58,27 @@ describe('vendor orders list visibility', () => {
         where: {
           assignedVendorId: 'sporjinal',
         },
-        include: expect.objectContaining({
-          order: true,
-          fulfillment: true,
-          lineItems: true,
+        select: expect.objectContaining({
+          order: {
+            select: {
+              sourceShopifyOrderId: true,
+              sourceShopifyOrderNumber: true,
+            },
+          },
+          fulfillment: {
+            select: {
+              trackingUrl: true,
+              fulfilledAt: true,
+              shipmentCreatedAt: true,
+              shipmentUpdatedAt: true,
+            },
+          },
+          lineItems: {
+            select: {
+              quantity: true,
+              lineAmount: true,
+            },
+          },
         }),
         orderBy: {
           updatedAt: 'desc',

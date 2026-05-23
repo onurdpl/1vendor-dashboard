@@ -17,6 +17,7 @@ import {
   syncNavlungoReturnPickupStatusForReturn,
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
 import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
 
@@ -103,7 +104,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return listVendorReturns(vendorId, resolvePagination(request.query));
+      return withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, resolvePagination(request.query)));
     },
   );
 
@@ -118,7 +119,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      const returnRecord = await getVendorReturnById(vendorId, request.params.returnId);
+      const returnRecord = await withSlowEndpointTiming('GET /returns/:returnId', () =>
+        getVendorReturnById(vendorId, request.params.returnId),
+      );
       if (!returnRecord) {
         return reply.code(404).send({ message: 'Return record not found.' });
       }

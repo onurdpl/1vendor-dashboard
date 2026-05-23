@@ -15,6 +15,7 @@ import {
   upsertVendorFinancialProfile,
 } from './finance.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
+import { withSlowEndpointTiming } from '../../lib/performance.js';
 import type { PreparePayoutBatchDto, ShippingCostInputDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
@@ -32,7 +33,7 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
       }
 
-      return getVendorFinanceDashboard(vendorId, resolvePagination(request.query));
+      return withSlowEndpointTiming('GET /finance', () => getVendorFinanceDashboard(vendorId, resolvePagination(request.query)));
     },
   );
 
