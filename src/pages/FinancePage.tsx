@@ -7,13 +7,13 @@ import {
   MetadataRow,
   OperationalActionGroup,
   SectionErrorRetry,
-  SectionSkeleton,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
   SearchInput,
   SideDetailPanel,
   StatusBadge,
+  TableSkeletonRows,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -1013,25 +1013,28 @@ export function FinancePage() {
             ))}
           </div>
 
-          {isError && !finance ? (
-            <SectionErrorRetry
-              title="Finance unavailable"
-              description={error ?? 'The financial overview could not be loaded.'}
-              onRetry={() => void refetch()}
-            />
-          ) : !authContextReady || isLoading ? (
-            <SectionSkeleton title="Loading finance overview" description="Fetching finance records in the background." />
-          ) : filteredRecords.length === 0 ? (
-            <EmptyStatePanel
-              title="No payout activity in this view"
-              description="Adjust the status, type, or search filters to review payout activity."
-            />
-          ) : (
-            <OperationalTable
-              columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payout impact', 'Updated', 'Action']}
-              className="finance-op-table finance-op-table-v2"
-            >
-              {filteredRecords.map((record) => (
+          <OperationalTable
+            columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payout impact', 'Updated', 'Action']}
+            className="finance-op-table finance-op-table-v2"
+          >
+            {isError && !finance ? (
+              <OperationalTableRow>
+                <SectionErrorRetry
+                  title="Finance unavailable"
+                  description={error ?? 'The financial overview could not be loaded.'}
+                  onRetry={() => void refetch()}
+                />
+              </OperationalTableRow>
+            ) : !authContextReady || isLoading ? (
+              <TableSkeletonRows columns={8} rows={6} />
+            ) : filteredRecords.length === 0 ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="No payout activity in this view"
+                  description="Adjust the status, type, or search filters to review payout activity."
+                />
+              </OperationalTableRow>
+            ) : filteredRecords.map((record) => (
                 <OperationalTableRow
                   key={record.id}
                   selected={selectedRecord?.id === record.id}
@@ -1075,8 +1078,7 @@ export function FinancePage() {
                   </OperationalActionGroup>
                 </OperationalTableRow>
               ))}
-            </OperationalTable>
-          )}
+          </OperationalTable>
 
           <div className="finance-info-footer">
             <section className="finance-footer-card">

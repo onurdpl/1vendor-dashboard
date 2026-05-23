@@ -212,7 +212,11 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    expect(screen.getByText('Loading orders')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Lifecycle' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText(/Unauthorized/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Orders unavailable')).not.toBeInTheDocument();
     expect(listOrdersMock).not.toHaveBeenCalled();
@@ -352,7 +356,9 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage(['/orders?order=1030']);
 
-    expect(screen.getAllByText('Loading orders').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Linked order unavailable')).not.toBeInTheDocument();
 
     ordersResult.resolve([toSummary(targetOrder)]);

@@ -5,13 +5,13 @@ import {
   FilterBar,
   OperationalActionGroup,
   SectionErrorRetry,
-  SectionSkeleton,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
   SearchInput,
   SideDetailPanel,
   StatusBadge,
+  TableSkeletonRows,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -692,32 +692,35 @@ export function ReturnsPage() {
             <span>Needs action <strong>{attentionCount}</strong></span>
           </div>
 
-          {isError && !returns ? (
-            <SectionErrorRetry
-              title="Returns unavailable"
-              description={error ?? 'Unable to load returns.'}
-              onRetry={() => void refetch()}
-            />
-          ) : !authContextReady || isLoading ? (
-            <SectionSkeleton title="Loading returns" description="Fetching return records in the background." />
-          ) : filteredReturns.length === 0 ? (
-            <EmptyStatePanel
-              title="No returns match this view"
-              description="Adjust search or filters to find return requests and refunds."
-            />
-          ) : (
-            <OperationalTable
-              columns={[
-                'Item',
-                'SKU',
-                'Order #',
-                'Return status',
-                'Requested',
-                'Action',
-              ]}
-              className="returns-op-table returns-op-table-v2"
-            >
-              {filteredReturns.map((item) => {
+          <OperationalTable
+            columns={[
+              'Item',
+              'SKU',
+              'Order #',
+              'Return status',
+              'Requested',
+              'Action',
+            ]}
+            className="returns-op-table returns-op-table-v2"
+          >
+            {isError && !returns ? (
+              <OperationalTableRow>
+                <SectionErrorRetry
+                  title="Returns unavailable"
+                  description={error ?? 'Unable to load returns.'}
+                  onRetry={() => void refetch()}
+                />
+              </OperationalTableRow>
+            ) : !authContextReady || isLoading ? (
+              <TableSkeletonRows columns={6} rows={5} />
+            ) : filteredReturns.length === 0 ? (
+              <OperationalTableRow>
+                <EmptyStatePanel
+                  title="No returns match this view"
+                  description="Adjust search or filters to find return requests and refunds."
+                />
+              </OperationalTableRow>
+            ) : filteredReturns.map((item) => {
                 const isSelected = selectedReturn?.id === item.id;
                 const itemDisplay = getTableItemDisplay(item);
                 const requestedAt = formatDateParts(item.date);
@@ -762,8 +765,7 @@ export function ReturnsPage() {
                   </OperationalTableRow>
                 );
               })}
-            </OperationalTable>
-          )}
+          </OperationalTable>
         </div>
 
         <SideDetailPanel

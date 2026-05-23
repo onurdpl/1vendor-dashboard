@@ -198,9 +198,10 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    expect(screen.getByLabelText('Dashboard loading skeleton')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Operational dashboard' })).toBeInTheDocument();
-    expect(screen.getByText('Loading priority signals')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Operations dashboard' })).toBeInTheDocument();
+    expect(screen.getByText('Operational priority queue')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dashboard priority skeleton')).toBeInTheDocument();
+    expect(screen.getByText('Vendor orders')).toBeInTheDocument();
     expect(screen.queryByText('Loading operational overview')).not.toBeInTheDocument();
   });
 
@@ -257,6 +258,7 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(await screen.findByText(/notification center/i)).toBeInTheDocument();
     expect(screen.getByText('Shipping cost is pending')).toBeInTheDocument();
     expect(screen.getByText('External-provider shipping cost is missing.')).toBeInTheDocument();
@@ -270,6 +272,7 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(await screen.findByText('Recent operational events')).toBeInTheDocument();
     expect(screen.getByText('Refund webhook processed')).toBeInTheDocument();
     expect(screen.getByText('Refund ID 123 processed successfully.')).toBeInTheDocument();

@@ -2,9 +2,11 @@ import { useMemo, useState } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
+  MetricSkeletonGrid,
   MetadataRow,
   OperationalSection,
   SectionErrorRetry,
+  SkeletonText,
   StatusBadge,
 } from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
@@ -133,78 +135,6 @@ function formatRecentActivity(item: string) {
   };
 }
 
-function DashboardLoadingSkeleton({
-  userName,
-  userRole,
-  vendorName,
-}: {
-  userName?: string | null;
-  userRole?: string | null;
-  vendorName?: string | null;
-}) {
-  const skeletonKpis = ['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate'];
-
-  return (
-    <section className="op-page dashboard-command-center dashboard-enterprise-shell" aria-label="Dashboard loading skeleton">
-      <header className="dashboard-enterprise-header">
-        <div className="dashboard-enterprise-title">
-          <h1>Operational dashboard</h1>
-          <p className="page-description">Preparing dashboard cards for the current vendor scope.</p>
-          <div className="dashboard-role-badges" aria-label="Workspace context">
-            <StatusBadge tone="info">User {userName ?? 'Unknown'}</StatusBadge>
-            <StatusBadge tone="attention">Role {userRole ?? 'Unknown'}</StatusBadge>
-            <StatusBadge tone="info">Vendor {vendorName ?? 'Unknown'}</StatusBadge>
-          </div>
-        </div>
-        <div className="dashboard-status-strip" aria-label="Dashboard status">
-          <StatusBadge tone="info">API preparing</StatusBadge>
-          <div className="dashboard-sync-card">
-            <span>Last sync</span>
-            <strong>—</strong>
-          </div>
-          <StatusBadge tone="attention">Refreshing</StatusBadge>
-        </div>
-      </header>
-
-      <div className="dashboard-enterprise-kpi-row" aria-label="Dashboard card skeletons">
-        {skeletonKpis.map((label) => (
-          <article key={label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(label)}`}>
-            <span>{label}</span>
-            <strong>—</strong>
-            <small>Loading</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="dashboard-enterprise-grid">
-        <div className="dashboard-enterprise-main">
-          <OperationalSection title="Operational priority queue" description="Cards load independently as data becomes available.">
-            <EmptyStatePanel title="Loading priority signals" description="The workspace is available while operational data refreshes." />
-          </OperationalSection>
-          <OperationalSection title="Recent operational events loading" description="Latest events will appear here.">
-            <EmptyStatePanel title="Loading activity" description="Event cards are preparing." />
-          </OperationalSection>
-        </div>
-        <aside className="dashboard-enterprise-aside">
-          <OperationalSection title="Needs attention" description="Attention items are loading.">
-            <EmptyStatePanel title="Loading attention items" description="No blocking dashboard fetch is required to render the workspace shell." />
-          </OperationalSection>
-          <OperationalSection title="Finance snapshot" description="Financial cards are loading.">
-            <div className="dashboard-status-metric-list dashboard-finance-rows">
-              {['Gross sales', 'Refunds', 'Net revenue', 'Payout estimate'].map((label) => (
-                <div className="dashboard-status-metric-row" key={label}>
-                  <span>{label}</span>
-                  <strong>—</strong>
-                </div>
-              ))}
-            </div>
-          </OperationalSection>
-        </aside>
-      </div>
-    </section>
-  );
-}
-
 export function DashboardPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
@@ -225,7 +155,7 @@ export function DashboardPage() {
     data: notifications,
     refetch: refetchNotifications,
   } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.list(notificationScopeVendorId, { signal }), {
-    enabled: appReadiness.ready,
+    enabled: appReadiness.ready && Boolean(dashboard),
   });
   const markNotificationReadMutation = useMutationAction(
     (notificationId: string) => runtimeServices.notifications.markRead(notificationId),
@@ -347,16 +277,6 @@ export function DashboardPage() {
     }
   }
 
-  if (!appReadiness.ready || (isLoading && !dashboard)) {
-    return (
-      <DashboardLoadingSkeleton
-        userName={currentUser?.name}
-        userRole={currentUser?.role}
-        vendorName={currentVendor.vendorName}
-      />
-    );
-  }
-
   const dashboardView = dashboard ?? {
     vendorId,
     vendorName: currentVendor.vendorName,
@@ -398,7 +318,9 @@ export function DashboardPage() {
       </header>
 
       <div className="dashboard-enterprise-kpi-row">
-        {dashboardKpis.map((stat) => (
+        {!appReadiness.ready || (isLoading && !dashboard) ? (
+          <MetricSkeletonGrid labels={['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate']} />
+        ) : dashboardKpis.map((stat) => (
           <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
             <span>{stat.label}</span>
             <strong>{stat.value}</strong>
@@ -419,6 +341,27 @@ export function DashboardPage() {
                 description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
                 onRetry={() => void refetchDashboard()}
               />
+            ) : !appReadiness.ready || (isLoading && !dashboard) ? (
+              <div className="dashboard-priority-table" aria-label="Dashboard priority skeleton">
+                <div className="dashboard-priority-head" aria-hidden="true">
+                  <span>Priority</span>
+                  <span>Type</span>
+                  <span>Count</span>
+                  <span>Oldest</span>
+                  <span>Status</span>
+                  <span>Action</span>
+                </div>
+                {Array.from({ length: 3 }, (_, index) => (
+                  <article key={`dashboard-priority-skeleton-${index}`} className="dashboard-priority-row op-skeleton-row">
+                    <SkeletonText width="56%" />
+                    <SkeletonText width="70%" />
+                    <SkeletonText width="28%" />
+                    <SkeletonText width="42%" />
+                    <SkeletonText width="48%" />
+                    <SkeletonText width="36%" />
+                  </article>
+                ))}
+              </div>
             ) : dashboardView.priorityWork.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
@@ -452,7 +395,22 @@ export function DashboardPage() {
           </OperationalSection>
 
           <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
-            {dashboardView.recentActivity.length === 0 ? (
+            {!appReadiness.ready || (isLoading && !dashboard) ? (
+              <ul className="dashboard-activity-list dashboard-event-list" aria-label="Dashboard activity skeleton">
+                {Array.from({ length: 3 }, (_, index) => (
+                  <li key={`dashboard-activity-skeleton-${index}`} className="op-skeleton-row">
+                    <span className="dashboard-event-dot" aria-hidden="true" />
+                    <div className="dashboard-event-copy">
+                      <SkeletonText width="68%" />
+                      <SkeletonText width="52%" />
+                    </div>
+                    <div className="dashboard-event-meta">
+                      <SkeletonText width="42%" />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : dashboardView.recentActivity.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
@@ -536,7 +494,7 @@ export function DashboardPage() {
                   </div>
                 )}
               </div>
-            ) : dashboardView.notificationSummary ? (
+            ) : dashboard ? dashboardView.notificationSummary ? (
               <div className="op-meta-grid">
                 <MetadataRow label="Unread" value={dashboardView.notificationSummary.unread} />
                 <MetadataRow label="High priority" value={dashboardView.notificationSummary.highPriority} />
@@ -544,13 +502,30 @@ export function DashboardPage() {
               </div>
             ) : (
               <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
+            ) : (
+              <div className="notification-center">
+                <div className="notification-summary-row">
+                  <MetadataRow label="Unread" value={<SkeletonText width="2rem" />} />
+                  <MetadataRow label="High priority" value={<SkeletonText width="2rem" />} />
+                  <MetadataRow label="Total" value={<SkeletonText width="2rem" />} />
+                </div>
+              </div>
             )}
           </OperationalSection>
         </div>
 
         <aside className="dashboard-enterprise-aside">
           <OperationalSection title="Needs attention" description={`${needsAttention} items require your attention.`}>
-            {attentionItems.length === 0 ? (
+            {!appReadiness.ready || (isLoading && !dashboard) ? (
+              <div className="dashboard-attention-list" aria-label="Dashboard attention skeleton">
+                {Array.from({ length: 3 }, (_, index) => (
+                  <article key={`dashboard-attention-skeleton-${index}`} className="dashboard-attention-row op-skeleton-row">
+                    <SkeletonText width="70%" />
+                    <SkeletonText width="24%" />
+                  </article>
+                ))}
+              </div>
+            ) : attentionItems.length === 0 ? (
               <EmptyStatePanel title="No attention items" description="No active attention items." />
             ) : (
               <div className="dashboard-attention-list">
@@ -572,19 +547,19 @@ export function DashboardPage() {
             <div className="dashboard-status-metric-list dashboard-finance-rows">
               <div className="dashboard-status-metric-row">
                 <span>Gross sales</span>
-                <strong>{dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
+                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Refunds</span>
-                <strong>{dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
+                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Net revenue</span>
-                <strong>{dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
+                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Payout estimate</span>
-                <strong>{dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
+                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
               </div>
             </div>
           </OperationalSection>

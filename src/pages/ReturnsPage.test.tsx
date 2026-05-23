@@ -149,6 +149,16 @@ function toSummary(detail: ReturnDetail): ReturnSummary {
   return summary;
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function renderReturnsPage(initialEntries = ['/returns']) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -217,6 +227,20 @@ describe('ReturnsPage control center', () => {
     });
     listReturnsMock.mockReset();
     getReturnMock.mockReset();
+  });
+
+  it('renders filters and table frame before return data hydrates', () => {
+    const returnsResult = deferred<ReturnSummary[]>();
+    listReturnsMock.mockReturnValue(returnsResult.promise);
+
+    renderReturnsPage();
+
+    expect(screen.getByRole('heading', { name: /return requests/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search returns by order, return #, customer or SKU...')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Item' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Return status' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+    expect(screen.queryByText('Returns unavailable')).not.toBeInTheDocument();
   });
 
   it('renders pending return requests separately from processed refunds', async () => {

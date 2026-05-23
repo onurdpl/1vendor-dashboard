@@ -215,6 +215,42 @@ export function SectionSkeleton({ title = 'Loading section', description = 'Data
   return <EmptyStatePanel title={title} description={description} />;
 }
 
+export function SkeletonText({ width = '100%' }: { width?: string }) {
+  return <span className="op-skeleton-line" style={{ width }} aria-hidden="true" />;
+}
+
+export function TableSkeletonRows({ columns, rows = 4 }: { columns: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }, (_, rowIndex) => (
+        <OperationalTableRow key={`skeleton-row-${rowIndex}`} className="op-skeleton-row">
+          {Array.from({ length: columns }, (_, columnIndex) => (
+            <span key={`skeleton-cell-${rowIndex}-${columnIndex}`} className="op-skeleton-cell">
+              <SkeletonText width={columnIndex === 0 ? '72%' : columnIndex % 2 === 0 ? '58%' : '42%'} />
+            </span>
+          ))}
+        </OperationalTableRow>
+      ))}
+    </>
+  );
+}
+
+export function MetricSkeletonGrid({ labels }: { labels: string[] }) {
+  return (
+    <>
+      {labels.map((label) => (
+        <article key={label} className="op-kpi op-tone-neutral op-skeleton-metric">
+          <span>{label}</span>
+          <SkeletonText width="34%" />
+          <small>
+            <SkeletonText width="62%" />
+          </small>
+        </article>
+      ))}
+    </>
+  );
+}
+
 export function SectionErrorRetry({
   title = 'This section could not load',
   description,

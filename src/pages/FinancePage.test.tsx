@@ -187,6 +187,16 @@ function buildInvoiceExecution(
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 function renderFinancePage(initialEntries = ['/finance']) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -261,6 +271,20 @@ describe('FinancePage control center', () => {
     listAdminSupportTicketsMock.mockResolvedValue([]);
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);
+  });
+
+  it('renders filters and ledger table frame before finance data hydrates', () => {
+    const financeResult = deferred<FinanceDashboard>();
+    getFinanceDashboardMock.mockReturnValue(financeResult.promise);
+
+    renderFinancePage();
+
+    expect(screen.getByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search by order #, type, status, amount...')).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Payout impact' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+    expect(screen.queryByText('Finance unavailable')).not.toBeInTheDocument();
   });
 
   it('renders recorded and failed finance statuses with operational hierarchy', async () => {

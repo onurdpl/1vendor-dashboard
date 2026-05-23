@@ -7,6 +7,7 @@ import {
   OperationalSection,
   SectionErrorRetry,
   SectionSkeleton,
+  TableSkeletonRows,
   OperationalTable,
   OperationalTableRow,
   OperationalToolbar,
@@ -413,25 +414,28 @@ export function OrdersPage() {
             </div>
 
             <div className="op-main-column orders-table-shell">
-            {isError && !orders ? (
-              <SectionErrorRetry
-                title="Orders unavailable"
-                description={error ?? 'Unable to load orders.'}
-                onRetry={() => void refetch()}
-              />
-            ) : !authContextReady || isLoading ? (
-              <SectionSkeleton title="Loading orders" description="Fetching vendor-scoped orders in the background." />
-            ) : filteredOrders.length === 0 ? (
-              <EmptyStatePanel
-                title="No orders in this view"
-                description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
-              />
-            ) : (
               <OperationalTable
                 columns={['Order', 'Lifecycle', 'Value', 'Shipping', 'Updated', 'Actions']}
                 className="orders-op-table orders-op-table-v3"
               >
-                {filteredOrders.map((order) => {
+                {isError && !orders ? (
+                  <OperationalTableRow>
+                    <SectionErrorRetry
+                      title="Orders unavailable"
+                      description={error ?? 'Unable to load orders.'}
+                      onRetry={() => void refetch()}
+                    />
+                  </OperationalTableRow>
+                ) : !authContextReady || isLoading ? (
+                  <TableSkeletonRows columns={6} rows={5} />
+                ) : filteredOrders.length === 0 ? (
+                  <OperationalTableRow>
+                    <EmptyStatePanel
+                      title="No orders in this view"
+                      description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
+                    />
+                  </OperationalTableRow>
+                ) : filteredOrders.map((order) => {
                   const lifecyclePrimary = getLifecyclePrimaryLabel(order);
                   const lifecycleSecondary = getLifecycleSecondaryLabel(order);
                   const shippingOperational = getShippingOperationalLabel(order);
@@ -471,8 +475,7 @@ export function OrdersPage() {
                   );
                 })}
               </OperationalTable>
-            )}
-          </div>
+            </div>
           </div>
 
           <SideDetailPanel
