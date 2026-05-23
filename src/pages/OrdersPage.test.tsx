@@ -176,6 +176,7 @@ describe('OrdersPage control center', () => {
     expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('searchbox')).toHaveLength(1);
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
