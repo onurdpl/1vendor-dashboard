@@ -18,9 +18,13 @@ describe('backend deployment health endpoint', () => {
         version: expect.any(String),
         environment: expect.any(String),
         timestamp: expect.any(String),
+        uptimeSeconds: expect.any(Number),
+        coldStartAgeSeconds: expect.any(Number),
         dbReachable: expect.any(Boolean),
         migrationsReachable: expect.any(Boolean),
       });
+      expect(response.json()).toHaveProperty('dbPingMs');
+      expect(typeof response.json().dbPingMs === 'number' || response.json().dbPingMs === null).toBe(true);
       expect(['ok', 'degraded']).toContain(response.json().status);
       expect(JSON.stringify(response.json())).not.toContain('DATABASE_URL');
       expect(JSON.stringify(response.json())).not.toContain('postgresql://');

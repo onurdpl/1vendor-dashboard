@@ -27,6 +27,7 @@ import { registerNotificationRoutes } from './modules/notifications/notification
 import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
+import { registerRequestTimingHooks } from './lib/request-timing.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -104,6 +105,8 @@ const REQUIRED_SCHEMA_COLUMNS = [
   },
 ] as const;
 
+const processStartedAt = Date.now();
+
 async function getSchemaReadiness() {
   const tableNames = Array.from(new Set(REQUIRED_SCHEMA_COLUMNS.map((column) => column.tableName)));
   const columnNames = Array.from(new Set(REQUIRED_SCHEMA_COLUMNS.map((column) => column.columnName)));
@@ -150,11 +153,13 @@ async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
       dbReachable: false,
       migrationsReachable: false,
       schemaReady: false,
+      dbPingMs: null,
       requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
       missingColumns: [],
     };
   }
 
+  const dbPingStartedAt = Date.now();
   try {
     await prisma.$queryRaw`SELECT 1`;
   } catch {
@@ -162,10 +167,12 @@ async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
       dbReachable: false,
       migrationsReachable: false,
       schemaReady: false,
+      dbPingMs: Date.now() - dbPingStartedAt,
       requiredColumnCount: REQUIRED_SCHEMA_COLUMNS.length,
       missingColumns: [],
     };
   }
+  const dbPingMs = Date.now() - dbPingStartedAt;
 
   const schema = await getSchemaReadiness();
 
@@ -174,15 +181,25 @@ async function getDatabaseHealth(env: ReturnType<typeof loadEnv>) {
     return {
       dbReachable: true,
       migrationsReachable: true,
+      dbPingMs,
       ...schema,
     };
   } catch {
     return {
       dbReachable: true,
       migrationsReachable: false,
+      dbPingMs,
       ...schema,
     };
   }
+}
+
+function getRuntimeTimingSnapshot() {
+  const coldStartAgeSeconds = Math.max(0, Math.round((Date.now() - processStartedAt) / 1000));
+  return {
+    uptimeSeconds: Math.max(0, Math.round(process.uptime())),
+    coldStartAgeSeconds,
+  };
 }
 
 export function createApp() {
@@ -249,6 +266,8 @@ export function createApp() {
     }
   });
 
+  registerRequestTimingHooks(app);
+
   app.addContentTypeParser('application/json', { parseAs: 'buffer' }, (request, body, done) => {
     const rawBodyBuffer = Buffer.isBuffer(body) ? body : Buffer.from(body);
     const rawBody = rawBodyBuffer.toString('utf8');
@@ -270,7 +289,9 @@ export function createApp() {
       ok: true,
       status,
       ...getBackendBuildInfo(env),
+      ...getRuntimeTimingSnapshot(),
       dbReachable: database.dbReachable,
+      dbPingMs: database.dbPingMs,
       migrationsReachable: database.migrationsReachable,
       schemaReady: database.schemaReady,
       requiredColumnCount: database.requiredColumnCount,
@@ -295,10 +316,12 @@ export function createApp() {
     }
 
     try {
+      const dbPingStartedAt = Date.now();
       await prisma.$queryRaw`SELECT 1`;
       return {
         ok: true,
         status: 'connected',
+        dbPingMs: Date.now() - dbPingStartedAt,
       };
     } catch (error) {
       return {
