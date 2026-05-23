@@ -34,7 +34,9 @@ export type NavlungoReturnPickupInput = {
   adapter?: ShippingProviderAdapter;
   autoCreate?: boolean;
   apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+  endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
   carrierOverride?: 'current' | '9' | '10';
+  carrierIdOverride?: 'current' | '9' | '10';
   endpointPathOverride?: NavlungoCreatePostEndpointPath;
   diagnosticConfirm?: 'YES';
   customerOverrides?: {
@@ -257,7 +259,7 @@ function resolveNavlungoCarrierId(providerMetadata: unknown, env: AppEnv) {
 function resolveNavlungoDiagnosticCarrierId(
   providerMetadata: unknown,
   env: AppEnv,
-  carrierOverride: NavlungoReturnPickupInput['carrierOverride'],
+  carrierOverride: NavlungoReturnPickupInput['carrierOverride'] | NavlungoReturnPickupInput['carrierIdOverride'],
 ) {
   if (carrierOverride === '9' || carrierOverride === '10') {
     return Number(carrierOverride);
@@ -282,7 +284,7 @@ function resolveNavlungoDiagnosticEndpointPath(
 
 function resolveNavlungoDiagnosticBaseUrl(
   env: AppEnv,
-  apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride'],
+  apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride'] | NavlungoReturnPickupInput['endpointVersionOverride'],
   endpointPathOverride: NavlungoReturnPickupInput['endpointPathOverride'],
 ) {
   const selectedVersion = apiVersionOverride === 'v2' || apiVersionOverride === 'v2.1' ? apiVersionOverride : 'current';
@@ -949,7 +951,7 @@ function buildNavlungoReturnPickupPayload(input: {
   config: Awaited<ReturnType<typeof getVendorShippingConfigForReturn>>;
   env: AppEnv;
   customerOverrides?: NavlungoReturnPickupInput['customerOverrides'];
-  carrierOverride?: NavlungoReturnPickupInput['carrierOverride'];
+  carrierOverride?: NavlungoReturnPickupInput['carrierOverride'] | NavlungoReturnPickupInput['carrierIdOverride'];
   endpointPath?: NavlungoCreatePostEndpointPath;
 }) {
   const order = input.record.vendorAllocation.order;
@@ -1056,20 +1058,26 @@ export async function createNavlungoReturnPickupForReturn(
   const diagnosticOverrideRequested =
     input.apiVersionOverride === 'v2' ||
     input.apiVersionOverride === 'v2.1' ||
+    input.endpointVersionOverride === 'v2' ||
+    input.endpointVersionOverride === 'v2.1' ||
     input.carrierOverride === '9' ||
     input.carrierOverride === '10' ||
+    input.carrierIdOverride === '9' ||
+    input.carrierIdOverride === '10' ||
     input.endpointPathOverride === '/post/return';
   if (diagnosticOverrideRequested && input.dryRun !== true && input.diagnosticConfirm !== 'YES') {
     throw new ReturnReviewError('Explicit confirmation is required for Navlungo return pickup diagnostic live create.', 400);
   }
-  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, input.apiVersionOverride, input.endpointPathOverride);
+  const endpointVersionOverride = input.endpointVersionOverride ?? input.apiVersionOverride;
+  const carrierIdOverride = input.carrierIdOverride ?? input.carrierOverride;
+  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, endpointVersionOverride, input.endpointPathOverride);
   const savedCompletion = readNavlungoReturnPickupCompletion(record.returnProviderSnapshot);
   const built = buildNavlungoReturnPickupPayload({
     record,
     config,
     env: requestBase.env,
     customerOverrides: mergeNavlungoReturnPickupCompletion(savedCompletion, input.customerOverrides),
-    carrierOverride: input.carrierOverride,
+    carrierOverride: carrierIdOverride,
     endpointPath: requestBase.endpointPath,
   });
   const attemptedAt = new Date().toISOString();

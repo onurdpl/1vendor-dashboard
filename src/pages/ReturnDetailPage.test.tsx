@@ -40,7 +40,9 @@ const createNavlungoReturnPickupMock = vi.fn<
     input: {
       dryRun?: boolean;
       apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+      endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
       carrierOverride?: 'current' | '9' | '10';
+      carrierIdOverride?: 'current' | '9' | '10';
       endpointPathOverride?: '/post/create' | '/post/return';
       diagnosticConfirm?: 'YES';
       customerOverrides?: Record<string, string | undefined>;
@@ -69,7 +71,9 @@ vi.mock('../features/returns/api', async () => {
       input: {
         dryRun?: boolean;
         apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+        endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
         carrierOverride?: 'current' | '9' | '10';
+        carrierIdOverride?: 'current' | '9' | '10';
         endpointPathOverride?: '/post/create' | '/post/return';
         diagnosticConfirm?: 'YES';
         customerOverrides?: Record<string, string | undefined>;
@@ -600,8 +604,8 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
       dryRun: false,
-      apiVersionOverride: 'v2.1',
-      carrierOverride: '10',
+      endpointVersionOverride: 'v2.1',
+      carrierIdOverride: '10',
       endpointPathOverride: '/post/create',
       diagnosticConfirm: 'YES',
     });
@@ -635,8 +639,8 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
       dryRun: false,
-      apiVersionOverride: 'v2.1',
-      carrierOverride: 'current',
+      endpointVersionOverride: 'v2.1',
+      carrierIdOverride: 'current',
       endpointPathOverride: '/post/return',
       diagnosticConfirm: 'YES',
     });

@@ -5855,8 +5855,8 @@ describe('shipping execution foundation', () => {
       },
       {
         adapter,
-        apiVersionOverride: 'v2.1',
-        carrierOverride: '10',
+        endpointVersionOverride: 'v2.1',
+        carrierIdOverride: '10',
         diagnosticConfirm: 'YES',
       },
     );
@@ -5921,7 +5921,8 @@ describe('shipping execution foundation', () => {
       },
       {
         adapter,
-        apiVersionOverride: 'v2.1',
+        endpointVersionOverride: 'v2.1',
+        carrierIdOverride: '10',
         endpointPathOverride: '/post/return',
         diagnosticConfirm: 'YES',
       },
@@ -5930,11 +5931,13 @@ describe('shipping execution foundation', () => {
     const createInput = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0];
     expect(createInput.endpointPath).toBe('/post/return');
     expect(createInput.requestSnapshot.posts[0].post_type).toBe(3);
+    expect(createInput.requestSnapshot.posts[0].carrier_id).toBe(10);
     expect(createInput.requestSnapshot.posts[0].recipient).toEqual({ addressId: 55574 });
     expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         returnProviderSnapshot: expect.objectContaining({
           navlungoReturnEndpointVersionTried: 'v2.1',
+          navlungoReturnRequestedCarrierId: 10,
           navlungoReturnEndpointPathTried: '/post/return',
           navlungoReturnResolvedProviderPath: '/v2.1/post/return',
           navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/return',

@@ -552,7 +552,9 @@ export function ReturnDetailPage() {
     (input: {
       dryRun?: boolean;
       apiVersionOverride?: 'current' | 'v2' | 'v2.1';
+      endpointVersionOverride?: 'current' | 'v2' | 'v2.1';
       carrierOverride?: 'current' | '9' | '10';
+      carrierIdOverride?: 'current' | '9' | '10';
       endpointPathOverride?: '/post/create' | '/post/return';
       diagnosticConfirm?: 'YES';
     }) => {
@@ -1812,8 +1814,8 @@ export function ReturnDetailPage() {
                         void navlungoReturnPickupMutation
                           .mutateAsync({
                             dryRun: false,
-                            apiVersionOverride: navlungoReturnPickupApiVersionOverride,
-                            carrierOverride: navlungoReturnPickupCarrierOverride,
+                            endpointVersionOverride: navlungoReturnPickupApiVersionOverride,
+                            carrierIdOverride: navlungoReturnPickupCarrierOverride,
                             endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
                             diagnosticConfirm: navlungoReturnPickupLiveConfirmed ? 'YES' : undefined,
                           })
