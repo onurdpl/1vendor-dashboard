@@ -37,4 +37,43 @@ describe('app readiness', () => {
     expect(readiness.ready).toBe(true);
     expect(readiness.currentVendor.vendorId).toBe('demo-vendor-b');
   });
+
+  it('becomes ready for a vendor user with a fixed vendor context', () => {
+    setToken('vendor-token');
+    setCurrentUser({
+      email: 'vendor-a@demo.com',
+      name: 'Vendor A User',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    const readiness = getAppReadinessSnapshot();
+
+    expect(readiness.status).toBe('ready');
+    expect(readiness.ready).toBe(true);
+    expect(readiness.currentVendor.vendorId).toBe('demo-vendor-a');
+  });
+
+  it('does not become ready when an authenticated user has no vendor context', () => {
+    setToken('admin-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+
+    const readiness = getAppReadinessSnapshot();
+
+    expect(readiness.status).toBe('missing_vendor_context');
+    expect(readiness.sessionReady).toBe(true);
+    expect(readiness.vendorReady).toBe(false);
+    expect(readiness.ready).toBe(false);
+  });
 });

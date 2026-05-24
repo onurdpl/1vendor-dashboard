@@ -129,6 +129,7 @@ export function getToken() {
 
 export function setToken(token: string) {
   window.localStorage.setItem(TOKEN_KEY, token);
+  dispatchSessionReset();
 }
 
 function getCurrentBrowserPath() {
@@ -243,6 +244,7 @@ export function getCurrentUser() {
 
 export function setCurrentUser(user: CurrentUser) {
   window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  dispatchSessionReset();
 }
 
 export function getCurrentUserVendorDetails(): readonly UserVendorAccess[] {

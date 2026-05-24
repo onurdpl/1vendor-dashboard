@@ -281,6 +281,31 @@ describe('OrdersPage control center', () => {
     expect(getOrderMock).not.toHaveBeenCalled();
   });
 
+  it('asks for vendor selection when the authenticated user has no vendor context', () => {
+    window.localStorage.clear();
+    setToken('test-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    const { container } = renderOrdersPage();
+
+    expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
+    expect(screen.getAllByRole('heading', { name: 'Select vendor' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('heading', { name: 'Waiting for vendor context' })).not.toBeInTheDocument();
+    expect(container.querySelector('.op-skeleton-row')).toBeNull();
+    expect(listOrdersMock).not.toHaveBeenCalled();
+    expect(getOrderMock).not.toHaveBeenCalled();
+  });
+
   it('renders table skeletons only while an enabled orders query is fetching', () => {
     const ordersResult = deferred<OrderSummary[]>();
     listOrdersMock.mockReturnValue(ordersResult.promise);

@@ -24,6 +24,12 @@ const defaultVendors = [
   },
 ] as const satisfies readonly VendorContext[];
 
+const missingVendorContext: VendorContext = {
+  vendorId: '',
+  vendorName: '',
+  scope: 'missing-vendor-context',
+};
+
 function dispatchVendorChange() {
   if (typeof window === 'undefined') {
     return;
@@ -33,10 +39,15 @@ function dispatchVendorChange() {
 }
 
 function getResolvedAvailableVendors(): readonly VendorContext[] {
+  const currentUser = getCurrentUser();
   const vendorDetails = getCurrentUserVendorDetails();
 
-  if (vendorDetails.length === 0) {
+  if (!currentUser) {
     return defaultVendors;
+  }
+
+  if (vendorDetails.length === 0) {
+    return [];
   }
 
   return vendorDetails.map((vendor) => ({
@@ -49,6 +60,10 @@ function getResolvedAvailableVendors(): readonly VendorContext[] {
 function resolveVendorIdForCurrentUser(storedVendorId: string | null) {
   const currentUser = getCurrentUser();
   const availableVendors = getResolvedAvailableVendors();
+
+  if (availableVendors.length === 0) {
+    return '';
+  }
 
   if (!currentUser) {
     return storedVendorId && availableVendors.some((vendor) => vendor.vendorId === storedVendorId)
@@ -94,6 +109,10 @@ export function setCurrentVendorId(vendorId: VendorId) {
 
 export function getCurrentVendorContext(): VendorContext {
   const availableVendors = getResolvedAvailableVendors();
+
+  if (availableVendors.length === 0) {
+    return missingVendorContext;
+  }
 
   if (typeof window === 'undefined') {
     return availableVendors[0];

@@ -56,4 +56,46 @@ describe('vendor context', () => {
 
     expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-a');
   });
+
+  it('persists an admin selected vendor across context reads', () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a', 'demo-vendor-b'],
+      vendorDetails: [
+        { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' },
+        { vendorId: 'demo-vendor-b', vendorName: 'Demo Vendor B' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    setCurrentVendorId('demo-vendor-b');
+
+    expect(getCurrentVendorContext()).toEqual({
+      vendorId: 'demo-vendor-b',
+      vendorName: 'Demo Vendor B',
+      scope: 'runtime-vendor-context',
+    });
+    expect(getCurrentVendorContext().vendorId).toBe('demo-vendor-b');
+  });
+
+  it('does not invent a demo vendor for an authenticated user with no vendor access', () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: false,
+      defaultVendorId: '',
+    });
+
+    expect(getAvailableVendors()).toEqual([]);
+    expect(getCurrentVendorContext()).toEqual({
+      vendorId: '',
+      vendorName: '',
+      scope: 'missing-vendor-context',
+    });
+  });
 });

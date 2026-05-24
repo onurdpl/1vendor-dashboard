@@ -28,6 +28,12 @@ const adminNavItems = [
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
 ];
 
+const missingVendorContext = {
+  vendorId: '',
+  vendorName: 'No vendor selected',
+  scope: 'missing-vendor-context',
+};
+
 export function AppShell() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -49,7 +55,7 @@ export function AppShell() {
       : vendors.filter((vendor) => currentUser.vendorAccess.includes(vendor.vendorId))
     : vendors;
   const currentVendor =
-    visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0];
+    visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0] ?? missingVendorContext;
 
   useEffect(() => {
     setSelectedVendorId(appReadiness.currentVendor.vendorId);
@@ -157,7 +163,7 @@ export function AppShell() {
               <div className="session-meta">Switch vendor context for orders, returns, finance, and automation.</div>
             )}
           </div>
-          {currentUser?.canSwitchVendors ? (
+          {currentUser?.canSwitchVendors && visibleVendors.length > 0 ? (
             <label className="vendor-switcher">
               <span className="sr-only">Select vendor</span>
               <select

@@ -2,7 +2,12 @@ import { useEffect, useState } from 'react';
 import { getCurrentUser, getToken, onSessionReset, type CurrentUser } from './auth/session';
 import { getCurrentVendorContext, onVendorChange, type VendorContext } from './auth/vendorContext';
 
-export type AppReadinessStatus = 'loading_session' | 'loading_vendor_context' | 'ready' | 'unauthorized';
+export type AppReadinessStatus =
+  | 'loading_session'
+  | 'loading_vendor_context'
+  | 'missing_vendor_context'
+  | 'ready'
+  | 'unauthorized';
 
 export type AppReadinessState = {
   status: AppReadinessStatus;
@@ -49,7 +54,7 @@ export function getAppReadinessSnapshot(): AppReadinessState {
 
   if (!currentVendor.vendorId) {
     return {
-      status: 'loading_vendor_context',
+      status: 'missing_vendor_context',
       token,
       currentUser,
       currentVendor,
@@ -81,10 +86,12 @@ export function useAppReadiness() {
 
     const unsubscribeSession = onSessionReset(refresh);
     const unsubscribeVendor = onVendorChange(refresh);
+    window.addEventListener('storage', refresh);
 
     return () => {
       unsubscribeSession();
       unsubscribeVendor();
+      window.removeEventListener('storage', refresh);
     };
   }, []);
 

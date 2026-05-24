@@ -311,7 +311,8 @@ export function OrdersPage() {
     ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
     { enabled: authContextReady && Boolean(currentVendor.vendorId) },
   );
-  const ordersWaitingForVendorContext = !authContextReady || !currentVendor.vendorId;
+  const ordersMissingVendorContext = appReadiness.status === 'missing_vendor_context';
+  const ordersWaitingForVendorContext = !ordersMissingVendorContext && (!authContextReady || !currentVendor.vendorId);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
@@ -654,6 +655,13 @@ export function OrdersPage() {
                       onRetry={() => void refetch()}
                     />
                   </OperationalTableRow>
+                ) : ordersMissingVendorContext ? (
+                  <OperationalTableRow>
+                    <EmptyStatePanel
+                      title="Select vendor"
+                      description="Choose a vendor context before loading vendor-scoped orders."
+                    />
+                  </OperationalTableRow>
                 ) : ordersWaitingForVendorContext ? (
                   <OperationalTableRow>
                     <EmptyStatePanel
@@ -892,6 +900,11 @@ export function OrdersPage() {
             </>
               );
             })()
+          ) : ordersMissingVendorContext ? (
+            <EmptyStatePanel
+              title="Select vendor"
+              description="Order detail requires a selected vendor context."
+            />
           ) : ordersWaitingForVendorContext ? (
             <EmptyStatePanel
               title="Waiting for vendor context"
