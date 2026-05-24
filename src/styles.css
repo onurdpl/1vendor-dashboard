@@ -3142,11 +3142,15 @@ h3 {
 
 .finance-control-center .op-side-panel-body,
 .finance-control-center .op-meta-group {
+  grid-template-columns: minmax(0, 1fr);
+  grid-auto-flow: row;
   gap: 9px;
   min-width: 0;
 }
 
 .finance-control-center .op-side-panel-body > * {
+  grid-column: 1 / -1;
+  grid-row: auto;
   width: 100%;
   min-width: 0;
 }

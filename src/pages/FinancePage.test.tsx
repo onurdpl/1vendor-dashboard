@@ -303,7 +303,7 @@ describe('FinancePage control center', () => {
   it('opens the finance detail panel for a selected ledger row', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
-    renderFinancePage();
+    const { container } = renderFinancePage();
 
     await screen.findByText('#1002');
     await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
@@ -312,7 +312,46 @@ describe('FinancePage control center', () => {
     expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
     expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
+    const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
+    expect(inspectorBody?.querySelector(':scope > .admin-collab-card')).toBeTruthy();
+    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
+    expect(inspectorBody?.querySelectorAll(':scope > .finance-detail-card').length).toBeGreaterThanOrEqual(3);
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
+  });
+
+  it('renders recommendation, invoice, and settlement sections in the same finance inspector stack', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          status: 'Pending',
+          settlement: {
+            ...financeDashboard.transactions[0].settlement!,
+            status: 'held',
+            payoutReady: false,
+            holdReason: 'operator_review',
+          },
+        },
+        financeDashboard.transactions[1],
+        financeDashboard.transactions[2],
+      ],
+    });
+
+    const { container } = renderFinancePage();
+
+    expect(await screen.findByText('Suggested next steps')).toBeInTheDocument();
+    expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
+    expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
+
+    const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
+    expect(inspectorBody?.querySelector(':scope > .operational-recommendations-card')).toBeTruthy();
+    expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
+    expect(
+      Array.from(inspectorBody?.querySelectorAll(':scope > .finance-detail-card') ?? []).some((section) =>
+        section.textContent?.includes('Supplier settlement/payout'),
+      ),
+    ).toBe(true);
   });
 
   it('selects a finance row by ledgerId deep link', async () => {
