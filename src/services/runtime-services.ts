@@ -554,6 +554,18 @@ export const runtimeServices = {
           navlungoUpdateAttempted: true,
           navlungoUpdateSucceeded: true,
           navlungoUpdateHttpStatus: 200,
+          navlungoUpdateRecipientOverridePresent: Boolean(Object.keys(payload.recipient ?? {}).length),
+          navlungoUpdateRecipientOverrideKeys: Object.keys(payload.recipient ?? {}).sort(),
+          navlungoUpdateSubmittedRecipientOverrideKeys: Object.keys(payload.recipient ?? {}).sort(),
+          navlungoUpdateOptionOverrideKeys: [
+            payload.postNote?.trim() ? 'postNote' : null,
+            payload.barcodeFormat?.trim() ? 'barcodeFormat' : null,
+          ].filter((key): key is string => Boolean(key)),
+          navlungoUpdateRecipientOverrides: Object.fromEntries(
+            Object.entries(payload.recipient ?? {}).filter(([, value]) => typeof value === 'string' && value.trim()),
+          ),
+          navlungoUpdatePostNote: payload.postNote?.trim() ?? '',
+          navlungoUpdateBarcodeFormat: payload.barcodeFormat?.trim() ?? '',
           navlungoUpdatedAt: submittedAt,
           shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
         },

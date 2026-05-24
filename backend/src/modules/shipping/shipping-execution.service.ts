@@ -728,6 +728,13 @@ function mapProviderResponseSummary(
     navlungoUpdateSenderMode: readString(snapshot, ['navlungoUpdateSenderMode']),
     navlungoUpdateSenderFieldKeys: readStringArray(snapshot.navlungoUpdateSenderFieldKeys),
     navlungoUpdateMissingSenderFields: readStringArray(snapshot.navlungoUpdateMissingSenderFields),
+    navlungoUpdateRecipientOverridePresent: readOptionalBoolean(snapshot, ['navlungoUpdateRecipientOverridePresent']),
+    navlungoUpdateRecipientOverrideKeys: readStringArray(snapshot.navlungoUpdateRecipientOverrideKeys),
+    navlungoUpdateSubmittedRecipientOverrideKeys: readStringArray(snapshot.navlungoUpdateSubmittedRecipientOverrideKeys),
+    navlungoUpdateOptionOverrideKeys: readStringArray(snapshot.navlungoUpdateOptionOverrideKeys),
+    navlungoUpdateRecipientOverrides: normalizeNavlungoUpdateRecipientOverrides(snapshot.navlungoUpdateRecipientOverrides),
+    navlungoUpdatePostNote: readString(snapshot, ['navlungoUpdatePostNote']),
+    navlungoUpdateBarcodeFormat: readString(snapshot, ['navlungoUpdateBarcodeFormat']),
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     navlungoReturnPickupDryRun: readOptionalBoolean(snapshot, ['navlungoReturnPickupDryRun']),
@@ -1948,6 +1955,80 @@ function buildNavlungoUpdateRecipient(input: {
   return {
     recipient,
     missingFields,
+  };
+}
+
+const NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS = [
+  'name',
+  'phone',
+  'email',
+  'country',
+  'postcode',
+  'city',
+  'district',
+  'address',
+] as const;
+
+type NavlungoUpdateRecipientOverrideField = typeof NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS[number];
+
+function normalizeNavlungoUpdateRecipientOverrides(value: unknown) {
+  if (!isRecord(value)) {
+    return {} as Partial<Record<NavlungoUpdateRecipientOverrideField, string>>;
+  }
+
+  return Object.fromEntries(
+    NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS
+      .map((field) => {
+        const raw = value[field];
+        return [field, typeof raw === 'string' ? raw.trim() : ''] as const;
+      })
+      .filter(([, raw]) => raw.length > 0),
+  ) as Partial<Record<NavlungoUpdateRecipientOverrideField, string>>;
+}
+
+function readNavlungoUpdateOverrides(snapshot: unknown) {
+  const snapshotRecord = isRecord(snapshot) ? snapshot : {};
+  const nested = isRecord(snapshotRecord.navlungoUpdateOverrides) ? snapshotRecord.navlungoUpdateOverrides : {};
+  const recipient = {
+    ...normalizeNavlungoUpdateRecipientOverrides(snapshotRecord.navlungoUpdateRecipientOverrides),
+    ...normalizeNavlungoUpdateRecipientOverrides(nested.recipient),
+  };
+  const postNote =
+    readString(nested, ['postNote']) ??
+    readString(snapshotRecord, ['navlungoUpdatePostNote']);
+  const barcodeFormat =
+    readString(nested, ['barcodeFormat']) ??
+    readString(snapshotRecord, ['navlungoUpdateBarcodeFormat']);
+
+  return {
+    recipient,
+    postNote,
+    barcodeFormat,
+  };
+}
+
+function buildNavlungoUpdateOverrideSnapshot(input: {
+  recipient: Partial<Record<NavlungoUpdateRecipientOverrideField, string>>;
+  submittedRecipient: Partial<Record<NavlungoUpdateRecipientOverrideField, string>>;
+  postNote: string | null;
+  barcodeFormat: string | null;
+  submittedOptionKeys: string[];
+}) {
+  const recipientKeys = Object.keys(input.recipient).sort();
+
+  return {
+    navlungoUpdateOverrides: {
+      recipient: input.recipient,
+      postNote: input.postNote ?? '',
+      barcodeFormat: input.barcodeFormat ?? '',
+    },
+    navlungoUpdateRecipientOverrides: input.recipient,
+    navlungoUpdateRecipientOverridePresent: recipientKeys.length > 0,
+    navlungoUpdateRecipientOverrideKeys: recipientKeys,
+    navlungoUpdateSubmittedRecipientOverrideKeys: Object.keys(input.submittedRecipient).sort(),
+    navlungoUpdateOptionOverrideKeys: input.submittedOptionKeys.sort(),
+    navlungoUpdatePostNote: input.postNote ?? '',
+    navlungoUpdateBarcodeFormat: input.barcodeFormat ?? '',
   };
 }
 
@@ -5566,6 +5647,31 @@ export async function updateNavlungoShipmentExecution(
     throw new Error('Allocation could not be found for the selected vendor.');
   }
 
+  const existingUpdateOverrides = readNavlungoUpdateOverrides(existingSnapshot);
+  const submittedRecipientOverrides = normalizeNavlungoUpdateRecipientOverrides(input.recipient);
+  const mergedRecipientOverrides = {
+    ...existingUpdateOverrides.recipient,
+    ...submittedRecipientOverrides,
+  };
+  const submittedPostNote = typeof input.postNote === 'string' && input.postNote.trim()
+    ? input.postNote.trim()
+    : null;
+  const submittedBarcodeFormat = typeof input.barcodeFormat === 'string' && input.barcodeFormat.trim()
+    ? input.barcodeFormat.trim()
+    : null;
+  const mergedPostNote = submittedPostNote ?? existingUpdateOverrides.postNote ?? '';
+  const mergedBarcodeFormat = submittedBarcodeFormat ?? existingUpdateOverrides.barcodeFormat ?? null;
+  const updateOverrideSnapshot = buildNavlungoUpdateOverrideSnapshot({
+    recipient: mergedRecipientOverrides,
+    submittedRecipient: submittedRecipientOverrides,
+    postNote: mergedPostNote,
+    barcodeFormat: mergedBarcodeFormat,
+    submittedOptionKeys: [
+      submittedPostNote ? 'postNote' : null,
+      submittedBarcodeFormat ? 'barcodeFormat' : null,
+    ].filter((key): key is string => Boolean(key)),
+  });
+
   const config = mapShippingConfig(await getStoredShippingConfig(options.vendorId), options.vendorId);
   const sender = buildNavlungoSender(config, { useFullSenderDetails: true, requireEmail: false });
   if (!sender.sender) {
@@ -5583,7 +5689,7 @@ export async function updateNavlungoShipmentExecution(
     order: allocation.order,
     customerName: allocation.order.customerName,
     customerEmail: allocation.order.customerEmail,
-    recipient: input.recipient,
+    recipient: mergedRecipientOverrides,
   });
   if (recipient.missingFields.length > 0) {
     throw new Error(
@@ -5596,13 +5702,13 @@ export async function updateNavlungoShipmentExecution(
     );
   }
 
-  const barcodeFormat = input.barcodeFormat?.trim() || resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
+  const barcodeFormat = mergedBarcodeFormat || resolveNavlungoBarcodeFormat(config.providerMetadata, options.env);
   const payload = {
     post_number: existing.providerShipmentId,
     sender: sender.sender,
     recipient: recipient.recipient,
     post: {
-      note: input.postNote?.trim() ?? '',
+      note: mergedPostNote,
     },
     barcode_format: barcodeFormat,
     custom_data_1: '',
@@ -5614,6 +5720,7 @@ export async function updateNavlungoShipmentExecution(
   const attemptSnapshot = appendTimelineEvent(
     {
       ...existingSnapshot,
+      ...updateOverrideSnapshot,
       navlungoUpdateAttempted: true,
       navlungoUpdateSucceeded: false,
       navlungoUpdateProviderShipmentIdPresent: true,
@@ -5657,6 +5764,7 @@ export async function updateNavlungoShipmentExecution(
       {
         ...attemptSnapshot,
         ...result.responseSnapshot,
+        ...updateOverrideSnapshot,
         navlungoUpdateAttempted: true,
         navlungoUpdateSucceeded: true,
         navlungoUpdatedAt: updatedAt,
@@ -5699,6 +5807,7 @@ export async function updateNavlungoShipmentExecution(
       {
         ...attemptSnapshot,
         ...providerSnapshot,
+        ...updateOverrideSnapshot,
         navlungoUpdateAttempted: true,
         navlungoUpdateSucceeded: false,
         shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',

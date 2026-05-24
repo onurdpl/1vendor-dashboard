@@ -197,6 +197,32 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+const NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS = [
+  'name',
+  'phone',
+  'email',
+  'country',
+  'postcode',
+  'city',
+  'district',
+  'address',
+] as const;
+
+function readNavlungoUpdateRecipientOverrides(value: unknown) {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS
+      .map((field) => {
+        const raw = value[field];
+        return [field, typeof raw === 'string' ? raw.trim() : ''] as const;
+      })
+      .filter(([, raw]) => raw.length > 0),
+  );
+}
+
 function redactValidationDiagnosticText(value: string) {
   return value
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[redacted-email]')
@@ -864,6 +890,16 @@ function buildShipmentProviderResponseSummary(
     navlungoUpdateSenderMode: readString(snapshot, ['navlungoUpdateSenderMode']),
     navlungoUpdateSenderFieldKeys: readStringArray(snapshot?.navlungoUpdateSenderFieldKeys),
     navlungoUpdateMissingSenderFields: readStringArray(snapshot?.navlungoUpdateMissingSenderFields),
+    navlungoUpdateRecipientOverridePresent:
+      typeof snapshot?.navlungoUpdateRecipientOverridePresent === 'boolean'
+        ? snapshot.navlungoUpdateRecipientOverridePresent
+        : null,
+    navlungoUpdateRecipientOverrideKeys: readStringArray(snapshot?.navlungoUpdateRecipientOverrideKeys),
+    navlungoUpdateSubmittedRecipientOverrideKeys: readStringArray(snapshot?.navlungoUpdateSubmittedRecipientOverrideKeys),
+    navlungoUpdateOptionOverrideKeys: readStringArray(snapshot?.navlungoUpdateOptionOverrideKeys),
+    navlungoUpdateRecipientOverrides: readNavlungoUpdateRecipientOverrides(snapshot?.navlungoUpdateRecipientOverrides),
+    navlungoUpdatePostNote: readString(snapshot, ['navlungoUpdatePostNote']),
+    navlungoUpdateBarcodeFormat: readString(snapshot, ['navlungoUpdateBarcodeFormat']),
     navlungoUpdatedAt: readString(snapshot, ['navlungoUpdatedAt']),
     shopifyFulfillmentUpdateSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentUpdateSyncSkippedReason']),
     lastProviderStage: readString(snapshot, ['lastProviderStage']),

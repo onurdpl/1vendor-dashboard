@@ -1249,9 +1249,62 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect((await screen.findAllByText('Navlungo shipment updated')).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText('District *')[0]).toHaveValue('Kartal');
     expect(await screen.findByText('Update Post')).toBeInTheDocument();
     expect(screen.getByText(/attempted yes · HTTP 200 · succeeded yes/i)).toBeInTheDocument();
     expect(screen.getByText('Updated at')).toBeInTheDocument();
+  });
+
+  it('repopulates persisted Navlungo update overrides after reload', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      vendorId: 'sporjinal',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        provider: 'navlungo',
+        providerShipmentId: 'NAV-1028',
+        trackingNumber: 'NAV-1028',
+        shipmentStatus: 'created',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          navlungoUpdateAttempted: true,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdateRecipientOverridePresent: true,
+          navlungoUpdateRecipientOverrideKeys: ['city', 'district', 'postcode'],
+          navlungoUpdateSubmittedRecipientOverrideKeys: ['district'],
+          navlungoUpdateOptionOverrideKeys: ['postNote', 'barcodeFormat'],
+          navlungoUpdateRecipientOverrides: {
+            city: 'Istanbul',
+            district: 'Kartal',
+            postcode: '34870',
+          },
+          navlungoUpdatePostNote: 'Leave at reception',
+          navlungoUpdateBarcodeFormat: 'pdf-A6',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    const updatePanel = await screen.findByLabelText('Navlungo shipment update');
+
+    expect(within(updatePanel).getByLabelText('City *')).toHaveValue('Istanbul');
+    expect(within(updatePanel).getByLabelText('District *')).toHaveValue('Kartal');
+    expect(within(updatePanel).getByLabelText('Postcode')).toHaveValue('34870');
+    expect(within(updatePanel).getByLabelText('Post note')).toHaveValue('Leave at reception');
+    expect(within(updatePanel).getByLabelText('Barcode format')).toHaveValue('pdf-A6');
+    expect(screen.getByText(/yes · keys city, district, postcode/i)).toBeInTheDocument();
+    expect(screen.getByText(/recipient district · options postNote, barcodeFormat/i)).toBeInTheDocument();
   });
 
   it('hides the Navlungo shipment update form from vendors while preserving cancellation', async () => {

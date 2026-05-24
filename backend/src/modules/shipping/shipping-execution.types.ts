@@ -406,6 +406,16 @@ export type ShipmentExecutionDto = {
     navlungoUpdateSenderMode?: string | null;
     navlungoUpdateSenderFieldKeys?: string[];
     navlungoUpdateMissingSenderFields?: string[];
+    navlungoUpdateRecipientOverridePresent?: boolean | null;
+    navlungoUpdateRecipientOverrideKeys?: string[];
+    navlungoUpdateSubmittedRecipientOverrideKeys?: string[];
+    navlungoUpdateOptionOverrideKeys?: string[];
+    navlungoUpdateRecipientOverrides?: Partial<Record<
+      'name' | 'phone' | 'email' | 'country' | 'postcode' | 'city' | 'district' | 'address',
+      string
+    >>;
+    navlungoUpdatePostNote?: string | null;
+    navlungoUpdateBarcodeFormat?: string | null;
     navlungoUpdatedAt?: string | null;
     shopifyFulfillmentUpdateSyncSkippedReason?: string | null;
     navlungoReturnPickupDryRun?: boolean | null;

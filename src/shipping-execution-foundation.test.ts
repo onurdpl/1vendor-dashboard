@@ -1844,6 +1844,149 @@ describe('shipping execution foundation', () => {
     expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
   });
 
+  it('persists and merges Navlungo update recipient overrides without wiping empty fields', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-navlungo-update-merge',
+      allocationId: 'alloc-1',
+      provider: 'NAVLUNGO',
+      providerShipmentId: 'NV-2001',
+      trackingNumber: 'NV-2001',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'navlungo',
+        flow: 'forward',
+        navlungoUpdateOverrides: {
+          recipient: {
+            city: 'Istanbul',
+            district: 'Kadikoy',
+          },
+          postNote: 'Existing note',
+          barcodeFormat: 'pdf-A6',
+        },
+        navlungoUpdateRecipientOverrides: {
+          city: 'Istanbul',
+          district: 'Kadikoy',
+        },
+      },
+    });
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO',
+      updateShipment: vi.fn().mockResolvedValue({
+        providerShipmentId: 'NV-2001',
+        trackingNumber: 'NV-2001',
+        trackingUrl: 'https://tracking.test/NV-2001',
+        labelUrl: 'new-barcode',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValueOnce(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocationWithShopifyFulfillmentData());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata(),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+    prismaMock.shipmentExecution.update
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          navlungoUpdateAttempted: true,
+        },
+      })
+      .mockResolvedValueOnce({
+        ...existing,
+        responseSnapshot: {
+          provider: 'navlungo',
+          navlungoUpdateAttempted: true,
+          navlungoUpdateHttpStatus: 200,
+          navlungoUpdateSucceeded: true,
+          navlungoUpdateRecipientOverridePresent: true,
+          navlungoUpdateRecipientOverrideKeys: ['city', 'district', 'postcode'],
+          navlungoUpdateSubmittedRecipientOverrideKeys: ['postcode'],
+          navlungoUpdateOptionOverrideKeys: [],
+          navlungoUpdateRecipientOverrides: {
+            city: 'Istanbul',
+            district: 'Kadikoy',
+            postcode: '34000',
+          },
+          navlungoUpdatePostNote: 'Existing note',
+          navlungoUpdateBarcodeFormat: 'pdf-A6',
+          navlungoUpdatedAt: '2026-05-22T10:00:00.000Z',
+          shopifyFulfillmentUpdateSyncSkippedReason: 'not_implemented',
+        },
+      });
+
+    const result = await updateNavlungoShipmentExecution(existing.id, {
+      recipient: {
+        postcode: '34000',
+      },
+      postNote: '',
+      barcodeFormat: '',
+    }, {
+      env,
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.updateShipment).toHaveBeenCalledWith({
+      providerShipmentId: 'NV-2001',
+      requestSnapshot: expect.objectContaining({
+        recipient: expect.objectContaining({
+          city: 'Istanbul',
+          district: 'Kadikoy',
+          post_code: '34000',
+        }),
+        post: {
+          note: 'Existing note',
+        },
+        barcode_format: 'pdf-A6',
+      }),
+    });
+    expect(prismaMock.shipmentExecution.update.mock.calls[0][0].data.responseSnapshot).toMatchObject({
+      navlungoUpdateRecipientOverridePresent: true,
+      navlungoUpdateRecipientOverrideKeys: ['city', 'district', 'postcode'],
+      navlungoUpdateSubmittedRecipientOverrideKeys: ['postcode'],
+      navlungoUpdateOptionOverrideKeys: [],
+      navlungoUpdateRecipientOverrides: {
+        city: 'Istanbul',
+        district: 'Kadikoy',
+        postcode: '34000',
+      },
+      navlungoUpdatePostNote: 'Existing note',
+      navlungoUpdateBarcodeFormat: 'pdf-A6',
+    });
+    expect(result.providerResponseSummary).toMatchObject({
+      navlungoUpdateRecipientOverridePresent: true,
+      navlungoUpdateRecipientOverrideKeys: ['city', 'district', 'postcode'],
+      navlungoUpdateSubmittedRecipientOverrideKeys: ['postcode'],
+      navlungoUpdateOptionOverrideKeys: [],
+      navlungoUpdateRecipientOverrides: {
+        city: 'Istanbul',
+        district: 'Kadikoy',
+        postcode: '34000',
+      },
+      navlungoUpdatePostNote: 'Existing note',
+      navlungoUpdateBarcodeFormat: 'pdf-A6',
+    });
+  });
+
   it('blocks Navlungo update before provider call when full sender fields are missing', async () => {
     const existing = buildShipmentExecution({
       id: 'shipment-navlungo-update-missing-sender',

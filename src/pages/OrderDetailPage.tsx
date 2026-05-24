@@ -1350,6 +1350,44 @@ const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
   address: 'Address',
 };
 
+const NAVLUNGO_UPDATE_RECIPIENT_FIELDS = [
+  'name',
+  'phone',
+  'email',
+  'address',
+  'city',
+  'district',
+  'postcode',
+  'country',
+] as const;
+
+type NavlungoUpdateRecipientField = typeof NAVLUNGO_UPDATE_RECIPIENT_FIELDS[number];
+type NavlungoUpdateFormState = Partial<Record<NavlungoUpdateRecipientField | 'postNote' | 'barcodeFormat', string>>;
+
+function readNavlungoUpdateFormState(summary?: ShipmentExecution['providerResponseSummary'] | null): NavlungoUpdateFormState {
+  const recipientOverrides = isRecord(summary?.navlungoUpdateRecipientOverrides)
+    ? summary.navlungoUpdateRecipientOverrides
+    : {};
+
+  const state: NavlungoUpdateFormState = {};
+  for (const field of NAVLUNGO_UPDATE_RECIPIENT_FIELDS) {
+    const value = recipientOverrides[field];
+    if (typeof value === 'string' && value.trim()) {
+      state[field] = value;
+    }
+  }
+
+  if (summary?.navlungoUpdatePostNote?.trim()) {
+    state.postNote = summary.navlungoUpdatePostNote.trim();
+  }
+
+  if (summary?.navlungoUpdateBarcodeFormat?.trim()) {
+    state.barcodeFormat = summary.navlungoUpdateBarcodeFormat.trim();
+  }
+
+  return state;
+}
+
 function hasShipmentSuccessEvidence(value: unknown) {
   if (value === null || value === undefined) {
     return false;
@@ -1476,6 +1514,7 @@ export function OrderDetailPage() {
   const [navlungoBarcodeProbeError, setNavlungoBarcodeProbeError] = useState<string | null>(null);
   const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
   const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
+  const [navlungoUpdateForm, setNavlungoUpdateForm] = useState<NavlungoUpdateFormState>({});
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
@@ -1859,6 +1898,12 @@ export function OrderDetailPage() {
   const visibleShipmentExecution = shipmentActionState?.shipment ?? shipmentExecution ?? null;
   const hasShipmentExecution = Boolean(visibleShipmentExecution);
   const shipmentProviderSummary = visibleShipmentExecution?.providerResponseSummary;
+
+  useEffect(() => {
+    setNavlungoUpdateForm(readNavlungoUpdateFormState(shipmentProviderSummary));
+    setNavlungoUpdateConfirmed(false);
+  }, [visibleShipmentExecution?.id]);
+
   const visibleShipmentStatus = (visibleShipmentExecution?.shipmentStatus ?? '').trim().toLowerCase();
   const failedLikeShipmentExecution =
     Boolean(visibleShipmentExecution) &&
@@ -2213,17 +2258,19 @@ export function OrderDetailPage() {
       return;
     }
 
-    const formData = new FormData(event.currentTarget);
     const recipient = Object.fromEntries(
-      (['name', 'phone', 'email', 'address', 'country', 'city', 'district', 'postcode'] as ShipmentCustomerField[])
+      NAVLUNGO_UPDATE_RECIPIENT_FIELDS
         .map((field) => {
-          const value = formData.get(`navlungo-${field}`);
+          const value = navlungoUpdateForm[field];
           return [field, typeof value === 'string' ? value.trim() : ''] as const;
         })
         .filter(([, value]) => value.length > 0),
     ) as Partial<Record<ShipmentCustomerField, string>>;
-    const postNoteValue = formData.get('navlungo-post-note');
-    const barcodeFormatValue = formData.get('navlungo-barcode-format');
+    const submittedFormState = {
+      ...navlungoUpdateForm,
+    };
+    const postNoteValue = navlungoUpdateForm.postNote ?? '';
+    const barcodeFormatValue = navlungoUpdateForm.barcodeFormat ?? '';
 
     setShipmentActionState({
       tone: 'info',
@@ -2234,13 +2281,14 @@ export function OrderDetailPage() {
     void updateNavlungoShipmentMutation({
       shipmentExecutionId: visibleShipmentExecution.id,
       recipient,
-      postNote: typeof postNoteValue === 'string' ? postNoteValue.trim() : '',
-      barcodeFormat: typeof barcodeFormatValue === 'string' ? barcodeFormatValue.trim() : '',
+      postNote: postNoteValue.trim(),
+      barcodeFormat: barcodeFormatValue.trim(),
     })
       .then((shipment) => {
-        const succeeded = shipment.providerResponseSummary?.navlungoUpdateSucceeded === true;
-        const providerMessage = shipment.providerResponseSummary?.navlungoUpdateProviderMessage ||
-          shipment.providerResponseSummary?.providerError ||
+        const updatedSummary = shipment.providerResponseSummary as ShipmentExecution['providerResponseSummary'] | undefined;
+        const succeeded = updatedSummary?.navlungoUpdateSucceeded === true;
+        const providerMessage = updatedSummary?.navlungoUpdateProviderMessage ||
+          updatedSummary?.providerError ||
           null;
         const message = succeeded
           ? 'Navlungo shipment updated'
@@ -2253,6 +2301,8 @@ export function OrderDetailPage() {
           endpoint: `POST /shipments/${visibleShipmentExecution.id}/update-navlungo`,
         });
         setNavlungoUpdateConfirmed(false);
+        const nextFormState = readNavlungoUpdateFormState(updatedSummary);
+        setNavlungoUpdateForm(Object.keys(nextFormState).length > 0 ? nextFormState : submittedFormState);
         showFeedback(message, tone);
         void refetch();
       })
@@ -2738,15 +2788,34 @@ export function OrderDetailPage() {
           <div className="shipment-update-section">
             <span className="shipment-update-section-label">Recipient info</span>
             <div className="shipment-field-completion-grid">
-              {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as ShipmentCustomerField[]).map((field) => (
+              {(['name', 'phone', 'email', 'address', 'city', 'district', 'postcode'] as NavlungoUpdateRecipientField[]).map((field) => (
                 <label className="field" key={`navlungo-${field}`}>
                   <span>{SHIPMENT_CUSTOMER_FIELD_LABELS[field]}{field === 'email' || field === 'postcode' ? '' : ' *'}</span>
-                  <input name={`navlungo-${field}`} />
+                  <input
+                    name={`navlungo-${field}`}
+                    value={navlungoUpdateForm[field] ?? ''}
+                    onChange={(event) =>
+                      setNavlungoUpdateForm((current) => ({
+                        ...current,
+                        [field]: event.target.value,
+                      }))
+                    }
+                  />
                 </label>
               ))}
               <label className="field">
                 <span>Country *</span>
-                <input name="navlungo-country" placeholder="tr" />
+                <input
+                  name="navlungo-country"
+                  placeholder="tr"
+                  value={navlungoUpdateForm.country ?? ''}
+                  onChange={(event) =>
+                    setNavlungoUpdateForm((current) => ({
+                      ...current,
+                      country: event.target.value,
+                    }))
+                  }
+                />
               </label>
             </div>
           </div>
@@ -2755,11 +2824,30 @@ export function OrderDetailPage() {
             <div className="shipment-field-completion-grid">
               <label className="field">
                 <span>Post note</span>
-                <input name="navlungo-post-note" />
+                <input
+                  name="navlungo-post-note"
+                  value={navlungoUpdateForm.postNote ?? ''}
+                  onChange={(event) =>
+                    setNavlungoUpdateForm((current) => ({
+                      ...current,
+                      postNote: event.target.value,
+                    }))
+                  }
+                />
               </label>
               <label className="field">
                 <span>Barcode format</span>
-                <input name="navlungo-barcode-format" placeholder="pdf-A6" />
+                <input
+                  name="navlungo-barcode-format"
+                  placeholder="pdf-A6"
+                  value={navlungoUpdateForm.barcodeFormat ?? ''}
+                  onChange={(event) =>
+                    setNavlungoUpdateForm((current) => ({
+                      ...current,
+                      barcodeFormat: event.target.value,
+                    }))
+                  }
+                />
               </label>
             </div>
           </div>
@@ -3071,6 +3159,23 @@ export function OrderDetailPage() {
         <div className="summary-row">
           <span>Missing update sender fields</span>
           <strong>{summary.navlungoUpdateMissingSenderFields?.length ? summary.navlungoUpdateMissingSenderFields.join(', ') : '—'}</strong>
+        </div>
+        <div className="summary-row">
+          <span>Recipient override</span>
+          <strong>
+            {formatDiagnosticPresence(summary.navlungoUpdateRecipientOverridePresent)} · keys{' '}
+            {summary.navlungoUpdateRecipientOverrideKeys?.length ? summary.navlungoUpdateRecipientOverrideKeys.join(', ') : '—'}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Submitted override keys</span>
+          <strong>
+            recipient{' '}
+            {summary.navlungoUpdateSubmittedRecipientOverrideKeys?.length
+              ? summary.navlungoUpdateSubmittedRecipientOverrideKeys.join(', ')
+              : '—'} · options{' '}
+            {summary.navlungoUpdateOptionOverrideKeys?.length ? summary.navlungoUpdateOptionOverrideKeys.join(', ') : '—'}
+          </strong>
         </div>
         <div className="summary-row">
           <span>Update validation fields</span>
