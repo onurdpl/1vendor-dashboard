@@ -751,6 +751,40 @@ describe('Navlungo dormant auth scaffold', () => {
         'recipient.address validation failed',
         'The desi field is required.',
       ],
+      createPostRequest: expect.objectContaining({
+        method: 'POST',
+        url: 'https://domestic-api.navlungo.com/v2/post/create',
+        endpointPath: '/post/create',
+        headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+        redactedHeaders: expect.objectContaining({
+          Authorization: '[redacted]',
+          'X-localization': 'en',
+        }),
+        redactedJsonPayload: expect.objectContaining({
+          platform: 'shopify',
+          posts: [
+            expect.objectContaining({
+              sender: expect.objectContaining({
+                name: '[redacted]',
+                phone: '[redacted]',
+                email: '[redacted]',
+                address: '[redacted]',
+              }),
+              recipient: expect.objectContaining({
+                name: '[redacted]',
+                phone: '[redacted]',
+                email: '[redacted]',
+                address: '[redacted]',
+              }),
+            }),
+          ],
+        }),
+      }),
+      createPostResponseBody: expect.objectContaining({
+        status: false,
+        message: 'Validation Errors',
+        code: 'VALIDATION_ERROR',
+      }),
       validationResponseShape: {
         kind: 'json:object',
         topLevelKeys: ['status', 'message', 'code', 'errors'],
@@ -760,6 +794,7 @@ describe('Navlungo dormant auth scaffold', () => {
     expect(JSON.stringify(snapshot)).not.toContain('+90 532 123 45 68');
     expect(JSON.stringify(snapshot)).not.toContain('recipient@example.test');
     expect(JSON.stringify(snapshot)).not.toContain('Recipient address');
+    expect(JSON.stringify(snapshot)).not.toContain('secret-password');
   });
 
   it('parses Navlungo validation field paths from root error object', async () => {

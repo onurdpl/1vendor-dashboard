@@ -7036,6 +7036,24 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 8px;
 }
 
+.return-review-compact-grid .return-diagnostics-json {
+  grid-column: 1 / -1;
+}
+
+.return-diagnostics-json pre {
+  margin: 6px 0 0;
+  max-height: 260px;
+  padding: 10px;
+  border-radius: 8px;
+  background: #131925;
+  color: #edf2ff;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .return-review-compact-grid label {
   display: grid;
   gap: 4px;

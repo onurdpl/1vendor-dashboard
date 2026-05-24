@@ -847,6 +847,46 @@ describe('ReturnDetailPage vendor review screen', () => {
           kind: 'json:object',
           topLevelKeys: ['message', 'status', 'errors'],
         },
+        navlungoReturnCreateRequest: {
+          method: 'POST',
+          url: 'https://domestic-api.navlungo.com/v2.1/post/return',
+          endpointPath: '/post/return',
+          headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+          redactedHeaders: {
+            Accept: 'application/json',
+            Authorization: '[redacted]',
+            'Content-Type': 'application/json',
+            'X-localization': 'en',
+          },
+          redactedJsonPayload: {
+            platform: 'shopify',
+            posts: [
+              {
+                reference_id: 'DE-RET-1023-ABC123',
+                carrier_id: 9,
+                post_type: 3,
+                sender: {
+                  name: '[redacted]',
+                  phone: '[redacted]',
+                  email: '[redacted]',
+                  address: '[redacted]',
+                  country: 'tr',
+                  city: '[redacted]',
+                  district: '[redacted]',
+                  post_code: '',
+                },
+                recipient: { addressId: 55574 },
+              },
+            ],
+          },
+        },
+        navlungoReturnCreateResponseBody: {
+          message: 'Validation Errors',
+          status: false,
+          error: {
+            'posts.0.carrier_id': ['Carrier field is required'],
+          },
+        },
         responseKeys: ['message', 'status', 'error'],
       },
     });
@@ -862,7 +902,15 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(within(diagnostics).getByText('posts.0.sender.district')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Sender district is required.')).toBeInTheDocument();
     expect(within(diagnostics).getByText('json:object · message, status, errors')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Redacted create request')).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/"endpointPath": "\/post\/return"/)).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/"Authorization": "\[redacted\]"/)).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Redacted provider response body')).toBeInTheDocument();
+    expect(within(diagnostics).getByText(/"posts.0.carrier_id"/)).toBeInTheDocument();
     expect(within(diagnostics).getByText(/responseKeys/)).toBeInTheDocument();
+    expect(screen.queryByText('John Doe')).not.toBeInTheDocument();
+    expect(screen.queryByText('+90 535 123 45 67')).not.toBeInTheDocument();
+    expect(screen.queryByText('customer@example.test')).not.toBeInTheDocument();
   });
 
   it('renders sanitized Navlungo return request summary without PII', async () => {

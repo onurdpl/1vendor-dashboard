@@ -718,6 +718,52 @@ function sanitizeNavlungoValidationMessage(value: unknown, path: string[] = []) 
     .slice(0, 240);
 }
 
+function sanitizeNavlungoDiagnosticValue(value: unknown, path: string[] = []): unknown {
+  if (Array.isArray(value)) {
+    return value.slice(0, 50).map((item) => sanitizeNavlungoDiagnosticValue(item, path));
+  }
+
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([key]) => !/token|secret|authorization|bearer|api[_-]?key|password/i.test(key))
+        .map(([key, item]) => {
+          const nextPath = [...path, key];
+          if (/name|phone|email|address|city|district|post_?code|postcode/i.test(key)) {
+            return [key, typeof item === 'string' && item.trim() ? '[redacted]' : sanitizeNavlungoDiagnosticValue(item, nextPath)];
+          }
+          return [key, sanitizeNavlungoDiagnosticValue(item, nextPath)];
+        }),
+    );
+  }
+
+  if (typeof value === 'string') {
+    return sanitizeNavlungoValidationMessage(value, path) ?? '';
+  }
+
+  return value;
+}
+
+function summarizeNavlungoCreatePostRequestDiagnostics(input: {
+  url: string | null;
+  payload: NavlungoCreatePostPayload;
+  endpointPath: NavlungoCreatePostEndpointPath;
+}) {
+  return {
+    method: 'POST',
+    url: input.url,
+    endpointPath: input.endpointPath,
+    headerKeys: ['Accept', 'Authorization', 'Content-Type', 'X-localization'],
+    redactedHeaders: {
+      Accept: 'application/json',
+      Authorization: '[redacted]',
+      'Content-Type': 'application/json',
+      'X-localization': 'en',
+    },
+    redactedJsonPayload: sanitizeNavlungoDiagnosticValue(input.payload),
+  };
+}
+
 function collectNavlungoValidationDiagnostics(
   value: unknown,
   path: string[] = [],
@@ -854,6 +900,7 @@ function buildCreatePostDiagnostics(response: NavlungoHttpResponse, bodyData: Re
     carrierFieldsPresent: Boolean(readNumberOrString(post, ['carrier_id']) ?? readString(post, ['carrier_name'])),
     providerMessage,
     providerTrackingId: extractNavlungoProviderTrackingId(providerMessage),
+    redactedResponseBody: sanitizeNavlungoDiagnosticValue(response.body),
     ...getNavlungoValidationDiagnostics(response.body),
   };
 }
@@ -1363,6 +1410,11 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
     const client = new NavlungoHttpClient(this.env, this.options);
     const createPostEndpointPath = normalizeNavlungoCreatePostEndpointPath(input.endpointPath);
     const requestSummary = summarizeNavlungoCreatePostRequest(payload, this.env, createPostEndpointPath);
+    const createPostRequestDiagnostics = summarizeNavlungoCreatePostRequestDiagnostics({
+      url: client.requestUrl(createPostEndpointPath),
+      payload,
+      endpointPath: createPostEndpointPath,
+    });
     const senderUsesAddressId = isRecord(payload.posts?.[0]?.sender) && 'addressId' in payload.posts[0].sender;
     const responseSnapshot: Record<string, unknown> = {
       provider: NAVLUNGO_PROVIDER_KEY,
@@ -1380,6 +1432,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       senderUsesAddressId,
       senderMode: senderUsesAddressId ? 'addressId' : 'fullSender',
       navlungoRequestSummary: requestSummary,
+      createPostRequest: createPostRequestDiagnostics,
       createPostEndpointPath,
       lastSuccessfulNavlungoRequestSummary: lastSuccessfulNavlungoCreatePostRequestSummary,
     };
@@ -1428,6 +1481,7 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
       createPostResponseKeys: createDiagnostics.topLevelKeys,
       createPostDataKeys: createDiagnostics.dataKeys,
       providerMessage: createDiagnostics.providerMessage,
+      createPostResponseBody: createDiagnostics.redactedResponseBody,
       validationErrorKeys: createDiagnostics.validationErrorKeys,
       validationErrorMessages: createDiagnostics.validationErrorMessages,
       failedFieldNames: createDiagnostics.failedFieldNames,

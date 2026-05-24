@@ -185,6 +185,13 @@ function formatDiagnosticList(values: string[]) {
   return values.length ? values.join(', ') : '—';
 }
 
+function formatDiagnosticJson(value: unknown) {
+  if (!isRecord(value) && !Array.isArray(value)) {
+    return null;
+  }
+  return JSON.stringify(value, null, 2);
+}
+
 function isRenderableReturnDetail(value: unknown): value is ReturnDetail {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     return false;
@@ -944,6 +951,8 @@ export function ReturnDetailPage() {
     'validationErrorMessages',
   ]);
   const navlungoReturnValidationResponseShape = returnProviderSnapshot.navlungoReturnValidationResponseShape;
+  const navlungoReturnCreateRequestJson = formatDiagnosticJson(returnProviderSnapshot.navlungoReturnCreateRequest);
+  const navlungoReturnCreateResponseBodyJson = formatDiagnosticJson(returnProviderSnapshot.navlungoReturnCreateResponseBody);
   const returnProviderSnapshotResponseKeys = Object.keys(returnProviderSnapshot).sort();
   const shouldRenderNavlungoAutoCreateDiagnostics =
     isAdmin &&
@@ -1599,6 +1608,18 @@ export function ReturnDetailPage() {
                   <span>Snapshot response keys</span>
                   <strong>{formatDiagnosticList(returnProviderSnapshotResponseKeys)}</strong>
                 </div>
+                {navlungoReturnCreateRequestJson ? (
+                  <div className="return-diagnostics-json">
+                    <span>Redacted create request</span>
+                    <pre>{navlungoReturnCreateRequestJson}</pre>
+                  </div>
+                ) : null}
+                {navlungoReturnCreateResponseBodyJson ? (
+                  <div className="return-diagnostics-json">
+                    <span>Redacted provider response body</span>
+                    <pre>{navlungoReturnCreateResponseBodyJson}</pre>
+                  </div>
+                ) : null}
                 {navlungoReturnRequestSummary ? (
                   <>
                     <div>
