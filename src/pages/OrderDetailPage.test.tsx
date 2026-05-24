@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -2486,6 +2486,34 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         warnings: [],
       }),
     );
+    const savedKargonomiConfig = {
+      vendorId: 'sporjinal',
+      preferredProvider: 'kargonomi' as const,
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: '18.00',
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-112668',
+          vendorId: 'sporjinal',
+          provider: 'kargonomi',
+          warehouseId: '112668',
+          name: 'Sporjinal warehouse',
+          address: null,
+          isDefault: true,
+        },
+      ],
+      providerMetadata: {
+        packageType: 'box',
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+      source: 'configured' as const,
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    };
+    updateVendorShippingConfigMock.mockResolvedValueOnce(savedKargonomiConfig);
 
     renderOrderDetail();
 
@@ -2649,6 +2677,141 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Run Navlungo carrier diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
+  });
+
+  it('persists and restores Navlungo sender and return recipient config fields after save', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'navlungo',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        navlungoSenderAddressId: '55574',
+        navlungoSenderName: 'Old Sender',
+        navlungoSenderCountry: 'tr',
+        navlungoReturnRecipientAddressId: '77701',
+        navlungoReturnRecipientName: 'Old Return Warehouse',
+        navlungoReturnRecipientCountry: 'tr',
+        navlungoBarcodeFormat: 'pdf-A6',
+        navlungoCarrierId: '9',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:28:50.786Z',
+    });
+    const savedConfig = {
+      vendorId: 'sporjinal',
+      preferredProvider: 'navlungo' as const,
+      shippingEnabled: true,
+      defaultDesi: '4.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55580',
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        navlungoSenderAddressId: '55580',
+        navlungoSenderName: 'Sporjinal Sender',
+        navlungoSenderPhone: '+90 532 123 45 67',
+        navlungoSenderEmail: 'sender@example.test',
+        navlungoSenderAddress: 'Sender Street 1',
+        navlungoSenderCountry: 'tr',
+        navlungoSenderCity: 'Istanbul',
+        navlungoSenderDistrict: 'Kadikoy',
+        navlungoSenderPostCode: '34710',
+        navlungoReturnRecipientAddressId: '77702',
+        navlungoReturnRecipientName: 'Return Warehouse',
+        navlungoReturnRecipientPhone: '+90 532 765 43 21',
+        navlungoReturnRecipientEmail: 'returns@example.test',
+        navlungoReturnRecipientAddress: 'Return Street 2',
+        navlungoReturnRecipientCountry: 'tr',
+        navlungoReturnRecipientCity: 'Istanbul',
+        navlungoReturnRecipientDistrict: 'Ataşehir',
+        navlungoReturnRecipientPostCode: '34750',
+        navlungoBarcodeFormat: 'pdf-A5',
+        navlungoCarrierId: '9',
+      },
+      source: 'configured' as const,
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    };
+    updateVendorShippingConfigMock.mockResolvedValueOnce(savedConfig);
+    getVendorShippingConfigMock.mockResolvedValueOnce(savedConfig);
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
+    fireEvent.change(screen.getByLabelText('Navlungo sender address ID'), { target: { value: '55580' } });
+    fireEvent.change(screen.getByLabelText('Default desi'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Navlungo return recipient address ID'), { target: { value: '77702' } });
+    await user.click(screen.getByText('Full sender details for diagnostics'));
+    fireEvent.change(screen.getByLabelText('Sender name'), { target: { value: 'Sporjinal Sender' } });
+    fireEvent.change(screen.getByLabelText('Sender phone'), { target: { value: '+90 532 123 45 67' } });
+    fireEvent.change(screen.getByLabelText('Sender email'), { target: { value: 'sender@example.test' } });
+    fireEvent.change(screen.getByLabelText('Sender address'), { target: { value: 'Sender Street 1' } });
+    fireEvent.change(screen.getByLabelText('Sender city'), { target: { value: 'Istanbul' } });
+    fireEvent.change(screen.getByLabelText('Sender district'), { target: { value: 'Kadikoy' } });
+    fireEvent.change(screen.getByLabelText('Sender post code'), { target: { value: '34710' } });
+    await user.click(screen.getByText('Return recipient address book details'));
+    fireEvent.change(screen.getByLabelText('Return recipient name'), { target: { value: 'Return Warehouse' } });
+    fireEvent.change(screen.getByLabelText('Return recipient phone'), { target: { value: '+90 532 765 43 21' } });
+    fireEvent.change(screen.getByLabelText('Return recipient email'), { target: { value: 'returns@example.test' } });
+    fireEvent.change(screen.getByLabelText('Return recipient address'), { target: { value: 'Return Street 2' } });
+    fireEvent.change(screen.getByLabelText('Return recipient city'), { target: { value: 'Istanbul' } });
+    fireEvent.change(screen.getByLabelText('Return recipient district'), { target: { value: 'Ataşehir' } });
+    fireEvent.change(screen.getByLabelText('Return recipient post code'), { target: { value: '34750' } });
+    fireEvent.change(screen.getByLabelText('Default barcode format'), { target: { value: 'pdf-A5' } });
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() =>
+      expect(updateVendorShippingConfigMock).toHaveBeenCalledWith(
+        'sporjinal',
+        expect.objectContaining({
+          preferredProvider: 'navlungo',
+          defaultWarehouseId: '55580',
+          defaultDesi: 4,
+          providerMetadata: expect.objectContaining({
+            navlungoSenderAddressId: '55580',
+            navlungoSenderName: 'Sporjinal Sender',
+            navlungoSenderPhone: '+90 532 123 45 67',
+            navlungoSenderEmail: 'sender@example.test',
+            navlungoSenderAddress: 'Sender Street 1',
+            navlungoSenderCountry: 'tr',
+            navlungoSenderCity: 'Istanbul',
+            navlungoSenderDistrict: 'Kadikoy',
+            navlungoSenderPostCode: '34710',
+            navlungoReturnRecipientAddressId: '77702',
+            navlungoReturnRecipientName: 'Return Warehouse',
+            navlungoReturnRecipientPhone: '+90 532 765 43 21',
+            navlungoReturnRecipientEmail: 'returns@example.test',
+            navlungoReturnRecipientAddress: 'Return Street 2',
+            navlungoReturnRecipientCountry: 'tr',
+            navlungoReturnRecipientCity: 'Istanbul',
+            navlungoReturnRecipientDistrict: 'Ataşehir',
+            navlungoReturnRecipientPostCode: '34750',
+            navlungoBarcodeFormat: 'pdf-A5',
+            navlungoCarrierId: '9',
+          }),
+        }),
+      ),
+    );
+    expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Navlungo sender address ID')).toHaveValue('55580');
+    expect(screen.getByLabelText('Navlungo return recipient address ID')).toHaveValue('77702');
+    expect(screen.getByLabelText('Sender name')).toHaveValue('Sporjinal Sender');
+    expect(screen.getByLabelText('Return recipient city')).toHaveValue('Istanbul');
+    expect(screen.getByLabelText('Return recipient district')).toHaveValue('Ataşehir');
   });
 
   it('renders Navlungo auth validation fields and messages safely', async () => {

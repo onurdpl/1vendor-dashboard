@@ -337,6 +337,10 @@ export type ShipmentExecution = {
     navlungoReturnRecipientAddressIdPresent?: boolean | null;
     navlungoReturnRecipientAddressIdNumeric?: boolean | null;
     navlungoReturnRecipientAddressIdSource?: string | null;
+    navlungoReturnRecipientMetadataConfigured?: boolean | null;
+    navlungoReturnRecipientName?: string | null;
+    navlungoReturnRecipientCity?: string | null;
+    navlungoReturnRecipientDistrict?: string | null;
     navlungoStatusSyncAttempted?: boolean | null;
     navlungoStatusSyncHttpStatus?: number | null;
     navlungoStatusSyncResolvedProviderUrl?: string | null;

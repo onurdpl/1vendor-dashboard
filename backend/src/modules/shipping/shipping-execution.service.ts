@@ -2180,9 +2180,17 @@ export async function upsertVendorShippingConfig(
   input: VendorShippingConfigUpdateDto,
 ): Promise<VendorShippingConfigDto> {
   const defaultConfig = mapShippingConfig(null, vendorId);
+  const existingConfig = await getStoredShippingConfig(vendorId);
   const preferredProvider = normalizeProvider(input.preferredProvider ?? defaultConfig.preferredProvider);
   const defaultDesi = input.defaultDesi ?? Number(defaultConfig.defaultDesi);
   const shippingVatPercent = input.shippingVatPercent ?? Number(defaultConfig.shippingVatPercent);
+  const providerMetadataForSave =
+    input.providerMetadata !== undefined &&
+    preferredProvider === ShippingProvider.NAVLUNGO &&
+    isRecord(existingConfig?.providerMetadata) &&
+    isRecord(input.providerMetadata)
+      ? { ...existingConfig.providerMetadata, ...input.providerMetadata }
+      : input.providerMetadata;
 
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) {
     throw new Error('defaultDesi must be greater than zero.');
@@ -2196,8 +2204,8 @@ export async function upsertVendorShippingConfig(
   if (input.defaultWarehouseId !== undefined && input.defaultWarehouseId !== null && !/^\d+$/.test(input.defaultWarehouseId)) {
     throw new Error('defaultWarehouseId must be numeric.');
   }
-  if (input.providerMetadata !== undefined) {
-    assertValidKargoPackageType(resolveKargoPackageType(input.providerMetadata));
+  if (providerMetadataForSave !== undefined) {
+    assertValidKargoPackageType(resolveKargoPackageType(providerMetadataForSave));
   }
 
   const config = await prisma.$transaction(async (tx) => {
@@ -2213,9 +2221,9 @@ export async function upsertVendorShippingConfig(
         defaultWarehouseId: input.defaultWarehouseId === undefined ? undefined : input.defaultWarehouseId,
         shippingVatPercent: input.shippingVatPercent === undefined ? undefined : shippingVatPercent,
         providerMetadata:
-          input.providerMetadata === undefined
+          providerMetadataForSave === undefined
             ? undefined
-            : (input.providerMetadata as Prisma.InputJsonValue),
+            : (providerMetadataForSave as Prisma.InputJsonValue),
       },
       create: {
         vendorId,
@@ -2226,9 +2234,9 @@ export async function upsertVendorShippingConfig(
         defaultWarehouseId: input.defaultWarehouseId ?? null,
         shippingVatPercent,
         providerMetadata:
-          input.providerMetadata === undefined
+          providerMetadataForSave === undefined
             ? Prisma.JsonNull
-            : (input.providerMetadata as Prisma.InputJsonValue),
+            : (providerMetadataForSave as Prisma.InputJsonValue),
       },
     });
 

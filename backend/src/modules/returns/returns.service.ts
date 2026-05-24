@@ -276,6 +276,24 @@ function resolveNavlungoReturnRecipientAddressId(config: {
   };
 }
 
+function summarizeNavlungoReturnRecipientMetadata(providerMetadata: unknown) {
+  const name = readString(providerMetadata, ['navlungoReturnRecipientName', 'returnRecipientName', 'return_recipient_name']);
+  const city = readString(providerMetadata, ['navlungoReturnRecipientCity', 'returnRecipientCity', 'return_recipient_city']);
+  const district = readString(providerMetadata, [
+    'navlungoReturnRecipientDistrict',
+    'returnRecipientDistrict',
+    'return_recipient_district',
+  ]);
+  const configured = Boolean(name?.trim() || city?.trim() || district?.trim());
+
+  return {
+    configured,
+    name: name?.trim() || null,
+    city: city?.trim() || null,
+    district: district?.trim() || null,
+  };
+}
+
 function parsePositiveInteger(value: string | null | undefined) {
   if (!value?.trim()) {
     return null;
@@ -1154,6 +1172,7 @@ function buildNavlungoReturnPickupPayload(input: {
     post_code: overrides.postcode?.trim() || overrides.post_code?.trim() || order.shippingPostcode?.trim() || '',
   };
   const returnRecipientAddress = resolveNavlungoReturnRecipientAddressId(input.config, input.env);
+  const returnRecipientMetadata = summarizeNavlungoReturnRecipientMetadata(input.config.providerMetadata);
   const recipientAddressId = parsePositiveInteger(returnRecipientAddress.value);
   const returnRecipientAddressIdPresent = Boolean(returnRecipientAddress.value?.trim());
   const returnRecipientAddressIdNumeric = returnRecipientAddressIdPresent && Boolean(recipientAddressId);
@@ -1210,6 +1229,10 @@ function buildNavlungoReturnPickupPayload(input: {
     navlungoReturnRecipientAddressIdPresent: returnRecipientAddressIdPresent,
     navlungoReturnRecipientAddressIdNumeric: returnRecipientAddressIdNumeric,
     navlungoReturnRecipientAddressIdSource: returnRecipientAddress.source,
+    navlungoReturnRecipientMetadataConfigured: returnRecipientMetadata.configured,
+    navlungoReturnRecipientName: returnRecipientMetadata.name,
+    navlungoReturnRecipientCity: returnRecipientMetadata.city,
+    navlungoReturnRecipientDistrict: returnRecipientMetadata.district,
   };
 }
 
@@ -1298,6 +1321,10 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
     navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
     navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+    navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
+    navlungoReturnRecipientName: built.navlungoReturnRecipientName,
+    navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,
+    navlungoReturnRecipientDistrict: built.navlungoReturnRecipientDistrict,
     returnRequestId: record.id,
     shopifyReturnIdPresent: Boolean(record.sourceShopifyReturnId || record.sourceShopifyReturnGid),
     shopifyReturnSyncSkippedReason: 'not_implemented',
@@ -1511,6 +1538,10 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
           navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
           navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
           navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+          navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
+          navlungoReturnRecipientName: built.navlungoReturnRecipientName,
+          navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,
+          navlungoReturnRecipientDistrict: built.navlungoReturnRecipientDistrict,
           shopifyReturnSyncSkippedReason: 'not_implemented',
           shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
           attemptedAt: new Date().toISOString(),
@@ -1599,6 +1630,10 @@ export async function saveNavlungoReturnPickupAddressCompletion(
         navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
         navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
         navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+        navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
+        navlungoReturnRecipientName: built.navlungoReturnRecipientName,
+        navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,
+        navlungoReturnRecipientDistrict: built.navlungoReturnRecipientDistrict,
       } as Prisma.InputJsonValue,
     },
   });

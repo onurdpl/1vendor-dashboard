@@ -1684,6 +1684,22 @@ export function ReturnDetailPage() {
                       </strong>
                     </div>
                     <div>
+                      <span>Return recipient metadata</span>
+                      <strong>
+                        {returnProviderSnapshot.navlungoReturnRecipientMetadataConfigured === true ? 'configured' : 'optional'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Return recipient</span>
+                      <strong>
+                        {[
+                          returnProviderSnapshot.navlungoReturnRecipientName,
+                          returnProviderSnapshot.navlungoReturnRecipientCity,
+                          returnProviderSnapshot.navlungoReturnRecipientDistrict,
+                        ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' · ') || '—'}
+                      </strong>
+                    </div>
+                    <div>
                       <span>Post payload keys</span>
                       <strong>
                         {Array.isArray(navlungoReturnRequestSummary.postPayloadKeys)
@@ -1849,6 +1865,22 @@ export function ReturnDetailPage() {
                           {returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true ? 'yes' : 'no'}
                           {' · numeric '}
                           {returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true ? 'yes' : 'no'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Return recipient metadata</span>
+                        <strong>
+                          {returnProviderSnapshot.navlungoReturnRecipientMetadataConfigured === true ? 'configured' : 'optional'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Return recipient</span>
+                        <strong>
+                          {[
+                            returnProviderSnapshot.navlungoReturnRecipientName,
+                            returnProviderSnapshot.navlungoReturnRecipientCity,
+                            returnProviderSnapshot.navlungoReturnRecipientDistrict,
+                          ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0).join(' · ') || '—'}
                         </strong>
                       </div>
                       <div className="summary-row">

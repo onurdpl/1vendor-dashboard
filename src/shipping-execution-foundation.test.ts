@@ -7,6 +7,10 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorShippingConfig: {
     findUnique: vi.fn(),
+    findUniqueOrThrow: vi.fn(),
+    upsert: vi.fn(),
+  },
+  vendorShippingWarehouse: {
     upsert: vi.fn(),
   },
   shipmentExecution: {
@@ -66,6 +70,7 @@ const {
   retryFailedShipmentExecution,
   syncNavlungoShipmentStatus,
   updateNavlungoShipmentExecution,
+  upsertVendorShippingConfig,
 } = await import(
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
@@ -116,6 +121,7 @@ const env = {
   NAVLUNGO_API_USERNAME: undefined,
   NAVLUNGO_API_PASSWORD: undefined,
   NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: undefined,
+  NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID: undefined,
   NAVLUNGO_DEFAULT_BARCODE_FORMAT: undefined,
   NAVLUNGO_DEFAULT_CARRIER_ID: undefined,
 };
@@ -324,7 +330,9 @@ describe('shipping execution foundation', () => {
     prismaMock.vendorAllocation.findUnique.mockReset();
     prismaMock.vendorAllocation.update.mockReset();
     prismaMock.vendorShippingConfig.findUnique.mockReset();
+    prismaMock.vendorShippingConfig.findUniqueOrThrow.mockReset();
     prismaMock.vendorShippingConfig.upsert.mockReset();
+    prismaMock.vendorShippingWarehouse.upsert.mockReset();
     prismaMock.shipmentExecution.findUnique.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
     prismaMock.shipmentExecution.findMany.mockReset();
@@ -5811,6 +5819,63 @@ describe('shipping execution foundation', () => {
       returnProvider: 'navlungo',
       returnProviderShipmentId: 'NAV-RETURN-1',
       returnTrackingNumber: 'RET-TRACK-1',
+    });
+  });
+
+  it('merges partial Navlungo shipping config metadata without wiping sender details', async () => {
+    const existingConfig = {
+      id: 'shipping-config-sporjinal',
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({
+        navlungoSenderAddressId: '55574',
+        navlungoSenderName: 'Stored sender',
+        navlungoSenderCity: 'Istanbul',
+        navlungoReturnRecipientAddressId: '77701',
+      }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    };
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(existingConfig);
+    prismaMock.vendorShippingConfig.upsert.mockResolvedValue(existingConfig);
+    prismaMock.vendorShippingConfig.findUniqueOrThrow.mockResolvedValue({
+      ...existingConfig,
+      providerMetadata: {
+        ...existingConfig.providerMetadata,
+        navlungoCarrierId: '10',
+      },
+      updatedAt: new Date('2026-05-22T09:05:00.000Z'),
+    });
+
+    const result = await upsertVendorShippingConfig('sporjinal', {
+      preferredProvider: 'navlungo',
+      defaultDesi: 3,
+      providerMetadata: {
+        navlungoCarrierId: '10',
+      },
+      warehouses: [],
+    });
+
+    expect(prismaMock.vendorShippingConfig.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({
+        providerMetadata: expect.objectContaining({
+          navlungoSenderAddressId: '55574',
+          navlungoSenderName: 'Stored sender',
+          navlungoSenderCity: 'Istanbul',
+          navlungoReturnRecipientAddressId: '77701',
+          navlungoCarrierId: '10',
+        }),
+      }),
+    }));
+    expect(result.providerMetadata).toMatchObject({
+      navlungoSenderName: 'Stored sender',
+      navlungoReturnRecipientAddressId: '77701',
+      navlungoCarrierId: '10',
     });
   });
 

@@ -1,4 +1,5 @@
 import { Link, useLocation, useParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SkeletonText } from '../components/OperationalPrimitives';
@@ -874,6 +875,14 @@ type ShippingConfigDraft = {
   navlungoSenderDistrict: string;
   navlungoSenderPostCode: string;
   navlungoReturnRecipientAddressId: string;
+  navlungoReturnRecipientName: string;
+  navlungoReturnRecipientPhone: string;
+  navlungoReturnRecipientEmail: string;
+  navlungoReturnRecipientAddress: string;
+  navlungoReturnRecipientCountry: string;
+  navlungoReturnRecipientCity: string;
+  navlungoReturnRecipientDistrict: string;
+  navlungoReturnRecipientPostCode: string;
   navlungoBarcodeFormat: string;
   navlungoCarrierId: string;
 };
@@ -958,6 +967,17 @@ function readNavlungoSenderField(config: VendorShippingConfig | null | undefined
   return fallback ?? '';
 }
 
+function readNavlungoReturnRecipientField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  for (const key of keys) {
+    const raw = metadata[key];
+    if (typeof raw === 'string') {
+      return raw;
+    }
+  }
+  return fallback ?? '';
+}
+
 function buildSupportCorrelationId(orderId: string, shipmentId?: string | null) {
   return ['support', orderId, shipmentId].filter(Boolean).join(':');
 }
@@ -1031,6 +1051,14 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     navlungoSenderDistrict: readNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
     navlungoSenderPostCode: readNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']),
     navlungoReturnRecipientAddressId: readNavlungoReturnRecipientAddressId(config),
+    navlungoReturnRecipientName: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientName', 'returnRecipientName', 'return_recipient_name']),
+    navlungoReturnRecipientPhone: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPhone', 'returnRecipientPhone', 'return_recipient_phone']),
+    navlungoReturnRecipientEmail: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientEmail', 'returnRecipientEmail', 'return_recipient_email']),
+    navlungoReturnRecipientAddress: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientAddress', 'returnRecipientAddress', 'return_recipient_address']),
+    navlungoReturnRecipientCountry: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCountry', 'returnRecipientCountry', 'return_recipient_country'], 'tr'),
+    navlungoReturnRecipientCity: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientCity', 'returnRecipientCity', 'return_recipient_city']),
+    navlungoReturnRecipientDistrict: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientDistrict', 'returnRecipientDistrict', 'return_recipient_district']),
+    navlungoReturnRecipientPostCode: readNavlungoReturnRecipientField(config, ['navlungoReturnRecipientPostCode', 'returnRecipientPostCode', 'return_recipient_post_code']),
     navlungoBarcodeFormat: readNavlungoBarcodeFormat(config),
     navlungoCarrierId: readNavlungoCarrierId(config),
   };
@@ -1186,6 +1214,14 @@ function buildShippingConfigUpdate(
     providerMetadata.navlungoSenderCity = draft.navlungoSenderCity.trim();
     providerMetadata.navlungoSenderDistrict = draft.navlungoSenderDistrict.trim();
     providerMetadata.navlungoSenderPostCode = draft.navlungoSenderPostCode.trim();
+    providerMetadata.navlungoReturnRecipientName = draft.navlungoReturnRecipientName.trim();
+    providerMetadata.navlungoReturnRecipientPhone = draft.navlungoReturnRecipientPhone.trim();
+    providerMetadata.navlungoReturnRecipientEmail = draft.navlungoReturnRecipientEmail.trim();
+    providerMetadata.navlungoReturnRecipientAddress = draft.navlungoReturnRecipientAddress.trim();
+    providerMetadata.navlungoReturnRecipientCountry = draft.navlungoReturnRecipientCountry.trim();
+    providerMetadata.navlungoReturnRecipientCity = draft.navlungoReturnRecipientCity.trim();
+    providerMetadata.navlungoReturnRecipientDistrict = draft.navlungoReturnRecipientDistrict.trim();
+    providerMetadata.navlungoReturnRecipientPostCode = draft.navlungoReturnRecipientPostCode.trim();
     providerMetadata.navlungoBarcodeFormat = draft.navlungoBarcodeFormat.trim() || 'pdf-A6';
     providerMetadata.navlungoCarrierId = draft.navlungoCarrierId.trim() || '9';
 
@@ -1407,6 +1443,7 @@ function getCreateShipmentErrorMessage(error: unknown) {
 export function OrderDetailPage() {
   const { orderId } = useParams();
   const location = useLocation();
+  const queryClient = useQueryClient();
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
@@ -1458,7 +1495,7 @@ export function OrderDetailPage() {
       enabled: authContextReady && Boolean(orderId),
     },
   );
-  const { data: vendorShippingConfig, refetch: refetchVendorShippingConfig } = useQueryResource(
+  const { data: vendorShippingConfig } = useQueryResource(
     queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
     ({ signal }) => getVendorShippingConfig({ vendorId: currentVendor.vendorId, signal }),
     {
@@ -1672,9 +1709,16 @@ export function OrderDetailPage() {
         queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
         queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
       ],
-      onSuccess: async () => {
+      onSuccess: (savedConfig, submittedConfig) => {
+        queryClient.setQueryData(
+          queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
+          savedConfig,
+        );
+        if (!submittedConfig.preferredProvider || savedConfig.preferredProvider === submittedConfig.preferredProvider) {
+          setShippingConfigDraft(buildShippingConfigDraft(savedConfig));
+        }
         setShippingConfigFeedback({ tone: 'success', message: 'Shipping provider configuration saved.' });
-        await Promise.all([refetchVendorShippingConfig(), refetchShippingProviderDiagnostics()]);
+        void refetchShippingProviderDiagnostics();
       },
       onError: (error) => {
         const message = error instanceof Error ? error.message : 'Shipping provider configuration could not be saved.';
@@ -1762,7 +1806,6 @@ export function OrderDetailPage() {
   useEffect(() => {
     if (vendorShippingConfig) {
       setShippingConfigDraft(buildShippingConfigDraft(vendorShippingConfig));
-      setShippingConfigFeedback(null);
     }
   }, [vendorShippingConfig]);
 
@@ -2328,6 +2371,14 @@ export function OrderDetailPage() {
             {summary?.navlungoReturnRecipientAddressIdSource ?? '—'} · present{' '}
             {formatDiagnosticPresence(summary?.navlungoReturnRecipientAddressIdPresent)} · numeric{' '}
             {formatDiagnosticPresence(summary?.navlungoReturnRecipientAddressIdNumeric)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Return recipient metadata</span>
+          <strong>
+            {formatDiagnosticPresence(summary?.navlungoReturnRecipientMetadataConfigured)}
+            {summary?.navlungoReturnRecipientCity ? ` · ${summary.navlungoReturnRecipientCity}` : ''}
+            {summary?.navlungoReturnRecipientDistrict ? ` · ${summary.navlungoReturnRecipientDistrict}` : ''}
           </strong>
         </div>
         <div className="summary-row">
@@ -4489,6 +4540,106 @@ export function OrderDetailPage() {
                 }
               />
             </label>
+            <details className="shipping-config-advanced">
+              <summary>Return recipient address book details</summary>
+              <p>Optional metadata for the return warehouse/address book entry. Return pickup still sends only recipient.addressId.</p>
+              <label className="field">
+                <span>Return recipient name</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientName}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientName: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient phone</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientPhone}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientPhone: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient email</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientEmail}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientEmail: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient address</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientAddress}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientAddress: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient country</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientCountry}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientCountry: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient city</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientCity}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientCity: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient district</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientDistrict}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientDistrict: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="field">
+                <span>Return recipient post code</span>
+                <input
+                  value={shippingConfigDraft.navlungoReturnRecipientPostCode}
+                  onChange={(event) =>
+                    setShippingConfigDraft((current) => ({
+                      ...current,
+                      navlungoReturnRecipientPostCode: event.target.value,
+                    }))
+                  }
+                />
+              </label>
+            </details>
             <label className="field">
               <span>Default carrier ID</span>
               <input
