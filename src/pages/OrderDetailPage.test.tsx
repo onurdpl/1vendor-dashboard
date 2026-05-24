@@ -2552,6 +2552,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.selectOptions(providerSelect, 'navlungo');
 
     expect(await screen.findByLabelText('Navlungo sender address ID')).toHaveValue('55574');
+    expect(screen.getByLabelText('Navlungo return recipient address ID')).toHaveValue('');
     expect(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Navlungo carrier diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();

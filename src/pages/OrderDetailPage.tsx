@@ -873,6 +873,7 @@ type ShippingConfigDraft = {
   navlungoSenderCity: string;
   navlungoSenderDistrict: string;
   navlungoSenderPostCode: string;
+  navlungoReturnRecipientAddressId: string;
   navlungoBarcodeFormat: string;
   navlungoCarrierId: string;
 };
@@ -920,6 +921,17 @@ function readNavlungoSenderAddressId(config?: VendorShippingConfig | null) {
     metadata.senderAddressId ??
     metadata.sender_address_id ??
     (config?.preferredProvider === 'navlungo' ? config.defaultWarehouseId : null);
+  return typeof raw === 'string' ? raw : '';
+}
+
+function readNavlungoReturnRecipientAddressId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw =
+    metadata.navlungoReturnRecipientAddressId ??
+    metadata.returnRecipientAddressId ??
+    metadata.return_recipient_address_id ??
+    metadata.navlungoReturnAddressId ??
+    metadata.returnAddressId;
   return typeof raw === 'string' ? raw : '';
 }
 
@@ -1018,6 +1030,7 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     navlungoSenderCity: readNavlungoSenderField(config, ['navlungoSenderCity', 'senderCity', 'sender_city']),
     navlungoSenderDistrict: readNavlungoSenderField(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
     navlungoSenderPostCode: readNavlungoSenderField(config, ['navlungoSenderPostCode', 'senderPostCode', 'sender_post_code']),
+    navlungoReturnRecipientAddressId: readNavlungoReturnRecipientAddressId(config),
     navlungoBarcodeFormat: readNavlungoBarcodeFormat(config),
     navlungoCarrierId: readNavlungoCarrierId(config),
   };
@@ -1035,6 +1048,13 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
     !/^\d+$/.test(draft.navlungoSenderAddressId.trim())
   ) {
     errors.push('Navlungo sender address ID must be numeric.');
+  }
+  if (
+    draft.preferredProvider === 'navlungo' &&
+    draft.navlungoReturnRecipientAddressId.trim() &&
+    !/^\d+$/.test(draft.navlungoReturnRecipientAddressId.trim())
+  ) {
+    errors.push('Navlungo return recipient address ID must be numeric.');
   }
   if (draft.preferredProvider === 'navlungo' && !/^\d+$/.test(draft.navlungoCarrierId.trim())) {
     errors.push('Navlungo carrier ID must be numeric.');
@@ -1155,7 +1175,9 @@ function buildShippingConfigUpdate(
   if (draft.preferredProvider === 'navlungo') {
     const providerMetadata = { ...metadata };
     const senderAddressId = draft.navlungoSenderAddressId.trim();
+    const returnRecipientAddressId = draft.navlungoReturnRecipientAddressId.trim();
     providerMetadata.navlungoSenderAddressId = senderAddressId;
+    providerMetadata.navlungoReturnRecipientAddressId = returnRecipientAddressId;
     providerMetadata.navlungoSenderName = draft.navlungoSenderName.trim();
     providerMetadata.navlungoSenderPhone = draft.navlungoSenderPhone.trim();
     providerMetadata.navlungoSenderEmail = draft.navlungoSenderEmail.trim();
@@ -2298,6 +2320,14 @@ export function OrderDetailPage() {
           <strong>
             {payloadSummary.recipientKeys.includes('addressId') ? 'present' : 'missing'} · valid{' '}
             {formatDiagnosticPresence(summary?.recipientAddressIdValid)}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Recipient addressId config</span>
+          <strong>
+            {summary?.navlungoReturnRecipientAddressIdSource ?? '—'} · present{' '}
+            {formatDiagnosticPresence(summary?.navlungoReturnRecipientAddressIdPresent)} · numeric{' '}
+            {formatDiagnosticPresence(summary?.navlungoReturnRecipientAddressIdNumeric)}
           </strong>
         </div>
         <div className="summary-row">
@@ -4442,6 +4472,19 @@ export function OrderDetailPage() {
                   setShippingConfigDraft((current) => ({
                     ...current,
                     navlungoSenderAddressId: event.target.value,
+                  }))
+                }
+              />
+            </label>
+            <label className="field">
+              <span>Navlungo return recipient address ID</span>
+              <input
+                inputMode="numeric"
+                value={shippingConfigDraft.navlungoReturnRecipientAddressId}
+                onChange={(event) =>
+                  setShippingConfigDraft((current) => ({
+                    ...current,
+                    navlungoReturnRecipientAddressId: event.target.value,
                   }))
                 }
               />

@@ -414,6 +414,9 @@ export type ShipmentExecutionDto = {
     navlungoReturnPickupMissingFields?: string[];
     navlungoReturnPickupPayloadSummary?: NavlungoCreatePostRequestSummaryDto | null;
     recipientAddressIdValid?: boolean | null;
+    navlungoReturnRecipientAddressIdPresent?: boolean | null;
+    navlungoReturnRecipientAddressIdNumeric?: boolean | null;
+    navlungoReturnRecipientAddressIdSource?: string | null;
     navlungoStatusSyncAttempted?: boolean | null;
     navlungoStatusSyncHttpStatus?: number | null;
     navlungoStatusSyncResolvedProviderUrl?: string | null;

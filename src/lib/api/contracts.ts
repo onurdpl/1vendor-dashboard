@@ -334,6 +334,9 @@ export type ShipmentExecution = {
     navlungoReturnPickupMissingFields?: string[];
     navlungoReturnPickupPayloadSummary?: NavlungoCreatePostRequestSummary | null;
     recipientAddressIdValid?: boolean | null;
+    navlungoReturnRecipientAddressIdPresent?: boolean | null;
+    navlungoReturnRecipientAddressIdNumeric?: boolean | null;
+    navlungoReturnRecipientAddressIdSource?: string | null;
     navlungoStatusSyncAttempted?: boolean | null;
     navlungoStatusSyncHttpStatus?: number | null;
     navlungoStatusSyncResolvedProviderUrl?: string | null;

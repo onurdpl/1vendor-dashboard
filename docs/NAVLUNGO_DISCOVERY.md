@@ -379,10 +379,12 @@ Confirmed from v2.1 docs navigation:
   - List Address
   - Address Detail
   - Delete Address
+- Return Pickup (`POST /post/return`) validates `posts.0.recipient.addressId` separately from the forward-shipment `sender.addressId` field. The integration now treats the return recipient address ID as its own explicit configuration value (`navlungoReturnRecipientAddressId` / `NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID`) instead of silently reusing the forward sender address ID.
 
 Likely implication:
 
 - Address Book may support sender warehouses or reusable sender addresses.
+- Return pickup recipient address IDs must be confirmed from the Navlungo account/address book before live create. Numeric local shape is necessary but does not prove the ID is valid for the authenticated account.
 
 Unknown:
 

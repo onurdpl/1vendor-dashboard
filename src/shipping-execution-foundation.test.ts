@@ -123,6 +123,7 @@ const env = {
 function buildNavlungoProviderMetadata(overrides: Record<string, unknown> = {}) {
   return {
     navlungoSenderAddressId: '55574',
+    navlungoReturnRecipientAddressId: '55574',
     navlungoSenderName: 'Sporjinal Warehouse',
     navlungoSenderPhone: '+90 532 123 45 67',
     navlungoSenderEmail: 'warehouse@example.test',
@@ -5656,6 +5657,9 @@ describe('shipping execution foundation', () => {
       navlungoReturnPickupAttempted: false,
       navlungoReturnPickupSucceeded: false,
       navlungoReturnPickupMissingFields: [],
+      navlungoReturnRecipientAddressIdPresent: true,
+      navlungoReturnRecipientAddressIdNumeric: true,
+      navlungoReturnRecipientAddressIdSource: 'provider_metadata',
       navlungoReturnPickupPayloadSummary: expect.objectContaining({
         endpointPath: '/post/create',
         requestedPostType: 3,
@@ -5808,6 +5812,90 @@ describe('shipping execution foundation', () => {
       returnProviderShipmentId: 'NAV-RETURN-1',
       returnTrackingNumber: 'RET-TRACK-1',
     });
+  });
+
+  it('blocks Navlungo return pickup when recipient address id is not configured', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoReturnRecipientAddressId: '' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await expect(createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { adapter },
+    )).rejects.toThrow('Navlungo return recipient addressId is invalid or not configured.');
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnPickupStatus: 'needs_attention',
+          navlungoReturnPickupMissingFields: ['recipient.addressId'],
+          navlungoReturnMissingFields: ['recipient.addressId'],
+          recipientAddressIdValid: false,
+          navlungoReturnRecipientAddressIdPresent: false,
+          navlungoReturnRecipientAddressIdNumeric: false,
+          navlungoReturnRecipientAddressIdSource: 'missing',
+        }),
+      }),
+    }));
+  });
+
+  it('blocks Navlungo return pickup when recipient address id is non-numeric', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoReturnRecipientAddressId: 'not-a-number' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await expect(createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      { adapter },
+    )).rejects.toThrow('Navlungo return recipient addressId is invalid or not configured.');
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          recipientAddressIdValid: false,
+          navlungoReturnRecipientAddressIdPresent: true,
+          navlungoReturnRecipientAddressIdNumeric: false,
+          navlungoReturnRecipientAddressIdSource: 'provider_metadata',
+        }),
+      }),
+    }));
   });
 
   it('applies admin Navlungo return pickup diagnostic API version and carrier overrides', async () => {

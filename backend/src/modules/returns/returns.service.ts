@@ -246,6 +246,36 @@ function resolveNavlungoSenderAddressId(config: {
   );
 }
 
+function resolveNavlungoReturnRecipientAddressId(config: {
+  providerMetadata: unknown;
+}, env: AppEnv) {
+  const metadataValue = readString(config.providerMetadata, [
+    'navlungoReturnRecipientAddressId',
+    'returnRecipientAddressId',
+    'return_recipient_address_id',
+    'navlungoReturnAddressId',
+    'returnAddressId',
+  ]);
+  if (metadataValue !== null) {
+    return {
+      value: metadataValue,
+      source: 'provider_metadata',
+    };
+  }
+
+  if (env.NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID?.trim()) {
+    return {
+      value: env.NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID,
+      source: 'env',
+    };
+  }
+
+  return {
+    value: null,
+    source: 'missing',
+  };
+}
+
 function parsePositiveInteger(value: string | null | undefined) {
   if (!value?.trim()) {
     return null;
@@ -1123,7 +1153,10 @@ function buildNavlungoReturnPickupPayload(input: {
     district: overrides.district?.trim() || order.shippingDistrict?.trim() || '',
     post_code: overrides.postcode?.trim() || overrides.post_code?.trim() || order.shippingPostcode?.trim() || '',
   };
-  const recipientAddressId = parsePositiveInteger(resolveNavlungoSenderAddressId(input.config, input.env));
+  const returnRecipientAddress = resolveNavlungoReturnRecipientAddressId(input.config, input.env);
+  const recipientAddressId = parsePositiveInteger(returnRecipientAddress.value);
+  const returnRecipientAddressIdPresent = Boolean(returnRecipientAddress.value?.trim());
+  const returnRecipientAddressIdNumeric = returnRecipientAddressIdPresent && Boolean(recipientAddressId);
   const carrierId = resolveNavlungoDiagnosticCarrierId(input.config.providerMetadata, input.env, input.carrierOverride);
   const barcodeFormat = resolveNavlungoReturnBarcodeFormat(input.config.providerMetadata);
   const desi = Number(input.config.defaultDesi || 1);
@@ -1174,6 +1207,9 @@ function buildNavlungoReturnPickupPayload(input: {
     referenceId,
     summary: summarizeNavlungoCreatePostRequest(payload, input.env, input.endpointPath),
     recipientAddressIdValid: Boolean(recipientAddressId),
+    navlungoReturnRecipientAddressIdPresent: returnRecipientAddressIdPresent,
+    navlungoReturnRecipientAddressIdNumeric: returnRecipientAddressIdNumeric,
+    navlungoReturnRecipientAddressIdSource: returnRecipientAddress.source,
   };
 }
 
@@ -1259,6 +1295,9 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnResolvedProviderUrl: requestBase.resolvedProviderUrl,
     navlungoReturnBaseUrlOverrideApplied: Boolean(requestBase.baseUrlOverride),
     recipientAddressIdValid: built.recipientAddressIdValid,
+    navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
+    navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
+    navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
     returnRequestId: record.id,
     shopifyReturnIdPresent: Boolean(record.sourceShopifyReturnId || record.sourceShopifyReturnGid),
     shopifyReturnSyncSkippedReason: 'not_implemented',
@@ -1278,13 +1317,30 @@ export async function createNavlungoReturnPickupForReturn(
   }
 
   if (built.missingFields.length > 0) {
+    const missingRecipientAddressId = built.missingFields.includes('recipient.addressId');
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: {
+          ...(readSnapshot(record.returnProviderSnapshot) ?? {}),
+          ...diagnostics,
+          navlungoReturnAutoCreateSkippedReason: 'missing_required_fields',
+          navlungoReturnPickupStatus: 'needs_attention',
+          navlungoReturnMissingFields: built.missingFields,
+          navlungoReturnCreateHttpStatus: null,
+          navlungoReturnCreateSucceeded: false,
+        } as Prisma.InputJsonValue,
+      },
+    });
     throw new ReturnReviewError(
-      [
-        'Missing required Navlungo return pickup fields:',
-        ...built.missingFields.map((field) => `- ${field}`),
-        '',
-        'Provider request blocked before create call.',
-      ].join('\n'),
+      missingRecipientAddressId
+        ? 'Navlungo return recipient addressId is invalid or not configured.'
+        : [
+            'Missing required Navlungo return pickup fields:',
+            ...built.missingFields.map((field) => `- ${field}`),
+            '',
+            'Provider request blocked before create call.',
+          ].join('\n'),
       400,
     );
   }
@@ -1452,6 +1508,9 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
           navlungoReturnRequestedCarrierId: built.summary.requestedCarrierId,
           navlungoReturnRequestedPostType: built.summary.requestedPostType,
           recipientAddressIdValid: built.recipientAddressIdValid,
+          navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
+          navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
+          navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
           shopifyReturnSyncSkippedReason: 'not_implemented',
           shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
           attemptedAt: new Date().toISOString(),
@@ -1537,6 +1596,9 @@ export async function saveNavlungoReturnPickupAddressCompletion(
         navlungoReturnAutoCreateSkippedReason: resolved ? null : 'missing_required_fields',
         navlungoReturnPickupStatus: resolved ? 'ready' : 'needs_attention',
         recipientAddressIdValid: built.recipientAddressIdValid,
+        navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
+        navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
+        navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
       } as Prisma.InputJsonValue,
     },
   });

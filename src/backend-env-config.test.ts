@@ -148,6 +148,7 @@ describe('backend env shipping provider gates', () => {
       NAVLUNGO_API_USERNAME: 'api-user',
       NAVLUNGO_API_PASSWORD: 'secret-password',
       NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID: '55574',
+      NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID: '77701',
       NAVLUNGO_DEFAULT_BARCODE_FORMAT: 'pdf-A6',
       NAVLUNGO_DEFAULT_CARRIER_ID: '9',
     });
@@ -159,6 +160,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.NAVLUNGO_API_USERNAME).toBe('api-user');
     expect(env.NAVLUNGO_API_PASSWORD).toBe('secret-password');
     expect(env.NAVLUNGO_DEFAULT_SENDER_ADDRESS_ID).toBe('55574');
+    expect(env.NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID).toBe('77701');
     expect(env.NAVLUNGO_DEFAULT_BARCODE_FORMAT).toBe('pdf-A6');
     expect(env.NAVLUNGO_DEFAULT_CARRIER_ID).toBe('9');
   });

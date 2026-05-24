@@ -1668,6 +1668,22 @@ export function ReturnDetailPage() {
                       <strong>{returnProviderSnapshot.recipientAddressIdValid === true ? 'valid' : 'missing'}</strong>
                     </div>
                     <div>
+                      <span>Recipient addressId source</span>
+                      <strong>
+                        {typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
+                          ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
+                          : '—'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Recipient addressId configured</span>
+                      <strong>
+                        {returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true ? 'yes' : 'no'}
+                        {' · numeric '}
+                        {returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true ? 'yes' : 'no'}
+                      </strong>
+                    </div>
+                    <div>
                       <span>Post payload keys</span>
                       <strong>
                         {Array.isArray(navlungoReturnRequestSummary.postPayloadKeys)
@@ -1818,6 +1834,22 @@ export function ReturnDetailPage() {
                       <div className="summary-row">
                         <span>Recipient addressId</span>
                         <strong>{returnProviderSnapshot.recipientAddressIdValid === true ? 'valid' : 'missing'}</strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Recipient addressId source</span>
+                        <strong>
+                          {typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
+                            ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
+                            : '—'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Recipient addressId configured</span>
+                        <strong>
+                          {returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true ? 'yes' : 'no'}
+                          {' · numeric '}
+                          {returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true ? 'yes' : 'no'}
+                        </strong>
                       </div>
                       <div className="summary-row">
                         <span>Custom data</span>
