@@ -51,6 +51,7 @@ type ReturnSummaryDto = {
     variantTitle?: string | null;
     variant?: string | null;
     optionTitle?: string | null;
+    imageUrl?: string | null;
     product?: {
       title?: string | null;
       name?: string | null;
@@ -218,6 +219,22 @@ function resolveReturnItemVariant(item: ReturnItemDto) {
   return readFirstDtoText(item.variantTitle, item.variant, item.optionTitle) || 'Details pending';
 }
 
+function mapReturnLineItem(item: ReturnItemDto, originalVendorId: string, assignedVendorId: string) {
+  return {
+    id: item.id,
+    originalVendorId,
+    assignedVendorId,
+    vendorId: assignedVendorId,
+    sku: item.sku ?? 'UNKNOWN-SKU',
+    variantTitle: resolveReturnItemVariant(item),
+    name: resolveReturnItemName(item),
+    imageUrl: item.imageUrl ?? null,
+    quantity: item.quantity,
+    condition: 'Opened' as const,
+    refundAmount: formatCurrency(item.refundAmount),
+  };
+}
+
 function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
   const sourceType = dto.returnRequestSource === 'shopify_return_request' ? 'shopify_return_request' : 'shopify_refund';
   const sourceLabel = dto.returnRequestSource === 'shopify_return_request'
@@ -251,18 +268,7 @@ function mapSummary(dto: ReturnSummaryDto): ReturnSummary {
         }]
       : [];
   const refundedItemsSource = dto.refundedItems?.length ? dto.refundedItems : summaryFallbackItem;
-  const refundedItems = refundedItemsSource.map((item) => ({
-    id: item.id,
-    originalVendorId: dto.assignedVendorId,
-    assignedVendorId: dto.assignedVendorId,
-    vendorId: dto.assignedVendorId,
-    sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: resolveReturnItemVariant(item),
-    name: resolveReturnItemName(item),
-    quantity: item.quantity,
-    condition: 'Opened' as const,
-    refundAmount: formatCurrency(item.refundAmount),
-  }));
+  const refundedItems = refundedItemsSource.map((item) => mapReturnLineItem(item, dto.assignedVendorId, dto.assignedVendorId));
 
   return {
     id: dto.id,
@@ -329,18 +335,7 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     ? apiClient.get<ReturnDetailDto>(`/returns/${returnId}`, requestOptions)
     : apiClient.get<ReturnDetailDto>(`/returns/${returnId}`));
   const summary = mapSummary(response);
-  const refundedItems = response.refundedItems.map((item) => ({
-    id: item.id,
-    originalVendorId: response.originalVendorId,
-    assignedVendorId: response.assignedVendorId,
-    vendorId: response.assignedVendorId,
-    sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: resolveReturnItemVariant(item),
-    name: resolveReturnItemName(item),
-    quantity: item.quantity,
-    condition: 'Opened' as const,
-    refundAmount: formatCurrency(item.refundAmount),
-  }));
+  const refundedItems = response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId));
 
   const detail = {
     ...summary,
@@ -393,18 +388,7 @@ export async function createNavlungoReturnPickup(
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup`, input));
   const summary = mapSummary(response);
-  const refundedItems = response.refundedItems.map((item) => ({
-    id: item.id,
-    originalVendorId: response.originalVendorId,
-    assignedVendorId: response.assignedVendorId,
-    vendorId: response.assignedVendorId,
-    sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: resolveReturnItemVariant(item),
-    name: resolveReturnItemName(item),
-    quantity: item.quantity,
-    condition: 'Opened' as const,
-    refundAmount: formatCurrency(item.refundAmount),
-  }));
+  const refundedItems = response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId));
 
   return {
     ...summary,
@@ -437,18 +421,7 @@ export async function saveNavlungoReturnPickupAddressCompletion(
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-pickup/address-completion`, input));
   const summary = mapSummary(response);
-  const refundedItems = response.refundedItems.map((item) => ({
-    id: item.id,
-    originalVendorId: response.originalVendorId,
-    assignedVendorId: response.assignedVendorId,
-    vendorId: response.assignedVendorId,
-    sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: resolveReturnItemVariant(item),
-    name: resolveReturnItemName(item),
-    quantity: item.quantity,
-    condition: 'Opened' as const,
-    refundAmount: formatCurrency(item.refundAmount),
-  }));
+  const refundedItems = response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId));
 
   return {
     ...summary,
@@ -480,18 +453,7 @@ export async function syncNavlungoReturnStatus(
     ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-status-sync`, {}, requestOptions)
     : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/navlungo-return-status-sync`, {}));
   const summary = mapSummary(response);
-  const refundedItems = response.refundedItems.map((item) => ({
-    id: item.id,
-    originalVendorId: response.originalVendorId,
-    assignedVendorId: response.assignedVendorId,
-    vendorId: response.assignedVendorId,
-    sku: item.sku ?? 'UNKNOWN-SKU',
-    variantTitle: resolveReturnItemVariant(item),
-    name: resolveReturnItemName(item),
-    quantity: item.quantity,
-    condition: 'Opened' as const,
-    refundAmount: formatCurrency(item.refundAmount),
-  }));
+  const refundedItems = response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId));
 
   return {
     ...summary,
@@ -532,30 +494,8 @@ export async function markReturnReceived(
         ? 'Pending return request (no refund posted yet)'
         : 'Original payment method (Shopify refund flow)',
     processedBy: '',
-    refundedItems: response.refundedItems.map((item) => ({
-      id: item.id,
-      originalVendorId: response.originalVendorId,
-      assignedVendorId: response.assignedVendorId,
-      vendorId: response.assignedVendorId,
-      sku: item.sku ?? 'UNKNOWN-SKU',
-      variantTitle: resolveReturnItemVariant(item),
-      name: resolveReturnItemName(item),
-      quantity: item.quantity,
-      condition: 'Opened' as const,
-      refundAmount: formatCurrency(item.refundAmount),
-    })),
-    items: response.refundedItems.map((item) => ({
-      id: item.id,
-      originalVendorId: response.originalVendorId,
-      assignedVendorId: response.assignedVendorId,
-      vendorId: response.assignedVendorId,
-      sku: item.sku ?? 'UNKNOWN-SKU',
-      variantTitle: resolveReturnItemVariant(item),
-      name: resolveReturnItemName(item),
-      quantity: item.quantity,
-      condition: 'Opened' as const,
-      refundAmount: formatCurrency(item.refundAmount),
-    })),
+    refundedItems: response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId)),
+    items: response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId)),
     timeline: [],
   };
 }
@@ -579,30 +519,8 @@ export async function reviewReturn(
         ? 'Pending return request (no refund posted yet)'
         : 'Original payment method (Shopify refund flow)',
     processedBy: '',
-    refundedItems: response.refundedItems.map((item) => ({
-      id: item.id,
-      originalVendorId: response.originalVendorId,
-      assignedVendorId: response.assignedVendorId,
-      vendorId: response.assignedVendorId,
-      sku: item.sku ?? 'UNKNOWN-SKU',
-      variantTitle: resolveReturnItemVariant(item),
-      name: resolveReturnItemName(item),
-      quantity: item.quantity,
-      condition: 'Opened' as const,
-      refundAmount: formatCurrency(item.refundAmount),
-    })),
-    items: response.refundedItems.map((item) => ({
-      id: item.id,
-      originalVendorId: response.originalVendorId,
-      assignedVendorId: response.assignedVendorId,
-      vendorId: response.assignedVendorId,
-      sku: item.sku ?? 'UNKNOWN-SKU',
-      variantTitle: resolveReturnItemVariant(item),
-      name: resolveReturnItemName(item),
-      quantity: item.quantity,
-      condition: 'Opened' as const,
-      refundAmount: formatCurrency(item.refundAmount),
-    })),
+    refundedItems: response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId)),
+    items: response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId)),
     timeline: [],
   };
 }

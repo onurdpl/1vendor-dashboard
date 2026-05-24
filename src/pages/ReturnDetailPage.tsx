@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useLocation, useParams } from 'react-router-dom';
 import { EmptyStatePanel, SectionErrorRetry, SkeletonText, StatusBadge } from '../components/OperationalPrimitives';
+import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -121,6 +122,15 @@ function getSkuText(value: string | null | undefined) {
     return '—';
   }
   return text;
+}
+
+function getItemInitials(value: string | null | undefined) {
+  const [first = '', second = ''] = (value ?? 'Item').trim().split(/\s+/);
+  return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
+}
+
+function getReturnItemImageAlt(item: ReturnLineItem) {
+  return item.name ? `${item.name} product image` : item.sku ? `${item.sku} product image` : 'Returned item product image';
 }
 
 function getReturnedItems(returnRequest: ReturnDetail) {
@@ -1188,6 +1198,13 @@ export function ReturnDetailPage() {
               <div className="return-review-item-list">
                 {returnedItems.map((item) => (
                   <article key={getItemKey(item)} className="return-review-item">
+                    <ProductImagePreview
+                      imageUrl={item.imageUrl}
+                      fallbackLabel={getItemInitials(item.name || item.sku)}
+                      alt={getReturnItemImageAlt(item)}
+                      title={item.name || item.sku || 'Returned item'}
+                      size="sidebar"
+                    />
                     <div className="return-review-item-main">
                       <strong>{item.name || 'Return item'}</strong>
                       {getVariantText(item.variantTitle) !== '—' ? <span>{getVariantText(item.variantTitle)}</span> : null}

@@ -64,6 +64,7 @@ const orderDetail: OrderDetail = {
       sku: 'SKU456',
       variantTitle: 'Standard',
       name: 'Barcode gateway license',
+      imageUrl: 'https://cdn.example.com/barcode-license.png',
       quantity: 3,
       price: '$650.00',
       fulfillmentStatus: 'Fulfilled',
@@ -181,8 +182,26 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'İNCELE' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Barcode gateway license product image' })).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/barcode-license.png',
+    );
     expect(screen.queryByText('0 attention')).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
+  });
+
+  it('renders the inspector line item initials fallback when imageUrl is missing', async () => {
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue({
+      ...orderDetail,
+      lineItems: orderDetail.lineItems.map((item) => ({ ...item, imageUrl: null })),
+    });
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('BG')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Barcode gateway license product image' })).not.toBeInTheDocument();
   });
 
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {

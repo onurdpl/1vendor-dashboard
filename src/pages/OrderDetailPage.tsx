@@ -2,6 +2,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SkeletonText } from '../components/OperationalPrimitives';
+import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
@@ -1277,15 +1278,6 @@ type ShipmentActionState = {
   endpoint?: string;
 };
 
-type LineItemImagePreviewState = {
-  id: string;
-  src: string;
-  alt: string;
-  title: string;
-  top: number;
-  left: number;
-};
-
 const OPEN_SUPPORT_TICKET_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
 
 const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
@@ -1426,9 +1418,6 @@ export function OrderDetailPage() {
   const [useFullNavlungoSenderForRetry, setUseFullNavlungoSenderForRetry] = useState(false);
   const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
-  const [hoveredLineItemImage, setHoveredLineItemImage] = useState<LineItemImagePreviewState | null>(null);
-  const [activeLineItemImage, setActiveLineItemImage] = useState<LineItemImagePreviewState | null>(null);
-  const [failedLineItemImages, setFailedLineItemImages] = useState<Set<string>>(() => new Set());
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -1755,80 +1744,8 @@ export function OrderDetailPage() {
     }
   }, [vendorShippingConfig]);
 
-  useEffect(() => {
-    if (!activeLineItemImage) {
-      return undefined;
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setActiveLineItemImage(null);
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeLineItemImage]);
-
   function getLineItemImageAlt(item: OrderDetail['lineItems'][number]) {
     return item.name ? `${item.name} product image` : item.sku ? `${item.sku} product image` : 'Product image';
-  }
-
-  function buildLineItemImagePreview(
-    item: OrderDetail['lineItems'][number],
-    element: HTMLElement,
-  ): LineItemImagePreviewState | null {
-    const src = item.imageUrl?.trim();
-    if (!src || failedLineItemImages.has(item.id)) {
-      return null;
-    }
-
-    const previewWidth = 220;
-    const previewHeight = 240;
-    const viewportWidth = window.innerWidth || 1024;
-    const viewportHeight = window.innerHeight || 768;
-    const rect = element.getBoundingClientRect();
-    const preferredLeft = rect.right + 12;
-    const fallbackLeft = rect.left - previewWidth - 12;
-    const left = Math.max(
-      12,
-      Math.min(
-        preferredLeft + previewWidth + 12 <= viewportWidth ? preferredLeft : fallbackLeft,
-        viewportWidth - previewWidth - 12,
-      ),
-    );
-    const top = Math.max(12, Math.min(rect.top + rect.height / 2 - previewHeight / 2, viewportHeight - previewHeight - 12));
-
-    return {
-      id: item.id,
-      src,
-      alt: getLineItemImageAlt(item),
-      title: item.name || item.sku || 'Product image',
-      top,
-      left,
-    };
-  }
-
-  function showLineItemImagePreview(item: OrderDetail['lineItems'][number], element: HTMLElement) {
-    setHoveredLineItemImage(buildLineItemImagePreview(item, element));
-  }
-
-  function openLineItemImagePreview(item: OrderDetail['lineItems'][number], element: HTMLElement) {
-    const preview = buildLineItemImagePreview(item, element);
-    if (preview) {
-      setActiveLineItemImage(preview);
-      setHoveredLineItemImage(null);
-    }
-  }
-
-  function markLineItemImageFailed(itemId: string) {
-    setFailedLineItemImages((current) => {
-      const next = new Set(current);
-      next.add(itemId);
-      return next;
-    });
-    setHoveredLineItemImage((current) => (current?.id === itemId ? null : current));
-    setActiveLineItemImage((current) => (current?.id === itemId ? null : current));
   }
 
   useEffect(() => {
@@ -4846,38 +4763,15 @@ export function OrderDetailPage() {
             <div className="order-line-items-compact">
               {orderItems.length > 0 ? (
                 orderItems.map((item) => {
-                  const hasUsableImage = Boolean(item.imageUrl?.trim() && !failedLineItemImages.has(item.id));
                   const imageAlt = getLineItemImageAlt(item);
                   return (
                     <div key={item.id} className="order-line-item-row-v2">
-                      {hasUsableImage ? (
-                        <button
-                          type="button"
-                          className="order-item-thumb order-item-thumb-button"
-                          aria-label={`Preview ${item.name || item.sku || 'product image'}`}
-                          onMouseEnter={(event) => showLineItemImagePreview(item, event.currentTarget)}
-                          onMouseLeave={() => setHoveredLineItemImage(null)}
-                          onFocus={(event) => showLineItemImagePreview(item, event.currentTarget)}
-                          onBlur={() => setHoveredLineItemImage(null)}
-                          onClick={(event) => openLineItemImagePreview(item, event.currentTarget)}
-                        >
-                          <img
-                            src={item.imageUrl ?? undefined}
-                            alt={imageAlt}
-                            loading="lazy"
-                            onError={() => markLineItemImageFailed(item.id)}
-                          />
-                          <span className="order-item-thumb-fallback">
-                            {getInitialsLabel(item.name || item.sku || 'Item')}
-                          </span>
-                        </button>
-                      ) : (
-                        <span className="order-item-thumb" aria-hidden="true">
-                          <span className="order-item-thumb-fallback">
-                            {getInitialsLabel(item.name || item.sku || 'Item')}
-                          </span>
-                        </span>
-                      )}
+                      <ProductImagePreview
+                        imageUrl={item.imageUrl}
+                        fallbackLabel={getInitialsLabel(item.name || item.sku || 'Item')}
+                        alt={imageAlt}
+                        title={item.name || item.sku || 'Product image'}
+                      />
                       <div className="order-item-primary">
                         <strong>{item.name || 'Unknown item'}</strong>
                         <span>{[item.variantTitle, item.sku].filter(Boolean).join(' · ') || 'SKU pending'}</span>
@@ -8067,42 +7961,6 @@ export function OrderDetailPage() {
         </aside>
       </div>
 
-      {hoveredLineItemImage ? (
-        <div
-          className="line-item-image-hover-preview"
-          style={{ top: hoveredLineItemImage.top, left: hoveredLineItemImage.left }}
-          aria-hidden="true"
-        >
-          <img src={hoveredLineItemImage.src} alt="" />
-          <span>{hoveredLineItemImage.title}</span>
-        </div>
-      ) : null}
-      {activeLineItemImage ? (
-        <div
-          className="line-item-image-lightbox-backdrop"
-          role="presentation"
-          onMouseDown={() => setActiveLineItemImage(null)}
-        >
-          <div
-            className="line-item-image-lightbox"
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${activeLineItemImage.title} image preview`}
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <button
-              type="button"
-              className="line-item-image-lightbox-close"
-              aria-label="Close image preview"
-              onClick={() => setActiveLineItemImage(null)}
-            >
-              ×
-            </button>
-            <img src={activeLineItemImage.src} alt={activeLineItemImage.alt} />
-            <p>{activeLineItemImage.title}</p>
-          </div>
-        </div>
-      ) : null}
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
       {order ? (
         <SupportTicketModal

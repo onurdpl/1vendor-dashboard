@@ -859,6 +859,7 @@ export type ReturnLineItem = {
   sku: string;
   variantTitle: string;
   name: string;
+  imageUrl?: string | null;
   quantity: number;
   condition: 'New' | 'Opened' | 'Damaged';
   refundAmount: string;

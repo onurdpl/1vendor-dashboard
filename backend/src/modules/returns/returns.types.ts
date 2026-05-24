@@ -46,6 +46,7 @@ export type RefundedItemDto = {
   displayTitle?: string | null;
   orderLineItemTitle?: string | null;
   variantTitle?: string | null;
+  imageUrl?: string | null;
   quantity: number;
   refundAmount: string;
 };

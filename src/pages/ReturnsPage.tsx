@@ -21,6 +21,7 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { runtimeConfig } from '../config/runtime';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { SupportTicketModal } from '../components/SupportTicketModal';
+import { ProductImagePreview } from '../components/ProductImagePreview';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
@@ -40,6 +41,7 @@ type ReturnRowItemCandidate = {
   optionTitle?: unknown;
   options?: unknown;
   sku?: unknown;
+  imageUrl?: unknown;
   product?: ReturnRowItemCandidate;
   merchandise?: ReturnRowItemCandidate & { product?: ReturnRowItemCandidate };
   lineItem?: ReturnRowItemCandidate;
@@ -223,6 +225,15 @@ function readFirstProductText(sku: string | null | undefined, ...values: unknown
   return values.map((value) => readProductText(value, sku)).find(Boolean) ?? '';
 }
 
+function getItemInitials(value: string | null | undefined) {
+  const [first = '', second = ''] = (value ?? 'Item').trim().split(/\s+/);
+  return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
+}
+
+function readImageUrl(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
 function getRowItemCandidates(summary: ReturnSummary) {
   const record = summary as ReturnSummary & {
     refundedItems?: ReturnRowItemCandidate[];
@@ -308,6 +319,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
       sku: item.sku,
       title: readProductText(item.name, item.sku) || readProductText(item.variantTitle, item.sku) || getItemTitleFallback(item.sku),
       variantTitle: getVariantText(item.variantTitle),
+      imageUrl: item.imageUrl ?? null,
       quantity: item.quantity,
       amount: item.refundAmount,
       condition: item.condition,
@@ -320,6 +332,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
       sku: item.sku,
       title: resolveCandidateTitle(item as ReturnRowItemCandidate) || getItemTitleFallback(item.sku),
       variantTitle: getVariantText(resolveCandidateVariant(item as ReturnRowItemCandidate)),
+      imageUrl: item.imageUrl ?? null,
       quantity: item.quantity,
       amount: item.refundAmount,
       condition: item.condition,
@@ -330,6 +343,7 @@ function getItemPreview(summary: ReturnSummary, detail: ReturnDetail | null) {
     sku,
     title: getItemTitleFallback(sku),
     variantTitle: 'Details pending',
+    imageUrl: null,
     quantity: 1,
     amount: summary.sourceType === 'shopify_return_request' ? 'Not posted' : summary.amount,
     condition: 'Opened' as ReturnLineItem['condition'],
@@ -835,6 +849,13 @@ export function ReturnsPage() {
                   {selectedItems.length > 0 ? (
                     selectedItems.map((item) => (
                       <article key={`${item.sku}-${item.title}-${item.variantTitle}`} className="return-detail-item">
+                        <ProductImagePreview
+                          imageUrl={readImageUrl(item.imageUrl)}
+                          fallbackLabel={getItemInitials(item.title || item.sku)}
+                          alt={item.title ? `${item.title} product image` : 'Returned item product image'}
+                          title={item.title || item.sku || 'Returned item'}
+                          size="sidebar"
+                        />
                         <div className="return-detail-item-copy">
                           <strong>{item.title}</strong>
                           <small>

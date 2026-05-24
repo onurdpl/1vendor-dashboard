@@ -149,6 +149,7 @@ const returnDetail: ReturnDetail = {
       sku: 'DJ1196-002-40,5',
       variantTitle: 'White / 42',
       name: 'Nike Air Force 1 07',
+      imageUrl: 'https://cdn.example.com/air-force-1.png',
       quantity: 1,
       condition: 'Opened',
       refundAmount: '$0.00',
@@ -277,6 +278,10 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
     expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
+    expect(screen.getByRole('img', { name: 'Nike Air Force 1 07 product image' })).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/air-force-1.png',
+    );
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.getByText('White / 42')).toBeInTheDocument();
     expect(screen.getByText('Vendor review')).toBeInTheDocument();

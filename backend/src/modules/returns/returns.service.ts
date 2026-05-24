@@ -419,6 +419,7 @@ type ReturnRecordLineItemSource = {
   sku: string | null;
   title: string | null;
   orderLineItemTitle: string | null;
+  imageUrl: string | null;
   quantity: number;
   refundAmount: string;
 };
@@ -432,6 +433,7 @@ function toAllocationReturnedItem(item: {
     sourceVariantId: string | null;
     sku: string | null;
     title: string | null;
+    imageUrl: string | null;
   };
 }): ReturnRecordLineItemSource {
   return {
@@ -441,6 +443,7 @@ function toAllocationReturnedItem(item: {
     sku: item.shopifyOrderLineItem.sku,
     title: item.shopifyOrderLineItem.title,
     orderLineItemTitle: item.shopifyOrderLineItem.title,
+    imageUrl: item.shopifyOrderLineItem.imageUrl,
     quantity: item.quantity,
     refundAmount: toAmountString(toNumber(item.lineAmount)),
   };
@@ -457,6 +460,7 @@ function toRefundReturnedItem(item: {
     sourceVariantId: string | null;
     sku: string | null;
     title: string | null;
+    imageUrl: string | null;
   };
 }): ReturnRecordLineItemSource {
   return {
@@ -466,6 +470,7 @@ function toRefundReturnedItem(item: {
     sku: item.shopifyOrderLineItem.sku ?? item.sku,
     title: item.title,
     orderLineItemTitle: item.shopifyOrderLineItem.title,
+    imageUrl: item.shopifyOrderLineItem.imageUrl,
     quantity: item.quantity,
     refundAmount: toAmountString(toNumber(item.subtotal)),
   };

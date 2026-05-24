@@ -5827,6 +5827,19 @@ h3 {
   position: relative;
 }
 
+.product-image-preview-thumb-compact,
+.product-image-preview-thumb-sidebar {
+  width: 36px;
+  height: 36px;
+  border-radius: 12px;
+  font-size: 0.72rem;
+}
+
+.product-image-preview-thumb-sidebar {
+  width: 38px;
+  height: 38px;
+}
+
 .order-item-thumb-button {
   appearance: none;
   padding: 0;
@@ -6834,7 +6847,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .return-review-item {
   display: grid;
-  grid-template-columns: minmax(190px, 1fr) minmax(84px, 0.45fr) minmax(44px, 0.24fr) minmax(106px, 0.48fr);
+  grid-template-columns: auto minmax(190px, 1fr) minmax(84px, 0.45fr) minmax(44px, 0.24fr) minmax(106px, 0.48fr);
   gap: 10px;
   align-items: center;
   padding: 8px 10px;

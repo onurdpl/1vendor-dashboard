@@ -16,6 +16,7 @@ import {
   StatusBadge,
   TimelineBlock,
 } from '../components/OperationalPrimitives';
+import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
 import {
@@ -182,6 +183,10 @@ function getRailProviderLabel(order: OrderSummary | OrderDetail) {
 function getItemInitials(name: string) {
   const [first = '', second = ''] = name.trim().split(/\s+/);
   return `${first[0] ?? 'I'}${second[0] ?? ''}`.toUpperCase();
+}
+
+function getLineItemImageAlt(item: OrderDetail['lineItems'][number]) {
+  return item.name ? `${item.name} product image` : item.sku ? `${item.sku} product image` : 'Product image';
 }
 
 function parseOperationalAmount(amount: string) {
@@ -816,7 +821,13 @@ export function OrdersPage() {
                   <div className="order-detail-items">
                     {(selectedOrder as OrderDetail).lineItems.map((item) => (
                       <article key={item.id} className="order-detail-item">
-                        <span className="order-detail-thumb" aria-hidden="true">{getItemInitials(item.name)}</span>
+                        <ProductImagePreview
+                          imageUrl={item.imageUrl}
+                          fallbackLabel={getItemInitials(item.name || item.sku || 'Item')}
+                          alt={getLineItemImageAlt(item)}
+                          title={item.name || item.sku || 'Product image'}
+                          size="compact"
+                        />
                         <div className="order-detail-item-copy">
                           <strong>{item.name}</strong>
                           <small>{item.sku} · {item.variantTitle}</small>

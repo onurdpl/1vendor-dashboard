@@ -52,6 +52,7 @@ const pendingReturn: ReturnDetail = {
       sku: 'SKU-A-1',
       variantTitle: 'Medium',
       name: 'Wireless label printer',
+      imageUrl: 'https://cdn.example.com/wireless-label-printer.png',
       quantity: 1,
       condition: 'Opened',
       refundAmount: '$0.00',
@@ -253,6 +254,10 @@ describe('ReturnsPage control center', () => {
     expect(listReturnsMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
     expect((await screen.findAllByText('Return requested')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Wireless label printer').length).toBeGreaterThan(0);
+    expect(screen.getByRole('img', { name: 'Wireless label printer product image' })).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/wireless-label-printer.png',
+    );
     expect(screen.getAllByText('SKU-A-1').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refunded').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Refund pending').length).toBeGreaterThan(0);
