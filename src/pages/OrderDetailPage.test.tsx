@@ -1523,7 +1523,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).queryByText(/reverseShipment/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).queryByText(/Tracking pending/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
-    expect(within(timeline as HTMLElement).getByText(/Human order, shipment, return, and support events/)).toBeInTheDocument();
+    expect(within(timeline as HTMLElement).getByText(/Order, shipment, return, and support activity/)).toBeInTheDocument();
   });
 
   it('renders the dense operational foundation without exposing vendor diagnostics', async () => {

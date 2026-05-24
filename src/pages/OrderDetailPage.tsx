@@ -4620,7 +4620,7 @@ export function OrderDetailPage() {
                 <strong>{order.assignedVendorId || 'Unknown'}</strong>
               </div>
               <div>
-                <span>Customer</span>
+                <span>Customer visibility</span>
                 <strong>{customerLabel}</strong>
               </div>
               <div>
@@ -4644,6 +4644,15 @@ export function OrderDetailPage() {
           <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
             {order.shippingStatus}
           </span>
+          <Link
+            className="button button-primary button-compact order-detail-inspect-button"
+            to={`/admin/orders/${encodeURIComponent(String(order.sourceShopifyOrderNumber).replace(/^#/, ''))}`}
+          >
+            İNCELE
+          </Link>
+          <button type="button" className="button button-secondary button-compact order-detail-overflow-button" aria-label="More order actions">
+            ...
+          </button>
         </div>
         {!hasOperationalReturn ? (
           <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">
@@ -4701,19 +4710,11 @@ export function OrderDetailPage() {
                     </span>
                     <div className="order-item-primary">
                       <strong>{item.name || 'Unknown item'}</strong>
-                      <span>{item.sku || '—'}</span>
-                    </div>
-                    <div>
-                      <span>Variant / SKU</span>
-                      <strong>{item.variantTitle || item.sku || '—'}</strong>
+                      <span>{[item.variantTitle, item.sku].filter(Boolean).join(' · ') || 'SKU pending'}</span>
                     </div>
                     <div>
                       <span>Qty</span>
                       <strong>{item.quantity}</strong>
-                    </div>
-                    <div>
-                      <span>Unit price</span>
-                      <strong>{item.price}</strong>
                     </div>
                     <div>
                       <span>Total</span>
@@ -4729,8 +4730,11 @@ export function OrderDetailPage() {
 
           <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
             <div className="order-card-heading">
-              <h2>Financial summary</h2>
-              <p>Read-only operational estimate. Unknowns are flagged inline, not treated as balances.</p>
+              <div>
+                <h2>Financial summary</h2>
+                <p>Read-only operational estimate.</p>
+              </div>
+              <span className="order-preview-badge">Preview</span>
             </div>
             <div className="order-financial-impact-grid">
               {financeSummaryCards.map((card) => (
@@ -4843,7 +4847,7 @@ export function OrderDetailPage() {
           <div className="order-detail-sidebar-flow">
             <OperationalTimeline
               title="Timeline"
-              subtitle="Human order, shipment, return, and support events. Provider diagnostics stay collapsed for admins."
+              subtitle="Order, shipment, return, and support activity."
               events={groupOrderDetailTimelineEvents([
                 ...order.timeline
                   .filter((entry) => !isRawProviderTimelineLabel(entry.label))
@@ -4870,14 +4874,32 @@ export function OrderDetailPage() {
               <div className="order-support-compact-stack">
                 {isVendorAssignedOwner ? (
                   <>
-                    <button
-                      type="button"
-                      className="button button-secondary button-compact order-support-contact-button"
-                      onClick={() => setSupportOpen(true)}
-                      disabled={!canReportIssue}
-                    >
-                      Contact support
-                    </button>
+                    <div className="order-support-action-row">
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact order-support-contact-button"
+                        onClick={() => setSupportOpen(true)}
+                        disabled={!canReportIssue}
+                      >
+                        Contact support
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        onClick={() => handleCopyDiagnostics('shipment-summary')}
+                        disabled={!isAdmin}
+                      >
+                        Internal note
+                      </button>
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact"
+                        onClick={() => setSupportOpen(true)}
+                        disabled={!canReportIssue}
+                      >
+                        Escalate
+                      </button>
+                    </div>
                     {!canReportIssue ? (
                       <span className="muted">Support is available for active or fulfilled assigned orders.</span>
                     ) : (
