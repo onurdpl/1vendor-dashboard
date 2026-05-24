@@ -826,6 +826,7 @@ export function OrdersPage() {
                           fallbackLabel={getItemInitials(item.name || item.sku || 'Item')}
                           alt={getLineItemImageAlt(item)}
                           title={item.name || item.sku || 'Product image'}
+                          subtitle={[item.sku, item.variantTitle].filter(Boolean).join(' · ')}
                           size="compact"
                         />
                         <div className="order-detail-item-copy">

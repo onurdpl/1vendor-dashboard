@@ -4771,6 +4771,7 @@ export function OrderDetailPage() {
                         fallbackLabel={getInitialsLabel(item.name || item.sku || 'Item')}
                         alt={imageAlt}
                         title={item.name || item.sku || 'Product image'}
+                        subtitle={[item.sku, item.variantTitle].filter(Boolean).join(' · ')}
                       />
                       <div className="order-item-primary">
                         <strong>{item.name || 'Unknown item'}</strong>

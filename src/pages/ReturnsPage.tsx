@@ -854,6 +854,7 @@ export function ReturnsPage() {
                           fallbackLabel={getItemInitials(item.title || item.sku)}
                           alt={item.title ? `${item.title} product image` : 'Returned item product image'}
                           title={item.title || item.sku || 'Returned item'}
+                          subtitle={[getSkuText(item.sku), item.variantTitle].filter((value) => value && value !== '—').join(' · ')}
                           size="sidebar"
                         />
                         <div className="return-detail-item-copy">

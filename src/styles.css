@@ -5887,14 +5887,16 @@ h3 {
 .line-item-image-hover-preview {
   position: fixed;
   z-index: 80;
-  width: 220px;
-  min-height: 220px;
-  padding: 10px;
-  border: 1px solid rgba(203, 213, 225, 0.88);
-  border-radius: 18px;
+  width: 248px;
+  min-height: 248px;
+  padding: 12px;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  border-radius: 20px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
-  box-shadow: 0 24px 64px rgba(15, 23, 42, 0.18);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(241, 245, 249, 0.98));
+  box-shadow:
+    0 24px 54px rgba(15, 23, 42, 0.16),
+    0 1px 0 rgba(255, 255, 255, 0.9) inset;
   pointer-events: none;
   animation: lineItemPreviewIn 140ms ease-out;
 }
@@ -5902,19 +5904,32 @@ h3 {
 .line-item-image-hover-preview img {
   display: block;
   width: 100%;
-  max-height: 190px;
+  height: 206px;
   object-fit: contain;
-  border-radius: 12px;
-  background: #f8fafc;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at 50% 42%, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.9) 48%, rgba(226, 232, 240, 0.64));
+  box-shadow: 0 0 0 1px rgba(226, 232, 240, 0.72) inset;
 }
 
 .line-item-image-hover-preview span {
   display: block;
-  margin-top: 8px;
+  margin-top: 9px;
   overflow: hidden;
-  color: #475569;
-  font-size: 0.72rem;
-  font-weight: 760;
+  color: #334155;
+  font-size: 0.73rem;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-item-image-hover-preview small {
+  display: block;
+  margin-top: 2px;
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 620;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5925,51 +5940,91 @@ h3 {
   z-index: 120;
   display: grid;
   place-items: center;
-  padding: 24px;
-  background: rgba(15, 23, 42, 0.58);
-  backdrop-filter: blur(8px);
+  padding: clamp(16px, 4vw, 36px);
+  background: rgba(15, 23, 42, 0.68);
+  backdrop-filter: blur(10px);
   animation: lineItemBackdropIn 120ms ease-out;
 }
 
 .line-item-image-lightbox {
   position: relative;
   display: grid;
-  gap: 12px;
-  width: min(680px, 92vw);
-  max-height: min(760px, 88vh);
-  padding: 18px;
-  border: 1px solid rgba(226, 232, 240, 0.9);
-  border-radius: 24px;
+  gap: 10px;
+  width: fit-content;
+  max-width: min(700px, 94vw);
+  max-height: min(760px, 90vh);
+  padding: 14px;
+  border: 1px solid rgba(226, 232, 240, 0.86);
+  border-radius: 22px;
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
-  box-shadow: 0 32px 90px rgba(15, 23, 42, 0.32);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.98));
+  box-shadow:
+    0 30px 84px rgba(15, 23, 42, 0.34),
+    0 1px 0 rgba(255, 255, 255, 0.86) inset;
   animation: lineItemLightboxIn 150ms ease-out;
+}
+
+.line-item-image-lightbox-canvas {
+  display: grid;
+  place-items: center;
+  inline-size: min(620px, calc(94vw - 56px));
+  max-inline-size: 620px;
+  min-inline-size: min(300px, calc(100vw - 64px));
+  block-size: min(58vh, 540px);
+  min-block-size: 280px;
+  padding: clamp(14px, 3vw, 28px);
+  border-radius: 17px;
+  background:
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94) 42%, rgba(226, 232, 240, 0.66));
+  box-shadow:
+    0 0 0 1px rgba(226, 232, 240, 0.78) inset,
+    0 16px 34px rgba(15, 23, 42, 0.06) inset;
 }
 
 .line-item-image-lightbox img {
   display: block;
-  width: 100%;
-  max-height: min(600px, 72vh);
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
   object-fit: contain;
-  border-radius: 16px;
-  background: #f8fafc;
+  border-radius: 10px;
 }
 
-.line-item-image-lightbox p {
+.line-item-image-lightbox-footer {
+  display: grid;
+  gap: 2px;
+  padding: 0 2px 1px;
+}
+
+.line-item-image-lightbox-footer p {
   margin: 0;
-  color: #334155;
-  font-size: 0.86rem;
-  font-weight: 760;
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 0.82rem;
+  font-weight: 720;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.line-item-image-lightbox-footer span {
+  overflow: hidden;
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .line-item-image-lightbox-close {
   position: absolute;
-  top: 12px;
-  right: 12px;
+  top: 10px;
+  right: 10px;
   display: inline-grid;
   place-items: center;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border: 1px solid rgba(203, 213, 225, 0.84);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.92);

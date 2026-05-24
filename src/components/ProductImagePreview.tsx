@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 type ProductImagePreviewState = {
   src: string;
   alt: string;
   title: string;
+  subtitle: string;
   top: number;
   left: number;
 };
@@ -13,12 +14,19 @@ type ProductImagePreviewProps = {
   fallbackLabel: string;
   alt: string;
   title: string;
+  subtitle?: string | null;
   size?: 'detail' | 'compact' | 'sidebar';
 };
 
-function buildPreviewState(src: string, alt: string, title: string, element: HTMLElement): ProductImagePreviewState {
-  const previewWidth = 220;
-  const previewHeight = 240;
+function buildPreviewState(
+  src: string,
+  alt: string,
+  title: string,
+  subtitle: string,
+  element: HTMLElement,
+): ProductImagePreviewState {
+  const previewWidth = 248;
+  const previewHeight = 278;
   const viewportWidth = window.innerWidth || 1024;
   const viewportHeight = window.innerHeight || 768;
   const rect = element.getBoundingClientRect();
@@ -33,7 +41,7 @@ function buildPreviewState(src: string, alt: string, title: string, element: HTM
   );
   const top = Math.max(12, Math.min(rect.top + rect.height / 2 - previewHeight / 2, viewportHeight - previewHeight - 12));
 
-  return { src, alt, title, top, left };
+  return { src, alt, title, subtitle, top, left };
 }
 
 export function ProductImagePreview({
@@ -41,12 +49,15 @@ export function ProductImagePreview({
   fallbackLabel,
   alt,
   title,
+  subtitle,
   size = 'detail',
 }: ProductImagePreviewProps) {
   const src = imageUrl?.trim() ?? '';
+  const previewSubtitle = subtitle?.trim() ?? '';
   const [failed, setFailed] = useState(false);
   const [hoveredPreview, setHoveredPreview] = useState<ProductImagePreviewState | null>(null);
   const [activePreview, setActivePreview] = useState<ProductImagePreviewState | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const hasUsableImage = Boolean(src && !failed);
   const thumbnailClassName = `order-item-thumb product-image-preview-thumb product-image-preview-thumb-${size}`;
 
@@ -71,15 +82,21 @@ export function ProductImagePreview({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [activePreview]);
 
+  useEffect(() => {
+    if (activePreview) {
+      closeButtonRef.current?.focus();
+    }
+  }, [activePreview]);
+
   function showPreview(element: HTMLElement) {
     if (hasUsableImage) {
-      setHoveredPreview(buildPreviewState(src, alt, title, element));
+      setHoveredPreview(buildPreviewState(src, alt, title, previewSubtitle, element));
     }
   }
 
   function openPreview(element: HTMLElement) {
     if (hasUsableImage) {
-      setActivePreview(buildPreviewState(src, alt, title, element));
+      setActivePreview(buildPreviewState(src, alt, title, previewSubtitle, element));
       setHoveredPreview(null);
     }
   }
@@ -114,6 +131,7 @@ export function ProductImagePreview({
         >
           <img src={hoveredPreview.src} alt="" />
           <span>{hoveredPreview.title}</span>
+          {hoveredPreview.subtitle ? <small>{hoveredPreview.subtitle}</small> : null}
         </div>
       ) : null}
 
@@ -134,12 +152,18 @@ export function ProductImagePreview({
               type="button"
               className="line-item-image-lightbox-close"
               aria-label="Close image preview"
+              ref={closeButtonRef}
               onClick={() => setActivePreview(null)}
             >
               ×
             </button>
-            <img src={activePreview.src} alt={activePreview.alt} />
-            <p>{activePreview.title}</p>
+            <div className="line-item-image-lightbox-canvas">
+              <img src={activePreview.src} alt={activePreview.alt} />
+            </div>
+            <footer className="line-item-image-lightbox-footer">
+              <p>{activePreview.title}</p>
+              {activePreview.subtitle ? <span>{activePreview.subtitle}</span> : null}
+            </footer>
           </div>
         </div>
       ) : null}

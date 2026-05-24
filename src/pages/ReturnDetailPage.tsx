@@ -1212,6 +1212,7 @@ export function ReturnDetailPage() {
                       fallbackLabel={getItemInitials(item.name || item.sku)}
                       alt={getReturnItemImageAlt(item)}
                       title={item.name || item.sku || 'Returned item'}
+                      subtitle={[item.sku, getVariantText(item.variantTitle)].filter((value) => value && value !== '—').join(' · ')}
                       size="sidebar"
                     />
                     <div className="return-review-item-main">
