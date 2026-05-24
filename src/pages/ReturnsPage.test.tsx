@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -285,6 +285,28 @@ describe('ReturnsPage control center', () => {
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
     expect(screen.queryByRole('img', { name: 'Wireless label printer product image' })).not.toBeInTheDocument();
     expect(container.querySelector('.order-item-thumb-fallback')).toHaveTextContent('WL');
+  });
+
+  it('renders returned item card content in the sidebar layout', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn)]);
+    getReturnMock.mockResolvedValue(pendingReturn);
+
+    renderReturnsPage();
+
+    const returnedItemsSection = (await screen.findByRole('heading', { name: 'Returned items' })).closest('.op-panel-section');
+    expect(returnedItemsSection).not.toBeNull();
+    const sidebar = within(returnedItemsSection as HTMLElement);
+    const title = sidebar.getByText('Wireless label printer');
+    const itemCard = title.closest('.return-detail-item');
+
+    expect(itemCard).not.toBeNull();
+    expect(within(itemCard as HTMLElement).getByRole('img', { name: 'Wireless label printer product image' })).toHaveAttribute(
+      'src',
+      'https://cdn.example.com/wireless-label-printer.png',
+    );
+    expect(within(itemCard as HTMLElement).getByText(/SKU SKU-A-1/)).toBeInTheDocument();
+    expect(within(itemCard as HTMLElement).getByText('Qty 1')).toBeInTheDocument();
+    expect(within(itemCard as HTMLElement).getByText('$0.00')).toBeInTheDocument();
   });
 
   it('renders selected drawer item details from the scoped return detail endpoint', async () => {
