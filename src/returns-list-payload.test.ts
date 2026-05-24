@@ -222,4 +222,53 @@ describe('returns list payload optimization', () => {
       }),
     );
   });
+
+  it('can defer return detail image backfill so primary detail payload is not blocked', async () => {
+    const record = buildReturnRecord();
+    record.vendorAllocation.lineItems[0].shopifyOrderLineItem.imageUrl = null;
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(record);
+    prismaMock.shopifyOrderLineItem.updateMany.mockResolvedValue({ count: 1 });
+    let resolveImages: (value: {
+      orderId: string;
+      lineItems: Array<{
+        lineItemGid: string;
+        sourceLineItemId: string;
+        sku: string;
+        imageUrl: string;
+        imageSource: string;
+      }>;
+    }) => void = () => undefined;
+    const shopifyAdminService = {
+      fetchOrderLineItemImages: vi.fn().mockReturnValue(new Promise((resolve) => {
+        resolveImages = resolve;
+      })),
+    };
+
+    const result = await getVendorReturnById('sporjinal', 'return-1', {
+      shopifyAdminService,
+      deferImageBackfill: true,
+    });
+
+    expect(shopifyAdminService.fetchOrderLineItemImages).toHaveBeenCalledWith('gid://shopify/Order/1');
+    expect(result?.refundedItems[0]).toEqual(
+      expect.objectContaining({
+        imageUrl: null,
+      }),
+    );
+
+    resolveImages({
+      orderId: 'gid://shopify/Order/1',
+      lineItems: [
+        {
+          lineItemGid: 'gid://shopify/LineItem/line-1',
+          sourceLineItemId: 'line-1',
+          sku: 'SKU-1',
+          imageUrl: 'https://cdn.example.com/deferred-running-shoe.png',
+          imageSource: 'line_item',
+        },
+      ],
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(prismaMock.shopifyOrderLineItem.updateMany).toHaveBeenCalled();
+  });
 });

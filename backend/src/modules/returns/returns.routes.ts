@@ -122,7 +122,10 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const returnRecord = await withSlowEndpointTiming('GET /returns/:returnId', () =>
-        getVendorReturnById(vendorId, request.params.returnId, { shopifyAdminService }),
+        getVendorReturnById(vendorId, request.params.returnId, {
+          shopifyAdminService,
+          deferImageBackfill: true,
+        }),
       );
       if (!returnRecord) {
         return reply.code(404).send({ message: 'Return record not found.' });

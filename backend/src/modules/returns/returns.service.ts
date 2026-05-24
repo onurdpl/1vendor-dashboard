@@ -824,8 +824,9 @@ export async function listVendorReturns(
 export async function getVendorReturnById(
   vendorId: string,
   returnId: string,
-  options: { shopifyAdminService?: ShopifyLineItemImageLookupService } = {},
+  options: { shopifyAdminService?: ShopifyLineItemImageLookupService; deferImageBackfill?: boolean } = {},
 ): Promise<ReturnDetailDto | null> {
+  const startedAt = Date.now();
   const record = await prisma.returnRecord.findFirst({
     where: {
       id: returnId,
@@ -862,12 +863,55 @@ export async function getVendorReturnById(
       },
     },
   });
+  const dbElapsedMs = Date.now() - startedAt;
+  if (dbElapsedMs >= 500) {
+    console.warn('[return-detail-timing]', {
+      stage: 'db_find_return_detail',
+      returnId,
+      elapsedMs: dbElapsedMs,
+    });
+  }
 
   if (!record) {
     return null;
   }
 
-  const lineItemImageOverrides = await backfillMissingLineItemImages(record.vendorAllocation, options.shopifyAdminService);
+  let lineItemImageOverrides = new Map<string, string>();
+  if (options.deferImageBackfill && options.shopifyAdminService) {
+    const imageBackfillStartedAt = Date.now();
+    void backfillMissingLineItemImages(record.vendorAllocation, options.shopifyAdminService)
+      .then((resolved) => {
+        const elapsedMs = Date.now() - imageBackfillStartedAt;
+        if (elapsedMs >= 500 || resolved.size > 0) {
+          console.info('[return-detail-image-backfill]', {
+            mode: 'deferred',
+            returnId,
+            resolvedCount: resolved.size,
+            elapsedMs,
+          });
+        }
+      })
+      .catch((error) => {
+        console.warn('[return-detail-image-backfill]', {
+          mode: 'deferred',
+          returnId,
+          resolvedCount: 0,
+          error: error instanceof Error ? error.message : 'Unknown image backfill error.',
+        });
+      });
+  } else {
+    const imageBackfillStartedAt = Date.now();
+    lineItemImageOverrides = await backfillMissingLineItemImages(record.vendorAllocation, options.shopifyAdminService);
+    const imageElapsedMs = Date.now() - imageBackfillStartedAt;
+    if (imageElapsedMs >= 500) {
+      console.warn('[return-detail-timing]', {
+        stage: 'line_item_image_backfill',
+        returnId,
+        resolvedCount: lineItemImageOverrides.size,
+        elapsedMs: imageElapsedMs,
+      });
+    }
+  }
   const matchingRefundRecords = getMatchingRefundRecords(record);
   const refundAmount = matchingRefundRecords.reduce(
     (sum, refund) => sum + toNumber(refund.amount),

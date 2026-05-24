@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -432,6 +432,27 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(await screen.findByRole('heading', { name: 'Return unavailable' })).toBeInTheDocument();
     expect(screen.getAllByText('Request timed out after 15000ms.').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+  });
+
+  it('keeps primary Return Detail content visible when optional sections fail', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue(returnDetail);
+    getFinanceDashboardMock.mockRejectedValueOnce(new Error('Finance request timed out.'));
+    listVendorSupportTicketsMock.mockRejectedValueOnce(new Error('Support request timed out.'));
+
+    renderPage();
+
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance records could not load' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support tickets could not load' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Return unavailable' })).not.toBeInTheDocument();
+
+    const financeRetrySection = screen.getByRole('heading', { name: 'Finance records could not load' }).closest('.op-empty-state');
+    expect(financeRetrySection).not.toBeNull();
+    await user.click(within(financeRetrySection as HTMLElement).getByRole('button', { name: 'Retry' }));
+
+    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
+    expect(getReturnMock).toHaveBeenCalledTimes(1);
   });
 
   it('does not crash when the return detail response is null or malformed', async () => {

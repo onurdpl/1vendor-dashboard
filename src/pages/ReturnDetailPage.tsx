@@ -515,18 +515,32 @@ export function ReturnDetailPage() {
       endpoint: returnDetailEndpoint,
     },
   );
-  const { data: relatedFinanceData } = useQueryResource(
+  const {
+    data: relatedFinanceData,
+    isError: relatedFinanceError,
+    error: relatedFinanceErrorMessage,
+    refetch: refetchRelatedFinance,
+  } = useQueryResource(
     queryKeys.finance.summary(currentVendor.vendorId),
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     {
       enabled: authContextReady && Boolean(returnRequest),
+      routeName: 'ReturnDetailPage.relatedFinance',
+      endpoint: '/finance',
     },
   );
-  const { data: relatedSupportTicketsData } = useQueryResource(
+  const {
+    data: relatedSupportTicketsData,
+    isError: relatedSupportTicketsError,
+    error: relatedSupportTicketsErrorMessage,
+    refetch: refetchRelatedSupportTickets,
+  } = useQueryResource(
     isAdmin ? queryKeys.admin.support.tickets() : queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     {
       enabled: authContextReady && Boolean(returnRequest),
+      routeName: 'ReturnDetailPage.relatedSupportTickets',
+      endpoint: isAdmin ? '/admin/support/tickets' : '/support/tickets',
     },
   );
   const markReceivedMutation = useMutationAction(
@@ -1292,6 +1306,20 @@ export function ReturnDetailPage() {
             links={returnCrossLinks}
             audience={audience}
           />
+          {relatedFinanceError ? (
+            <SectionErrorRetry
+              title="Finance records could not load"
+              description={relatedFinanceErrorMessage ?? 'Retry the finance section.'}
+              onRetry={() => void refetchRelatedFinance()}
+            />
+          ) : null}
+          {relatedSupportTicketsError ? (
+            <SectionErrorRetry
+              title="Support tickets could not load"
+              description={relatedSupportTicketsErrorMessage ?? 'Retry the support section.'}
+              onRetry={() => void refetchRelatedSupportTickets()}
+            />
+          ) : null}
         </main>
 
         <aside className="return-review-side" aria-label="Return operational sidebar">
