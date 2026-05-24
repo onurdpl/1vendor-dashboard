@@ -309,8 +309,9 @@ export function OrdersPage() {
   const { data: orders, isLoading, isError, error, diagnostics, refetch } = useQueryResource(
     queryKeys.orders.list(currentVendor.vendorId),
     ({ signal }) => listOrders({ vendorId: currentVendor.vendorId, signal }),
-    { enabled: authContextReady },
+    { enabled: authContextReady && Boolean(currentVendor.vendorId) },
   );
+  const ordersWaitingForVendorContext = !authContextReady || !currentVendor.vendorId;
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [fulfillmentFilter, setFulfillmentFilter] = useState('all');
@@ -653,7 +654,14 @@ export function OrdersPage() {
                       onRetry={() => void refetch()}
                     />
                   </OperationalTableRow>
-                ) : !authContextReady || isLoading ? (
+                ) : ordersWaitingForVendorContext ? (
+                  <OperationalTableRow>
+                    <EmptyStatePanel
+                      title="Waiting for vendor context"
+                      description="Orders will load after the authenticated vendor scope is ready."
+                    />
+                  </OperationalTableRow>
+                ) : isLoading ? (
                   <TableSkeletonRows columns={6} rows={5} />
                 ) : filteredOrders.length === 0 ? (
                   <OperationalTableRow>
@@ -884,8 +892,13 @@ export function OrdersPage() {
             </>
               );
             })()
-          ) : !authContextReady || isLoading ? (
-            <SectionSkeleton title="Loading order detail" description="Order detail will hydrate after the list finishes loading." />
+          ) : ordersWaitingForVendorContext ? (
+            <EmptyStatePanel
+              title="Waiting for vendor context"
+              description="Order detail will be available after the authenticated vendor scope is ready."
+            />
+          ) : isLoading ? (
+            <SectionSkeleton title="Loading order detail" description="Order detail will hydrate after the orders list loads." />
           ) : (
             <EmptyStatePanel
               title={hasRequestedOrderTarget ? 'Linked order unavailable' : 'Select an order'}

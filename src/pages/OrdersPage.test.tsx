@@ -260,21 +260,65 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText(orderDetail.id)).not.toBeInTheDocument();
   });
 
-  it('waits for auth and vendor readiness before calling the orders API', () => {
+  it('renders an explicit waiting state while auth and vendor readiness are unavailable', () => {
     window.localStorage.clear();
     listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
     getOrderMock.mockResolvedValue(orderDetail);
 
-    renderOrdersPage();
+    const { container } = renderOrdersPage();
 
     expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
+    expect(screen.getAllByRole('heading', { name: 'Waiting for vendor context' }).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Order detail will hydrate after the list finishes loading.')).not.toBeInTheDocument();
+    expect(container.querySelector('.op-skeleton-row')).toBeNull();
     expect(screen.queryByText(/Unauthorized/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Orders unavailable')).not.toBeInTheDocument();
     expect(listOrdersMock).not.toHaveBeenCalled();
+    expect(getOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('renders table skeletons only while an enabled orders query is fetching', () => {
+    const ordersResult = deferred<OrderSummary[]>();
+    listOrdersMock.mockReturnValue(ordersResult.promise);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    const { container } = renderOrdersPage();
+
+    expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
+    expect(container.querySelector('.op-skeleton-row')).not.toBeNull();
+    expect(screen.getByText('Loading order detail')).toBeInTheDocument();
+    expect(screen.getByText('Order detail will hydrate after the orders list loads.')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Waiting for vendor context' })).not.toBeInTheDocument();
+    expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+  });
+
+  it('renders empty list and inspector states after an orders query resolves empty', async () => {
+    listOrdersMock.mockResolvedValue([]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('No orders in this view')).toBeInTheDocument();
+    expect(screen.getByText('No order selected')).toBeInTheDocument();
+    expect(screen.getByText('Select an order')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Waiting for vendor context' })).not.toBeInTheDocument();
+    expect(getOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('renders the orders retry state when the enabled orders query fails', async () => {
+    listOrdersMock.mockRejectedValue(new Error('Orders request timed out.'));
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    expect(await screen.findByText('Orders unavailable')).toBeInTheDocument();
+    expect(screen.getByText('Orders request timed out.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Waiting for vendor context' })).not.toBeInTheDocument();
     expect(getOrderMock).not.toHaveBeenCalled();
   });
 

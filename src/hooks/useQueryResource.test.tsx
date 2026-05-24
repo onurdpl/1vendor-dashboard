@@ -16,11 +16,13 @@ function createDeferred<T>() {
 function Probe({
   queryFn,
   timeoutMs,
+  enabled = true,
 }: {
   queryFn: (context: QueryResourceContext) => Promise<string>;
   timeoutMs?: number;
+  enabled?: boolean;
 }) {
-  const query = useQueryResource(['stable-resource'], queryFn, { timeoutMs });
+  const query = useQueryResource(['stable-resource'], queryFn, { timeoutMs, enabled });
 
   return (
     <div>
@@ -52,13 +54,13 @@ function createTestQueryClient() {
 
 function renderProbe(
   queryFn: (context: QueryResourceContext) => Promise<string>,
-  options: { timeoutMs?: number; queryClient?: QueryClient } = {},
+  options: { timeoutMs?: number; queryClient?: QueryClient; enabled?: boolean } = {},
 ) {
   const queryClient = options.queryClient ?? createTestQueryClient();
 
   const rendered = render(
     <QueryClientProvider client={queryClient}>
-      <Probe queryFn={queryFn} timeoutMs={options.timeoutMs} />
+      <Probe queryFn={queryFn} timeoutMs={options.timeoutMs} enabled={options.enabled} />
     </QueryClientProvider>,
   );
   return { ...rendered, queryClient };
@@ -138,6 +140,17 @@ describe('useQueryResource', () => {
     await waitFor(() => expect(screen.getByTestId('error-state')).toHaveTextContent('Error'));
     expect(screen.getByTestId('value')).toHaveTextContent('No data');
     expect(screen.getByTestId('error-message')).toHaveTextContent('Request timed out after 5ms.');
+  });
+
+  it('reports disabled queries without data as idle instead of initial loading', () => {
+    const queryFn = vi.fn<(context: QueryResourceContext) => Promise<string>>().mockResolvedValue('Disabled data');
+
+    renderProbe(queryFn, { enabled: false });
+
+    expect(screen.getByTestId('value')).toHaveTextContent('No data');
+    expect(screen.getByTestId('initial-loading')).toHaveTextContent('Not initial loading');
+    expect(screen.getByTestId('fetching')).toHaveTextContent('Idle');
+    expect(queryFn).not.toHaveBeenCalled();
   });
 
   it('does not force a refetch on remount while cached data is fresh', async () => {

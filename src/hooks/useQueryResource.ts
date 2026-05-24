@@ -41,7 +41,7 @@ export function useQueryResource<TData>(
   const hasData = query.data !== undefined && query.data !== null;
   const blockingError = query.isError && !hasData;
   const queryKeyLabel = queryKey.map(String).join('/');
-  const status: ResourceStatus = query.isPending && !hasData
+  const status: ResourceStatus = query.isPending && query.fetchStatus !== 'idle' && !hasData
     ? 'loading'
     : blockingError
       ? 'error'
