@@ -19,6 +19,7 @@ function buildReturnRecord() {
     sourceVariantId: 'variant-1',
     sku: 'SKU-1',
     title: 'Running Shoe',
+    imageUrl: 'https://cdn.example.com/running-shoe.png',
   };
 
   return {
@@ -28,7 +29,7 @@ function buildReturnRecord() {
     sourceShopifyRefundId: null,
     sourceShopifyReturnId: 'return-remote-1',
     sourceShopifyReturnGid: 'gid://shopify/Return/1',
-    sourceShopifyLineItemId: null,
+    sourceShopifyLineItemId: 'line-1',
     returnLifecycleStatus: 'approved',
     returnRequestSource: 'shopify_return_request',
     requestCreatedAt: new Date('2026-05-01T08:00:00.000Z'),
@@ -110,6 +111,67 @@ describe('returns list payload optimization', () => {
     expect(result?.returnProviderSnapshot).toEqual(
       expect.objectContaining({
         rawProviderDiagnostics: 'detail-only',
+      }),
+    );
+  });
+
+  it('threads stored Shopify line item images into return list summaries', async () => {
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([buildReturnRecord()]);
+
+    const result = await listVendorReturns('sporjinal', { limit: 25, offset: 0 });
+
+    expect(result[0]?.refundedItems[0]).toEqual(
+      expect.objectContaining({
+        imageUrl: 'https://cdn.example.com/running-shoe.png',
+      }),
+    );
+  });
+
+  it('threads stored Shopify line item images into return detail items', async () => {
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(buildReturnRecord());
+
+    const result = await getVendorReturnById('sporjinal', 'return-1');
+
+    expect(result?.refundedItems[0]).toEqual(
+      expect.objectContaining({
+        imageUrl: 'https://cdn.example.com/running-shoe.png',
+      }),
+    );
+  });
+
+  it('falls back to the original allocation line item image for refund return items', async () => {
+    const record = buildReturnRecord();
+    record.returnRequestSource = 'shopify_refund';
+    record.sourceShopifyRefundId = 'gid://shopify/Refund/1';
+    record.vendorAllocation.refundRecords = [
+      {
+        sourceShopifyRefundId: 'gid://shopify/Refund/1',
+        amount: 1299.9,
+        lineItems: [
+          {
+            id: 'refund-line-1',
+            sourceLineItemId: 'gid://shopify/LineItem/line-1',
+            sku: 'SKU-1',
+            title: 'Refund row title',
+            quantity: 1,
+            subtotal: 1299.9,
+            shopifyOrderLineItem: {
+              sourceVariantId: 'variant-1',
+              sku: 'SKU-1',
+              title: 'Running Shoe',
+              imageUrl: null,
+            },
+          },
+        ],
+      },
+    ];
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(record);
+
+    const result = await getVendorReturnById('sporjinal', 'return-1');
+
+    expect(result?.refundedItems[0]).toEqual(
+      expect.objectContaining({
+        imageUrl: 'https://cdn.example.com/running-shoe.png',
       }),
     );
   });

@@ -267,6 +267,26 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('1 item')).not.toBeInTheDocument();
   });
 
+  it('renders the returned item thumbnail fallback when no image URL is available', async () => {
+    const returnWithoutImage: ReturnDetail = {
+      ...pendingReturn,
+      refundedItems: [
+        {
+          ...pendingReturn.refundedItems[0],
+          imageUrl: null,
+        },
+      ],
+    };
+    listReturnsMock.mockResolvedValue([toSummary(returnWithoutImage)]);
+    getReturnMock.mockResolvedValue(returnWithoutImage);
+
+    const { container } = renderReturnsPage();
+
+    expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('img', { name: 'Wireless label printer product image' })).not.toBeInTheDocument();
+    expect(container.querySelector('.order-item-thumb-fallback')).toHaveTextContent('WL');
+  });
+
   it('renders selected drawer item details from the scoped return detail endpoint', async () => {
     listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
     getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));

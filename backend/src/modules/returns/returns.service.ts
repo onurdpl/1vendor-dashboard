@@ -424,6 +424,85 @@ type ReturnRecordLineItemSource = {
   refundAmount: string;
 };
 
+function normalizeShopifyIdentifier(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+  const parts = text.split('/').filter(Boolean);
+  return parts.at(-1) ?? text;
+}
+
+function identifiersMatch(left: string | null | undefined, right: string | null | undefined) {
+  const leftText = left?.trim();
+  const rightText = right?.trim();
+  if (!leftText || !rightText) {
+    return false;
+  }
+  return leftText === rightText || normalizeShopifyIdentifier(leftText) === normalizeShopifyIdentifier(rightText);
+}
+
+function setImageLookupValue(map: Map<string, string>, key: string | null | undefined, imageUrl: string) {
+  const text = key?.trim();
+  if (!text) {
+    return;
+  }
+  map.set(text, imageUrl);
+  const normalized = normalizeShopifyIdentifier(text);
+  if (normalized) {
+    map.set(normalized, imageUrl);
+  }
+}
+
+function buildReturnLineItemImageLookup(lineItems: Array<Parameters<typeof toAllocationReturnedItem>[0]>) {
+  const byLineItemId = new Map<string, string>();
+  const byVariantId = new Map<string, string>();
+  const bySku = new Map<string, string>();
+
+  for (const item of lineItems) {
+    const imageUrl = item.shopifyOrderLineItem.imageUrl?.trim();
+    if (!imageUrl) {
+      continue;
+    }
+    setImageLookupValue(byLineItemId, item.shopifyOrderLineItem.sourceLineItemId, imageUrl);
+    setImageLookupValue(byVariantId, item.shopifyOrderLineItem.sourceVariantId, imageUrl);
+    const sku = item.shopifyOrderLineItem.sku?.trim();
+    if (sku) {
+      bySku.set(sku, imageUrl);
+    }
+  }
+
+  return { byLineItemId, byVariantId, bySku };
+}
+
+function resolveReturnedItemImageUrl(
+  item: ReturnRecordLineItemSource,
+  lookup: ReturnType<typeof buildReturnLineItemImageLookup>,
+) {
+  const existing = item.imageUrl?.trim();
+  if (existing) {
+    return existing;
+  }
+
+  const lineItemImage =
+    lookup.byLineItemId.get(item.sourceLineItemId) ??
+    lookup.byLineItemId.get(normalizeShopifyIdentifier(item.sourceLineItemId) ?? '');
+  if (lineItemImage) {
+    return lineItemImage;
+  }
+
+  const variantImage =
+    item.sourceVariantId
+      ? lookup.byVariantId.get(item.sourceVariantId) ??
+        lookup.byVariantId.get(normalizeShopifyIdentifier(item.sourceVariantId) ?? '')
+      : null;
+  if (variantImage) {
+    return variantImage;
+  }
+
+  return item.sku ? lookup.bySku.get(item.sku) ?? null : null;
+}
+
 function toAllocationReturnedItem(item: {
   id: string;
   quantity: number;
@@ -489,8 +568,14 @@ function buildReturnedItemsForRecord(record: {
     : refundLineItems.length > 0
       ? refundLineItems.map(toRefundReturnedItem)
       : record.vendorAllocation.lineItems.map(toAllocationReturnedItem);
+  const imageLookup = buildReturnLineItemImageLookup(record.vendorAllocation.lineItems);
 
-  return itemSources.map(withReturnedItemDisplayFields);
+  return itemSources
+    .map((item) => ({
+      ...item,
+      imageUrl: resolveReturnedItemImageUrl(item, imageLookup),
+    }))
+    .map(withReturnedItemDisplayFields);
 }
 
 function filterReturnRequestAllocationLineItems<
@@ -508,8 +593,8 @@ function filterReturnRequestAllocationLineItems<
     return [];
   }
 
-  return lineItems.filter(
-    (item) => item.shopifyOrderLineItem.sourceLineItemId === record.sourceShopifyLineItemId,
+  return lineItems.filter((item) =>
+    identifiersMatch(item.shopifyOrderLineItem.sourceLineItemId, record.sourceShopifyLineItemId),
   );
 }
 
@@ -579,10 +664,10 @@ export async function listVendorReturns(
               amount: true,
               lineItems: {
                 select: {
-	                  id: true,
-	                  sourceLineItemId: true,
-	                  sku: true,
-	                  title: true,
+                  id: true,
+                  sourceLineItemId: true,
+                  sku: true,
+                  title: true,
                   quantity: true,
                   subtotal: true,
                   shopifyOrderLineItem: true,

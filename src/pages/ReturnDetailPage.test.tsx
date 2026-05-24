@@ -302,6 +302,24 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
   });
 
+  it('renders the returned item thumbnail fallback when no image URL is available', async () => {
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      refundedItems: [
+        {
+          ...returnDetail.refundedItems[0],
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { container } = renderPage();
+
+    expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
+    expect(screen.queryByRole('img', { name: 'Nike Air Force 1 07 product image' })).not.toBeInTheDocument();
+    expect(container.querySelector('.order-item-thumb-fallback')).toHaveTextContent('NA');
+  });
+
   it('shows waiting reason when vendor context is not ready', async () => {
     appReadinessOverride.value = {
       status: 'loading_vendor_context',
