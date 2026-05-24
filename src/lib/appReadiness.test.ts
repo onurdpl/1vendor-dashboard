@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { getAppReadinessSnapshot } from './appReadiness';
-import { setCurrentUser, setCurrentVendorId, setToken } from './auth';
+import { createCurrentUserFromVendorAccess, setCurrentUser, setCurrentVendorId, setSession, setToken } from './auth';
 
 describe('app readiness', () => {
   beforeEach(() => {
@@ -74,6 +74,25 @@ describe('app readiness', () => {
     expect(readiness.status).toBe('missing_vendor_context');
     expect(readiness.sessionReady).toBe(true);
     expect(readiness.vendorReady).toBe(false);
+    expect(readiness.ready).toBe(false);
+  });
+
+  it('does not invent demo vendor access for real authenticated users with no backend vendor links', () => {
+    const user = createCurrentUserFromVendorAccess({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      status: 'active',
+      vendorAccess: [],
+    });
+
+    setSession('admin-token', user);
+
+    const readiness = getAppReadinessSnapshot();
+
+    expect(user.vendorAccess).toEqual([]);
+    expect(user.defaultVendorId).toBe('');
+    expect(readiness.status).toBe('missing_vendor_context');
     expect(readiness.ready).toBe(false);
   });
 });

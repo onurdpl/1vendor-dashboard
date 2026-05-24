@@ -1,11 +1,11 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { OrdersPage } from './OrdersPage';
 import type { OrderDetail, OrderSummary, ShipmentExecution } from '../features/orders/api';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setSession, setToken } from '../lib/auth';
 
 const listOrdersMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<OrderSummary[]>>();
 const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | null }) => Promise<OrderDetail>>();
@@ -279,6 +279,36 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByText('Orders unavailable')).not.toBeInTheDocument();
     expect(listOrdersMock).not.toHaveBeenCalled();
     expect(getOrderMock).not.toHaveBeenCalled();
+  });
+
+  it('enables the orders query once session and vendor context hydrate after mount', async () => {
+    window.localStorage.clear();
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage();
+
+    expect(screen.getAllByRole('heading', { name: 'Waiting for vendor context' }).length).toBeGreaterThan(0);
+    expect(listOrdersMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      setSession('fresh-token', {
+        email: 'admin@demo.com',
+        name: 'Demo Admin',
+        role: 'admin',
+        vendorAccess: ['demo-vendor-a'],
+        vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+        canSwitchVendors: false,
+        defaultVendorId: 'demo-vendor-a',
+      });
+      setCurrentVendorId('demo-vendor-a');
+    });
+
+    await waitFor(() => {
+      expect(listOrdersMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
+    });
+    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Waiting for vendor context' })).not.toBeInTheDocument();
   });
 
   it('asks for vendor selection when the authenticated user has no vendor context', () => {

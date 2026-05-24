@@ -132,6 +132,16 @@ export function setToken(token: string) {
   dispatchSessionReset();
 }
 
+export function setSession(token: string, user: CurrentUser) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(TOKEN_KEY, token);
+  window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
+  dispatchSessionReset();
+}
+
 function getCurrentBrowserPath() {
   if (typeof window === 'undefined') {
     return '/';
@@ -267,9 +277,9 @@ export function createCurrentUserFromVendorAccess(input: {
   status?: string;
   vendorAccess: readonly UserVendorAccess[];
 }) {
-  const vendorDetails = input.vendorAccess.length > 0 ? [...input.vendorAccess] : [...defaultVendorDirectory];
+  const vendorDetails = [...input.vendorAccess];
   const vendorIds = vendorDetails.map((vendor) => vendor.vendorId);
-  const defaultVendorId = vendorIds[0] ?? defaultVendorDirectory[0].vendorId;
+  const defaultVendorId = vendorIds[0] ?? '';
 
   return {
     email: input.email,

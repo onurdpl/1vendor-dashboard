@@ -22,6 +22,7 @@ export {
   rememberExpiredSession,
   sanitizeInternalPath,
   setCurrentUser,
+  setSession,
   setToken,
   validateSession,
 } from './auth/session';

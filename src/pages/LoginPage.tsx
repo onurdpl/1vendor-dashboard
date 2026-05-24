@@ -7,9 +7,8 @@ import {
   getDemoUsers,
   isAuthenticated,
   sanitizeInternalPath,
-  setCurrentUser,
   setCurrentVendorId,
-  setToken,
+  setSession,
 } from '../lib/auth';
 import type { VendorId } from '../lib/auth';
 import { runtimeConfig } from '../config/runtime';
@@ -84,8 +83,7 @@ export function LoginPage() {
       const { token, user } = await runtimeServices.auth.login(email, password);
 
       setErrorMessage(null);
-      setToken(token);
-      setCurrentUser(user);
+      setSession(token, user);
       setCurrentVendorId(user.defaultVendorId as VendorId);
       navigate(from, { replace: true });
     } catch (error) {
