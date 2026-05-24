@@ -41,6 +41,10 @@ export async function addVendorSupportTicketReply(ticketId: string, message: str
   return runtimeServices.support.addVendorReply(ticketId, message);
 }
 
+export async function escalateVendorSupportTicket(ticketId: string): Promise<SupportTicket> {
+  return runtimeServices.support.escalateVendor(ticketId);
+}
+
 export async function assignAdminSupportTicketToSelf(ticketId: string): Promise<SupportTicket> {
   return runtimeServices.support.assignToSelf(ticketId);
 }

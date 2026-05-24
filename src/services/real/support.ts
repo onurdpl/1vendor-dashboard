@@ -41,6 +41,10 @@ export async function addVendorSupportTicketReply(ticketId: string, message: str
   return apiClient.post<SupportTicket>(`/support/tickets/${ticketId}/replies`, { message });
 }
 
+export async function escalateVendorSupportTicket(ticketId: string): Promise<SupportTicket> {
+  return apiClient.post<SupportTicket>(`/support/tickets/${ticketId}/escalate`, {});
+}
+
 export async function assignAdminSupportTicketToSelf(ticketId: string): Promise<SupportTicket> {
   return apiClient.post<SupportTicket>(`/admin/support/tickets/${ticketId}/assign-self`, {});
 }

@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderDetail } from '../features/orders/api';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
+import type { SupportTicket } from '../lib/api/contracts';
 import { OrderDetailPage } from './OrderDetailPage';
 
 const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
@@ -29,6 +30,7 @@ const getFinanceDashboardMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 const createSupportTicketMock = vi.fn();
+const escalateVendorSupportTicketMock = vi.fn();
 const runtimeDiagnosticsMocks = vi.hoisted(() => ({
   kargonomiLocationLookup: vi.fn(),
   navlungoAuth: vi.fn(),
@@ -120,6 +122,7 @@ vi.mock('../features/support/api', async () => {
   return {
     ...actual,
     createSupportTicket: (input: unknown) => createSupportTicketMock(input),
+    escalateVendorSupportTicket: (ticketId: string) => escalateVendorSupportTicketMock(ticketId),
     listAdminSupportTickets: () => listAdminSupportTicketsMock(),
     listVendorSupportTickets: () => listVendorSupportTicketsMock(),
   };
@@ -214,6 +217,40 @@ const orderWithoutShipment: OrderDetail = {
   ...orderWithShipmentSummary,
   shipmentExecution: null,
 };
+
+function buildSupportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
+  return {
+    id: 'ticket-shipment-1',
+    createdAt: '2026-05-15T20:00:00.000Z',
+    updatedAt: '2026-05-15T20:05:00.000Z',
+    createdByUserId: 'vendor-user',
+    createdByRole: 'VENDOR',
+    vendorId: 'sporjinal',
+    vendorName: 'Sporjinal',
+    subject: 'Help with order #1028',
+    message: 'Tracking has not updated.',
+    priority: 'normal',
+    status: 'OPEN',
+    category: 'TRACKING',
+    assigneeUserId: null,
+    assigneeName: null,
+    vendorUnreadCount: 0,
+    adminUnreadCount: 1,
+    lastReplyAt: null,
+    lastReplyByRole: null,
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
+    sla: null,
+    contextType: 'shipment',
+    contextId: orderWithShipmentSummary.shipmentExecution!.id,
+    contextSummary: { orderNumber: '#1028' },
+    resolvedAt: null,
+    closedAt: null,
+    ...overrides,
+  };
+}
 
 function renderOrderDetail() {
   const queryClient = new QueryClient({
@@ -959,6 +996,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       subject: 'Help with order #1028',
       status: 'OPEN',
     });
+    escalateVendorSupportTicketMock.mockReset();
   });
 
   it('renders the Order Detail frame before primary data and defers provider diagnostics', () => {
@@ -1867,6 +1905,103 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(createSupportTicketMock.mock.calls[0][0].contextSnapshot).not.toHaveProperty('adminDiagnostics');
   });
 
+  it('opens an existing linked support ticket instead of creating a duplicate', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([buildSupportTicket()]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    const contactSupport = within(supportCard).getByRole('link', { name: 'Contact support' });
+    expect(contactSupport).toHaveAttribute('href', '/support/ticket-shipment-1');
+    expect(within(supportCard).getByText(/already open/i)).toBeInTheDocument();
+    expect(within(supportCard).queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
+    expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('escalates an existing linked support ticket without creating a new one', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    const supportTicket = buildSupportTicket();
+    listVendorSupportTicketsMock.mockResolvedValueOnce([supportTicket]);
+    escalateVendorSupportTicketMock.mockResolvedValueOnce({
+      ...supportTicket,
+      priority: 'high',
+      status: 'IN_REVIEW',
+      escalatedAt: '2026-05-15T20:10:00.000Z',
+    });
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Escalate' }));
+
+    await waitFor(() => expect(escalateVendorSupportTicketMock).toHaveBeenCalledWith('ticket-shipment-1'));
+    expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('disables escalation before a support ticket exists and hides unsupported internal notes for vendors', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const supportCard = await screen.findByLabelText('Shipment and return support');
+    expect(within(supportCard).getByRole('button', { name: 'Escalate' })).toBeDisabled();
+    expect(within(supportCard).getByText(/Create a support ticket before escalating/i)).toBeInTheDocument();
+    expect(within(supportCard).queryByRole('button', { name: 'Internal note' })).not.toBeInTheDocument();
+  });
+
+  it('deduplicates duplicate-looking linked support ticket rows', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([
+      buildSupportTicket({ id: 'ticket-shipment-1' }),
+      buildSupportTicket({ id: 'ticket-shipment-duplicate', createdAt: '2026-05-15T20:01:00.000Z' }),
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const ticketSummary = await screen.findByLabelText('Support ticket summary');
+    expect(ticketSummary).toHaveTextContent('Tickets · 1');
+    expect(within(ticketSummary).getAllByText('Help with order #1028')).toHaveLength(1);
+    expect(within(ticketSummary).getByText('Normal priority')).toBeInTheDocument();
+    expect(within(ticketSummary).getByText(/Updated May 15, 2026/)).toBeInTheDocument();
+  });
+
   it('shows finance ledger preview to admins and hides it from vendors', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -2084,7 +2219,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByText('Contact support')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Support ticket summary')).toBeInTheDocument();
     expect(screen.queryByLabelText('Admin support diagnostics')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy diagnostics' })).not.toBeInTheDocument();
   });

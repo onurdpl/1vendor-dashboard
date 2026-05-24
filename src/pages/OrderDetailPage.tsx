@@ -40,7 +40,7 @@ import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness } from '../lib/appReadiness';
 import { listReturns } from '../features/returns/api';
 import { getFinanceDashboard } from '../features/finance/api';
-import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import { escalateVendorSupportTicket, listAdminSupportTickets, listVendorSupportTickets, type SupportTicket } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import { getApiErrorDiagnostics, type ApiErrorDiagnostics } from '../lib/api/errors';
@@ -70,6 +70,18 @@ function formatDate(value: string) {
 
 function formatOptionalDate(value?: string, fallback = '—') {
   return value ? formatDate(value) : fallback;
+}
+
+function formatSupportTicketStatus(status: SupportTicket['status']) {
+  return status.replace(/_/g, ' ');
+}
+
+function formatSupportTicketPriority(priority: SupportTicket['priority']) {
+  return `${toTitleCaseLabel(priority)} priority`;
+}
+
+function isEscalatedSupportTicket(ticket: SupportTicket) {
+  return ticket.priority === 'high' || Boolean(ticket.escalatedAt);
 }
 
 function buildFinanceHref(record: { id: string }) {
@@ -937,6 +949,34 @@ function buildSupportCorrelationId(orderId: string, shipmentId?: string | null) 
   return ['support', orderId, shipmentId].filter(Boolean).join(':');
 }
 
+function getSupportTicketDedupeKey(ticket: SupportTicket) {
+  return [
+    ticket.contextType,
+    ticket.contextId ?? '',
+    ticket.contextSummary?.orderNumber ?? '',
+    ticket.contextSummary?.returnNumber ?? '',
+    ticket.subject.trim().toLowerCase(),
+    ticket.status,
+    ticket.priority,
+  ].join('|');
+}
+
+function dedupeSupportTickets(tickets: SupportTicket[]) {
+  const seen = new Set<string>();
+  return tickets.filter((ticket) => {
+    const key = getSupportTicketDedupeKey(ticket);
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
+}
+
+function isOpenSupportTicket(ticket: SupportTicket) {
+  return OPEN_SUPPORT_TICKET_STATUSES.has(ticket.status);
+}
+
 function compactDiagnosticsValue(value: unknown) {
   if (value === null || value === undefined || value === '') {
     return '—';
@@ -1246,6 +1286,8 @@ type LineItemImagePreviewState = {
   left: number;
 };
 
+const OPEN_SUPPORT_TICKET_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+
 const SHIPMENT_CUSTOMER_FIELD_LABELS: Record<ShipmentCustomerField, string> = {
   name: 'Name',
   surname: 'Surname',
@@ -1465,6 +1507,22 @@ export function OrderDetailPage() {
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
     {
       enabled: authContextReady && Boolean(order),
+    },
+  );
+  const { mutateAsync: escalateSupportTicketMutation, isPending: isEscalatingSupportTicket } = useMutationAction(
+    (ticketId: string) => escalateVendorSupportTicket(ticketId),
+    {
+      invalidateQueryKeys: [
+        queryKeys.support.tickets(currentVendor.vendorId),
+        queryKeys.admin.support.tickets(),
+        orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId),
+      ],
+      onSuccess: () => {
+        showFeedback('Support ticket escalated.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(getTrackingMutationErrorMessage(error), 'error');
+      },
     },
   );
   const { mutateAsync: runFulfillmentAction, isPending: isRunningFulfillmentAction } = useMutationAction(
@@ -3726,11 +3784,13 @@ export function OrderDetailPage() {
   );
   const relatedSupportTickets = useMemo(
     () =>
-      (relatedSupportTicketsData ?? []).filter((ticket) =>
-        supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber, {
-          audience: isAdmin ? 'admin' : 'vendor',
-          currentVendorId: currentVendor.vendorId,
-        }),
+      dedupeSupportTickets(
+        (relatedSupportTicketsData ?? []).filter((ticket) =>
+          supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber, {
+            audience: isAdmin ? 'admin' : 'vendor',
+            currentVendorId: currentVendor.vendorId,
+          }),
+        ),
       ),
     [currentVendor.vendorId, isAdmin, order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
   );
@@ -4241,6 +4301,9 @@ export function OrderDetailPage() {
   ];
   const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
+  const openLinkedSupportTicket = relatedSupportTickets.find(isOpenSupportTicket) ?? null;
+  const linkedSupportTicketHref = openLinkedSupportTicket ? `${supportBasePath}/${openLinkedSupportTicket.id}` : null;
+  const linkedSupportTicketEscalated = openLinkedSupportTicket ? isEscalatedSupportTicket(openLinkedSupportTicket) : false;
   const hasOperationalReturn = Boolean(activeReturn || visibleShipmentExecution?.returnShipment);
   const needsOperationalAttention = Boolean(waitingSupportTicket) || (!hasTrackingSync && order.shippingStatus !== 'Delivered');
   const orderHealth = needsOperationalAttention
@@ -4983,35 +5046,39 @@ export function OrderDetailPage() {
                 {isVendorAssignedOwner ? (
                   <>
                     <div className="order-support-action-row">
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact order-support-contact-button"
-                        onClick={() => setSupportOpen(true)}
-                        disabled={!canReportIssue}
-                      >
-                        Contact support
-                      </button>
+                      {linkedSupportTicketHref ? (
+                        <Link className="button button-secondary button-compact order-support-contact-button" to={linkedSupportTicketHref}>
+                          Contact support
+                        </Link>
+                      ) : (
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact order-support-contact-button"
+                          onClick={() => setSupportOpen(true)}
+                          disabled={!canReportIssue}
+                        >
+                          Contact support
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="button button-secondary button-compact"
-                        onClick={() => handleCopyDiagnostics('shipment-summary')}
-                        disabled={!isAdmin}
+                        onClick={() => {
+                          if (openLinkedSupportTicket) {
+                            void escalateSupportTicketMutation(openLinkedSupportTicket.id);
+                          }
+                        }}
+                        disabled={!openLinkedSupportTicket || linkedSupportTicketEscalated || isEscalatingSupportTicket}
                       >
-                        Internal note
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        onClick={() => setSupportOpen(true)}
-                        disabled={!canReportIssue}
-                      >
-                        Escalate
+                        {isEscalatingSupportTicket ? 'Escalating…' : linkedSupportTicketEscalated ? 'Escalated' : 'Escalate'}
                       </button>
                     </div>
                     {!canReportIssue ? (
                       <span className="muted">Support is available for active or fulfilled assigned orders.</span>
+                    ) : openLinkedSupportTicket ? (
+                      <span className="muted">A linked support ticket is already open. Escalate only when the existing case needs attention.</span>
                     ) : (
-                      <span className="muted">Order, shipment, return, and sync context attached.</span>
+                      <span className="muted">Order, shipment, return, and sync context attached. Create a support ticket before escalating.</span>
                     )}
                   </>
                 ) : null}
@@ -5021,8 +5088,12 @@ export function OrderDetailPage() {
                     <strong>Tickets · {relatedSupportTickets.length}</strong>
                     {relatedSupportTickets.slice(0, 3).map((ticket) => (
                       <Link className="order-support-ticket-row" key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
-                        <span>{ticket.status.replace(/_/g, ' ')}</span>
+                        <span className="order-support-ticket-status">{formatSupportTicketStatus(ticket.status)}</span>
                         <strong>{ticket.subject}</strong>
+                        <span className="order-support-ticket-meta">
+                          <span>{formatSupportTicketPriority(ticket.priority)}</span>
+                          <span>Updated {formatOptionalDate(ticket.updatedAt)}</span>
+                        </span>
                       </Link>
                     ))}
                   </div>

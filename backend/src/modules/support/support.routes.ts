@@ -9,6 +9,7 @@ import {
   addVendorSupportTicketReply,
   assignSupportTicketToSelf,
   createSupportTicket,
+  escalateVendorSupportTicket,
   getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,
@@ -105,6 +106,28 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
           request.vendorContext.vendorId,
           request.authUser,
           request.body ?? {},
+        );
+      } catch (error) {
+        return sendSupportError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { ticketId: string } }>(
+    '/support/tickets/:ticketId/escalate',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      if (!request.authUser || !request.vendorContext) {
+        return reply.code(401).send({ message: 'Unauthorized' });
+      }
+
+      try {
+        return await escalateVendorSupportTicket(
+          request.params.ticketId,
+          request.vendorContext.vendorId,
+          request.authUser,
         );
       } catch (error) {
         return sendSupportError(error, reply);

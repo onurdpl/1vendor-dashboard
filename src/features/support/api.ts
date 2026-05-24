@@ -4,6 +4,7 @@ export {
   addVendorSupportTicketReply,
   assignAdminSupportTicketToSelf,
   createSupportTicket,
+  escalateVendorSupportTicket,
   getAdminSupportAnalytics,
   getAdminSupportTicket,
   getVendorSupportTicket,

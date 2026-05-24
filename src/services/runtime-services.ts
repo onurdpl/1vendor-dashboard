@@ -1762,6 +1762,27 @@ export const runtimeServices = {
       ticket.updatedAt = now;
       return { ...ticket, notes: undefined };
     },
+    async escalateVendor(ticketId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realSupport.escalateVendorSupportTicket(ticketId);
+      }
+      const ticket = mockSupportTickets.find((item) => item.id === ticketId && item.vendorId === getCurrentVendorId());
+      const currentUser = getCurrentUser();
+      if (!ticket) {
+        throw new ApiError('Support ticket not found.', 'server', { status: 404 });
+      }
+      if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+        throw new ApiError('Resolved or closed support tickets cannot be escalated.', 'server', { status: 400 });
+      }
+      const now = new Date().toISOString();
+      ticket.priority = 'high';
+      ticket.status = ticket.status === 'OPEN' ? 'IN_REVIEW' : ticket.status;
+      ticket.escalatedAt = now;
+      ticket.escalationReason = `Vendor escalation requested by ${currentUser?.name ?? 'Vendor User'}.`;
+      ticket.adminUnreadCount += 1;
+      ticket.updatedAt = now;
+      return { ...ticket, notes: undefined };
+    },
     async assignToSelf(ticketId: string) {
       if (runtimeConfig.apiMode === 'real') {
         return realSupport.assignAdminSupportTicketToSelf(ticketId);

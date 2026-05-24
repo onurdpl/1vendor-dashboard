@@ -752,9 +752,9 @@ function mapAdminTicket(
 
 function mapVendorTicket(
   ticket: Parameters<typeof mapTicket>[0],
-  options: Omit<Parameters<typeof mapTicket>[1], 'includeContextSnapshot' | 'includeSla' | 'includeNotes'> = {},
+  options: Omit<Parameters<typeof mapTicket>[1], 'includeContextSnapshot' | 'includeNotes'> = {},
 ) {
-  return mapTicket(ticket, { ...options, includeContextSnapshot: false, includeSla: false, includeNotes: false });
+  return mapTicket(ticket, { ...options, includeContextSnapshot: false, includeNotes: false });
 }
 
 function readBool(value: unknown) {
@@ -1112,6 +1112,51 @@ export async function addVendorSupportTicketReply(
     throw new SupportTicketError('Support ticket not found.', 404);
   }
   return updated;
+}
+
+export async function escalateVendorSupportTicket(
+  ticketId: string,
+  vendorId: string,
+  authUser: AuthUserContext,
+): Promise<SupportTicketDto> {
+  const existing = await prisma.supportTicket.findFirst({
+    where: {
+      id: ticketId,
+      vendorId,
+    },
+    select: {
+      id: true,
+      status: true,
+    },
+  });
+  if (!existing) {
+    throw new SupportTicketError('Support ticket not found.', 404);
+  }
+
+  const currentStatus = normalizeStatus(existing.status);
+  if (currentStatus === 'RESOLVED' || currentStatus === 'CLOSED') {
+    throw new SupportTicketError('Resolved or closed support tickets cannot be escalated.', 400);
+  }
+
+  const now = new Date();
+  const ticket = await prisma.supportTicket.update({
+    where: { id: ticketId },
+    data: {
+      priority: 'high',
+      status: currentStatus === 'OPEN' ? 'IN_REVIEW' : currentStatus,
+      escalatedAt: now,
+      escalationReason: `Vendor escalation requested by ${authUser.name}.`,
+      adminUnreadCount: { increment: 1 },
+      updatedAt: now,
+    },
+    include: {
+      vendor: {
+        select: { name: true },
+      },
+    },
+  });
+
+  return mapVendorTicket(ticket, { includeSla: true });
 }
 
 export async function addAdminSupportTicketReply(
