@@ -20,6 +20,7 @@ import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
 import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
+import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 
 type ReturnReasonBackfillBody = {
   dryRun?: boolean;
@@ -71,6 +72,7 @@ function sendReviewError(error: unknown, reply: { code: (status: number) => { se
 export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+  const shopifyAdminService = createShopifyAdminService(env);
 
   async function resolveReturnActor(
     request: { authUser?: AuthUserContext; headers: { [key: string]: string | string[] | undefined } },
@@ -120,7 +122,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const returnRecord = await withSlowEndpointTiming('GET /returns/:returnId', () =>
-        getVendorReturnById(vendorId, request.params.returnId),
+        getVendorReturnById(vendorId, request.params.returnId, { shopifyAdminService }),
       );
       if (!returnRecord) {
         return reply.code(404).send({ message: 'Return record not found.' });

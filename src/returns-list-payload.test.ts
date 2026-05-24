@@ -5,6 +5,9 @@ const prismaMock = vi.hoisted(() => ({
     findMany: vi.fn(),
     findFirst: vi.fn(),
   },
+  shopifyOrderLineItem: {
+    updateMany: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -15,6 +18,7 @@ const { listVendorReturns, getVendorReturnById } = await import('../backend/src/
 
 function buildReturnRecord() {
   const orderLineItem = {
+    id: 'shopify-line-1',
     sourceLineItemId: 'line-1',
     sourceVariantId: 'variant-1',
     sku: 'SKU-1',
@@ -59,6 +63,9 @@ function buildReturnRecord() {
       originalVendorId: 'sporjinal',
       sourceShopifyOrderId: 'gid://shopify/Order/1',
       sourceShopifyOrderNumber: '#1001',
+      order: {
+        sourceShopifyOrderId: 'gid://shopify/Order/1',
+      },
       lineItems: [
         {
           id: 'alloc-line-1',
@@ -76,6 +83,7 @@ describe('returns list payload optimization', () => {
   beforeEach(() => {
     prismaMock.returnRecord.findMany.mockReset();
     prismaMock.returnRecord.findFirst.mockReset();
+    prismaMock.shopifyOrderLineItem.updateMany.mockReset();
   });
 
   it('omits heavy return provider snapshots from list summaries', async () => {
@@ -172,6 +180,45 @@ describe('returns list payload optimization', () => {
     expect(result?.refundedItems[0]).toEqual(
       expect.objectContaining({
         imageUrl: 'https://cdn.example.com/running-shoe.png',
+      }),
+    );
+  });
+
+  it('lazily backfills missing return detail images from the original Shopify order line item lookup', async () => {
+    const record = buildReturnRecord();
+    record.vendorAllocation.lineItems[0].shopifyOrderLineItem.imageUrl = null;
+    prismaMock.returnRecord.findFirst.mockResolvedValueOnce(record);
+    prismaMock.shopifyOrderLineItem.updateMany.mockResolvedValue({ count: 1 });
+    const shopifyAdminService = {
+      fetchOrderLineItemImages: vi.fn().mockResolvedValue({
+        orderId: 'gid://shopify/Order/1',
+        lineItems: [
+          {
+            lineItemGid: 'gid://shopify/LineItem/line-1',
+            sourceLineItemId: 'line-1',
+            sku: 'SKU-1',
+            imageUrl: 'https://cdn.example.com/backfilled-running-shoe.png',
+            imageSource: 'line_item',
+          },
+        ],
+      }),
+    };
+
+    const result = await getVendorReturnById('sporjinal', 'return-1', { shopifyAdminService });
+
+    expect(shopifyAdminService.fetchOrderLineItemImages).toHaveBeenCalledWith('gid://shopify/Order/1');
+    expect(prismaMock.shopifyOrderLineItem.updateMany).toHaveBeenCalledWith({
+      where: {
+        id: 'shopify-line-1',
+        imageUrl: null,
+      },
+      data: {
+        imageUrl: 'https://cdn.example.com/backfilled-running-shoe.png',
+      },
+    });
+    expect(result?.refundedItems[0]).toEqual(
+      expect.objectContaining({
+        imageUrl: 'https://cdn.example.com/backfilled-running-shoe.png',
       }),
     );
   });

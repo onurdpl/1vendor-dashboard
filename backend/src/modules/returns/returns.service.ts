@@ -13,6 +13,10 @@ import {
   type NavlungoCreatePostEndpointPath,
 } from '../shipping/navlungo-provider.adapter.js';
 import type { ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
+import {
+  backfillMissingLineItemImages,
+  type ShopifyLineItemImageLookupService,
+} from '../orders/orders.service.js';
 
 export class ReturnReviewError extends Error {
   statusCode: number;
@@ -769,7 +773,11 @@ export async function listVendorReturns(
   });
 }
 
-export async function getVendorReturnById(vendorId: string, returnId: string): Promise<ReturnDetailDto | null> {
+export async function getVendorReturnById(
+  vendorId: string,
+  returnId: string,
+  options: { shopifyAdminService?: ShopifyLineItemImageLookupService } = {},
+): Promise<ReturnDetailDto | null> {
   const record = await prisma.returnRecord.findFirst({
     where: {
       id: returnId,
@@ -780,6 +788,11 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     include: {
       vendorAllocation: {
         include: {
+          order: {
+            select: {
+              sourceShopifyOrderId: true,
+            },
+          },
           lineItems: {
             include: {
               shopifyOrderLineItem: true,
@@ -806,6 +819,7 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
     return null;
   }
 
+  const lineItemImageOverrides = await backfillMissingLineItemImages(record.vendorAllocation, options.shopifyAdminService);
   const matchingRefundRecords = getMatchingRefundRecords(record);
   const refundAmount = matchingRefundRecords.reduce(
     (sum, refund) => sum + toNumber(refund.amount),
@@ -813,7 +827,22 @@ export async function getVendorReturnById(vendorId: string, returnId: string): P
   );
   const sourceRefundId = record.sourceShopifyRefundId ?? (isReturnRequestRecord(record) ? '' : getRefundSourceId(record));
   const refundLineItems = matchingRefundRecords.flatMap((refund) => refund.lineItems);
-  const detailRefundedItems = buildReturnedItemsForRecord(record, refundLineItems);
+  const detailRefundedItems = buildReturnedItemsForRecord(
+    {
+      ...record,
+      vendorAllocation: {
+        ...record.vendorAllocation,
+        lineItems: record.vendorAllocation.lineItems.map((item) => ({
+          ...item,
+          shopifyOrderLineItem: {
+            ...item.shopifyOrderLineItem,
+            imageUrl: lineItemImageOverrides.get(item.shopifyOrderLineItem.id) ?? item.shopifyOrderLineItem.imageUrl,
+          },
+        })),
+      },
+    },
+    refundLineItems,
+  );
   const refundedSkus = Array.from(
     new Set(
       detailRefundedItems

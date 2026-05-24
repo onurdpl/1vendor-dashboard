@@ -38,11 +38,11 @@ function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
 }
 
-type ShopifyLineItemImageLookupService = {
+export type ShopifyLineItemImageLookupService = {
   fetchOrderLineItemImages(orderId: string): Promise<FetchOrderLineItemImagesResult>;
 };
 
-type OrderDetailLineItemRecord = {
+export type OrderDetailLineItemRecord = {
   shopifyOrderLineItem: {
     id: string;
     sourceLineItemId: string;
@@ -51,7 +51,7 @@ type OrderDetailLineItemRecord = {
   };
 };
 
-async function backfillMissingLineItemImages(
+export async function backfillMissingLineItemImages(
   allocation: {
     order: { sourceShopifyOrderId: string };
     lineItems: OrderDetailLineItemRecord[];

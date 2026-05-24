@@ -46,6 +46,12 @@ function formatMoney(value: number) {
   });
 }
 
+function mockProductImageUrl(label: string, accent: string) {
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" rx="18" fill="#f8fafc"/><rect x="20" y="56" width="56" height="14" rx="7" fill="${accent}" opacity=".16"/><path d="M25 56h46l8 10c2 3 0 8-4 8H24c-5 0-8-5-6-9l7-9Z" fill="${accent}" opacity=".82"/><path d="M37 34h22l12 22H27l10-22Z" fill="#ffffff" stroke="${accent}" stroke-width="3"/><text x="48" y="88" text-anchor="middle" font-family="Arial" font-size="10" font-weight="700" fill="#475569">${label}</text></svg>`,
+  )}`;
+}
+
 function toReturnLineItems(vendorId: VendorId, items: Array<VendorAllocationLineItem<RefundLineItemInput>>): ReturnLineItem[] {
   return items.map(({ vendorMetafield: _vendorMetafield, ...item }) => ({
     originalVendorId: item.originalVendorId,
@@ -58,6 +64,7 @@ function toReturnLineItems(vendorId: VendorId, items: Array<VendorAllocationLine
     condition: item.condition,
     refundAmount: item.price,
     vendorId,
+    imageUrl: item.imageUrl ?? null,
   }));
 }
 
@@ -86,6 +93,7 @@ const sourceRefunds: ShopifySourceRefund[] = [
         variantTitle: 'Medium',
         quantity: 1,
         price: '$1,250.00',
+        imageUrl: mockProductImageUrl('PRN', '#2563eb'),
         vendorMetafield: 'Demo Vendor A',
         condition: 'Opened',
       },
@@ -97,6 +105,7 @@ const sourceRefunds: ShopifySourceRefund[] = [
         variantTitle: 'Large',
         quantity: 1,
         price: '$1,600.00',
+        imageUrl: mockProductImageUrl('PRN', '#7c3aed'),
         vendorMetafield: 'Demo Vendor B',
         condition: 'Opened',
       },
@@ -127,6 +136,7 @@ const sourceRefunds: ShopifySourceRefund[] = [
         variantTitle: 'Standard',
         quantity: 1,
         price: '$650.00',
+        imageUrl: mockProductImageUrl('LIC', '#059669'),
         vendorMetafield: 'Demo Vendor A',
         condition: 'Damaged',
       },
@@ -157,6 +167,7 @@ const sourceRefunds: ShopifySourceRefund[] = [
         variantTitle: 'One size',
         quantity: 1,
         price: '$1,100.00',
+        imageUrl: mockProductImageUrl('TAB', '#0f766e'),
         vendorMetafield: 'Demo Vendor B',
         condition: 'New',
       },
