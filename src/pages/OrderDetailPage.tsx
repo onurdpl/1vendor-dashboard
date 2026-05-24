@@ -85,7 +85,7 @@ function getCompactCustomerLabel(value?: string) {
     normalized.toLowerCase().includes('available in order') ||
     normalized.toLowerCase().includes('customer unavailable')
   ) {
-    return 'Customer hidden for vendor scope';
+    return 'Customer unavailable';
   }
 
   return normalized;
@@ -4708,7 +4708,7 @@ export function OrderDetailPage() {
                 <strong>{order.assignedVendorId || 'Unknown'}</strong>
               </div>
               <div>
-                <span>Customer visibility</span>
+                <span>Customer</span>
                 <strong>{customerLabel}</strong>
               </div>
               <div>
@@ -4732,15 +4732,6 @@ export function OrderDetailPage() {
           <span className={`status-badge status-${getStatusClass(order.shippingStatus)}`}>
             {order.shippingStatus}
           </span>
-          <Link
-            className="button button-primary button-compact order-detail-inspect-button"
-            to={`/admin/orders/${encodeURIComponent(String(order.sourceShopifyOrderNumber).replace(/^#/, ''))}`}
-          >
-            İNCELE
-          </Link>
-          <button type="button" className="button button-secondary button-compact order-detail-overflow-button" aria-label="More order actions">
-            ...
-          </button>
         </div>
         {!hasOperationalReturn ? (
           <div className={`order-health-banner order-health-${orderHealth.tone}`} aria-label="Primary operational status">

@@ -1142,6 +1142,7 @@ export async function getVendorOrderById(
     id: allocation.id,
     sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
     sourceShopifyOrderNumber: allocation.order.sourceShopifyOrderNumber,
+    customerName: allocation.order.customerName,
     vendorId: allocation.assignedVendorId,
     assignedVendorId: allocation.assignedVendorId,
     originalVendorId: allocation.originalVendorId,

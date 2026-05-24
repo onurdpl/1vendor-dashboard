@@ -83,6 +83,7 @@ type OrderSummaryDto = {
 };
 
 type OrderDetailDto = OrderSummaryDto & {
+  customerName: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   shopifyFulfillmentSync?: {
@@ -355,6 +356,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,
+    customer: dto.customerName?.trim() || 'Customer unavailable',
     shippingAddress: 'Shopify shipping address available in future detail sync.',
     notes: 'Loaded from backend operational allocation detail.',
     lineItems: mapOrderLineItems(

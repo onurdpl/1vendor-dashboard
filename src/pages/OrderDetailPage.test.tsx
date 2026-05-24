@@ -1579,7 +1579,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
   });
 
-  it('uses vendor-safe customer wording and hides raw provider timeline events', async () => {
+  it('shows customer fallback and hides raw provider timeline events', async () => {
     setCurrentUser({
       email: 'vendor@example.com',
       name: 'Vendor User',
@@ -1604,7 +1604,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect((await screen.findAllByText('Customer hidden for vendor scope')).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText('Customer unavailable')).length).toBeGreaterThan(0);
     const timeline = screen.getByRole('heading', { name: 'Timeline' }).closest('article');
     expect(timeline).not.toBeNull();
     expect(within(timeline as HTMLElement).queryByText(/webhook/i)).not.toBeInTheDocument();
@@ -1614,6 +1614,46 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(timeline as HTMLElement).queryByText(/Tracking pending/i)).not.toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText('Order created')).toBeInTheDocument();
     expect(within(timeline as HTMLElement).getByText(/Order, shipment, return, and support activity/)).toBeInTheDocument();
+  });
+
+  it('renders stored customer names for vendor users', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValueOnce({
+      ...orderWithShipmentSummary,
+      customer: 'Ada Lovelace',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText('Ada Lovelace')).toBeInTheDocument();
+    expect(screen.getByText('Customer')).toBeInTheDocument();
+    expect(screen.queryByText('Customer hidden for vendor scope')).not.toBeInTheDocument();
+  });
+
+  it('removes dead Order Detail header actions', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Order #1028' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'İNCELE' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'More order actions' })).not.toBeInTheDocument();
   });
 
   it('renders the dense operational foundation without exposing vendor diagnostics', async () => {

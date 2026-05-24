@@ -422,6 +422,7 @@ export type OrderShipmentExecutionDto = {
 };
 
 export type OrderDetailDto = OrderSummaryDto & {
+  customerName: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
