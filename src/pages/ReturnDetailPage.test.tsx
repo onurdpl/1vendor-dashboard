@@ -312,6 +312,28 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText(/Latest backend update/i)).not.toBeInTheDocument();
   });
 
+  it('opens returned item image previews in a fixed body overlay', async () => {
+    getReturnMock.mockResolvedValue(returnDetail);
+
+    renderPage();
+
+    const previewButtons = await screen.findAllByRole('button', {
+      name: /Preview Nike Air Force 1 07/i,
+    });
+    await userEvent.click(previewButtons[0]);
+
+    expect(screen.getByRole('dialog', { name: /Nike Air Force 1 07 image preview/i })).toBeInTheDocument();
+    const backdrop = document.querySelector('.line-item-image-lightbox-backdrop');
+    expect(backdrop?.parentElement).toBe(document.body);
+    expect(document.body.style.overflow).toBe('hidden');
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Nike Air Force 1 07 image preview/i })).not.toBeInTheDocument();
+      expect(document.body.style.overflow).toBe('');
+    });
+  });
+
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
     getReturnMock.mockResolvedValue({
       ...returnDetail,

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type ProductImagePreviewState = {
   src: string;
@@ -72,6 +73,9 @@ export function ProductImagePreview({
       return undefined;
     }
 
+    const previousBodyOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         setActivePreview(null);
@@ -79,7 +83,10 @@ export function ProductImagePreview({
     }
 
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      document.body.style.overflow = previousBodyOverflow;
+    };
   }, [activePreview]);
 
   useEffect(() => {
@@ -101,29 +108,8 @@ export function ProductImagePreview({
     }
   }
 
-  return (
-    <>
-      {hasUsableImage ? (
-        <button
-          type="button"
-          className={`${thumbnailClassName} order-item-thumb-button`}
-          aria-label={`Preview ${title || 'product image'}`}
-          onMouseEnter={(event) => showPreview(event.currentTarget)}
-          onMouseLeave={() => setHoveredPreview(null)}
-          onFocus={(event) => showPreview(event.currentTarget)}
-          onBlur={() => setHoveredPreview(null)}
-          onClick={(event) => openPreview(event.currentTarget)}
-        >
-          <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />
-          <span className="order-item-thumb-fallback">{fallbackLabel}</span>
-        </button>
-      ) : (
-        <span className={thumbnailClassName} aria-hidden="true">
-          <span className="order-item-thumb-fallback">{fallbackLabel}</span>
-        </span>
-      )}
-
-      {hoveredPreview ? (
+  const hoverPreviewLayer = hoveredPreview && typeof document !== 'undefined'
+    ? createPortal(
         <div
           className="line-item-image-hover-preview"
           style={{ top: hoveredPreview.top, left: hoveredPreview.left }}
@@ -132,10 +118,13 @@ export function ProductImagePreview({
           <img src={hoveredPreview.src} alt="" />
           <span>{hoveredPreview.title}</span>
           {hoveredPreview.subtitle ? <small>{hoveredPreview.subtitle}</small> : null}
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+    : null;
 
-      {activePreview ? (
+  const activePreviewLayer = activePreview && typeof document !== 'undefined'
+    ? createPortal(
         <div
           className="line-item-image-lightbox-backdrop"
           role="presentation"
@@ -165,8 +154,35 @@ export function ProductImagePreview({
               {activePreview.subtitle ? <span>{activePreview.subtitle}</span> : null}
             </footer>
           </div>
-        </div>
-      ) : null}
+        </div>,
+        document.body,
+      )
+    : null;
+
+  return (
+    <>
+      {hasUsableImage ? (
+        <button
+          type="button"
+          className={`${thumbnailClassName} order-item-thumb-button`}
+          aria-label={`Preview ${title || 'product image'}`}
+          onMouseEnter={(event) => showPreview(event.currentTarget)}
+          onMouseLeave={() => setHoveredPreview(null)}
+          onFocus={(event) => showPreview(event.currentTarget)}
+          onBlur={() => setHoveredPreview(null)}
+          onClick={(event) => openPreview(event.currentTarget)}
+        >
+          <img src={src} alt={alt} loading="lazy" onError={() => setFailed(true)} />
+          <span className="order-item-thumb-fallback">{fallbackLabel}</span>
+        </button>
+      ) : (
+        <span className={thumbnailClassName} aria-hidden="true">
+          <span className="order-item-thumb-fallback">{fallbackLabel}</span>
+        </span>
+      )}
+
+      {hoverPreviewLayer}
+      {activePreviewLayer}
     </>
   );
 }

@@ -1113,10 +1113,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await userEvent.click(previewButton);
 
     expect(screen.getByRole('dialog', { name: /Nike Air Max Alpha Trainer 6 image preview/i })).toBeInTheDocument();
+    const backdrop = document.querySelector('.line-item-image-lightbox-backdrop');
+    expect(backdrop?.parentElement).toBe(document.body);
+    expect(document.body.style.overflow).toBe('hidden');
 
     await userEvent.keyboard('{Escape}');
     await waitFor(() => {
       expect(screen.queryByRole('dialog', { name: /Nike Air Max Alpha Trainer 6 image preview/i })).not.toBeInTheDocument();
+      expect(document.body.style.overflow).toBe('');
     });
   });
 

@@ -5886,7 +5886,7 @@ h3 {
 
 .line-item-image-hover-preview {
   position: fixed;
-  z-index: 80;
+  z-index: 1000;
   width: 248px;
   min-height: 248px;
   padding: 12px;
@@ -5937,10 +5937,12 @@ h3 {
 .line-item-image-lightbox-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 1100;
   display: grid;
   place-items: center;
   padding: clamp(16px, 4vw, 36px);
+  overflow: auto;
+  overscroll-behavior: contain;
   background: rgba(15, 23, 42, 0.68);
   backdrop-filter: blur(10px);
   animation: lineItemBackdropIn 120ms ease-out;
