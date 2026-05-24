@@ -5669,7 +5669,7 @@ describe('shipping execution foundation', () => {
       navlungoReturnRecipientAddressIdNumeric: true,
       navlungoReturnRecipientAddressIdSource: 'provider_metadata',
       navlungoReturnPickupPayloadSummary: expect.objectContaining({
-        endpointPath: '/post/create',
+        endpointPath: '/post/return',
         requestedPostType: 3,
         requestedCarrierId: 9,
         requestedBarcodeFormat: 'pdf-A5',
@@ -5794,6 +5794,7 @@ describe('shipping execution foundation', () => {
     );
 
     expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
+      endpointPath: '/post/return',
       requestSnapshot: expect.objectContaining({
         posts: [
           expect.objectContaining({
@@ -6017,13 +6018,13 @@ describe('shipping execution foundation', () => {
     const requestSnapshot = (adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].requestSnapshot;
     expect(requestSnapshot.posts[0].carrier_id).toBe(10);
     expect(requestSnapshot.posts[0].barcode_format).toBe('pdf-A5');
-    expect((adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].endpointPath).toBe('/post/create');
+    expect((adapter.createReturnShipment as ReturnType<typeof vi.fn>).mock.calls[0][0].endpointPath).toBe('/post/return');
     expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         returnProviderSnapshot: expect.objectContaining({
           navlungoReturnEndpointVersionTried: 'v2.1',
           navlungoReturnRequestedCarrierId: 10,
-          navlungoReturnResolvedProviderPath: '/v2.1/post/create',
+          navlungoReturnResolvedProviderPath: '/v2.1/post/return',
         }),
       }),
     }));
@@ -6094,6 +6095,52 @@ describe('shipping execution foundation', () => {
           navlungoReturnEndpointPathTried: '/post/return',
           navlungoReturnResolvedProviderPath: '/v2.1/post/return',
           navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/return',
+        }),
+      }),
+    }));
+  });
+
+  it('blocks Navlungo return pickup live create when endpoint override is post create', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    const adapter = buildAdapter({
+      provider: 'NAVLUNGO' as const,
+      createReturnShipment: vi.fn(),
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    await expect(createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      env,
+      {
+        adapter,
+        endpointPathOverride: '/post/create',
+        diagnosticConfirm: 'YES',
+      },
+    )).rejects.toThrow('Return pickup must use /post/return, not /post/create.');
+
+    expect(adapter.createReturnShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'return-request-1' },
+      data: expect.objectContaining({
+        returnProviderSnapshot: expect.objectContaining({
+          navlungoReturnEndpointPathTried: '/post/create',
+          navlungoReturnPickupStatus: 'needs_attention',
+          navlungoReturnProviderMessage: 'Return pickup must use /post/return, not /post/create.',
+          navlungoReturnCreateHttpStatus: null,
+          navlungoReturnCreateSucceeded: false,
         }),
       }),
     }));

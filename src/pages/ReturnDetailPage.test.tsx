@@ -608,7 +608,7 @@ describe('ReturnDetailPage vendor review screen', () => {
         navlungoReturnPickupMissingFields: [],
         recipientAddressIdValid: true,
         navlungoReturnPickupPayloadSummary: {
-          endpointPath: '/post/create',
+          endpointPath: '/post/return',
           requestedPostType: 3,
           requestedCarrierId: 9,
           senderKeys: ['name', 'phone', 'email', 'address', 'country', 'city', 'district', 'post_code'],
@@ -625,7 +625,12 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Preview Navlungo return pickup' }));
 
-    expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, { dryRun: true });
+    expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
+      dryRun: true,
+      endpointVersionOverride: 'current',
+      carrierIdOverride: 'current',
+      endpointPathOverride: '/post/return',
+    });
     expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
   });
 
@@ -659,7 +664,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       dryRun: false,
       endpointVersionOverride: 'v2.1',
       carrierIdOverride: '10',
-      endpointPathOverride: '/post/create',
+      endpointPathOverride: '/post/return',
       diagnosticConfirm: 'YES',
     });
   });
@@ -730,6 +735,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByLabelText('Return pickup address completion')).toBeInTheDocument();
+    expect(screen.getByLabelText('Endpoint path')).toHaveValue('/post/return');
     expect(screen.getByLabelText('District')).toBeInTheDocument();
     expect(screen.queryByLabelText('City')).not.toBeInTheDocument();
 
@@ -742,6 +748,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       },
     });
     expect(await screen.findByText('Return pickup address saved.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Endpoint path')).toHaveValue('/post/return');
   });
 
   it('renders admin completion fields from alternate Navlungo missing-field diagnostics', async () => {
@@ -838,8 +845,8 @@ describe('ReturnDetailPage vendor review screen', () => {
         navlungoReturnCreateHttpStatus: 422,
         navlungoReturnCreateSucceeded: false,
         navlungoReturnEndpointVersionTried: 'v2.1',
-        navlungoReturnResolvedProviderPath: '/v2.1/post/create',
-        navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/create',
+        navlungoReturnResolvedProviderPath: '/v2.1/post/return',
+        navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/return',
         providerMessage: 'Validation Errors',
         navlungoReturnValidationFields: ['posts.0.sender.district'],
         navlungoReturnValidationMessages: ['Sender district is required.'],
@@ -897,8 +904,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(within(diagnostics).getByText('422')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Validation Errors')).toBeInTheDocument();
     expect(within(diagnostics).getByText('v2.1')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('/v2.1/post/create')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('https://domestic-api.navlungo.com/v2.1/post/create')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('/v2.1/post/return')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('https://domestic-api.navlungo.com/v2.1/post/return')).toBeInTheDocument();
     expect(within(diagnostics).getByText('posts.0.sender.district')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Sender district is required.')).toBeInTheDocument();
     expect(within(diagnostics).getByText('json:object · message, status, errors')).toBeInTheDocument();
@@ -936,7 +943,7 @@ describe('ReturnDetailPage vendor review screen', () => {
         recipientAddressIdValid: true,
         navlungoReturnRequestSummary: {
           baseUrl: 'domestic-api.navlungo.com/v2',
-          endpointPath: '/post/create',
+          endpointPath: '/post/return',
           method: 'POST',
           topLevelBodyKeys: ['platform', 'posts'],
           postKeys: [
@@ -982,7 +989,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(within(diagnostics).getByText('9')).toBeInTheDocument();
     expect(within(diagnostics).getByText('pdf-A6')).toBeInTheDocument();
     expect(within(diagnostics).getByText('domestic-api.navlungo.com/v2')).toBeInTheDocument();
-    expect(within(diagnostics).getByText('/post/create')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('/post/return')).toBeInTheDocument();
     expect(within(diagnostics).getByText('addressId')).toBeInTheDocument();
     expect(within(diagnostics).getByText('valid')).toBeInTheDocument();
     expect(within(diagnostics).getAllByText('1 (number)').length).toBeGreaterThanOrEqual(2);
@@ -1057,7 +1064,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       returnProviderSnapshot: {
         navlungoReturnPickupDryRun: true,
         navlungoReturnPickupPayloadSummary: {
-          endpointPath: '/post/create',
+          endpointPath: '/post/return',
           requestedPostType: 3,
           requestedCarrierId: 9,
         },

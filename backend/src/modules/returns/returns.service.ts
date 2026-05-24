@@ -331,7 +331,7 @@ function resolveNavlungoReturnBarcodeFormat(providerMetadata: unknown) {
 function resolveNavlungoDiagnosticEndpointPath(
   endpointPathOverride: NavlungoReturnPickupInput['endpointPathOverride'],
 ): NavlungoCreatePostEndpointPath {
-  return endpointPathOverride === '/post/return' ? '/post/return' : '/post/create';
+  return endpointPathOverride === '/post/create' ? '/post/create' : '/post/return';
 }
 
 function resolveNavlungoDiagnosticBaseUrl(
@@ -1331,6 +1331,38 @@ export async function createNavlungoReturnPickupForReturn(
     shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
     attemptedAt,
   };
+
+  if (requestBase.endpointPath === '/post/create') {
+    const endpointDiagnostics = {
+      ...diagnostics,
+      navlungoReturnAutoCreateSkippedReason: 'invalid_return_endpoint',
+      navlungoReturnPickupStatus: 'needs_attention',
+      navlungoReturnProviderMessage: 'Return pickup must use /post/return, not /post/create.',
+      navlungoReturnCreateHttpStatus: null,
+      navlungoReturnCreateSucceeded: false,
+    };
+    if (input.dryRun) {
+      const detail = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+      if (!detail) {
+        throw new ReturnReviewError('Return record not found.', 404);
+      }
+      return {
+        ...detail,
+        returnProviderSnapshot: endpointDiagnostics,
+      };
+    }
+
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: {
+          ...(readSnapshot(record.returnProviderSnapshot) ?? {}),
+          ...endpointDiagnostics,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    throw new ReturnReviewError('Return pickup must use /post/return, not /post/create.', 400);
+  }
 
   if (input.dryRun) {
     const detail = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);

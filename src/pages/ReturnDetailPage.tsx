@@ -481,7 +481,7 @@ export function ReturnDetailPage() {
   const [navlungoReturnPickupApiVersionOverride, setNavlungoReturnPickupApiVersionOverride] = useState<'current' | 'v2' | 'v2.1'>('current');
   const [navlungoReturnPickupCarrierOverride, setNavlungoReturnPickupCarrierOverride] = useState<'current' | '9' | '10'>('current');
   const [navlungoReturnPickupEndpointPathOverride, setNavlungoReturnPickupEndpointPathOverride] =
-    useState<'/post/create' | '/post/return'>('/post/create');
+    useState<'/post/create' | '/post/return'>('/post/return');
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
   const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
@@ -594,7 +594,7 @@ export function ReturnDetailPage() {
           setNavlungoReturnPickupLiveConfirmed(false);
           setNavlungoReturnPickupApiVersionOverride('current');
           setNavlungoReturnPickupCarrierOverride('current');
-          setNavlungoReturnPickupEndpointPathOverride('/post/create');
+          setNavlungoReturnPickupEndpointPathOverride('/post/return');
         }
       },
       onError: (error) => {
@@ -1629,7 +1629,7 @@ export function ReturnDetailPage() {
                     </div>
                     <div>
                       <span>Request endpoint</span>
-                      <strong>{String(navlungoReturnRequestSummary.endpointPath ?? '/post/create')}</strong>
+                      <strong>{String(navlungoReturnRequestSummary.endpointPath ?? '/post/return')}</strong>
                     </div>
                     <div>
                       <span>Top-level body keys</span>
@@ -1820,7 +1820,16 @@ export function ReturnDetailPage() {
                       type="button"
                       className="button button-secondary"
                       disabled={navlungoReturnPickupMutation.isPending}
-                      onClick={() => void navlungoReturnPickupMutation.mutateAsync({ dryRun: true }).catch(() => undefined)}
+                      onClick={() =>
+                        void navlungoReturnPickupMutation
+                          .mutateAsync({
+                            dryRun: true,
+                            endpointVersionOverride: navlungoReturnPickupApiVersionOverride,
+                            carrierIdOverride: navlungoReturnPickupCarrierOverride,
+                            endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
+                          })
+                          .catch(() => undefined)
+                      }
                     >
                       {navlungoReturnPickupMutation.isPending ? 'Previewing...' : 'Preview Navlungo return pickup'}
                     </button>
@@ -1829,7 +1838,7 @@ export function ReturnDetailPage() {
                     <div className="provider-response-summary" aria-label="Navlungo return pickup payload summary">
                       <div className="summary-row">
                         <span>Endpoint</span>
-                        <strong>{String(navlungoReturnPickupPayloadSummary.endpointPath ?? '/post/create')}</strong>
+                        <strong>{String(navlungoReturnPickupPayloadSummary.endpointPath ?? '/post/return')}</strong>
                       </div>
                       <div className="summary-row">
                         <span>Post type</span>
@@ -1940,8 +1949,8 @@ export function ReturnDetailPage() {
                               setNavlungoReturnPickupEndpointPathOverride(event.target.value as '/post/create' | '/post/return')
                             }
                           >
-                            <option value="/post/create">/post/create</option>
                             <option value="/post/return">/post/return</option>
+                            <option value="/post/create">/post/create (invalid for return pickup)</option>
                           </select>
                         </label>
                       </div>
