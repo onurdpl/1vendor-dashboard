@@ -12,6 +12,7 @@ import {
   isShopifyReturnSignalTopic,
   mapWebhookEventToReturnSignalDiscovery,
 } from '../shopify/return-signal-discovery.service.js';
+import type { FetchOrderLineItemImagesResult } from '../shopify/shopify-admin.types.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -35,6 +36,95 @@ function toNumber(value: unknown) {
 
 function toIsoString(value: Date | null | undefined) {
   return value ? value.toISOString() : null;
+}
+
+type ShopifyLineItemImageLookupService = {
+  fetchOrderLineItemImages(orderId: string): Promise<FetchOrderLineItemImagesResult>;
+};
+
+type OrderDetailLineItemRecord = {
+  shopifyOrderLineItem: {
+    id: string;
+    sourceLineItemId: string;
+    sku: string | null;
+    imageUrl: string | null;
+  };
+};
+
+async function backfillMissingLineItemImages(
+  allocation: {
+    order: { sourceShopifyOrderId: string };
+    lineItems: OrderDetailLineItemRecord[];
+  },
+  shopifyAdminService?: ShopifyLineItemImageLookupService,
+) {
+  const missingItems = allocation.lineItems.filter((item) => !item.shopifyOrderLineItem.imageUrl);
+  if (!shopifyAdminService || missingItems.length === 0 || !allocation.order.sourceShopifyOrderId) {
+    return new Map<string, string>();
+  }
+
+  if (!missingItems.some((item) => item.shopifyOrderLineItem.sourceLineItemId || item.shopifyOrderLineItem.sku)) {
+    return new Map<string, string>();
+  }
+
+  try {
+    const imageResult = await shopifyAdminService.fetchOrderLineItemImages(allocation.order.sourceShopifyOrderId);
+    const byLineItemId = new Map<string, string>();
+    const bySku = new Map<string, string>();
+
+    for (const image of imageResult.lineItems) {
+      const imageUrl = image.imageUrl?.trim();
+      if (!imageUrl) {
+        continue;
+      }
+
+      if (image.sourceLineItemId) {
+        byLineItemId.set(image.sourceLineItemId, imageUrl);
+      }
+
+      if (image.lineItemGid) {
+        byLineItemId.set(image.lineItemGid, imageUrl);
+        const gidTail = image.lineItemGid.split('/').at(-1)?.trim();
+        if (gidTail) {
+          byLineItemId.set(gidTail, imageUrl);
+        }
+      }
+
+      if (image.sku) {
+        bySku.set(image.sku, imageUrl);
+      }
+    }
+
+    const resolved = new Map<string, string>();
+    await Promise.all(
+      missingItems.map(async (item) => {
+        const line = item.shopifyOrderLineItem;
+        const imageUrl = byLineItemId.get(line.sourceLineItemId) ?? (line.sku ? bySku.get(line.sku) : undefined);
+        if (!imageUrl) {
+          return;
+        }
+
+        await prisma.shopifyOrderLineItem.updateMany({
+          where: {
+            id: line.id,
+            imageUrl: null,
+          },
+          data: {
+            imageUrl,
+          },
+        });
+        resolved.set(line.id, imageUrl);
+      }),
+    );
+
+    return resolved;
+  } catch (error) {
+    console.warn('[orders] Shopify line item image backfill failed; returning existing order detail.', {
+      sourceShopifyOrderId: allocation.order.sourceShopifyOrderId,
+      errorMessage: error instanceof Error ? error.message : 'Unknown Shopify line item image backfill error.',
+    });
+    return new Map<string, string>();
+  }
 }
 
 function mapShopifyFulfillmentSync(
@@ -1008,7 +1098,11 @@ export async function listVendorOrders(
   });
 }
 
-export async function getVendorOrderById(vendorId: string, orderId: string): Promise<OrderDetailDto | null> {
+export async function getVendorOrderById(
+  vendorId: string,
+  orderId: string,
+  options: { shopifyAdminService?: ShopifyLineItemImageLookupService } = {},
+): Promise<OrderDetailDto | null> {
   const allocation = await prisma.vendorAllocation.findFirst({
     where: {
       id: orderId,
@@ -1041,6 +1135,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
   }
 
   const totalAmount = computeTotalAmount(allocation.lineItems);
+  const lineItemImageOverrides = await backfillMissingLineItemImages(allocation, options.shopifyAdminService);
   const shopifyReturnSignal = await getLatestShopifyReturnSignalForOrder(allocation.order.id);
 
   return {
@@ -1078,6 +1173,7 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
       sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
       sku: item.shopifyOrderLineItem.sku,
       title: item.shopifyOrderLineItem.title,
+      imageUrl: lineItemImageOverrides.get(item.shopifyOrderLineItem.id) ?? item.shopifyOrderLineItem.imageUrl,
       quantity: item.quantity,
       lineAmount: toAmountString(Number(item.lineAmount ?? 0)),
     })),
@@ -1096,9 +1192,15 @@ export async function getVendorOrderById(vendorId: string, orderId: string): Pro
 export async function getVendorOrderByIdForUser(
   vendorId: string,
   orderId: string,
-  options: { includeShipmentProviderResponseSummary?: boolean; includeFinanceLedgerPreview?: boolean } = {},
+  options: {
+    includeShipmentProviderResponseSummary?: boolean;
+    includeFinanceLedgerPreview?: boolean;
+    shopifyAdminService?: ShopifyLineItemImageLookupService;
+  } = {},
 ): Promise<OrderDetailDto | null> {
-  const order = await getVendorOrderById(vendorId, orderId);
+  const order = await getVendorOrderById(vendorId, orderId, {
+    shopifyAdminService: options.shopifyAdminService,
+  });
   if (!order) {
     return order;
   }
@@ -1221,6 +1323,7 @@ export async function getAdminShopifyOrderBreakdown(
           sourceVariantId: lineItem.shopifyOrderLineItem.sourceVariantId,
           sku: lineItem.shopifyOrderLineItem.sku,
           title: lineItem.shopifyOrderLineItem.title,
+          imageUrl: lineItem.shopifyOrderLineItem.imageUrl,
           quantity: lineItem.quantity,
           lineAmount: toAmountString(toNumber(lineItem.lineAmount)),
         })),

@@ -53,6 +53,7 @@ export type OrderDetailLineItemDto = {
   sourceVariantId: string | null;
   sku: string | null;
   title: string | null;
+  imageUrl: string | null;
   quantity: number;
   lineAmount: string;
 };
@@ -437,6 +438,7 @@ export type AdminOrderBreakdownLineItemDto = {
   sourceVariantId: string | null;
   sku: string | null;
   title: string | null;
+  imageUrl: string | null;
   quantity: number;
   lineAmount: string;
 };

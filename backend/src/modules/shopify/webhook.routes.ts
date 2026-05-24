@@ -540,10 +540,25 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         });
       }
 
+      const lineItemImages = await shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId).then(
+        (result) => result.lineItems,
+        (error) => {
+          app.log.warn(
+            {
+              sourceShopifyOrderId,
+              errorMessage: error instanceof Error ? error.message : 'Unknown Shopify line item image enrichment error.',
+            },
+            'Shopify line item image enrichment failed; continuing order ingestion.',
+          );
+          return [];
+        },
+      );
+
       ingestionResult = await ingestShopifyOrderWebhook({
         event: idempotencyResult.event,
         payload,
         sellerInfo: sellerInfoResult.sellerInfo,
+        lineItemImages,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify orders/create ingestion failed.';

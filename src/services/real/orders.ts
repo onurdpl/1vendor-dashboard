@@ -101,6 +101,7 @@ type OrderDetailDto = OrderSummaryDto & {
     sourceVariantId: string | null;
     sku: string | null;
     title: string | null;
+    imageUrl: string | null;
     quantity: number;
     lineAmount: string;
   }>;
@@ -150,6 +151,7 @@ type AdminOrderBreakdownDto = {
       sourceVariantId: string | null;
       sku: string | null;
       title: string | null;
+      imageUrl: string | null;
       quantity: number;
       lineAmount: string;
     }>;
@@ -280,6 +282,7 @@ function mapOrderLineItems(
     sku: item.sku ?? 'UNKNOWN-SKU',
     variantTitle: item.sourceVariantId ?? 'Default',
     name: item.title ?? 'Shopify line item',
+    imageUrl: item.imageUrl ?? null,
     quantity: item.quantity,
     price: formatCurrency(item.lineAmount),
     allocationStatus,

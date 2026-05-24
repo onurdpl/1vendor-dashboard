@@ -645,6 +645,7 @@ export type OrderLineItem = {
   sku: string;
   variantTitle: string;
   name: string;
+  imageUrl?: string | null;
   quantity: number;
   price: string;
   // Compatibility alias for current pages/hooks. Maps to assignedVendorId.

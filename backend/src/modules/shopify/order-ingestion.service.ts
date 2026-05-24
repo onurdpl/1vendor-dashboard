@@ -9,6 +9,7 @@ import type {
   ShopifyOrdersCreateLineItemPayload,
   ShopifyOrdersCreateWebhookPayload,
 } from './order-ingestion.types.js';
+import type { ShopifyOrderLineItemImage } from './shopify-admin.types.js';
 
 function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
   const firstName = payload.customer?.first_name?.trim();
@@ -121,8 +122,40 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
       quantity: typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1,
       unitPrice:
         lineItem.price !== undefined && lineItem.price !== null ? String(lineItem.price) : null,
+      imageUrl: null,
     })),
   };
+}
+
+function createLineItemImageResolver(lineItemImages: ShopifyOrderLineItemImage[] | undefined) {
+  const byLineItemId = new Map<string, string>();
+  const bySku = new Map<string, string>();
+
+  for (const image of lineItemImages ?? []) {
+    const imageUrl = image.imageUrl?.trim();
+    if (!imageUrl) {
+      continue;
+    }
+
+    if (image.sourceLineItemId) {
+      byLineItemId.set(image.sourceLineItemId, imageUrl);
+    }
+
+    if (image.lineItemGid) {
+      byLineItemId.set(image.lineItemGid, imageUrl);
+      const gidTail = image.lineItemGid.split('/').at(-1)?.trim();
+      if (gidTail) {
+        byLineItemId.set(gidTail, imageUrl);
+      }
+    }
+
+    if (image.sku) {
+      bySku.set(image.sku, imageUrl);
+    }
+  }
+
+  return (lineItem: ParsedShopifyOrderLineItem) =>
+    byLineItemId.get(lineItem.sourceLineItemId) ?? (lineItem.sku ? bySku.get(lineItem.sku) : undefined) ?? null;
 }
 
 function normalizeVendorSlug(value: string | undefined) {
@@ -145,6 +178,7 @@ function toLineAmount(unitPrice: string | null, quantity: number) {
 
 export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Promise<OrderIngestionResult> {
   const parsedOrder = parseOrderPayload(input.payload);
+  const resolveImageUrl = createLineItemImageResolver(input.lineItemImages);
 
   if (parsedOrder.lineItems.length === 0) {
     await prisma.webhookEvent.update({
@@ -184,6 +218,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       return {
         ...lineItem,
         vendorId,
+        imageUrl: resolveImageUrl(lineItem),
       };
     });
 
@@ -243,6 +278,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             sourceVariantId: lineItem.sourceVariantId,
             sku: lineItem.sku,
             title: lineItem.title,
+            imageUrl: lineItem.imageUrl,
             quantity: lineItem.quantity,
             unitPrice: lineItem.unitPrice,
             originalVendorId: lineItem.vendorId,
@@ -253,6 +289,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             sourceVariantId: lineItem.sourceVariantId,
             sku: lineItem.sku,
             title: lineItem.title,
+            imageUrl: lineItem.imageUrl,
             quantity: lineItem.quantity,
             unitPrice: lineItem.unitPrice,
             originalVendorId: lineItem.vendorId,

@@ -2,6 +2,7 @@ import type { AppEnv } from '../../config/env.js';
 import type {
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
+  FetchOrderLineItemImagesResult,
   FetchShopifyReturnDetailsResult,
   FetchShopifyReturnReverseDeliveryInputsResult,
   FetchOrderSellerInfoResult,
@@ -23,6 +24,42 @@ type OrderSellerInfoQueryResponse = {
     } | null;
   } | null;
 };
+
+type OrderLineItemImagesQueryResponse = {
+  order: {
+    id: string;
+    lineItems: {
+      edges: Array<{
+        node: {
+          id: string;
+          sku: string | null;
+          image?: {
+            url: string | null;
+            altText: string | null;
+          } | null;
+          variant?: {
+            id: string;
+            image?: {
+              url: string | null;
+              altText: string | null;
+            } | null;
+          } | null;
+          product?: {
+            id: string;
+            featuredMedia?: {
+              image?: {
+                url: string | null;
+                altText: string | null;
+              } | null;
+            } | null;
+          } | null;
+        };
+      }>;
+    };
+  } | null;
+};
+
+type OrderLineItemImageNode = NonNullable<OrderLineItemImagesQueryResponse['order']>['lineItems']['edges'][number]['node'];
 
 type ShopifyReturnQueryResponse = {
   return: {
@@ -211,6 +248,41 @@ function extractShopifyGidTail(gid: string) {
   return tail || null;
 }
 
+export function resolveShopifyLineItemImageUrl(lineItem: OrderLineItemImageNode) {
+  const lineItemImageUrl = lineItem.image?.url?.trim() || null;
+  if (lineItemImageUrl) {
+    return {
+      imageUrl: lineItemImageUrl,
+      imageSource: 'line_item' as const,
+      altText: lineItem.image?.altText?.trim() || null,
+    };
+  }
+
+  const variantImageUrl = lineItem.variant?.image?.url?.trim() || null;
+  if (variantImageUrl) {
+    return {
+      imageUrl: variantImageUrl,
+      imageSource: 'variant' as const,
+      altText: lineItem.variant?.image?.altText?.trim() || null,
+    };
+  }
+
+  const productFeaturedImageUrl = lineItem.product?.featuredMedia?.image?.url?.trim() || null;
+  if (productFeaturedImageUrl) {
+    return {
+      imageUrl: productFeaturedImageUrl,
+      imageSource: 'product_featured_media' as const,
+      altText: lineItem.product?.featuredMedia?.image?.altText?.trim() || null,
+    };
+  }
+
+  return {
+    imageUrl: null,
+    imageSource: null,
+    altText: null,
+  };
+}
+
 function parseSellerInfoValue(value: string | null): SellerInfoMap | null {
   if (!value) {
     return null;
@@ -256,6 +328,43 @@ function parseMockSellerInfoByOrderId(rawValue: string | undefined): Record<stri
     }, {});
 
     acc[orderId] = sellerInfo;
+    return acc;
+  }, {});
+}
+
+function parseMockOrderLineItemImagesByOrderId(rawValue: string | undefined): Record<string, FetchOrderLineItemImagesResult> {
+  if (!rawValue) {
+    return {};
+  }
+
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('SHOPIFY_MOCK_LINE_ITEM_IMAGES must be a JSON object keyed by Shopify order id.');
+  }
+
+  return Object.entries(parsed).reduce<Record<string, FetchOrderLineItemImagesResult>>((acc, [orderId, value]) => {
+    const lineItems = Array.isArray(value) ? value : [];
+    acc[orderId] = {
+      orderGid: toShopifyOrderGid(orderId),
+      sourceShopifyOrderId: orderId,
+      source: 'mock',
+      lineItems: lineItems
+        .filter((entry) => entry && typeof entry === 'object' && !Array.isArray(entry))
+        .map((entry) => {
+          const item = entry as Record<string, unknown>;
+          const lineItemGid = String(item.lineItemGid ?? item.id ?? '');
+          const imageUrl = typeof item.imageUrl === 'string' && item.imageUrl.trim() ? item.imageUrl.trim() : null;
+          return {
+            lineItemGid,
+            sourceLineItemId: String(item.sourceLineItemId ?? extractShopifyGidTail(lineItemGid) ?? lineItemGid),
+            sku: item.sku === null || item.sku === undefined ? null : String(item.sku),
+            imageUrl,
+            imageSource: imageUrl ? ('line_item' as const) : null,
+            altText: item.altText === null || item.altText === undefined ? null : String(item.altText),
+          };
+        })
+        .filter((item) => item.sourceLineItemId || item.lineItemGid || item.sku),
+    };
     return acc;
   }, {});
 }
@@ -494,6 +603,9 @@ function parseMockOrderFulfillmentStateByOrderId(
 
 export function createShopifyAdminService(env: AppEnv) {
   const mockSellerInfoByOrderId = parseMockSellerInfoByOrderId(env.SHOPIFY_MOCK_SELLER_INFO);
+  const mockOrderLineItemImagesByOrderId = parseMockOrderLineItemImagesByOrderId(
+    (env as { SHOPIFY_MOCK_LINE_ITEM_IMAGES?: string }).SHOPIFY_MOCK_LINE_ITEM_IMAGES,
+  );
   const mockReturnDetailsByReturnGid = parseMockReturnDetailsByReturnGid(env.SHOPIFY_MOCK_RETURN_DETAILS);
   const mockOrderFulfillmentStateByOrderId = parseMockOrderFulfillmentStateByOrderId(
     env.SHOPIFY_MOCK_ORDER_FULFILLMENT_STATE,
@@ -558,6 +670,106 @@ export function createShopifyAdminService(env: AppEnv) {
     return {
       sellerInfo: parseSellerInfoValue(json.data?.order?.metafield?.value ?? null),
       source: 'shopify_admin',
+    };
+  }
+
+  async function fetchOrderLineItemImages(orderId: string): Promise<FetchOrderLineItemImagesResult> {
+    if (mockOrderLineItemImagesByOrderId[orderId]) {
+      return mockOrderLineItemImagesByOrderId[orderId];
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      return {
+        orderGid: toShopifyOrderGid(orderId),
+        sourceShopifyOrderId: orderId,
+        lineItems: [],
+        source: 'mock',
+      };
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query OrderLineItemImages($orderId: ID!) {
+              order(id: $orderId) {
+                id
+                lineItems(first: 50) {
+                  edges {
+                    node {
+                      id
+                      sku
+                      image {
+                        url
+                        altText
+                      }
+                      variant {
+                        id
+                        image {
+                          url
+                          altText
+                        }
+                      }
+                      product {
+                        id
+                        featuredMedia {
+                          ... on MediaImage {
+                            image {
+                              url
+                              altText
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            orderId: toShopifyOrderGid(orderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify line item image fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<OrderLineItemImagesQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(`Shopify line item image fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      throw new Error(`Shopify line item image fetch did not return order ${orderId}.`);
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: extractShopifyGidTail(order.id) ?? orderId,
+      source: 'shopify_admin',
+      lineItems: (order.lineItems.edges || [])
+        .map((edge) => {
+          const resolved = resolveShopifyLineItemImageUrl(edge.node);
+          const sourceLineItemId = extractShopifyGidTail(edge.node.id) ?? edge.node.id;
+          return {
+            lineItemGid: edge.node.id,
+            sourceLineItemId,
+            sku: edge.node.sku ?? null,
+            ...resolved,
+          };
+        })
+        .filter((item) => item.sourceLineItemId || item.lineItemGid || item.sku),
     };
   }
 
@@ -1229,6 +1441,7 @@ export function createShopifyAdminService(env: AppEnv) {
 
   return {
     fetchOrderSellerInfo,
+    fetchOrderLineItemImages,
     fetchReturnDetails,
     fetchReturnReverseDeliveryInputs,
     probeReturnLabelUpload,

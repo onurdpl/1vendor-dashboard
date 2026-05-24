@@ -4706,7 +4706,20 @@ export function OrderDetailPage() {
                 orderItems.map((item) => (
                   <div key={item.id} className="order-line-item-row-v2">
                     <span className="order-item-thumb" aria-hidden="true">
-                      {getInitialsLabel(item.name || item.sku || 'Item')}
+                      {item.imageUrl ? (
+                        <img
+                          src={item.imageUrl}
+                          alt=""
+                          loading="lazy"
+                          onError={(event) => {
+                            event.currentTarget.style.display = 'none';
+                            event.currentTarget.parentElement?.classList.add('order-item-thumb-fallback-visible');
+                          }}
+                        />
+                      ) : null}
+                      <span className="order-item-thumb-fallback">
+                        {getInitialsLabel(item.name || item.sku || 'Item')}
+                      </span>
                     </span>
                     <div className="order-item-primary">
                       <strong>{item.name || 'Unknown item'}</strong>

@@ -6,10 +6,12 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import { getAdminShopifyOrderBreakdown, getVendorOrderByIdForUser, listVendorOrders } from './orders.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
+import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+  const shopifyAdminService = createShopifyAdminService(env);
 
   app.get(
     '/orders',
@@ -41,6 +43,7 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         getVendorOrderByIdForUser(vendorId, request.params.orderId, {
           includeShipmentProviderResponseSummary: request.authUser?.role === 'admin',
           includeFinanceLedgerPreview: request.authUser?.role === 'admin',
+          shopifyAdminService,
         }),
       );
       if (!order) {

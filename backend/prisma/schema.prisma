@@ -377,6 +377,7 @@ model ShopifyOrderLineItem {
   sourceVariantId     String?
   sku                 String?
   title               String?
+  imageUrl            String?
   quantity            Int                        @default(1)
   unitPrice           Decimal?                   @db.Decimal(10, 2)
   originalVendorId    String?

@@ -786,10 +786,22 @@ async function processWebhookEvent(
       };
     }
 
+    const lineItemImages = await shopifyAdminService.fetchOrderLineItemImages(sourceShopifyOrderId).then(
+      (result) => result.lineItems,
+      (error) => {
+        console.warn('[diagnostics] Shopify line item image enrichment failed; continuing replay.', {
+          sourceShopifyOrderId,
+          errorMessage: error instanceof Error ? error.message : 'Unknown Shopify line item image enrichment error.',
+        });
+        return [];
+      },
+    );
+
     const ingestionResult = await ingestShopifyOrderWebhook({
       event,
       payload: typedPayload,
       sellerInfo: sellerInfoResult.sellerInfo,
+      lineItemImages,
     });
 
     return ingestionResult.ok

@@ -1,5 +1,5 @@
 import type { WebhookEvent } from '@prisma/client';
-import type { SellerInfoMap } from './shopify-admin.types.js';
+import type { SellerInfoMap, ShopifyOrderLineItemImage } from './shopify-admin.types.js';
 
 export type ShopifyOrdersCreateLineItemPayload = {
   id: string | number;
@@ -51,6 +51,7 @@ export type ParsedShopifyOrderLineItem = {
   title: string | null;
   quantity: number;
   unitPrice: string | null;
+  imageUrl: string | null;
 };
 
 export type ParsedShopifyOrderPayload = {
@@ -90,4 +91,5 @@ export type OrderIngestionInput = {
   event: WebhookEvent;
   payload: ShopifyOrdersCreateWebhookPayload;
   sellerInfo: SellerInfoMap;
+  lineItemImages?: ShopifyOrderLineItemImage[];
 };

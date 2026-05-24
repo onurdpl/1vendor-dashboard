@@ -11,6 +11,7 @@ export type ShopifyOrderLineItemInput = {
   sku: ShopifySku;
   title: string;
   variantTitle: string;
+  imageUrl?: string | null;
   quantity: number;
   price: string;
   vendorMetafield?: ShopifyVendorMetafieldValue;

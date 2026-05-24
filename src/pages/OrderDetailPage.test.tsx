@@ -1019,6 +1019,61 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
   });
 
+  it('renders Shopify line item image snapshots when available', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      lineItems: [
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          imageUrl: 'https://cdn.shopify.com/s/files/line-item.jpg',
+        },
+      ],
+    });
+
+    const { container } = renderOrderDetail();
+
+    await screen.findByText('Nike Air Max Alpha Trainer 6');
+    const image = container.querySelector<HTMLImageElement>('.order-item-thumb img');
+    expect(image).toBeTruthy();
+    expect(image?.src).toBe('https://cdn.shopify.com/s/files/line-item.jpg');
+  });
+
+  it('keeps the line item thumbnail fallback when no Shopify image snapshot exists', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      lineItems: [
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          imageUrl: null,
+        },
+      ],
+    });
+
+    const { container } = renderOrderDetail();
+
+    await screen.findByText('Nike Air Max Alpha Trainer 6');
+    expect(container.querySelector('.order-item-thumb img')).toBeNull();
+    expect(container.querySelector('.order-item-thumb-fallback')?.textContent).toBe('NA');
+  });
+
   it('requires confirmation before cancelling a Navlungo shipment', async () => {
     setCurrentUser({
       email: 'admin@demo.com',

@@ -195,6 +195,61 @@ query GetReturn($id: ID!) {
     - `fulfillmentLineItem.lineItem.sku`
   - `reverseFulfillmentOrders` fallback was not needed for the verified return sample.
 
+### Order Line Item Image Snapshots
+- REST `orders/create` webhook line items do not include a product image URL directly. Do not infer a line-item image from webhook-only fields.
+- Admin GraphQL can resolve order line item images with this priority:
+  1. `lineItem.image.url`
+  2. `lineItem.variant.image.url`
+  3. `lineItem.product.featuredMedia.image.url`
+  4. no URL, UI placeholder
+- Confirmed query shape:
+
+```graphql
+query OrderLineItemImages($orderId: ID!) {
+  order(id: $orderId) {
+    lineItems(first: 50) {
+      edges {
+        node {
+          id
+          sku
+          image {
+            url
+            altText
+          }
+          variant {
+            id
+            image {
+              url
+              altText
+            }
+          }
+          product {
+            id
+            featuredMedia {
+              ... on MediaImage {
+                image {
+                  url
+                  altText
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+- Snapshot decision:
+  - Persist nullable `ShopifyOrderLineItem.imageUrl` at order ingestion when the Admin GraphQL lookup succeeds.
+  - If the lookup fails, order ingestion must continue and log only safe diagnostics.
+  - Existing orders are lazily backfilled on Order Detail load when `imageUrl` is missing and the Shopify order id is available.
+  - Lazy backfill failure must not block Order Detail rendering.
+- Fallback behavior:
+  - Order Detail renders the stored image URL when present.
+  - If no URL exists, or the image fails to load, the UI keeps the stable initials/placeholder thumbnail.
+
 ### Return Shipping / Tracking Visibility
 - Confirmed from Shopify Admin GraphQL docs:
   - `Return.reverseFulfillmentOrders` exposes reverse fulfillment orders for a return.

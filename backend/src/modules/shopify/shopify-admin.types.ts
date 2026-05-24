@@ -5,6 +5,22 @@ export type FetchOrderSellerInfoResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifyOrderLineItemImage = {
+  lineItemGid: string;
+  sourceLineItemId: string;
+  sku: string | null;
+  imageUrl: string | null;
+  imageSource: 'line_item' | 'variant' | 'product_featured_media' | null;
+  altText: string | null;
+};
+
+export type FetchOrderLineItemImagesResult = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  lineItems: ShopifyOrderLineItemImage[];
+  source: 'mock' | 'shopify_admin';
+};
+
 export type ShopifyReturnLineItem = {
   returnLineItemGid: string;
   fulfillmentLineItemGid: string | null;
