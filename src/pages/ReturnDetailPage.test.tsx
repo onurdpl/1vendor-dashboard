@@ -271,7 +271,17 @@ describe('ReturnDetailPage vendor review screen', () => {
   });
 
   it('renders a vendor-facing return review without internal lifecycle wording', async () => {
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        recipientAddressIdValid: true,
+        navlungoReturnRecipientAddressIdPresent: true,
+        navlungoReturnRecipientAddressIdNumeric: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/return',
+        },
+      },
+    });
 
     renderPage();
 
@@ -477,7 +487,17 @@ describe('ReturnDetailPage vendor review screen', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        recipientAddressIdValid: true,
+        navlungoReturnRecipientAddressIdPresent: true,
+        navlungoReturnRecipientAddressIdNumeric: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/return',
+        },
+      },
+    });
 
     const { container } = renderPage();
 
@@ -600,7 +620,17 @@ describe('ReturnDetailPage vendor review screen', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        recipientAddressIdValid: true,
+        navlungoReturnRecipientAddressIdPresent: true,
+        navlungoReturnRecipientAddressIdNumeric: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/return',
+        },
+      },
+    });
     createNavlungoReturnPickupMock.mockResolvedValueOnce({
       ...returnDetail,
       returnProviderSnapshot: {
@@ -623,7 +653,7 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     renderPage();
 
-    await user.click(await screen.findByRole('button', { name: 'Preview Navlungo return pickup' }));
+    await user.click(await screen.findByRole('button', { name: /Preview Navlungo return pickup/ }));
 
     expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
       dryRun: true,
@@ -645,7 +675,17 @@ describe('ReturnDetailPage vendor review screen', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        recipientAddressIdValid: true,
+        navlungoReturnRecipientAddressIdPresent: true,
+        navlungoReturnRecipientAddressIdNumeric: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/return',
+        },
+      },
+    });
     createNavlungoReturnPickupMock.mockResolvedValueOnce({
       ...returnDetail,
       returnProvider: 'navlungo',
@@ -680,7 +720,17 @@ describe('ReturnDetailPage vendor review screen', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProviderSnapshot: {
+        recipientAddressIdValid: true,
+        navlungoReturnRecipientAddressIdPresent: true,
+        navlungoReturnRecipientAddressIdNumeric: true,
+        navlungoReturnPickupPayloadSummary: {
+          endpointPath: '/post/return',
+        },
+      },
+    });
     createNavlungoReturnPickupMock.mockResolvedValueOnce({
       ...returnDetail,
       returnProvider: 'navlungo',
@@ -691,7 +741,6 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     await screen.findByRole('heading', { name: 'Provider return shipment' });
     await user.selectOptions(screen.getByLabelText('API version'), 'v2.1');
-    await user.selectOptions(screen.getByLabelText('Endpoint path'), '/post/return');
     await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
     await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
 
@@ -735,7 +784,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByLabelText('Return pickup address completion')).toBeInTheDocument();
-    expect(screen.getByLabelText('Endpoint path')).toHaveValue('/post/return');
+    expect(within(screen.getByLabelText('Navlungo return pickup diagnostics options')).getByText('/post/return')).toBeInTheDocument();
     expect(screen.getByLabelText('District')).toBeInTheDocument();
     expect(screen.queryByLabelText('City')).not.toBeInTheDocument();
 
@@ -748,7 +797,7 @@ describe('ReturnDetailPage vendor review screen', () => {
       },
     });
     expect(await screen.findByText('Return pickup address saved.')).toBeInTheDocument();
-    expect(screen.getByLabelText('Endpoint path')).toHaveValue('/post/return');
+    expect(within(screen.getByLabelText('Navlungo return pickup diagnostics options')).getByText('/post/return')).toBeInTheDocument();
   });
 
   it('renders admin completion fields from alternate Navlungo missing-field diagnostics', async () => {
@@ -1075,11 +1124,10 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     const districtInput = await screen.findByLabelText('District');
     await user.type(districtInput, 'Kartal');
-    await user.click(screen.getByRole('button', { name: 'Preview Navlungo return pickup' }));
-
-    expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Preview Navlungo return pickup/ })).toBeDisabled();
     expect(screen.getByLabelText('Return pickup address completion')).toBeInTheDocument();
     expect(screen.getByLabelText('District')).toHaveValue('Kartal');
+    expect(createNavlungoReturnPickupMock).not.toHaveBeenCalled();
   });
 
   it('hides completion fields after saved completion resolves missing sender district', async () => {
@@ -1147,7 +1195,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByLabelText('Return pickup address completion')).not.toBeInTheDocument();
   });
 
-  it('renders admin completion fields after live create reports missing sender district', async () => {
+  it('preserves return pickup diagnostics after live create returns validation errors', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@example.com',
@@ -1158,9 +1206,38 @@ describe('ReturnDetailPage vendor review screen', () => {
       canSwitchVendors: true,
       defaultVendorId: 'demo-vendor-a',
     });
-    getReturnMock.mockResolvedValue(returnDetail);
+    getReturnMock
+      .mockResolvedValueOnce({
+        ...returnDetail,
+        returnProviderSnapshot: {
+          recipientAddressIdValid: true,
+          navlungoReturnRecipientAddressIdPresent: true,
+          navlungoReturnRecipientAddressIdNumeric: true,
+          navlungoReturnPickupPayloadSummary: {
+            endpointPath: '/post/return',
+          },
+        },
+      })
+      .mockResolvedValue({
+        ...returnDetail,
+        returnProviderSnapshot: {
+          navlungoReturnCreateHttpStatus: 422,
+          navlungoReturnCreateSucceeded: false,
+          navlungoReturnProviderMessage: 'Validation Errors',
+          navlungoReturnValidationFields: ['posts.0.recipient.addressId'],
+          navlungoReturnValidationMessages: ['Recipient address id validation failed.'],
+          recipientAddressIdValid: true,
+          navlungoReturnRecipientAddressIdPresent: true,
+          navlungoReturnRecipientAddressIdNumeric: true,
+          navlungoReturnPickupPayloadSummary: {
+            endpointPath: '/post/return',
+            requestedPostType: 3,
+            requestedCarrierId: 9,
+          },
+        },
+      });
     createNavlungoReturnPickupMock.mockRejectedValueOnce(
-      new Error('Missing required Navlungo return pickup fields:\n- sender.district\n\nProvider request blocked before create call.'),
+      new Error('Navlungo Create Post failed with HTTP 422'),
     );
 
     renderPage();
@@ -1169,9 +1246,14 @@ describe('ReturnDetailPage vendor review screen', () => {
     await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
     await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
 
-    expect(await screen.findByText(/Missing required Navlungo return pickup fields/)).toBeInTheDocument();
-    expect(screen.getByLabelText('Return pickup address completion')).toBeInTheDocument();
-    expect(screen.getByLabelText('District')).toBeInTheDocument();
+    expect(await screen.findByText('Navlungo Create Post failed with HTTP 422')).toBeInTheDocument();
+    const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
+    expect(within(diagnostics).getByText('422')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Validation Errors')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('posts.0.recipient.addressId')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Recipient address id validation failed.')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('/post/return')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Return pickup address completion')).not.toBeInTheDocument();
   });
 
   it('does not render return pickup completion fields for vendors', async () => {
