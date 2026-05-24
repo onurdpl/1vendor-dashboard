@@ -1047,6 +1047,41 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(image?.src).toBe('https://cdn.shopify.com/s/files/line-item.jpg');
   });
 
+  it('opens and closes a line item image preview modal from the thumbnail', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      lineItems: [
+        {
+          ...orderWithShipmentSummary.lineItems[0],
+          imageUrl: 'https://cdn.shopify.com/s/files/line-item.jpg',
+        },
+      ],
+    });
+
+    renderOrderDetail();
+
+    const previewButton = await screen.findByRole('button', {
+      name: /Preview Nike Air Max Alpha Trainer 6/i,
+    });
+    await userEvent.click(previewButton);
+
+    expect(screen.getByRole('dialog', { name: /Nike Air Max Alpha Trainer 6 image preview/i })).toBeInTheDocument();
+
+    await userEvent.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(screen.queryByRole('dialog', { name: /Nike Air Max Alpha Trainer 6 image preview/i })).not.toBeInTheDocument();
+    });
+  });
+
   it('keeps the line item thumbnail fallback when no Shopify image snapshot exists', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
