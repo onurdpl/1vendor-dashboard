@@ -6,11 +6,14 @@ const TIMED_ROUTE_NAMES = new Set([
   'GET /returns',
   'GET /returns/:returnId',
   'GET /finance',
+  'GET /automation',
+  'GET /signals',
+  'GET /notifications',
   'GET /admin/operations',
   'GET /admin/operations/attention',
+  'GET /admin/diagnostics/reconciliation',
   'GET /admin/observability/summary',
   'GET /admin/observability/metrics',
-  'GET /automation',
 ]);
 
 const requestStartedAt = new WeakMap<FastifyRequest, bigint>();
