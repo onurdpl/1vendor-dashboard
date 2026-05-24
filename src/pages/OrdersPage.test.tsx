@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -178,6 +178,16 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
     expect(screen.queryByText('##1002')).not.toBeInTheDocument();
     expect(screen.getAllByRole('searchbox')).toHaveLength(1);
+    const metricsStrip = screen.getByLabelText('Orders operational metrics');
+    expect(metricsStrip).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Total orders')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Awaiting shipment')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Tracking missing')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Fulfilled')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Tracking visible')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
+    expect(screen.getAllByRole('combobox')).toHaveLength(3);
+    expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
