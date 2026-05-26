@@ -92,10 +92,15 @@ function buildFinanceHref(record: { id: string }) {
 
 const ORDER_FINANCE_HELPER_COPY =
   'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
+const ORDER_FINANCE_TIMELINE_HELPER_COPY = 'Finance events are previews until settlement review is completed.';
 const ORDER_FINANCE_UNKNOWN_VALUE = 'Unknown';
 
 function isMeaningfulFinanceValue(value: string | null | undefined) {
   return Boolean(value && value.trim() && value.trim() !== '—');
+}
+
+function isKnownFinanceValue(value: string | null | undefined) {
+  return isMeaningfulFinanceValue(value) && value !== ORDER_FINANCE_UNKNOWN_VALUE;
 }
 
 function formatFinancePreviewValue(
@@ -4178,6 +4183,7 @@ export function OrderDetailPage() {
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
   const refundFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Refund');
+  const settlementFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Payout' || record.category === 'Invoice') ?? null;
   const payoutCalculation = payoutFinanceRecord?.payoutCalculation ?? null;
   const refundCalculation = refundFinanceRecord?.payoutCalculation ?? null;
   const shippingDeductionUnknown =
@@ -4243,6 +4249,96 @@ export function OrderDetailPage() {
     ...row,
     state: row.value === ORDER_FINANCE_UNKNOWN_VALUE ? ORDER_FINANCE_UNKNOWN_VALUE : row.state,
   }));
+  const financePreviewEntryTime = (eventType: string) =>
+    financePreview?.entries.find((entry) => entry.eventType === eventType)?.occurredAt ?? null;
+  const commissionEstimateValue = financePreviewRows.find((row) => row.label === 'Commission estimate')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
+  const shippingDeductionValue = financePreviewRows.find((row) => row.label === 'Shipping deduction')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
+  const estimatedSettlementValue = financePreviewRows.find((row) => row.label === 'Estimated settlement')?.value ?? ORDER_FINANCE_UNKNOWN_VALUE;
+  const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
+  const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
+  const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
+  const financeTimelineItems = [
+    isKnownFinanceValue(commissionEstimateValue)
+      ? {
+          id: 'finance-commission-estimated',
+          title: 'Commission estimated',
+          description: `${commissionEstimateValue} · Estimated from available finance data.`,
+          at: financePreviewEntryTime('MARKETPLACE_COMMISSION_RESERVED') ?? settlementTimelineRecord?.date ?? order.date,
+          status: 'Estimated',
+          tone: 'info' as const,
+        }
+      : null,
+    financePreview || payoutCalculation
+      ? shippingDeductionUnknown
+        ? {
+            id: 'finance-shipping-deduction-unknown',
+            title: 'Shipping deduction unknown',
+            description: 'Shipping cost evidence is not available yet.',
+            at: financePreviewEntryTime('SHIPPING_COST_RESERVED') ?? settlementTimelineRecord?.date ?? order.date,
+            status: ORDER_FINANCE_UNKNOWN_VALUE,
+            tone: 'warning' as const,
+          }
+        : isKnownFinanceValue(shippingDeductionValue)
+          ? {
+              id: 'finance-shipping-deduction-estimated',
+              title: 'Shipping deduction estimated',
+              description: `${shippingDeductionValue} · Estimated from available shipping evidence.`,
+              at: financePreviewEntryTime('SHIPPING_COST_RESERVED') ?? settlementTimelineRecord?.date ?? order.date,
+              status: 'Estimated',
+              tone: 'info' as const,
+            }
+          : null
+      : null,
+    currentRefundEvidencePresent
+      ? {
+          id: 'finance-refund-impact',
+          title: isKnownFinanceValue(refundImpactValue) ? 'Refund impact estimated' : 'Refund impact pending',
+          description: isKnownFinanceValue(refundImpactValue)
+            ? `${refundImpactValue} · Estimated from linked return/refund evidence.`
+            : 'Return or refund evidence exists, but finance impact is not available yet.',
+          at: refundFinanceRecord?.date ?? relatedReturns[0]?.date ?? financePreviewEntryTime('RETURN_CREATED') ?? order.date,
+          status: isKnownFinanceValue(refundImpactValue) ? 'Estimated' : 'Pending',
+          tone: 'warning' as const,
+          href: refundFinanceRecord ? buildFinanceHref(refundFinanceRecord) : relatedReturns[0] ? `/returns/${relatedReturns[0].id}` : undefined,
+        }
+      : null,
+    financePreview || payoutCalculation || settlementTimelineRecord
+      ? {
+          id: 'finance-settlement-review',
+          title: 'Settlement awaiting review',
+          description: isKnownFinanceValue(estimatedSettlementValue)
+            ? `${estimatedSettlementValue} · Not approved for settlement.`
+            : 'Settlement estimate needs more finance evidence.',
+          at: settlementTimelineRecord?.settlement?.payableAt ?? settlementTimelineRecord?.settlement?.eligibleAt ?? settlementTimelineRecord?.date ?? order.date,
+          status: 'Preview',
+          tone: 'attention' as const,
+          href: settlementTimelineRecord ? buildFinanceHref(settlementTimelineRecord) : undefined,
+        }
+      : null,
+    paymentEvidenceRecord
+      ? {
+          id: `finance-payment-evidence-${paymentEvidenceRecord.id}`,
+          title: 'Payment evidence pending',
+          description: 'Existing finance review row is waiting for payment evidence.',
+          at: paymentEvidenceRecord.payoutBatch?.createdAt ?? paymentEvidenceRecord.date,
+          status: 'Evidence pending',
+          tone: 'attention' as const,
+          href: buildFinanceHref(paymentEvidenceRecord),
+          visibility: 'admin' as const,
+        }
+      : null,
+    ...manualAdjustmentRecords.map((record) => ({
+      id: `finance-adjustment-${record.id}`,
+      title: 'Manual adjustment recorded',
+      description: `${record.amount} · ${record.status}`,
+      at: record.date,
+      status: record.status,
+      tone: 'neutral' as const,
+      href: buildFinanceHref(record),
+      visibility: 'admin' as const,
+    })),
+  ].filter(Boolean) as OperationalEventInput[];
+  const visibleFinanceTimelineItems = financeTimelineItems.filter((item) => item.visibility !== 'admin' || isAdmin);
   const financeUnknownIndicators = isAdmin
     ? [
         ...(financeSummaryUnknowns.length ? financeSummaryUnknowns : []),
@@ -5189,6 +5285,37 @@ export function OrderDetailPage() {
                 ))}
               </div>
             ) : null}
+          </article>
+
+          <article className="order-detail-card-v2 order-finance-timeline-card order-workspace-panel" aria-label="Finance timeline">
+            <div className="order-card-heading">
+              <div>
+                <h2>Finance timeline</h2>
+                <p>{ORDER_FINANCE_TIMELINE_HELPER_COPY}</p>
+              </div>
+              <span className="order-preview-badge">Preview</span>
+            </div>
+            {visibleFinanceTimelineItems.length ? (
+              <ol className="order-finance-timeline-list">
+                {visibleFinanceTimelineItems.map((item) => (
+                  <li key={item.id}>
+                    <span className={`order-finance-timeline-dot op-tone-${item.tone ?? 'neutral'}`} aria-hidden="true" />
+                    <div className="order-finance-timeline-content">
+                      <div className="order-finance-timeline-title-row">
+                        {item.href ? <Link to={item.href}>{item.title}</Link> : <strong>{item.title}</strong>}
+                        {item.status ? (
+                          <span className={`order-finance-timeline-status op-tone-${item.tone ?? 'neutral'}`}>{item.status}</span>
+                        ) : null}
+                      </div>
+                      {item.description ? <p>{item.description}</p> : null}
+                      <small>{formatOptionalDate(item.at ?? undefined)}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p className="order-empty-copy">No finance events available yet.</p>
+            )}
           </article>
 
           {isAdmin && order.financeLedgerPreview ? (

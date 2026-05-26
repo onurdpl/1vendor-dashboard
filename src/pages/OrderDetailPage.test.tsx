@@ -2157,6 +2157,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(settlementPreview).getAllByText('Estimated').length).toBeGreaterThan(0);
     expect(settlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
 
+    const financeTimeline = screen.getByLabelText('Finance timeline');
+    expect(within(financeTimeline).getByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
+    expect(financeTimeline).toHaveTextContent('Finance events are previews until settlement review is completed.');
+    expect(within(financeTimeline).getByText('Commission estimated')).toBeInTheDocument();
+    expect(within(financeTimeline).getByText('Shipping deduction unknown')).toBeInTheDocument();
+    expect(within(financeTimeline).getByText('Settlement awaiting review')).toBeInTheDocument();
+    expect(within(financeTimeline).getAllByText('Estimated').length).toBeGreaterThan(0);
+    expect(financeTimeline).not.toHaveTextContent(/Payout scheduled|Payout paid|Confirmed settlement/i);
+
     expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
     expect(screen.getByText('Read-only simulation. Not payout, refund, invoice, or tax truth.')).toBeInTheDocument();
     expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
@@ -2213,6 +2222,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(vendorSettlementPreview).toHaveTextContent('Gross order amount');
     expect(vendorSettlementPreview).toHaveTextContent('Unknown');
     expect(vendorSettlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
+    const vendorFinanceTimeline = screen.getByLabelText('Finance timeline');
+    expect(vendorFinanceTimeline).toHaveTextContent('No finance events available yet.');
+    expect(vendorFinanceTimeline).not.toHaveTextContent(/Admin diagnostics|shipping_cost|commission_rate/i);
     expect(screen.queryByLabelText('Finance ledger preview')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Finance unknown indicators')).not.toBeInTheDocument();
   });
@@ -6692,6 +6704,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText('Return linked').length).toBeGreaterThan(0);
     expect(screen.getByText('Payout pending')).toBeInTheDocument();
     expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
+    const financeTimeline = screen.getByLabelText('Finance timeline');
+    expect(within(financeTimeline).getByText('Refund impact pending')).toBeInTheDocument();
+    expect(financeTimeline).not.toHaveTextContent(/Payout scheduled|Payout paid|Confirmed settlement/i);
   });
 
   it('does not show provider response internals to vendors', async () => {
