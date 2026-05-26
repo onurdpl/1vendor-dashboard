@@ -17,9 +17,10 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import type { NotificationIntent } from '../lib/api/contracts';
+import { formatDateTime, safeArray } from '../services/real/formatting';
 
-function getPriorityValue(items: { label: string; value: string }[], label: string) {
-  return Number.parseInt(items.find((item) => item.label === label)?.value ?? '0', 10) || 0;
+function getPriorityValue(items: { label: string; value: string }[] | null | undefined, label: string) {
+  return Number.parseInt(safeArray(items).find((item) => item.label === label)?.value ?? '0', 10) || 0;
 }
 
 function getHealthTone(health: string): 'success' | 'warning' | 'danger' | 'attention' {
@@ -193,7 +194,7 @@ export function DashboardPage() {
     },
   );
   const notificationView = useMemo(() => {
-    const merged = (notifications?.notifications ?? [])
+    const merged = safeArray(notifications?.notifications)
       .map((notification) => ({
         ...notification,
         ...notificationOverrides[notification.id],
@@ -288,12 +289,16 @@ export function DashboardPage() {
     priorityWork: [],
   };
 
-  const blockedAllocations = getPriorityValue(dashboardView.priorityWork, 'Blocked allocations');
-  const refundAttention = getPriorityValue(dashboardView.priorityWork, 'Refund attention');
+  const priorityWork = safeArray(dashboardView.priorityWork);
+  const recentActivity = safeArray(dashboardView.recentActivity);
+  const partialDataWarnings = safeArray(dashboardView.partialDataWarnings);
+  const dashboardStats = safeArray(dashboardView.stats);
+  const blockedAllocations = getPriorityValue(priorityWork, 'Blocked allocations');
+  const refundAttention = getPriorityValue(priorityWork, 'Refund attention');
   const needsAttention = blockedAllocations + refundAttention;
-  const attentionItems = dashboardView.priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
+  const attentionItems = priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
-  const dashboardKpis = dashboardView.stats.slice(0, 5);
+  const dashboardKpis = dashboardStats.slice(0, 5);
 
   return (
     <section className="op-page dashboard-command-center dashboard-enterprise-shell">
@@ -362,7 +367,7 @@ export function DashboardPage() {
                   </article>
                 ))}
               </div>
-            ) : dashboardView.priorityWork.length === 0 ? (
+            ) : priorityWork.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <div className="dashboard-priority-table">
@@ -374,7 +379,7 @@ export function DashboardPage() {
                   <span>Status</span>
                   <span>Action</span>
                 </div>
-                {dashboardView.priorityWork.map((item) => (
+                {priorityWork.map((item) => (
                   <article key={item.label} className="dashboard-priority-row">
                     <div className="dashboard-priority-cell">
                       <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
@@ -410,11 +415,11 @@ export function DashboardPage() {
                   </li>
                 ))}
               </ul>
-            ) : dashboardView.recentActivity.length === 0 ? (
+            ) : recentActivity.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
-                {dashboardView.recentActivity.map((item) => {
+                {recentActivity.map((item) => {
                   const activity = formatRecentActivity(item);
 
                   return (
@@ -464,7 +469,13 @@ export function DashboardPage() {
                           </div>
                         </div>
                         <div className="dashboard-notification-state">
-                          <span>{new Date(notification.createdAt).toLocaleString()}</span>
+                          <span>{formatDateTime(notification.createdAt, {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })}</span>
                           <span className="notification-status">{notification.status}</span>
                         </div>
                         <div className="notification-actions">
@@ -498,7 +509,7 @@ export function DashboardPage() {
               <div className="op-meta-grid">
                 <MetadataRow label="Unread" value={dashboardView.notificationSummary.unread} />
                 <MetadataRow label="High priority" value={dashboardView.notificationSummary.highPriority} />
-                <MetadataRow label="Latest" value={dashboardView.notificationSummary.latest.map((item) => item.title).join(', ') || 'No notifications'} />
+                <MetadataRow label="Latest" value={safeArray(dashboardView.notificationSummary.latest).map((item) => item.title).join(', ') || 'No notifications'} />
               </div>
             ) : (
               <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />
@@ -655,7 +666,7 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Operational items</span>
-            <strong>{dashboardView.priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
+            <strong>{priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
           </div>
           <div>
             <span>Pending attention</span>
@@ -663,13 +674,13 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Queue items</span>
-            <strong>{dashboardView.priorityWork.length}</strong>
+            <strong>{priorityWork.length}</strong>
           </div>
         </div>
         <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>
-        {dashboardView.partialDataWarnings?.length ? (
+        {partialDataWarnings.length ? (
           <ul className="dashboard-activity-list">
-            {dashboardView.partialDataWarnings.map((warning) => (
+            {partialDataWarnings.map((warning) => (
               <li key={warning}>{warning}</li>
             ))}
           </ul>

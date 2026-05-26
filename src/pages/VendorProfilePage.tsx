@@ -21,6 +21,7 @@ import type { SupportTicket, VendorShippingConfig } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
 import { useActionFeedback } from '../lib/ui';
+import { safeArray, safeStatusLabel } from '../services/real/formatting';
 
 const VENDOR_PROFILE_CONTEXT_ROUTE = 'vendor_profile_settings';
 const VENDOR_PROFILE_PATH = '/vendor/profile';
@@ -147,7 +148,7 @@ function findOpenVendorProfileTicket(tickets: SupportTicket[] | null, vendorId: 
     }
     const route = ticket.contextSummary?.route?.toLowerCase();
     const path = ticket.contextSummary?.path?.toLowerCase();
-    const subject = ticket.subject.toLowerCase();
+    const subject = ticket.subject?.toLowerCase() ?? '';
     return (
       route === VENDOR_PROFILE_CONTEXT_ROUTE ||
       path === VENDOR_PROFILE_PATH ||
@@ -188,14 +189,15 @@ export function VendorProfilePage() {
   const shippingConfig = shippingQuery.data;
   const financeProfile = financeQuery.data?.profile ?? null;
   const supportTickets = useMemo(
-    () => (supportQuery.data ?? []).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
+    () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
   );
   const existingProfileTicket = useMemo(
     () => findOpenVendorProfileTicket(supportTickets, currentVendor.vendorId),
     [currentVendor.vendorId, supportTickets],
   );
-  const defaultWarehouse = shippingConfig?.warehouses.find((warehouse) => warehouse.isDefault) ?? shippingConfig?.warehouses[0] ?? null;
+  const warehouses = safeArray(shippingConfig?.warehouses);
+  const defaultWarehouse = warehouses.find((warehouse) => warehouse.isDefault) ?? warehouses[0] ?? null;
   const navlungoSenderAddressId = getNavlungoSenderAddressId(shippingConfig);
   const navlungoReturnRecipientAddressId = getNavlungoReturnRecipientAddressId(shippingConfig);
   const navlungoReturnLocation = getNavlungoReturnLocation(shippingConfig);
@@ -451,7 +453,7 @@ export function VendorProfilePage() {
             <strong>{existingProfileTicket ? 'A correction ticket is already open.' : 'Need a correction?'}</strong>
             <p>
               {existingProfileTicket
-                ? `${existingProfileTicket.subject} is ${existingProfileTicket.status.toLowerCase().replace(/_/g, ' ')}.`
+                ? `${existingProfileTicket.subject} is ${safeStatusLabel(existingProfileTicket.status).toLowerCase()}.`
                 : 'Report a marketplace profile or configuration issue so operations can review the admin-owned data.'}
             </p>
           </div>

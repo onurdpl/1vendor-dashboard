@@ -7,6 +7,7 @@ import type {
   SupportTicket,
 } from './api/contracts';
 import { formatShopifyOrderNumber } from './formatOrderDisplay';
+import { getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 export type CommunicationEventType =
   | 'support_reply'
@@ -48,8 +49,12 @@ export type CommunicationFeedInput = {
   finance: FinanceDashboard | null | undefined;
 };
 
-function getStatusLabel(value: string) {
-  return value.toLowerCase().replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+function getStatusLabel(value: string | null | undefined) {
+  return safeStatusLabel(value);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function orderLabel(value: string | number | null | undefined) {
@@ -89,10 +94,13 @@ function getSupportContext(ticket: SupportTicket) {
 }
 
 export function buildVendorCommunicationFeed(input: CommunicationFeedInput): CommunicationEvent[] {
-  const financeRecords = input.finance?.transactions ?? [];
+  const supportTickets = safeArray<SupportTicket>(input.supportTickets).filter(isRecord) as SupportTicket[];
+  const returns = safeArray<ReturnSummary>(input.returns).filter(isRecord) as ReturnSummary[];
+  const orders = safeArray<OrderSummary>(input.orders).filter(isRecord) as OrderSummary[];
+  const financeRecords = safeArray<FinanceTransaction>(input.finance?.transactions).filter(isRecord) as FinanceTransaction[];
   const events: CommunicationEvent[] = [];
 
-  for (const ticket of input.supportTickets) {
+  for (const ticket of supportTickets) {
     const hasVendorUnread = ticket.vendorUnreadCount > 0;
     const waitingForVendor = ticket.status === 'WAITING_FOR_VENDOR';
     const resolved = ticket.status === 'RESOLVED' || ticket.status === 'CLOSED';
@@ -116,8 +124,8 @@ export function buildVendorCommunicationFeed(input: CommunicationFeedInput): Com
     });
   }
 
-  for (const returnRequest of input.returns) {
-    const status = returnRequest.status.toLowerCase();
+  for (const returnRequest of returns) {
+    const status = returnRequest.status?.toLowerCase() ?? '';
     const refundPending = returnRequest.sourceType === 'shopify_return_request' && !returnRequest.sourceShopifyRefundId;
     const requiresAction = status === 'requested' || status === 'pending' || status === 'in review';
     const resolved = ['refunded', 'processed', 'closed', 'approved'].includes(status) && !refundPending;
@@ -143,7 +151,7 @@ export function buildVendorCommunicationFeed(input: CommunicationFeedInput): Com
     });
   }
 
-  for (const order of input.orders) {
+  for (const order of orders) {
     const missingTracking = !order.trackingNumber && !order.carrier && order.shippingStatus === 'Awaiting Shipment';
     if (!missingTracking) {
       continue;
@@ -198,7 +206,7 @@ export function buildVendorCommunicationFeed(input: CommunicationFeedInput): Com
     });
   }
 
-  return events.sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime());
+  return events.sort((left, right) => getSafeTimestamp(right.timestamp, 0) - getSafeTimestamp(left.timestamp, 0));
 }
 
 export function filterCommunicationEvents(events: CommunicationEvent[], filter: CommunicationFilter) {

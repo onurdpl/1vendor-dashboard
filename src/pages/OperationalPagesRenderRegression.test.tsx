@@ -12,6 +12,7 @@ const listReturnsMock = vi.fn<() => Promise<ReturnSummary[]>>();
 const getReturnMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
+const getVendorShippingConfigMock = vi.fn<() => Promise<unknown>>();
 
 vi.mock('../features/orders/api', async () => {
   const actual = await vi.importActual<typeof import('../features/orders/api')>('../features/orders/api');
@@ -19,6 +20,7 @@ vi.mock('../features/orders/api', async () => {
     ...actual,
     listOrders: () => listOrdersMock(),
     getOrder: (orderId: string) => getOrderMock(orderId),
+    getVendorShippingConfig: () => getVendorShippingConfigMock(),
   };
 });
 
@@ -145,7 +147,20 @@ const supportTicket = {
 
 const financeDashboard = {
   summary: [],
-  transactions: [],
+  transactions: [
+    {
+      id: 'finance-partial-record',
+      date: malformedDate,
+      category: 'Refund',
+      status: 'Mystery status',
+      amount: 'not-a-number',
+      description: 'Partial finance preview',
+      counterparty: null,
+      shopifyOrderNumber: '#1001',
+      shopifyOrderId: orderSummary.sourceShopifyOrderId,
+      shopifyRefundId: null,
+    },
+  ],
   vendorProfile: null,
   reconciliation: [],
   payoutBatch: null,
@@ -201,6 +216,14 @@ describe('operational route render stability', () => {
     getReturnMock.mockResolvedValue(returnSummary);
     listVendorSupportTicketsMock.mockResolvedValue([supportTicket]);
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getVendorShippingConfigMock.mockResolvedValue({
+      provider: 'navlungo',
+      preferredProvider: 'navlungo',
+      shippingEnabled: true,
+      defaultWarehouseId: null,
+      warehouses: null,
+      providerMetadata: null,
+    });
   });
 
   it.each([
@@ -210,6 +233,51 @@ describe('operational route render stability', () => {
     ['/support', 'Vendor Support Requests'],
   ])('renders %s without crashing on malformed timestamps', async (route, heading) => {
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      renderRoute(route);
+
+      expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      await waitFor(() => {
+        expect(screen.queryByRole('heading', { name: 'This section could not load' })).not.toBeInTheDocument();
+      });
+      expect(consoleError.mock.calls.some((call) => call[0] === '[client-render-error]')).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it.each([
+    ['/orders/order-unstable-date', /Order #1001|Order detail/],
+    ['/returns/return-unstable-date', 'Return request'],
+    ['/finance', 'Finance control center'],
+    ['/vendor/profile', 'Demo Vendor A'],
+  ])('renders %s with partial records without a route recovery boundary', async (route, heading) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    try {
+      renderRoute(route);
+
+      if (heading instanceof RegExp) {
+        expect(await screen.findByRole('heading', { name: heading })).toBeInTheDocument();
+      } else {
+        expect((await screen.findAllByText(heading)).length).toBeGreaterThan(0);
+      }
+      await waitFor(() => {
+        expect(screen.queryByRole('heading', { name: 'This section could not load' })).not.toBeInTheDocument();
+      });
+      expect(consoleError.mock.calls.some((call) => call[0] === '[client-render-error]')).toBe(false);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it.each([
+    ['/support', 'Vendor Support Requests'],
+    ['/vendor/profile', 'Demo Vendor A'],
+  ])('renders %s when support records are empty', async (route, heading) => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    listVendorSupportTicketsMock.mockResolvedValue([]);
 
     try {
       renderRoute(route);

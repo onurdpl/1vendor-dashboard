@@ -1,5 +1,6 @@
 import type { SupportTicket } from './api/contracts';
 import { normalizeOrderNumber, sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from './shopifyIdentifiers';
+import { getSafeTimestamp } from '../services/real/formatting';
 
 export type OperationalAudience = 'admin' | 'vendor';
 export type OperationalVisibility = 'all' | 'admin';
@@ -31,6 +32,14 @@ export type OperationalMatchOptions = {
   audience?: OperationalAudience;
   currentVendorId?: string | null;
 };
+
+function isOperationalEventInput(value: unknown): value is OperationalEventInput {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && 'title' in value;
+}
+
+function isOperationalLinkInput(value: unknown): value is OperationalLinkInput {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) && 'title' in value;
+}
 
 function ticketMatchesAudience(ticket: SupportTicket, options: OperationalMatchOptions = {}) {
   if (options.audience !== 'vendor') {
@@ -138,17 +147,19 @@ export function supportTicketMatchesFinance(
 
 export function filterOperationalEvents(events: OperationalEventInput[], audience: OperationalAudience) {
   return events
+    .filter(isOperationalEventInput)
     .filter((event) => Boolean(event.title))
     .filter((event) => audience === 'admin' || event.visibility !== 'admin')
     .sort((left, right) => {
-      const leftTime = left.at ? new Date(left.at).getTime() : Number.POSITIVE_INFINITY;
-      const rightTime = right.at ? new Date(right.at).getTime() : Number.POSITIVE_INFINITY;
+      const leftTime = getSafeTimestamp(left.at, Number.POSITIVE_INFINITY);
+      const rightTime = getSafeTimestamp(right.at, Number.POSITIVE_INFINITY);
       return leftTime - rightTime;
     });
 }
 
 export function filterOperationalLinks(links: OperationalLinkInput[], audience: OperationalAudience) {
   return links
+    .filter(isOperationalLinkInput)
     .filter((link) => Boolean(link.title))
     .filter((link) => audience === 'admin' || link.visibility !== 'admin');
 }

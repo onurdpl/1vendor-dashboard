@@ -33,6 +33,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { useMutationAction } from '../hooks/useMutationAction';
+import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 type OrderQuickFilter = 'all' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type LabelActionFeedback = {
@@ -41,26 +42,17 @@ type LabelActionFeedback = {
 };
 
 function formatDate(value?: string | null) {
-  if (!value) {
-    return 'Not synced';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return 'Not synced';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(date);
+  }, 'Not synced');
 }
 
-function getStatusTone(status: string) {
-  const normalized = status.toLowerCase();
+function getStatusTone(status: string | null | undefined) {
+  const normalized = status?.toLowerCase() ?? '';
   if (normalized.includes('fulfilled') || normalized.includes('delivered') || normalized === 'active') {
     return 'success' as const;
   }
@@ -131,7 +123,7 @@ function getLifecycleSecondaryLabel(order: OrderSummary) {
     return 'Tracking pending';
   }
   if (order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked') {
-    return order.allocationStatus.replace(/_/g, ' ');
+    return safeStatusLabel(order.allocationStatus);
   }
   return null;
 }
@@ -350,13 +342,13 @@ export function OrdersPage() {
       return 3;
     };
 
-    return [...(orders ?? [])].sort((a, b) => {
+    return safeArray(orders).sort((a, b) => {
       const rankDiff = rank(a) - rank(b);
       if (rankDiff !== 0) {
         return rankDiff;
       }
 
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
+      return getSafeTimestamp(b.date, 0) - getSafeTimestamp(a.date, 0);
     });
   }, [orders]);
 
@@ -459,7 +451,7 @@ export function OrdersPage() {
   const isLabelActionPending = isCreatingShipmentLabel || isRetryingShipmentLabel;
 
   const summary = useMemo(() => {
-    const source = orders ?? [];
+    const source = safeArray(orders);
     return {
       total: source.length,
       awaitingShipment: source.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
@@ -484,8 +476,8 @@ export function OrdersPage() {
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
     { key: 'awaiting', label: 'Awaiting shipment', count: summary.awaitingShipment },
     { key: 'tracking_missing', label: 'Tracking missing', count: summary.trackingMissing },
-    { key: 'high_value', label: 'High value', count: (orders ?? []).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
-    { key: 'returns', label: 'Returns', count: (orders ?? []).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
+    { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
+    { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
   ];
 
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
@@ -765,7 +757,7 @@ export function OrdersPage() {
             <>
               <div className="orders-detail-rail-header">
                 <div className="orders-detail-rail-badges">
-                  <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{selectedOrder.allocationStatus.replace(/_/g, ' ')}</StatusBadge>
+                  <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{safeStatusLabel(selectedOrder.allocationStatus)}</StatusBadge>
                   <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
                 </div>
               </div>
@@ -773,7 +765,7 @@ export function OrdersPage() {
               <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
                 <strong>{selectedOrder.shippingStatus}</strong>
                 <span>{shippingOperational.label}</span>
-                <span>Shopify {shopifyFulfillmentState.toLowerCase()}</span>
+                <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span>
               </div>
 
               <section className="orders-smart-label-card" aria-label="Smart label action">
@@ -840,7 +832,7 @@ export function OrdersPage() {
                 <h4>Line items</h4>
                 {(selectedOrder as OrderDetail).lineItems?.length ? (
                   <div className="order-detail-items">
-                    {(selectedOrder as OrderDetail).lineItems.map((item) => (
+                    {safeArray((selectedOrder as OrderDetail).lineItems).map((item) => (
                       <article key={item.id} className="order-detail-item">
                         <ProductImagePreview
                           imageUrl={item.imageUrl}

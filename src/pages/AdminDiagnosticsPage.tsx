@@ -27,20 +27,20 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
-import { toTitleCaseLabel } from '../services/real/formatting';
+import { formatDateTime, safeStatusLabel, toTitleCaseLabel } from '../services/real/formatting';
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null | undefined) {
   if (!value) {
     return 'Not synced';
   }
 
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }, 'Not synced');
 }
 
 function getSeverityTone(severity: 'critical' | 'warning' | 'attention' | 'normal') {
@@ -85,7 +85,7 @@ function formatWebhookTopic(topic?: string | null) {
 
   return topic
     .split('/')
-    .map((part) => toTitleCaseLabel(part))
+    .map((part) => safeStatusLabel(part, 'Unknown'))
     .join(' / ');
 }
 

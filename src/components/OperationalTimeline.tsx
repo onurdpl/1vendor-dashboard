@@ -7,19 +7,16 @@ import {
   type OperationalEventInput,
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
+import { formatDateTime, safeArray } from '../services/real/formatting';
 
 function formatTimelineDate(value?: string | null) {
-  if (!value) {
-    return '—';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 export function OperationalTimeline({
@@ -35,7 +32,7 @@ export function OperationalTimeline({
   audience?: OperationalAudience;
   emptyMessage?: string;
 }) {
-  const visibleEvents = filterOperationalEvents(events, audience);
+  const visibleEvents = filterOperationalEvents(safeArray(events), audience);
 
   return (
     <article className="operational-card operational-timeline-card">
@@ -82,7 +79,7 @@ export function OperationalLinkCards({
   audience?: OperationalAudience;
   emptyMessage?: string;
 }) {
-  const visibleLinks = filterOperationalLinks(links, audience);
+  const visibleLinks = filterOperationalLinks(safeArray(links), audience);
 
   return (
     <article className="operational-card operational-links-card">

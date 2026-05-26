@@ -15,7 +15,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useAppReadiness } from '../lib/appReadiness';
 import { listAdminSupportTickets, type SupportTicket, type SupportTicketCategory, type SupportTicketStatus } from '../features/support/api';
-import { toTitleCaseLabel } from '../services/real/formatting';
+import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 const ALL_STATUSES: Array<SupportTicketStatus | 'all'> = ['all', 'OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 const ALL_CATEGORIES: Array<SupportTicketCategory | 'all'> = ['all', 'ORDER', 'RETURN', 'REFUND', 'SHIPMENT', 'TRACKING', 'PAYOUT', 'INVOICE', 'OTHER'];
@@ -23,13 +23,13 @@ const ALL_PRIORITIES = ['all', 'low', 'normal', 'high'] as const;
 const ASSIGNEE_FILTERS = ['all', 'unassigned', 'me'] as const;
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 function formatLastReply(ticket: SupportTicket) {
@@ -86,7 +86,7 @@ export function getSupportStatusTone(status: SupportTicketStatus) {
 }
 
 export function formatSupportLabel(value: string) {
-  return toTitleCaseLabel(value.toLowerCase());
+  return safeStatusLabel(value);
 }
 
 function getContextLabel(ticket: SupportTicket) {
@@ -144,7 +144,7 @@ export function AdminSupportTicketsPage() {
   const [escalatedOnly, setEscalatedOnly] = useState(false);
 
   const filteredTickets = useMemo(() => {
-    return (tickets ?? []).filter((ticket) => {
+    return safeArray(tickets).filter((ticket) => {
       if (unresolvedOnly && (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED')) {
         return false;
       }
@@ -181,7 +181,7 @@ export function AdminSupportTicketsPage() {
       if (leftRank !== rightRank) {
         return leftRank - rightRank;
       }
-      return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
+      return getSafeTimestamp(right.updatedAt, 0) - getSafeTimestamp(left.updatedAt, 0);
     });
   }, [assigneeFilter, categoryFilter, currentUser?.name, escalatedOnly, needsResponseOnly, priorityFilter, searchTerm, statusFilter, tickets, unresolvedOnly]);
 

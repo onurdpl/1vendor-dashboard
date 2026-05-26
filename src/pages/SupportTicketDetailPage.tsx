@@ -26,6 +26,7 @@ import { OperationalRecommendations } from '../components/OperationalRecommendat
 import { MentionText } from '../components/MentionText';
 import { getSnapshotString, type OperationalEventInput, type OperationalLinkInput } from '../lib/operationalCrossLinks';
 import type { OperationsRecommendation } from '../lib/api/contracts';
+import { formatDateTime, safeArray } from '../services/real/formatting';
 
 const ADMIN_STATUSES: SupportTicketStatus[] = ['IN_REVIEW', 'WAITING_FOR_VENDOR', 'RESOLVED', 'CLOSED'];
 const ADMIN_REPLY_TEMPLATES = [
@@ -52,17 +53,13 @@ const ADMIN_REPLY_TEMPLATES = [
 ] as const;
 
 function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return '—';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 function getSnapshotEntries(snapshot: unknown) {
@@ -204,7 +201,7 @@ function buildUnifiedSupportTimeline(ticket: SupportTicket): OperationalEventInp
       status: formatSupportLabel(ticket.priority),
       tone: 'info',
     },
-    ...(ticket.replies ?? []).map((reply) => ({
+    ...safeArray(ticket.replies).map((reply) => ({
       id: `reply-${reply.id}`,
       title: reply.authorRole === 'ADMIN' ? 'Support reply added' : 'Vendor reply added',
       description: reply.message,
@@ -599,8 +596,8 @@ export function SupportTicketDetailPage() {
                 </div>
                 <p>{ticket.message}</p>
               </div>
-              {ticket.replies?.length ? (
-                ticket.replies.map((reply) => (
+              {safeArray(ticket.replies).length ? (
+                safeArray(ticket.replies).map((reply) => (
                   <div key={reply.id} className="support-reply">
                     <div>
                       <strong>{reply.authorName}</strong>
@@ -788,8 +785,8 @@ export function SupportTicketDetailPage() {
                 </div>
               </div>
               <div className="support-notes-list">
-                {ticket.notes?.length ? (
-                  ticket.notes.map((item) => (
+                {safeArray(ticket.notes).length ? (
+                  safeArray(ticket.notes).map((item) => (
                     <div key={item.id} className="support-note">
                       <strong>{item.authorName}</strong>
                       <span>{formatDate(item.createdAt)}</span>

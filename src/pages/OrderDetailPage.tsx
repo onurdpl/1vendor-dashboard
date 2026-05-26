@@ -37,7 +37,7 @@ import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
-import { formatCurrency, toTitleCaseLabel } from '../services/real/formatting';
+import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeArray, safeStatusLabel, toTitleCaseLabel } from '../services/real/formatting';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness } from '../lib/appReadiness';
 import { listReturns } from '../features/returns/api';
@@ -64,10 +64,10 @@ import type {
 } from '../services/real/diagnostics';
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(value));
+  });
 }
 
 function formatOptionalDate(value?: string, fallback = '—') {
@@ -75,11 +75,11 @@ function formatOptionalDate(value?: string, fallback = '—') {
 }
 
 function formatSupportTicketStatus(status: SupportTicket['status']) {
-  return toTitleCaseLabel(status.toLowerCase());
+  return safeStatusLabel(status);
 }
 
 function formatSupportTicketPriority(priority: SupportTicket['priority']) {
-  return `${toTitleCaseLabel(priority)} priority`;
+  return `${safeStatusLabel(priority, 'Normal')} priority`;
 }
 
 function isEscalatedSupportTicket(ticket: SupportTicket) {
@@ -252,8 +252,8 @@ function getNavlungoLifecycleLogEvents(summary?: ShipmentExecution['providerResp
       return true;
     })
     .sort((left, right) => {
-      const leftTime = left.at ? new Date(left.at).getTime() : Number.MAX_SAFE_INTEGER;
-      const rightTime = right.at ? new Date(right.at).getTime() : Number.MAX_SAFE_INTEGER;
+      const leftTime = getSafeTimestamp(left.at, Number.MAX_SAFE_INTEGER);
+      const rightTime = getSafeTimestamp(right.at, Number.MAX_SAFE_INTEGER);
       return leftTime - rightTime;
     });
 }
@@ -263,7 +263,7 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
   const seenGroupedEvents = new Set<string>();
 
   events.forEach((event) => {
-    const normalizedTitle = event.title.toLowerCase();
+    const normalizedTitle = event.title?.toLowerCase() ?? '';
     const isNoisyShipmentEvent =
       normalizedTitle.includes('order') ||
       normalizedTitle.includes('webhook') ||
@@ -272,7 +272,7 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
       normalizedTitle.includes('delivered') ||
       normalizedTitle.includes('return') ||
       normalizedTitle.includes('status');
-    const eventDay = event.at ? new Date(event.at).toISOString().slice(0, 10) : 'unknown';
+    const eventDay = parseSafeDate(event.at)?.toISOString().slice(0, 10) ?? 'unknown';
     const eventKey = [normalizedTitle, event.status?.toLowerCase() ?? '', eventDay].join('|');
 
     if (isNoisyShipmentEvent && seenGroupedEvents.has(eventKey)) {
@@ -288,8 +288,8 @@ function groupOrderDetailTimelineEvents(events: OperationalEventInput[]) {
   return grouped;
 }
 
-function getStatusClass(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+function getStatusClass(value: string | null | undefined) {
+  return (value ?? 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
 
 function getTrackingTitle(order: { trackingNumber?: string; carrier?: string; trackingUrl?: string }) {
@@ -1018,7 +1018,7 @@ function getSupportTicketDedupeKey(ticket: SupportTicket) {
     ticket.contextId ?? '',
     ticket.contextSummary?.orderNumber ?? '',
     ticket.contextSummary?.returnNumber ?? '',
-    ticket.subject.trim().toLowerCase(),
+    ticket.subject?.trim().toLowerCase() ?? '',
     ticket.status,
     ticket.priority,
   ].join('|');
@@ -1046,8 +1046,8 @@ function getSupportLatestActivityAt(ticket: SupportTicket) {
 
 function getLatestSupportTicket(tickets: SupportTicket[]) {
   return [...tickets].sort((left, right) => {
-    const leftTime = new Date(getSupportLatestActivityAt(left)).getTime();
-    const rightTime = new Date(getSupportLatestActivityAt(right)).getTime();
+    const leftTime = getSafeTimestamp(getSupportLatestActivityAt(left), 0);
+    const rightTime = getSafeTimestamp(getSupportLatestActivityAt(right), 0);
     return rightTime - leftTime;
   })[0] ?? null;
 }
@@ -3969,7 +3969,7 @@ export function OrderDetailPage() {
   const relatedSupportTickets = useMemo(
     () =>
       dedupeSupportTickets(
-        (relatedSupportTicketsData ?? []).filter((ticket) =>
+        safeArray(relatedSupportTicketsData).filter((ticket) =>
           supportTicketMatchesOrder(ticket, order?.id, order?.sourceShopifyOrderNumber, {
             audience: isAdmin ? 'admin' : 'vendor',
             currentVendorId: currentVendor.vendorId,
@@ -4227,7 +4227,7 @@ export function OrderDetailPage() {
     );
   }
 
-  const orderItems = order.lineItems ?? order.items;
+  const orderItems = safeArray(order.lineItems).length ? safeArray(order.lineItems) : safeArray(order.items);
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
@@ -4661,7 +4661,7 @@ export function OrderDetailPage() {
           id: 'return-active',
           label: 'Return active',
           detail: activeReturn
-            ? `Customer return ${activeReturn.status.toLowerCase()}. Review return tracking and Shopify sync before closing the loop.`
+            ? `Customer return ${(activeReturn.status ?? 'unknown').toLowerCase()}. Review return tracking and Shopify sync before closing the loop.`
             : 'Customer return is linked. Review return tracking and Shopify sync before closing the loop.',
           tone: 'return',
           href: activeReturn ? `/returns/${activeReturn.id}` : null,
@@ -5451,7 +5451,7 @@ export function OrderDetailPage() {
                   <strong>{order.financeLedgerPreview.assumptions.join(' · ')}</strong>
                 </div>
                 <div className="shipment-mini-timeline" aria-label="Simulated ledger entries">
-                  {order.financeLedgerPreview.entries.slice(0, 12).map((entry) => (
+                  {safeArray(order.financeLedgerPreview.entries).slice(0, 12).map((entry) => (
                     <div className="summary-row" key={entry.id}>
                       <span>{toTitleCaseLabel(entry.eventType)}</span>
                       <strong>
@@ -5507,7 +5507,7 @@ export function OrderDetailPage() {
               title="Timeline"
               subtitle="Order, shipment, return, and support activity."
               events={groupOrderDetailTimelineEvents([
-                ...order.timeline
+                ...safeArray(order.timeline)
                   .filter((entry) => !isRawProviderTimelineLabel(entry.label))
                   .map((entry) => ({
                     id: `order-native-${entry.label}-${entry.at}`,
@@ -5517,7 +5517,11 @@ export function OrderDetailPage() {
                     visibility: getNativeTimelineVisibility(entry.label),
                   })),
                 ...orderTimelineEvents,
-              ]).sort((left, right) => new Date(left.at ?? order.date).getTime() - new Date(right.at ?? order.date).getTime())}
+              ]).sort(
+                (left, right) =>
+                  getSafeTimestamp(left.at ?? order.date, Number.POSITIVE_INFINITY) -
+                  getSafeTimestamp(right.at ?? order.date, Number.POSITIVE_INFINITY),
+              )}
               audience={audience}
               emptyMessage="No records available."
             />

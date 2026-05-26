@@ -23,6 +23,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
+import { safeArray } from '../services/real/formatting';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -117,7 +118,7 @@ function getVendorReason(reason: string | null | undefined, fallback = 'Return r
 }
 
 function getVendorStatusLabel(item: ReturnSummary) {
-  const normalized = item.status.toLowerCase();
+  const normalized = item.status?.toLowerCase() ?? '';
   if (item.sourceType === 'shopify_return_request' && normalized === 'requested') {
     return 'Awaiting review';
   }
@@ -127,11 +128,11 @@ function getVendorStatusLabel(item: ReturnSummary) {
   if (normalized === 'pending' || normalized === 'in review') {
     return 'Under review';
   }
-  return item.status;
+  return item.status || 'Unknown';
 }
 
 function getStatusTone(item: ReturnSummary) {
-  const normalized = item.status.toLowerCase();
+  const normalized = item.status?.toLowerCase() ?? '';
   if (item.sourceType === 'shopify_return_request' && normalized === 'requested') {
     return 'attention' as const;
   }
@@ -152,7 +153,7 @@ function isPendingReturn(item: ReturnSummary) {
 }
 
 function needsAttention(item: ReturnSummary) {
-  const normalized = item.status.toLowerCase();
+  const normalized = item.status?.toLowerCase() ?? '';
   return normalized === 'requested' || normalized === 'pending' || normalized === 'in review';
 }
 
@@ -498,7 +499,7 @@ export function ReturnsPage() {
 
   const filteredReturns = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return (returns ?? []).filter((item) => {
+    return safeArray(returns).filter((item) => {
       const matchesQuery =
         query.length === 0 ||
         [
@@ -569,17 +570,18 @@ export function ReturnsPage() {
   }, [returns, searchTerm, sourceFilter, statusFilter, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
-    if (!returns?.length) {
+    const returnList = safeArray(returns);
+    if (!returnList.length) {
       return null;
     }
-    const selectedByClick = selectedReturnId ? returns.find((item) => item.id === selectedReturnId) : null;
+    const selectedByClick = selectedReturnId ? returnList.find((item) => item.id === selectedReturnId) : null;
     if (selectedByClick) {
       return selectedByClick;
     }
     if (requestedReturnTarget) {
-      return returns.find((item) => returnMatchesTarget(item, requestedReturnTarget)) ?? null;
+      return returnList.find((item) => returnMatchesTarget(item, requestedReturnTarget)) ?? null;
     }
-    return filteredReturns[0] ?? returns[0];
+    return filteredReturns[0] ?? returnList[0];
   }, [filteredReturns, requestedReturnTarget, returns, selectedReturnId]);
 
   const detailQuery = useQueryResource(
@@ -597,7 +599,7 @@ export function ReturnsPage() {
   );
   const selectedDetail = detailQuery.data;
 
-  const returnRows = returns ?? [];
+  const returnRows = safeArray(returns);
   const pendingCount = returnRows.filter((item) => item.sourceType === 'shopify_return_request' && item.status === 'Requested').length;
   const approvedCount = returnRows.filter((item) => item.status === 'Approved').length;
   const processedCount = returnRows.filter((item) => item.sourceType !== 'shopify_return_request').length;

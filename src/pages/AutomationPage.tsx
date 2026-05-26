@@ -6,15 +6,20 @@ import { useActionFeedback } from '../lib/ui';
 import { getAutomationDashboard } from '../features/automation/api';
 import { canPerformAction } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
+import { formatDateTime, safeArray } from '../services/real/formatting';
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
+}
+
+function getClassToken(value: string | null | undefined) {
+  return (value ?? 'unknown').toLowerCase().replace(/\s+/g, '-');
 }
 
 export function AutomationPage() {
@@ -29,7 +34,10 @@ export function AutomationPage() {
   const canRunAutomationAction = canPerformAction('automation:write');
   const currentRole = appReadiness.currentUser?.role ?? 'vendor';
 
-  const automationView = automation ?? { alerts: [], suggestions: [] };
+  const automationView = {
+    alerts: safeArray(automation?.alerts),
+    suggestions: safeArray(automation?.suggestions),
+  };
   const totalAlerts = automationView.alerts.length;
   const criticalAlerts = automationView.alerts.filter((alert) => alert.type === 'Critical' || alert.status === 'New').length;
   const suggestedActions = automationView.suggestions.length;
@@ -98,11 +106,11 @@ export function AutomationPage() {
               {automationView.alerts.map((alert) => (
                 <article key={alert.id} className="automation-alert queue-item">
                   <div className="automation-alert-top">
-                    <div className={`status-badge automation-type automation-${alert.type.toLowerCase()}`}>
-                      {alert.type}
+                    <div className={`status-badge automation-type automation-${getClassToken(alert.type)}`}>
+                      {alert.type ?? 'Unknown'}
                     </div>
-                    <div className={`status-badge status-${alert.status.toLowerCase().replace(/\s+/g, '-')}`}>
-                      {alert.status}
+                    <div className={`status-badge status-${getClassToken(alert.status)}`}>
+                      {alert.status ?? 'Unknown'}
                     </div>
                   </div>
                   <div className="queue-title-block">

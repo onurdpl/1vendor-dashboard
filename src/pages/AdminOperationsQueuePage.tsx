@@ -21,18 +21,22 @@ import type {
   OperationsAttentionType,
   OperationsVendorRisk,
 } from '../lib/api/contracts';
+import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 function formatAge(hours: number) {
+  if (!Number.isFinite(hours)) {
+    return '—';
+  }
   if (hours < 1) {
     return '<1h';
   }
@@ -49,7 +53,7 @@ function formatType(value: OperationsAttentionType) {
   if (value === 'operational_signal') {
     return 'Operational signal';
   }
-  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`;
+  return safeStatusLabel(value);
 }
 
 function getSeverityTone(severity: OperationsAttentionSeverity) {
@@ -108,6 +112,11 @@ export function AdminOperationsQueuePage() {
     vendorRisks: [],
     recentActivity: [],
   };
+  const recommendations = safeArray(dataView.recommendations);
+  const queue = safeArray(dataView.queue);
+  const sections = safeArray(dataView.sections);
+  const vendorRisks = safeArray(dataView.vendorRisks);
+  const recentActivity = safeArray(dataView.recentActivity);
 
   return (
     <section className="op-page operations-control-center attention-center-page">
@@ -152,7 +161,7 @@ export function AdminOperationsQueuePage() {
           <OperationalRecommendations
             title="Recommended actions"
             subtitle="Read-only operator suggestions derived from active attention signals."
-            recommendations={dataView.recommendations}
+            recommendations={recommendations}
             audience="admin"
             emptyMessage="No operational recommendations right now."
           />
@@ -165,12 +174,12 @@ export function AdminOperationsQueuePage() {
                 <span>Sorted by severity and unresolved age.</span>
               </div>
             </div>
-            {dataView.queue.length ? (
+            {queue.length ? (
               <OperationalTable
                 columns={['Severity', 'Type', 'Vendor', 'Reference', 'Age', 'Recommended action', 'Action']}
                 className="attention-op-table"
               >
-                {dataView.queue.map((item) => (
+                {queue.map((item) => (
                   <OperationalTableRow key={item.id}>
                     <StatusBadge tone={getSeverityTone(item.severity)}>{item.severity}</StatusBadge>
                     <span>
@@ -199,7 +208,7 @@ export function AdminOperationsQueuePage() {
           </article>
 
           <div className="attention-sections-grid">
-            {dataView.sections.map((section) => (
+            {sections.map((section) => (
               <article key={section.key} className="attention-card">
                 <div className="attention-card-heading">
                   <div>
@@ -211,8 +220,8 @@ export function AdminOperationsQueuePage() {
                   </div>
                 </div>
                 <div className="attention-mini-list">
-                  {section.items.length ? (
-                    section.items.map((item) => (
+                  {safeArray(section.items).length ? (
+                    safeArray(section.items).map((item) => (
                       <div key={item.id} className="attention-mini-row">
                         <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                         <div>
@@ -240,8 +249,8 @@ export function AdminOperationsQueuePage() {
               </div>
             </div>
             <div className="attention-risk-list">
-              {dataView.vendorRisks.length ? (
-                dataView.vendorRisks.map((vendor) => (
+              {vendorRisks.length ? (
+                vendorRisks.map((vendor) => (
                   <div key={vendor.vendorId} className="attention-risk-row">
                     <div>
                       <strong>{vendor.vendorName}</strong>
@@ -264,8 +273,8 @@ export function AdminOperationsQueuePage() {
               </div>
             </div>
             <div className="attention-activity-feed">
-              {dataView.recentActivity.length ? (
-                dataView.recentActivity.map((item) => (
+              {recentActivity.length ? (
+                recentActivity.map((item) => (
                   <div key={item.id} className="attention-activity-row">
                     <span className={`attention-dot attention-${item.severity}`} aria-hidden="true" />
                     <div>

@@ -33,27 +33,24 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
+import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return '—';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 function getStatusLabel(returnRequest: ReturnDetail) {
-  const normalized = returnRequest.status.toLowerCase();
+  const normalized = returnRequest.status?.toLowerCase() ?? '';
   if (returnRequest.sourceType === 'shopify_return_request' && normalized === 'requested') {
     return 'Awaiting review';
   }
@@ -63,11 +60,11 @@ function getStatusLabel(returnRequest: ReturnDetail) {
   if (normalized === 'pending' || normalized === 'in review') {
     return 'Under review';
   }
-  return returnRequest.status;
+  return returnRequest.status || 'Unknown';
 }
 
 function getStatusTone(returnRequest: ReturnDetail) {
-  const normalized = returnRequest.status.toLowerCase();
+  const normalized = returnRequest.status?.toLowerCase() ?? '';
   if (returnRequest.sourceType === 'shopify_return_request' && normalized === 'requested') {
     return 'attention' as const;
   }
@@ -109,6 +106,10 @@ function sanitizeText(value: string | null | undefined, fallback = 'Return reque
   return text;
 }
 
+function formatDiagnosticToken(value: string | null | undefined, fallback = '—') {
+  return value?.trim() ? value.trim().replace(/_/g, ' ') : fallback;
+}
+
 function getVariantText(value: string | null | undefined) {
   const text = value?.trim();
   if (!text || text === 'Default' || /^gid:\/\//i.test(text) || /^unknown-sku$/i.test(text)) {
@@ -135,11 +136,12 @@ function getReturnItemImageAlt(item: ReturnLineItem) {
 }
 
 function getReturnedItems(returnRequest: ReturnDetail) {
-  return (returnRequest.refundedItems?.length ? returnRequest.refundedItems : returnRequest.items) ?? [];
+  const refundedItems = safeArray(returnRequest.refundedItems);
+  return refundedItems.length ? refundedItems : safeArray(returnRequest.items);
 }
 
-function getTimelineLabel(label: string) {
-  const normalized = label.toLowerCase();
+function getTimelineLabel(label: string | null | undefined) {
+  const normalized = label?.toLowerCase() ?? '';
   if (normalized.includes('requested') || normalized.includes('return')) {
     return 'Return requested';
   }
@@ -270,9 +272,9 @@ function ReturnDetailRouteDiagnostics({
 }
 
 function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
-  const logs = Array.isArray(snapshot.navlungoReturnStatusLogs)
-    ? snapshot.navlungoReturnStatusLogs.filter((log): log is Record<string, unknown> => Boolean(log) && typeof log === 'object' && !Array.isArray(log))
-    : [];
+  const logs = safeArray(snapshot.navlungoReturnStatusLogs).filter(
+    (log): log is Record<string, unknown> => Boolean(log) && typeof log === 'object' && !Array.isArray(log),
+  );
   const seen = new Set<string>();
   return logs
     .map((log) => {
@@ -327,7 +329,7 @@ function readNavlungoReturnLogs(snapshot: Record<string, unknown>) {
 }
 
 function getTimeline(returnRequest: ReturnDetail) {
-  const normalizedStatus = returnRequest.status.toLowerCase();
+  const normalizedStatus = returnRequest.status?.toLowerCase() ?? '';
   const hasReturnTracking = Boolean(
     returnRequest.returnCarrierName || returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl,
   );
@@ -1024,12 +1026,12 @@ export function ReturnDetailPage() {
     returnCarrierPresent: Boolean(returnRequest.returnCarrierName),
     returnTrackingPresent: Boolean(returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl),
   };
-  const relatedFinanceRecords = (relatedFinanceData?.transactions ?? []).filter(
+  const relatedFinanceRecords = safeArray(relatedFinanceData?.transactions).filter(
     (record) =>
       (returnRequest.sourceShopifyRefundId && sameShopifyIdentifier(record.shopifyRefundId, returnRequest.sourceShopifyRefundId)) ||
       sameOperationalOrderNumber(record.shopifyOrderNumber, returnRequest.sourceShopifyOrderNumber),
   );
-  const relatedSupportTickets = (relatedSupportTicketsData ?? []).filter((ticket) =>
+  const relatedSupportTickets = safeArray(relatedSupportTicketsData).filter((ticket) =>
     supportTicketMatchesReturn(ticket, returnRequest.id, {
       audience: isAdmin ? 'admin' : 'vendor',
       currentVendorId: currentVendor.vendorId,
@@ -1059,10 +1061,10 @@ export function ReturnDetailPage() {
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
       eyebrow: 'Support',
-      title: ticket.subject,
+      title: ticket.subject ?? 'Support ticket',
       description: ticket.vendorName ?? ticket.vendorId,
       href: `${supportBasePath}/${ticket.id}`,
-      status: ticket.status.replace(/_/g, ' '),
+      status: safeStatusLabel(ticket.status),
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
     })),
   ];
@@ -1086,9 +1088,9 @@ export function ReturnDetailPage() {
     ...relatedSupportTickets.map((ticket) => ({
       id: `support-${ticket.id}`,
       title: 'Support ticket opened',
-      description: ticket.subject,
+      description: ticket.subject ?? 'Support ticket',
       at: ticket.createdAt,
-      status: ticket.status.replace(/_/g, ' '),
+      status: safeStatusLabel(ticket.status),
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
       href: `${supportBasePath}/${ticket.id}`,
     })),
@@ -1113,7 +1115,7 @@ export function ReturnDetailPage() {
             title: 'Return pickup needs attention',
             description: navlungoReturnPickupMissingFields.length
               ? `Missing fields: ${navlungoReturnPickupMissingFields.join(', ')}`
-              : navlungoReturnAutoCreateSkippedReason.replace(/_/g, ' '),
+              : formatDiagnosticToken(navlungoReturnAutoCreateSkippedReason),
             at: returnRequest.updatedAt ?? returnRequest.date,
             status: 'Needs attention',
             tone: 'warning' as const,
@@ -1542,7 +1544,7 @@ export function ReturnDetailPage() {
                 </div>
                 <div>
                   <span>Reason</span>
-                  <strong>{navlungoReturnAutoCreateSkippedReason.replace(/_/g, ' ')}</strong>
+                  <strong>{formatDiagnosticToken(navlungoReturnAutoCreateSkippedReason)}</strong>
                 </div>
                 {navlungoReturnPickupMissingFields.length ? (
                   <div>
@@ -1569,7 +1571,7 @@ export function ReturnDetailPage() {
                 </div>
                 <div>
                   <span>Skipped reason</span>
-                  <strong>{navlungoReturnAutoCreateSkippedReason?.replace(/_/g, ' ') ?? '—'}</strong>
+                  <strong>{formatDiagnosticToken(navlungoReturnAutoCreateSkippedReason)}</strong>
                 </div>
                 <div>
                   <span>Missing fields</span>

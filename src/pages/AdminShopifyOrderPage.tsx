@@ -8,12 +8,17 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useActionFeedback } from '../lib/ui';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
+import { formatDateTime } from '../services/real/formatting';
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     dateStyle: 'medium',
     timeStyle: 'short',
-  }).format(new Date(value));
+  });
+}
+
+function getClassToken(value: string | null | undefined) {
+  return (value ?? 'unknown').toLowerCase().replace(/\s+/g, '-');
 }
 
 export function AdminShopifyOrderPage() {
@@ -123,11 +128,11 @@ export function AdminShopifyOrderPage() {
             <div className="chip-row">
               <span className={`status-badge status-${allocation.allocationStatus}`}>{allocation.allocationStatus}</span>
               <span
-                className={`status-badge status-${allocation.fulfillmentActionState.toLowerCase().replace(/\s+/g, '-')}`}
+                className={`status-badge status-${getClassToken(allocation.fulfillmentActionState)}`}
               >
                 {allocation.fulfillmentActionState}
               </span>
-              <span className={`status-badge status-${allocation.shippingStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+              <span className={`status-badge status-${getClassToken(allocation.shippingStatus)}`}>
                 {allocation.shippingStatus}
               </span>
             </div>
@@ -261,10 +266,10 @@ export function AdminShopifyOrderPage() {
                 <span>{item.quantity}</span>
                 <span>{item.price}</span>
                 <span className="order-state-stack">
-                  <span className={`status-badge status-${item.fulfillmentStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                  <span className={`status-badge status-${getClassToken(item.fulfillmentStatus)}`}>
                     {item.fulfillmentStatus}
                   </span>
-                  <span className={`status-badge status-${item.shippingStatus.toLowerCase().replace(/\s+/g, '-')}`}>
+                  <span className={`status-badge status-${getClassToken(item.shippingStatus)}`}>
                     {item.shippingStatus}
                   </span>
                 </span>

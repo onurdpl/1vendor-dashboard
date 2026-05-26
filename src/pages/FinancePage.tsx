@@ -41,6 +41,7 @@ import {
   type OperationalLinkInput,
 } from '../lib/operationalCrossLinks';
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
+import { formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 
 type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
 
@@ -78,28 +79,17 @@ const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement re
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
 
 function formatDate(value: string) {
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  });
 }
 
 function formatDateParts(value: string) {
-  const date = new Date(value);
-  return {
-    date: new Intl.DateTimeFormat('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    }).format(date),
-    time: new Intl.DateTimeFormat('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    }).format(date),
-  };
+  return formatSafeDateParts(value);
 }
 
 function readFinanceString(record: FinanceTransaction, key: string) {
@@ -254,8 +244,13 @@ function financeRecordMatchesTarget(record: FinanceTransaction, target: FinanceD
   ].some((value) => sameOrderNumber(value, target.value));
 }
 
-function normalizeFinanceStatus(status: string) {
-  const normalized = status.trim().toLowerCase();
+function normalizeFinanceStatus(status: string | null | undefined) {
+  const value = status?.trim();
+  if (!value) {
+    return 'Unknown';
+  }
+
+  const normalized = value.toLowerCase();
   if (normalized === 'hold' || normalized === 'recorded' || normalized === 'synced' || normalized === 'posted') {
     return 'Recorded';
   }
@@ -271,10 +266,10 @@ function normalizeFinanceStatus(status: string) {
   if (normalized === 'pending') {
     return 'Pending';
   }
-  return status;
+  return value;
 }
 
-function getStatusTone(status: string) {
+function getStatusTone(status: string | null | undefined) {
   const displayStatus = normalizeFinanceStatus(status);
   if (displayStatus === 'Completed' || displayStatus === 'Reconciled' || displayStatus === 'Recorded') {
     return 'success' as const;
@@ -348,11 +343,14 @@ function getPayoutActivityTone(record: FinanceTransaction, audience: 'admin' | '
   return 'attention' as const;
 }
 
-function isZeroCurrencyValue(value: string) {
-  return !/[1-9]/.test(value.replace(/[^\d]/g, ''));
+function isZeroCurrencyValue(value: string | null | undefined) {
+  return !/[1-9]/.test((value ?? '').replace(/[^\d]/g, ''));
 }
 
-function formatDeductionValue(value: string) {
+function formatDeductionValue(value: string | null | undefined) {
+  if (!value) {
+    return UNKNOWN_FINANCE_VALUE;
+  }
   if (value.startsWith('-') || isZeroCurrencyValue(value)) {
     return value;
   }
@@ -541,15 +539,11 @@ function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineIte
 }
 
 function formatSupportStatus(status: SupportTicket['status']) {
-  return status
-    .toLowerCase()
-    .split('_')
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
+  return safeStatusLabel(status);
 }
 
 function formatSupportPriority(priority: SupportTicket['priority']) {
-  return `${priority.charAt(0).toUpperCase()}${priority.slice(1)} priority`;
+  return `${safeStatusLabel(priority, 'Normal')} priority`;
 }
 
 function isOpenSupportTicket(ticket: SupportTicket) {
@@ -562,8 +556,8 @@ function getSupportLatestActivityAt(ticket: SupportTicket) {
 
 function getLatestSupportTicket(tickets: SupportTicket[]) {
   return [...tickets].sort((left, right) => {
-    const leftTime = new Date(getSupportLatestActivityAt(left)).getTime();
-    const rightTime = new Date(getSupportLatestActivityAt(right)).getTime();
+    const leftTime = getSafeTimestamp(getSupportLatestActivityAt(left), 0);
+    const rightTime = getSafeTimestamp(getSupportLatestActivityAt(right), 0);
     return rightTime - leftTime;
   })[0] ?? null;
 }
@@ -771,7 +765,7 @@ export function FinancePage() {
   }
 
   const financeKpis = useMemo(() => {
-    const transactions = finance?.transactions ?? [];
+    const transactions = safeArray(finance?.transactions);
     const recordedRefunds = transactions.filter((record) => isRefundRecord(record) && normalizeFinanceStatus(record.status) === 'Recorded').length;
     const pendingOrHeld = transactions.filter(isPendingOrHoldRecord).length;
     const failed = transactions.filter((record) => normalizeFinanceStatus(record.status) === 'Failed').length;
@@ -785,7 +779,7 @@ export function FinancePage() {
 
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
-    return (finance?.transactions ?? []).filter((record) => {
+    return safeArray(finance?.transactions).filter((record) => {
       const displayStatus = getPayoutActivityStatusLabel(record, financeAudience);
       const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
       const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
@@ -815,7 +809,7 @@ export function FinancePage() {
       return selectedByClick;
     }
     if (requestedFinanceTarget) {
-      return (finance?.transactions ?? []).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null;
+      return safeArray(finance?.transactions).find((record) => financeRecordMatchesTarget(record, requestedFinanceTarget)) ?? null;
     }
     if (!filteredRecords.length) {
       return null;
@@ -837,7 +831,7 @@ export function FinancePage() {
   const relatedSupportTickets = useMemo(
     () =>
       selectedRecord
-        ? (supportTickets ?? []).filter((ticket) =>
+        ? safeArray(supportTickets).filter((ticket) =>
             supportTicketMatchesFinance(
               ticket,
               selectedRecord.id,

@@ -24,6 +24,7 @@ import {
   type CommunicationEvent,
   type CommunicationFilter,
 } from '../lib/communicationCenter';
+import { formatDateTime, safeArray } from '../services/real/formatting';
 
 const FILTERS: Array<{ key: CommunicationFilter; label: string }> = [
   { key: 'all', label: 'All' },
@@ -37,21 +38,12 @@ const FILTERS: Array<{ key: CommunicationFilter; label: string }> = [
 ];
 
 function formatDate(value: string | null | undefined) {
-  if (!value) {
-    return '—';
-  }
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '—';
-  }
-
-  return new Intl.DateTimeFormat('en-US', {
+  return formatDateTime(value, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(date);
+  });
 }
 
 function getSeverityTone(severity: CommunicationEvent['severity']) {
@@ -121,7 +113,7 @@ export function VendorInboxPage() {
       if (!query) {
         return true;
       }
-      return [event.title, event.summary, event.relatedLabel, event.type, ...event.context.map((entry) => `${entry.label} ${entry.value}`)]
+      return [event.title, event.summary, event.relatedLabel, event.type, ...safeArray(event.context).map((entry) => `${entry.label} ${entry.value}`)]
         .join(' ')
         .toLowerCase()
         .includes(query);
@@ -223,7 +215,7 @@ export function VendorInboxPage() {
               </div>
               <p>{selectedEvent.summary}</p>
               <div className="communication-context-list">
-                {selectedEvent.context.map((entry) => (
+                {safeArray(selectedEvent.context).map((entry) => (
                   <div key={`${entry.label}-${entry.value}`}>
                     <span>{entry.label}</span>
                     <strong>{entry.value}</strong>
