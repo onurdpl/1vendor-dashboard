@@ -136,6 +136,146 @@ function formatRecentActivity(item: string) {
   };
 }
 
+function normalizeGroupKey(value: string) {
+  return value.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+function formatGroupedActivityTitle(title: string, count: number) {
+  const normalized = normalizeGroupKey(title);
+  if (normalized.includes('fulfillment') && normalized.includes('stale')) {
+    return `${count} stale fulfillments`;
+  }
+  if (normalized.includes('refund')) {
+    return `${count} refund events`;
+  }
+  if (normalized.includes('return')) {
+    return `${count} return events`;
+  }
+  return `${count} similar ${title.toLowerCase()} events`;
+}
+
+function groupRecentActivity(items: string[]) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      title: string;
+      description: string;
+      count: number;
+      items: Array<{ raw: string; title: string; description: string }>;
+    }
+  >();
+
+  items.forEach((item, index) => {
+    const activity = formatRecentActivity(item);
+    const normalizedTitle = normalizeGroupKey(activity.title);
+    const key = normalizedTitle || `activity-${index}`;
+    const group = groups.get(key);
+    const detail = { raw: item, title: activity.title, description: activity.description };
+
+    if (group) {
+      group.count += 1;
+      group.items.push(detail);
+      return;
+    }
+
+    groups.set(key, {
+      key,
+      title: activity.title,
+      description: activity.description,
+      count: 1,
+      items: [detail],
+    });
+  });
+
+  return [...groups.values()];
+}
+
+function getNotificationSeverityRank(severity: NotificationIntent['severity']) {
+  if (severity === 'critical') {
+    return 4;
+  }
+  if (severity === 'high') {
+    return 3;
+  }
+  if (severity === 'warning') {
+    return 2;
+  }
+  return 1;
+}
+
+function getNotificationTime(notification: NotificationIntent) {
+  const timestamp = Date.parse(notification.updatedAt || notification.createdAt || notification.deliveredAt || '');
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function formatGroupedNotificationTitle(title: string, count: number) {
+  const normalized = normalizeGroupKey(title);
+  if (normalized.includes('fulfillment') && normalized.includes('stale')) {
+    return `${count} stale fulfillment alerts`;
+  }
+  if (normalized.includes('shipping')) {
+    return `${count} shipping alerts`;
+  }
+  if (normalized.includes('refund')) {
+    return `${count} refund alerts`;
+  }
+  return `${count} related alerts`;
+}
+
+function groupNotifications(notifications: NotificationIntent[]) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      representative: NotificationIntent;
+      notifications: NotificationIntent[];
+      unread: number;
+      latestTime: number;
+      severityRank: number;
+    }
+  >();
+
+  notifications.forEach((notification, index) => {
+    const source = formatNotificationSource(notification);
+    const key = `${normalizeGroupKey(notification.title)}|${source}|${notification.severity}`;
+    const time = getNotificationTime(notification);
+    const severityRank = getNotificationSeverityRank(notification.severity);
+    const unread = notification.status !== 'read' && notification.status !== 'dismissed' ? 1 : 0;
+    const group = groups.get(key || `notification-${index}`);
+
+    if (group) {
+      group.notifications.push(notification);
+      group.unread += unread;
+      group.latestTime = Math.max(group.latestTime, time);
+      group.severityRank = Math.max(group.severityRank, severityRank);
+      const representativeRead = group.representative.status === 'read' || group.representative.status === 'dismissed';
+      const notificationIsUnread = notification.status !== 'read' && notification.status !== 'dismissed';
+      const sameReadPriority = representativeRead === !notificationIsUnread;
+      if ((representativeRead && notificationIsUnread) || (sameReadPriority && time > getNotificationTime(group.representative))) {
+        group.representative = notification;
+      }
+      return;
+    }
+
+    groups.set(key, {
+      key,
+      representative: notification,
+      notifications: [notification],
+      unread,
+      latestTime: time,
+      severityRank,
+    });
+  });
+
+  return [...groups.values()].sort((a, b) => {
+    if (a.severityRank !== b.severityRank) {
+      return b.severityRank - a.severityRank;
+    }
+    return b.latestTime - a.latestTime;
+  });
+}
+
 export function DashboardPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
@@ -293,6 +433,10 @@ export function DashboardPage() {
   const recentActivity = safeArray(dashboardView.recentActivity);
   const partialDataWarnings = safeArray(dashboardView.partialDataWarnings);
   const dashboardStats = safeArray(dashboardView.stats);
+  const groupedRecentActivity = groupRecentActivity(recentActivity);
+  const groupedNotifications = groupNotifications(notificationView.notifications);
+  const visibleNotificationGroups = groupedNotifications.slice(0, 4);
+  const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
   const blockedAllocations = getPriorityValue(priorityWork, 'Blocked allocations');
   const refundAttention = getPriorityValue(priorityWork, 'Refund attention');
   const needsAttention = blockedAllocations + refundAttention;
@@ -415,22 +559,35 @@ export function DashboardPage() {
                   </li>
                 ))}
               </ul>
-            ) : recentActivity.length === 0 ? (
+            ) : groupedRecentActivity.length === 0 ? (
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
-                {recentActivity.map((item) => {
-                  const activity = formatRecentActivity(item);
+                {groupedRecentActivity.map((activity) => {
+                  const hasGroup = activity.count > 1;
 
                   return (
-                    <li key={item}>
+                    <li key={activity.key} className={hasGroup ? 'dashboard-event-grouped' : undefined}>
                       <span className="dashboard-event-dot" aria-hidden="true" />
                       <div className="dashboard-event-copy">
-                        <strong>{activity.title}</strong>
-                        <span>{activity.description}</span>
+                        <strong>{hasGroup ? formatGroupedActivityTitle(activity.title, activity.count) : activity.title}</strong>
+                        <span>{hasGroup ? `Latest issue: ${activity.description}` : activity.description}</span>
+                        {hasGroup ? (
+                          <details className="dashboard-event-details">
+                            <summary>Show {activity.count} matching events</summary>
+                            <ul>
+                              {activity.items.map((detail, index) => (
+                                <li key={`${detail.raw}-${index}`}>
+                                  <span>{detail.title}</span>
+                                  <small>{detail.description}</small>
+                                </li>
+                              ))}
+                            </ul>
+                          </details>
+                        ) : null}
                       </div>
                       <div className="dashboard-event-meta">
-                        <StatusBadge tone="info">—</StatusBadge>
+                        <StatusBadge tone={hasGroup ? 'attention' : 'info'}>{hasGroup ? `${activity.count} events` : '—'}</StatusBadge>
                         <span>—</span>
                       </div>
                     </li>
@@ -451,57 +608,90 @@ export function DashboardPage() {
                   <MetadataRow label="High priority" value={notificationView.summary.highPriority} />
                   <MetadataRow label="Total" value={notificationView.summary.total} />
                 </div>
-                {notificationView.notifications.length === 0 ? (
+                {groupedNotifications.length === 0 ? (
                   <EmptyStatePanel title="No active notifications" description="No active notifications." />
                 ) : (
                   <div className="notification-list dashboard-notification-list">
-                    {notificationView.notifications.slice(0, 6).map((notification) => (
-                      <article key={notification.id} className={`notification-card ${notification.status === 'read' ? 'is-read' : ''}`}>
-                        <div className="dashboard-notification-severity">
-                          <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
-                        </div>
-                        <div className="dashboard-notification-copy">
-                          <strong>{notification.title}</strong>
-                          <p>{notification.message}</p>
-                          <div className="notification-meta">
-                            <span>{formatNotificationSource(notification)}</span>
-                            {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
+                    {visibleNotificationGroups.map((group) => {
+                      const notification = group.representative;
+                      const hasGroup = group.notifications.length > 1;
+                      const groupStatus = hasGroup
+                        ? group.unread > 0
+                          ? `${group.unread} unread`
+                          : 'all read'
+                        : notification.status;
+
+                      return (
+                        <article
+                          key={group.key}
+                          className={`notification-card ${group.unread === 0 ? 'is-read' : ''} ${hasGroup ? 'is-grouped' : ''}`}
+                        >
+                          <div className="dashboard-notification-severity">
+                            <StatusBadge tone={getNotificationTone(notification.severity)}>{notification.severity}</StatusBadge>
+                            {hasGroup ? <span className="dashboard-notification-count">{group.notifications.length}</span> : null}
                           </div>
-                        </div>
-                        <div className="dashboard-notification-state">
-                          <span>{formatDateTime(notification.createdAt, {
-                            month: 'short',
-                            day: 'numeric',
-                            year: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit',
-                          })}</span>
-                          <span className="notification-status">{notification.status}</span>
-                        </div>
-                        <div className="notification-actions">
-                          <button
-                            type="button"
-                            className="button button-secondary button-compact"
-                            disabled={notification.status === 'read' || Boolean(pendingNotificationAction)}
-                            onClick={() => {
-                              void handleMarkNotificationRead(notification.id);
-                            }}
-                          >
-                            {pendingNotificationAction === `read:${notification.id}` ? 'Marking...' : 'Mark as read'}
-                          </button>
-                          <button
-                            type="button"
-                            className="button button-secondary button-compact"
-                            disabled={Boolean(pendingNotificationAction)}
-                            onClick={() => {
-                              void handleDismissNotification(notification.id);
-                            }}
-                          >
-                            {pendingNotificationAction === `dismiss:${notification.id}` ? 'Dismissing...' : 'Dismiss'}
-                          </button>
-                        </div>
-                      </article>
-                    ))}
+                          <div className="dashboard-notification-copy">
+                            <strong>{hasGroup ? formatGroupedNotificationTitle(notification.title, group.notifications.length) : notification.title}</strong>
+                            <p>{hasGroup ? `Latest issue: ${notification.message}` : notification.message}</p>
+                            <div className="notification-meta">
+                              <span>{formatNotificationSource(notification)}</span>
+                              {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
+                              {hasGroup ? <span>{group.notifications.length} linked alerts</span> : null}
+                            </div>
+                            {hasGroup ? (
+                              <details className="dashboard-notification-details">
+                                <summary>Show matching alerts</summary>
+                                <ul>
+                                  {group.notifications.map((groupedNotification) => (
+                                    <li key={groupedNotification.id}>
+                                      <span>{groupedNotification.title}</span>
+                                      <small>{formatDateTime(groupedNotification.createdAt)}</small>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </details>
+                            ) : null}
+                          </div>
+                          <div className="dashboard-notification-state">
+                            <span>{formatDateTime(notification.createdAt, {
+                              month: 'short',
+                              day: 'numeric',
+                              year: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}</span>
+                            <span className="notification-status">{groupStatus}</span>
+                          </div>
+                          <div className="notification-actions">
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              disabled={notification.status === 'read' || Boolean(pendingNotificationAction)}
+                              onClick={() => {
+                                void handleMarkNotificationRead(notification.id);
+                              }}
+                            >
+                              {pendingNotificationAction === `read:${notification.id}` ? 'Marking...' : 'Mark as read'}
+                            </button>
+                            <button
+                              type="button"
+                              className="button button-secondary button-compact"
+                              disabled={Boolean(pendingNotificationAction)}
+                              onClick={() => {
+                                void handleDismissNotification(notification.id);
+                              }}
+                            >
+                              {pendingNotificationAction === `dismiss:${notification.id}` ? 'Dismissing...' : 'Dismiss'}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })}
+                    {collapsedNotificationCount > 0 ? (
+                      <div className="dashboard-notification-more">
+                        {collapsedNotificationCount} lower-priority notification groups collapsed
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>

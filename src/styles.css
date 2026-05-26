@@ -8595,6 +8595,58 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 600;
 }
 
+.dashboard-event-details,
+.dashboard-notification-details {
+  margin-top: 4px;
+}
+
+.dashboard-event-details summary,
+.dashboard-notification-details summary {
+  width: fit-content;
+  color: #2563eb;
+  font-size: 0.72rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.dashboard-event-details ul,
+.dashboard-notification-details ul {
+  display: grid;
+  gap: 4px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.dashboard-event-details li,
+.dashboard-notification-details li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  min-height: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.dashboard-event-details li span,
+.dashboard-notification-details li span {
+  overflow: hidden;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-event-details li small,
+.dashboard-notification-details li small {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
 .dashboard-event-meta {
   display: grid;
   gap: 5px;
@@ -8614,12 +8666,36 @@ summary.provider-response-heading::-webkit-details-marker {
   box-shadow: none;
 }
 
+.dashboard-enterprise-shell .notification-card.is-grouped {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+}
+
 .dashboard-enterprise-shell .notification-card.is-read {
   background: #f8fafc;
 }
 
 .dashboard-notification-list {
   gap: 6px;
+}
+
+.dashboard-notification-severity {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+
+.dashboard-notification-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 900;
 }
 
 .dashboard-notification-copy {
@@ -8650,6 +8726,17 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-enterprise-shell .notification-actions {
   justify-content: flex-end;
+}
+
+.dashboard-notification-more {
+  padding: 8px 10px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 10px;
+  background: #f8fafc;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 800;
+  text-align: center;
 }
 
 .dashboard-workspace-status-grid {

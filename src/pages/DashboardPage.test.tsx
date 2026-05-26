@@ -278,6 +278,85 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Refund ID 123 processed successfully.')).toBeInTheDocument();
   });
 
+  it('groups repeated recent operational events into one dashboard signal', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      recentActivity: [
+        'Fulfillment is stale: 102h awaiting shipment',
+        'Fulfillment is stale: 91h awaiting shipment',
+        'Fulfillment is stale: 88h awaiting shipment',
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('3 stale fulfillments')).toBeInTheDocument();
+    expect(screen.getByText('Latest issue: 102h awaiting shipment')).toBeInTheDocument();
+    expect(screen.getByText('Show 3 matching events')).toBeInTheDocument();
+  });
+
+  it('groups repeated notification alerts while preserving the latest action surface', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 3,
+        unread: 3,
+        critical: 0,
+        high: 3,
+        warning: 0,
+      },
+      notifications: [
+        {
+          ...notification,
+          id: 'notif-stale-1',
+          signalId: 'signal-stale-1',
+          title: 'Fulfillment is stale',
+          message: 'Order #1061 has waited 102h.',
+          severity: 'high',
+          createdAt: '2026-05-13T12:00:00.000Z',
+          updatedAt: '2026-05-13T12:00:00.000Z',
+          metadata: {
+            signalSourceArea: 'FULFILLMENT',
+          },
+        },
+        {
+          ...notification,
+          id: 'notif-stale-2',
+          signalId: 'signal-stale-2',
+          title: 'Fulfillment is stale',
+          message: 'Order #1059 has waited 91h.',
+          severity: 'high',
+          createdAt: '2026-05-13T11:00:00.000Z',
+          updatedAt: '2026-05-13T11:00:00.000Z',
+          metadata: {
+            signalSourceArea: 'FULFILLMENT',
+          },
+        },
+        {
+          ...notification,
+          id: 'notif-stale-3',
+          signalId: 'signal-stale-3',
+          title: 'Fulfillment is stale',
+          message: 'Order #1058 has waited 88h.',
+          severity: 'high',
+          createdAt: '2026-05-13T10:00:00.000Z',
+          updatedAt: '2026-05-13T10:00:00.000Z',
+          metadata: {
+            signalSourceArea: 'FULFILLMENT',
+          },
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('3 stale fulfillment alerts')).toBeInTheDocument();
+    expect(screen.getByText('Latest issue: Order #1061 has waited 102h.')).toBeInTheDocument();
+    expect(screen.getByText('3 linked alerts')).toBeInTheDocument();
+    expect(screen.getByText('3 unread')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+  });
+
   it('renders an empty notification state', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
     listNotificationsMock.mockResolvedValue({
