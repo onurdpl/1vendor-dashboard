@@ -90,6 +90,31 @@ function buildFinanceHref(record: { id: string }) {
   return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
 }
 
+const ORDER_FINANCE_HELPER_COPY =
+  'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
+const ORDER_FINANCE_UNKNOWN_VALUE = 'Unknown';
+
+function isMeaningfulFinanceValue(value: string | null | undefined) {
+  return Boolean(value && value.trim() && value.trim() !== '—');
+}
+
+function formatFinancePreviewValue(
+  value: string | null | undefined,
+  currency: string,
+  options: { unknown?: boolean } = {},
+) {
+  if (options.unknown || value === null || value === undefined) {
+    return ORDER_FINANCE_UNKNOWN_VALUE;
+  }
+
+  return formatCurrency(value, currency);
+}
+
+function isPositiveFinanceValue(value: string | null | undefined) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0;
+}
+
 function getCompactCustomerLabel(value?: string) {
   const normalized = value?.trim();
 
@@ -4149,39 +4174,82 @@ export function OrderDetailPage() {
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
-  const financePreview = order.financeLedgerPreview;
+  const financePreview = isAdmin ? order.financeLedgerPreview : null;
   const financeSummaryUnknowns = financePreview?.unknowns ?? [];
   const payoutFinanceRecord = relatedFinanceRecords.find((record) => record.category !== 'Refund');
   const refundFinanceRecord = relatedFinanceRecords.find((record) => record.category === 'Refund');
-  const payoutStatus = payoutFinanceRecord?.status ?? 'Unknown';
-  const hasRefundImpact =
-    Boolean(refundFinanceRecord) ||
+  const payoutCalculation = payoutFinanceRecord?.payoutCalculation ?? null;
+  const refundCalculation = refundFinanceRecord?.payoutCalculation ?? null;
+  const shippingDeductionUnknown =
+    Boolean(financePreview && (financePreview.unknowns.includes('shipping_cost') || financePreview.sourceFields.shippingCost === 'unknown')) ||
+    payoutCalculation?.shippingCostStatus === 'pending_provider_cost';
+  const currentRefundEvidencePresent =
     relatedReturns.length > 0 ||
+    Boolean(refundFinanceRecord) ||
     Boolean(financePreview && (financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0));
-  const refundImpact =
-    isAdmin && financePreview
-      ? financePreview.balance.vendorDebt !== '0.00'
-        ? `Debt ${formatCurrency(financePreview.balance.vendorDebt, financePreview.currency)}`
+  const refundImpactValue = financePreview
+    ? financePreview.unknowns.includes('refund_reversal_amount')
+      ? ORDER_FINANCE_UNKNOWN_VALUE
+      : isPositiveFinanceValue(financePreview.balance.vendorDebt)
+        ? formatCurrency(financePreview.balance.vendorDebt, financePreview.currency)
         : financePreview.sourceFields.returnCount > 0 || financePreview.sourceFields.refundCount > 0
-          ? 'Reflected in preview'
-          : 'No return/refund impact'
-      : refundFinanceRecord
-        ? `${refundFinanceRecord.amount} · ${refundFinanceRecord.status}`
-        : relatedReturns.length > 0
-          ? 'Return linked'
-          : 'No return/refund impact';
-  const financeSummaryCards = [
-    { label: 'Order total', value: order.amount },
-    { label: 'Payout status', value: payoutStatus },
-    hasRefundImpact ? { label: 'Refund impact', value: refundImpact } : null,
-  ].filter(Boolean) as Array<{ label: string; value: string }>;
+          ? refundCalculation?.refundImpact ?? refundFinanceRecord?.amount ?? ORDER_FINANCE_UNKNOWN_VALUE
+          : formatCurrency('0.00', financePreview.currency)
+    : refundCalculation?.refundImpact ?? refundFinanceRecord?.amount ?? (currentRefundEvidencePresent ? ORDER_FINANCE_UNKNOWN_VALUE : formatCurrency('0.00'));
+  const financePreviewRows = [
+    {
+      label: 'Gross order amount',
+      value:
+        financePreview
+          ? formatFinancePreviewValue(financePreview.balance.grossSales, financePreview.currency)
+          : payoutCalculation?.grossAmount ?? (isMeaningfulFinanceValue(order.amount) ? order.amount : ORDER_FINANCE_UNKNOWN_VALUE),
+      state: 'Estimated',
+    },
+    {
+      label: 'Commission estimate',
+      value: financePreview
+        ? formatFinancePreviewValue(financePreview.balance.marketplaceCommission, financePreview.currency, {
+            unknown: financePreview.unknowns.includes('commission_rate'),
+          })
+        : payoutCalculation?.commission ?? ORDER_FINANCE_UNKNOWN_VALUE,
+      state: 'Estimated',
+    },
+    {
+      label: 'Shipping deduction',
+      value: financePreview
+        ? formatFinancePreviewValue(financePreview.balance.shippingCostReserved, financePreview.currency, {
+            unknown: shippingDeductionUnknown,
+          })
+        : shippingDeductionUnknown
+          ? ORDER_FINANCE_UNKNOWN_VALUE
+          : payoutCalculation?.shippingDeduction ?? ORDER_FINANCE_UNKNOWN_VALUE,
+      state: 'Estimated',
+    },
+    {
+      label: 'Refund impact',
+      value: refundImpactValue,
+      state: 'Estimated',
+    },
+    {
+      label: 'Estimated settlement',
+      value: financePreview
+        ? formatFinancePreviewValue(financePreview.balance.netVendorPosition, financePreview.currency, {
+            unknown: financePreview.unknowns.includes('vendor_payable'),
+          })
+        : payoutCalculation?.estimatedPayout ?? ORDER_FINANCE_UNKNOWN_VALUE,
+      state: 'Estimated',
+    },
+  ].map((row) => ({
+    ...row,
+    state: row.value === ORDER_FINANCE_UNKNOWN_VALUE ? ORDER_FINANCE_UNKNOWN_VALUE : row.state,
+  }));
   const financeUnknownIndicators = isAdmin
     ? [
         ...(financeSummaryUnknowns.length ? financeSummaryUnknowns : []),
         financePreview?.sourceFields.shippingCost === 'unknown' ? 'shipping_cost' : null,
         !financePreview ? 'ledger_preview_unavailable' : null,
       ].filter(Boolean) as string[]
-    : ['finance_preview_admin_only'];
+    : [];
   const summaryCards = [
     {
       label: 'Allocation status',
@@ -5093,25 +5161,29 @@ export function OrderDetailPage() {
             </div>
           </article>
 
-          <article className="order-detail-card-v2 order-financial-summary-card order-workspace-panel">
+          <article
+            className="order-detail-card-v2 order-financial-summary-card order-workspace-panel"
+            aria-label="Order finance preview"
+          >
             <div className="order-card-heading">
               <div>
-                <h2>Financial summary</h2>
-                <p>Read-only operational estimate.</p>
+                <h2>Settlement preview</h2>
+                <p>{ORDER_FINANCE_HELPER_COPY}</p>
               </div>
               <span className="order-preview-badge">Preview</span>
             </div>
-            <div className="order-financial-impact-grid">
-              {financeSummaryCards.map((card) => (
-                <div key={card.label}>
-                  <span>{card.label}</span>
-                  <strong>{card.value}</strong>
+            <div className="order-financial-impact-grid order-finance-preview-grid">
+              {financePreviewRows.map((row) => (
+                <div key={row.label}>
+                  <span>{row.label}</span>
+                  <strong>{row.value}</strong>
+                  <em>{row.state}</em>
                 </div>
               ))}
             </div>
             {financeUnknownIndicators.length ? (
               <div className="finance-inline-unknowns" aria-label="Finance unknown indicators">
-                <span>Unknown</span>
+                <span>Unknown inputs</span>
                 {Array.from(new Set(financeUnknownIndicators)).map((unknown) => (
                   <strong key={unknown}>{toTitleCaseLabel(unknown.replace(/_/g, ' '))}</strong>
                 ))}

@@ -1778,8 +1778,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Overview' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Shipment & delivery' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: /Line items/ })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Financial summary' })).toBeInTheDocument();
-    expect(screen.getByText('Payout status')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Settlement preview' })).toBeInTheDocument();
+    expect(screen.getByText('Gross order amount')).toBeInTheDocument();
+    expect(screen.getByText('Estimated settlement')).toBeInTheDocument();
     expect(screen.queryByText('Estimated marketplace commission')).not.toBeInTheDocument();
     expect(screen.queryByText('Shipping cost status')).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Linked records' })).toBeInTheDocument();
@@ -2139,6 +2140,23 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
+    const settlementPreview = await screen.findByLabelText('Order finance preview');
+    expect(within(settlementPreview).getByRole('heading', { name: 'Settlement preview' })).toBeInTheDocument();
+    expect(settlementPreview).toHaveTextContent(
+      'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.',
+    );
+    expect(within(settlementPreview).getByText('Gross order amount')).toBeInTheDocument();
+    expect(within(settlementPreview).getByText('Commission estimate')).toBeInTheDocument();
+    expect(within(settlementPreview).getByText('Shipping deduction')).toBeInTheDocument();
+    expect(within(settlementPreview).getByText('Refund impact')).toBeInTheDocument();
+    expect(within(settlementPreview).getByText('Estimated settlement')).toBeInTheDocument();
+    expect(settlementPreview).toHaveTextContent(/TRY\s*4,999\.00/);
+    expect(settlementPreview).toHaveTextContent(/TRY\s*499\.90/);
+    expect(settlementPreview).toHaveTextContent(/TRY\s*4,499\.10/);
+    expect(within(settlementPreview).getAllByText('Unknown').length).toBeGreaterThan(0);
+    expect(within(settlementPreview).getAllByText('Estimated').length).toBeGreaterThan(0);
+    expect(settlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
+
     expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
     expect(screen.getByText('Read-only simulation. Not payout, refund, invoice, or tax truth.')).toBeInTheDocument();
     expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
@@ -2190,7 +2208,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     await screen.findByText('Contact support');
+    const vendorSettlementPreview = screen.getByLabelText('Order finance preview');
+    expect(vendorSettlementPreview).toHaveTextContent('Settlement preview');
+    expect(vendorSettlementPreview).toHaveTextContent('Gross order amount');
+    expect(vendorSettlementPreview).toHaveTextContent('Unknown');
+    expect(vendorSettlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
     expect(screen.queryByLabelText('Finance ledger preview')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Finance unknown indicators')).not.toBeInTheDocument();
   });
 
   it('shows admin support diagnostics copy tooling without exposing it to vendors', async () => {

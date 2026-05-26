@@ -6225,6 +6225,10 @@ h3 {
   background: #f8fafc;
 }
 
+.order-finance-preview-grid {
+  grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
+}
+
 .order-financial-impact-grid div,
 .order-secondary-detail-grid div,
 .order-shipping-state-grid div {
@@ -6252,6 +6256,15 @@ h3 {
   color: #0f172a;
   font-size: 0.9rem;
   line-height: 1.25;
+}
+
+.order-financial-impact-grid em {
+  color: #64748b;
+  font-size: 0.66rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
 }
 
 .order-preview-badge {
