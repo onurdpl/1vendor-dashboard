@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
@@ -30,7 +30,7 @@ import {
   updateVendorFinancialProfile,
 } from '../features/finance/api';
 import { useAppReadiness } from '../lib/appReadiness';
-import type { FinanceTransaction, OperationsRecommendation } from '../lib/api/contracts';
+import type { FinanceTransaction, OperationsRecommendation, SupportTicket } from '../lib/api/contracts';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
@@ -506,9 +506,9 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
       status: normalizeFinanceStatus(record.status),
     },
     {
-      label: record.settlement?.payoutReady ? 'Pending review' : 'Settlement estimate pending',
+      label: record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement estimate pending',
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
-      status: record.settlement?.payoutReady ? 'Pending review' : 'Pending',
+      status: record.settlement?.payoutReady ? 'Review' : 'Preview',
     },
     record.payoutBatch
       ? {
@@ -518,6 +518,58 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
         }
       : null,
   ].filter((item): item is { label: string; at: string | null; status: string } => Boolean(item));
+}
+
+function formatSupportStatus(status: SupportTicket['status']) {
+  return status
+    .toLowerCase()
+    .split('_')
+    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
+    .join(' ');
+}
+
+function formatSupportPriority(priority: SupportTicket['priority']) {
+  return `${priority.charAt(0).toUpperCase()}${priority.slice(1)} priority`;
+}
+
+function isOpenSupportTicket(ticket: SupportTicket) {
+  return ticket.status !== 'RESOLVED' && ticket.status !== 'CLOSED';
+}
+
+function getSupportLatestActivityAt(ticket: SupportTicket) {
+  return ticket.lastReplyAt ?? ticket.updatedAt ?? ticket.createdAt;
+}
+
+function getLatestSupportTicket(tickets: SupportTicket[]) {
+  return [...tickets].sort((left, right) => {
+    const leftTime = new Date(getSupportLatestActivityAt(left)).getTime();
+    const rightTime = new Date(getSupportLatestActivityAt(right)).getTime();
+    return rightTime - leftTime;
+  })[0] ?? null;
+}
+
+function getSupportActivitySummary(tickets: SupportTicket[]) {
+  const latestTicket = getLatestSupportTicket(tickets);
+  if (!latestTicket) {
+    return null;
+  }
+
+  const ticketCount = tickets.length;
+  const openCount = tickets.filter(isOpenSupportTicket).length;
+  const latestStatus = formatSupportStatus(latestTicket.status);
+  const highPriority = tickets.some((ticket) => ticket.priority === 'high' || Boolean(ticket.escalatedAt));
+  const ticketLabel = `${ticketCount} linked ticket${ticketCount === 1 ? '' : 's'}`;
+  const activeLabel = openCount > 0 ? ` · ${openCount} active` : '';
+
+  return {
+    latestTicket,
+    latestStatus,
+    latestAt: getSupportLatestActivityAt(latestTicket),
+    ticketCount,
+    ticketLabel,
+    description: `${ticketLabel} · Latest status: ${latestStatus}${activeLabel}`,
+    tone: highPriority ? ('warning' as const) : ('neutral' as const),
+  };
 }
 
 export function FinancePage() {
@@ -780,6 +832,9 @@ export function FinancePage() {
         : [],
     [currentVendor.vendorId, isAdmin, selectedRecord, supportTickets],
   );
+  const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
+  const hasSelectedRecordActions =
+    Boolean(selectedRecord?.invoiceExecution?.providerPdfUrl) || Boolean(isAdmin && selectedRecord?.category === 'Invoice');
   const financeCrossLinks: OperationalLinkInput[] = [];
   const financeTimelineEvents: OperationalEventInput[] = [];
   if (selectedRecord) {
@@ -811,17 +866,17 @@ export function FinancePage() {
         tone: returnHref ? 'warning' : 'neutral',
       });
     }
-    financeCrossLinks.push(
-      ...relatedSupportTickets.map((ticket) => ({
-        id: `support-${ticket.id}`,
+    if (supportActivitySummary) {
+      financeCrossLinks.push({
+        id: `support-group-${selectedRecord.id}`,
         eyebrow: 'Support',
-        title: ticket.subject,
-        description: ticket.vendorName ?? ticket.vendorId,
-        href: `${supportBasePath}/${ticket.id}`,
-        status: ticket.status.replace(/_/g, ' '),
-        tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
-      })),
-    );
+        title: 'Support activity',
+        description: supportActivitySummary.description,
+        href: `${supportBasePath}/${supportActivitySummary.latestTicket.id}`,
+        status: supportActivitySummary.latestStatus,
+        tone: supportActivitySummary.tone,
+      });
+    }
     financeTimelineEvents.push(
       ...getFinanceTimelineItems(selectedRecord).map((item) => ({
         id: `finance-${selectedRecord.id}-${item.label}`,
@@ -831,27 +886,18 @@ export function FinancePage() {
         status: item.status,
         tone: selectedRecord.category === 'Refund' ? ('warning' as const) : ('success' as const),
       })),
-      ...relatedSupportTickets.map((ticket) => ({
-        id: `support-${ticket.id}`,
-        title: 'Support ticket opened',
-        description: ticket.subject,
-        at: ticket.createdAt,
-        status: ticket.status.replace(/_/g, ' '),
-        tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
-        href: `${supportBasePath}/${ticket.id}`,
-      })),
-      ...relatedSupportTickets
-        .filter((ticket) => Boolean(ticket.lastReplyAt))
-        .map((ticket) => ({
-          id: `support-reply-${ticket.id}`,
-          title: 'Support reply added',
-          description: ticket.subject,
-          at: ticket.lastReplyAt,
-          status: ticket.lastReplyByRole ?? 'Reply',
-          tone: 'neutral' as const,
-          href: `${supportBasePath}/${ticket.id}`,
-        })),
     );
+    if (supportActivitySummary) {
+      financeTimelineEvents.push({
+        id: `support-group-${selectedRecord.id}`,
+        title: 'Support activity',
+        description: supportActivitySummary.description,
+        at: supportActivitySummary.latestAt,
+        status: supportActivitySummary.ticketLabel,
+        tone: supportActivitySummary.tone,
+        href: `${supportBasePath}/${supportActivitySummary.latestTicket.id}`,
+      });
+    }
   }
   const financeRecommendations: OperationsRecommendation[] = [];
   if (selectedRecord && isAdmin) {
@@ -1382,62 +1428,81 @@ export function FinancePage() {
               </div>
 
               <OperationalTimeline
-                title="Operational timeline"
-                subtitle="Finance and support activity for this row."
+                title="Finance timeline"
+                subtitle="Primary settlement lifecycle with grouped support activity."
                 events={financeTimelineEvents}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
 
               <OperationalLinkCards
                 title="Related records"
-                subtitle="Order, return, and support context for this finance row."
+                subtitle="Grouped order, return, and support context for this finance row."
                 links={financeCrossLinks}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
 
-              <div className="finance-detail-card finance-actions-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Actions</h4>
-                </div>
-                <OperationalActionGroup>
-                  {selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                    <a className="button button-secondary button-compact" href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">
-                      Download PDF
-                    </a>
-                  ) : null}
-                  {isAdmin && selectedRecord.category === 'Invoice' ? (
-                    <>
-                      <button
-                        type="button"
-                        className="button button-primary button-compact"
-                        disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
-                        onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
-                      >
-                        {createInvoiceMutation.isPending ? 'Syncing...' : 'Sync accounting draft'}
-                      </button>
-                      <button
-                        type="button"
-                        className="button button-secondary button-compact"
-                        disabled={
-                          retryInvoiceMutation.isPending ||
-                          !selectedRecord.invoiceExecution ||
-                          !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
-                        }
-                        onClick={() => {
-                          if (selectedRecord.invoiceExecution) {
-                            retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
+              {relatedSupportTickets.length > 1 ? (
+                <details className="finance-support-history">
+                  <summary>
+                    <span>Support history</span>
+                    <StatusBadge tone="neutral">{relatedSupportTickets.length} records</StatusBadge>
+                  </summary>
+                  <div className="finance-support-history-list">
+                    {relatedSupportTickets.map((ticket) => (
+                      <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                        <span>
+                          <strong>{ticket.subject}</strong>
+                          <small>{formatSupportStatus(ticket.status)} · {formatSupportPriority(ticket.priority)}</small>
+                        </span>
+                        <small>{formatDate(getSupportLatestActivityAt(ticket))}</small>
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+              ) : null}
+
+              {hasSelectedRecordActions ? (
+                <div className="finance-detail-card finance-actions-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Actions</h4>
+                  </div>
+                  <OperationalActionGroup>
+                    {selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                      <a className="button button-secondary button-compact" href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">
+                        Download PDF
+                      </a>
+                    ) : null}
+                    {isAdmin && selectedRecord.category === 'Invoice' ? (
+                      <>
+                        <button
+                          type="button"
+                          className="button button-primary button-compact"
+                          disabled={createInvoiceMutation.isPending || Boolean(selectedRecord.invoiceExecution)}
+                          onClick={() => createInvoiceMutation.mutate(selectedRecord.id)}
+                        >
+                          {createInvoiceMutation.isPending ? 'Syncing...' : 'Sync accounting draft'}
+                        </button>
+                        <button
+                          type="button"
+                          className="button button-secondary button-compact"
+                          disabled={
+                            retryInvoiceMutation.isPending ||
+                            !selectedRecord.invoiceExecution ||
+                            !['failed', 'unknown'].includes(selectedRecord.invoiceExecution.status)
                           }
-                        }}
-                      >
-                        {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry accounting sync'}
-                      </button>
-                    </>
-                  ) : null}
-                  {!selectedRecord.invoiceExecution?.providerPdfUrl && !(isAdmin && selectedRecord.category === 'Invoice') ? (
-                    <StatusBadge tone="neutral">No actions available</StatusBadge>
-                  ) : null}
-                </OperationalActionGroup>
-              </div>
+                          onClick={() => {
+                            if (selectedRecord.invoiceExecution) {
+                              retryInvoiceMutation.mutate(selectedRecord.invoiceExecution.id);
+                            }
+                          }}
+                        >
+                          {retryInvoiceMutation.isPending ? 'Retrying...' : 'Retry accounting sync'}
+                        </button>
+                      </>
+                    ) : null}
+                  </OperationalActionGroup>
+                </div>
+              ) : null}
 
               {isAdmin && selectedRecord.category === 'Invoice' ? (
                 <form className="finance-shipping-cost-form" aria-label="Attach shipping cost" onSubmit={handleAttachShippingCost}>

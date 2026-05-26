@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FinancePage } from './FinancePage';
-import type { FinanceDashboard } from '../lib/api/contracts';
+import type { FinanceDashboard, SupportTicket } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
@@ -158,6 +158,48 @@ const financeDashboard: FinanceDashboard = {
     },
   ],
 };
+
+function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
+  return {
+    id: 'ticket-finance-1',
+    createdAt: '2026-05-13T10:00:00Z',
+    updatedAt: '2026-05-13T10:00:00Z',
+    createdByUserId: 'vendor-user',
+    createdByRole: 'VENDOR',
+    vendorId: 'demo-vendor-a',
+    vendorName: 'Demo Vendor A',
+    subject: 'Help with order #1021',
+    message: 'Finance review request',
+    priority: 'normal',
+    status: 'OPEN',
+    category: 'PAYOUT',
+    assigneeUserId: null,
+    assigneeName: null,
+    vendorUnreadCount: 0,
+    adminUnreadCount: 0,
+    lastReplyAt: null,
+    lastReplyByRole: null,
+    firstResponseDueAt: null,
+    nextResponseDueAt: null,
+    escalatedAt: null,
+    escalationReason: null,
+    sla: null,
+    contextType: 'general',
+    contextId: null,
+    contextSummary: {
+      orderNumber: '1021',
+    },
+    contextSnapshot: {
+      financeLedgerEntryId: 'ledger-sale-recorded',
+      orderNumber: '1021',
+    },
+    resolvedAt: null,
+    closedAt: null,
+    notes: [],
+    replies: [],
+    ...overrides,
+  };
+}
 
 function buildInvoiceExecution(
   overrides: Partial<NonNullable<FinanceDashboard['transactions'][number]['invoiceExecution']>> = {},
@@ -452,6 +494,51 @@ describe('FinancePage control center', () => {
       'href',
       `/returns?refundId=${encodeURIComponent('gid://shopify/Refund/501')}`,
     );
+  });
+
+  it('groups duplicate support activity in finance timeline and linked records', async () => {
+    listAdminSupportTicketsMock.mockResolvedValue([
+      supportTicket({ id: 'ticket-finance-1', status: 'OPEN', updatedAt: '2026-05-13T10:30:00Z' }),
+      supportTicket({ id: 'ticket-finance-2', status: 'IN_REVIEW', updatedAt: '2026-05-13T11:30:00Z' }),
+      supportTicket({
+        id: 'ticket-finance-3',
+        priority: 'high',
+        status: 'IN_REVIEW',
+        updatedAt: '2026-05-13T12:30:00Z',
+        lastReplyAt: '2026-05-13T12:35:00Z',
+        lastReplyByRole: 'ADMIN',
+      }),
+    ]);
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    expect(await screen.findByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
+    expect(screen.getByText('Order recorded')).toBeInTheDocument();
+    expect(screen.getByText('Settlement awaiting review')).toBeInTheDocument();
+    expect(screen.getAllByText('Support activity').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/3 linked tickets/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Support ticket opened')).not.toBeInTheDocument();
+    expect(screen.queryByText('Support reply added')).not.toBeInTheDocument();
+
+    const relatedRecordsCard = screen.getByRole('heading', { name: 'Related records' }).closest('.operational-links-card');
+    expect(relatedRecordsCard).toBeTruthy();
+    expect(within(relatedRecordsCard as HTMLElement).getByText('Support activity')).toBeInTheDocument();
+    expect(within(relatedRecordsCard as HTMLElement).queryByText('Help with order #1021')).not.toBeInTheDocument();
+    expect(screen.getByText('Support history')).toBeInTheDocument();
+    expect(screen.getByText('3 records')).toBeInTheDocument();
+  });
+
+  it('hides the empty finance actions section when no action is available', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[1]);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Order #1001' })).toBeInTheDocument());
+    expect(screen.queryByRole('heading', { name: 'Actions' })).not.toBeInTheDocument();
+    expect(screen.queryByText('No actions available')).not.toBeInTheDocument();
   });
 
   it('shows vendor-friendly commission and tax deductions in compact ledger detail', async () => {
