@@ -1580,6 +1580,7 @@ export function OrderDetailPage() {
   const [navlungoUpdateConfirmed, setNavlungoUpdateConfirmed] = useState(false);
   const [navlungoUpdateForm, setNavlungoUpdateForm] = useState<NavlungoUpdateFormState>({});
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
+  const settlementPreviewRef = useRef<HTMLElement | null>(null);
   const tryOtoAutoRefreshAttemptsRef = useRef<Record<string, number>>({});
   const tryOtoAutoRefreshTimerRef = useRef<number | null>(null);
   const tryOtoAutoRefreshInFlightRef = useRef(false);
@@ -2712,6 +2713,22 @@ export function OrderDetailPage() {
     refreshShipmentStatusMutationRef.current = refreshShipmentStatusMutation;
     refetchOrderRef.current = refetch;
   }, [refreshShipmentStatusMutation, refetch]);
+
+  useEffect(() => {
+    if (location.hash !== '#settlement-preview' || !order) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const settlementPreview = settlementPreviewRef.current;
+      if (!settlementPreview) {
+        return;
+      }
+
+      settlementPreview.scrollIntoView?.({ block: 'start' });
+      settlementPreview.focus({ preventScroll: true });
+    });
+  }, [location.hash, order]);
 
   useEffect(() => {
     if (tryOtoAutoRefreshTimerRef.current !== null) {
@@ -5310,8 +5327,11 @@ export function OrderDetailPage() {
           </article>
 
           <article
+            id="settlement-preview"
+            ref={settlementPreviewRef}
             className="order-detail-card-v2 order-financial-summary-card order-workspace-panel"
             aria-label="Order finance preview"
+            tabIndex={-1}
           >
             <div className="order-card-heading">
               <div>

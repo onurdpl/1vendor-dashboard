@@ -2173,6 +2173,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const settlementPreview = await screen.findByLabelText('Order finance preview');
+    expect(settlementPreview).toHaveAttribute('id', 'settlement-preview');
     expect(within(settlementPreview).getByRole('heading', { name: 'Settlement preview' })).toBeInTheDocument();
     expect(settlementPreview).toHaveTextContent(
       'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.',

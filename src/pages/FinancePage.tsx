@@ -160,6 +160,15 @@ function buildFinanceHref(record: Pick<FinanceTransaction, 'id'>) {
   return `/finance?ledgerId=${encodeURIComponent(record.id)}`;
 }
 
+function buildOrderSettlementHref(record: FinanceTransaction) {
+  const orderHref = buildOrdersHref(record);
+  if (!orderHref?.startsWith('/orders/')) {
+    return null;
+  }
+
+  return `${orderHref}#settlement-preview`;
+}
+
 function readFirstSearchParam(searchParams: URLSearchParams, names: string[]) {
   for (const name of names) {
     const value = searchParams.get(name)?.trim();
@@ -835,6 +844,7 @@ export function FinancePage() {
   const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
   const hasSelectedRecordActions =
     Boolean(selectedRecord?.invoiceExecution?.providerPdfUrl) || Boolean(isAdmin && selectedRecord?.category === 'Invoice');
+  const selectedOrderSettlementHref = selectedRecord ? buildOrderSettlementHref(selectedRecord) : null;
   const financeCrossLinks: OperationalLinkInput[] = [];
   const financeTimelineEvents: OperationalEventInput[] = [];
   if (selectedRecord) {
@@ -1121,7 +1131,9 @@ export function FinancePage() {
                   description="Adjust the status, type, or search filters to review settlement estimates."
                 />
               </OperationalTableRow>
-            ) : filteredRecords.map((record) => (
+            ) : filteredRecords.map((record) => {
+              const orderSettlementHref = buildOrderSettlementHref(record);
+              return (
                 <OperationalTableRow
                   key={record.id}
                   selected={selectedRecord?.id === record.id}
@@ -1159,12 +1171,18 @@ export function FinancePage() {
                     <small>{formatDateParts(record.date).time}</small>
                   </span>
                   <OperationalActionGroup>
+                    {orderSettlementHref ? (
+                      <Link className="button button-secondary button-compact" to={orderSettlementHref}>
+                        View order settlement
+                      </Link>
+                    ) : null}
                     <button type="button" className="button button-secondary button-compact" onClick={() => setSelectedRecordId(record.id)}>
                       View
                     </button>
                   </OperationalActionGroup>
                 </OperationalTableRow>
-              ))}
+              );
+            })}
           </OperationalTable>
 
           <div className="finance-info-footer">
@@ -1290,6 +1308,11 @@ export function FinancePage() {
         >
           {selectedRecord ? (
             <>
+              {selectedOrderSettlementHref ? (
+                <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedOrderSettlementHref}>
+                  View order settlement
+                </Link>
+              ) : null}
               <div className="op-detail-status-row">
                 <StatusBadge tone={getPayoutActivityTone(selectedRecord)}>{getPayoutActivityStatusLabel(selectedRecord)}</StatusBadge>
                 {selectedRecord.category === 'Invoice' ? (

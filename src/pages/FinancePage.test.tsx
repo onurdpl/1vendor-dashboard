@@ -159,6 +159,17 @@ const financeDashboard: FinanceDashboard = {
   ],
 };
 
+const financeDashboardWithOrderSettlementRoute: FinanceDashboard = {
+  ...financeDashboard,
+  transactions: [
+    {
+      ...financeDashboard.transactions[0],
+      ...({ allocationId: 'alloc-finance-1021' } as Record<string, string>),
+    },
+    ...financeDashboard.transactions.slice(1),
+  ],
+};
+
 function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
   return {
     id: 'ticket-finance-1',
@@ -343,6 +354,25 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
     expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
     expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
+  });
+
+  it('renders order settlement deep links for finance rows with order detail route ids', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboardWithOrderSettlementRoute);
+
+    const { container } = renderFinancePage();
+
+    expect((await screen.findAllByText('#1021')).length).toBeGreaterThan(0);
+    const financeTable = container.querySelector('.finance-op-table');
+    expect(financeTable).toBeTruthy();
+    const rowSettlementLink = within(financeTable as HTMLElement).getByRole('link', { name: 'View order settlement' });
+    expect(rowSettlementLink).toHaveAttribute('href', '/orders/alloc-finance-1021#settlement-preview');
+
+    const inspector = container.querySelector('.op-side-panel');
+    expect(inspector).toBeTruthy();
+    expect(within(inspector as HTMLElement).getByRole('link', { name: 'View order settlement' })).toHaveAttribute(
+      'href',
+      '/orders/alloc-finance-1021#settlement-preview',
+    );
   });
 
   it('opens the finance detail panel for a selected ledger row', async () => {
