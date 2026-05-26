@@ -123,7 +123,7 @@ function deferred<T>() {
 }
 
 function getNotificationCenter() {
-  const headings = screen.getAllByRole('heading', { name: /notification center/i });
+  const headings = screen.getAllByRole('heading', { name: /notification (center|history)/i });
   const heading = headings[headings.length - 1];
   const section = heading.closest('section');
   if (!section) {
@@ -185,7 +185,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    expect(screen.getAllByText('Operational priority queue')).toHaveLength(1);
+    expect(screen.getAllByText('Operational queues')).toHaveLength(1);
     expect(screen.queryByText('Operational signals')).not.toBeInTheDocument();
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
@@ -199,10 +199,29 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(screen.getByRole('heading', { name: 'Operations dashboard' })).toBeInTheDocument();
-    expect(screen.getByText('Operational priority queue')).toBeInTheDocument();
+    expect(screen.getByText('Needs attention')).toBeInTheDocument();
+    expect(screen.getByText('Operational queues')).toBeInTheDocument();
+    expect(screen.getByLabelText('Dashboard action skeleton')).toBeInTheDocument();
     expect(screen.getByLabelText('Dashboard priority skeleton')).toBeInTheDocument();
     expect(screen.getByText('Vendor orders')).toBeInTheDocument();
     expect(screen.queryByText('Loading operational overview')).not.toBeInTheDocument();
+  });
+
+  it('orders dashboard hierarchy from action work to queues before passive insight history', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    const { container } = renderDashboardPage();
+
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    const pageText = container.textContent ?? '';
+    expect(pageText.indexOf('Needs attention')).toBeLessThan(pageText.indexOf('Operational queues'));
+    expect(pageText.indexOf('Operational queues')).toBeLessThan(pageText.indexOf('Passive insights'));
+    expect(pageText.indexOf('Passive insights')).toBeLessThan(pageText.indexOf('Finance snapshot'));
+    expect(screen.getByText('Fulfillment queue')).toBeInTheDocument();
+    expect(screen.getByText('Returns queue')).toBeInTheDocument();
+    expect(screen.getByText('Finance review queue')).toBeInTheDocument();
+    expect(screen.getByText('Support queue')).toBeInTheDocument();
+    expect(screen.getByText('Automation queue')).toBeInTheDocument();
   });
 
   it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {
@@ -231,8 +250,8 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
     expect(listNotificationsMock).toHaveBeenCalledWith(null);
-    expect(screen.getByText('Admin notification center')).toBeInTheDocument();
-    expect(screen.getByText('Global admin operational alerts.')).toBeInTheDocument();
+    expect(screen.getByText('Admin notification history')).toBeInTheDocument();
+    expect(screen.getByText('Grouped global admin alert history.')).toBeInTheDocument();
   });
 
   it('loads vendor notifications with the selected vendor scope for vendor users', async () => {
@@ -259,7 +278,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    expect(await screen.findByText(/notification center/i)).toBeInTheDocument();
+    expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
     expect(screen.getByText('Shipping cost is pending')).toBeInTheDocument();
     expect(screen.getByText('External-provider shipping cost is missing.')).toBeInTheDocument();
     expect(screen.getByText('shipping cost')).toBeInTheDocument();

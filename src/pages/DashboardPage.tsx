@@ -437,12 +437,42 @@ export function DashboardPage() {
   const groupedNotifications = groupNotifications(notificationView.notifications);
   const visibleNotificationGroups = groupedNotifications.slice(0, 4);
   const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
-  const blockedAllocations = getPriorityValue(priorityWork, 'Blocked allocations');
-  const refundAttention = getPriorityValue(priorityWork, 'Refund attention');
-  const needsAttention = blockedAllocations + refundAttention;
-  const attentionItems = priorityWork.filter((item) => getPriorityValue([item], item.label) > 0);
+  const operationalActionTotal = priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
   const dashboardKpis = dashboardStats.slice(0, 5);
+  const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !dashboard);
+  const queueCards = [
+    {
+      label: 'Fulfillment queue',
+      value: priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '—',
+      description: 'Shipment work waiting for action.',
+      tone: 'fulfillment',
+    },
+    {
+      label: 'Returns queue',
+      value: priorityWork.find((item) => item.label === 'Refund attention')?.value ?? '—',
+      description: 'Return and refund review workload.',
+      tone: 'returns',
+    },
+    {
+      label: 'Finance review queue',
+      value: dashboardView.financeSnapshot?.payoutEstimate ?? dashboardStats.find((stat) => stat.label === 'Payout estimate')?.value ?? '—',
+      description: 'Settlement estimate visibility.',
+      tone: 'finance',
+    },
+    {
+      label: 'Support queue',
+      value: notificationView.summary.unread > 0 ? String(notificationView.summary.unread) : 'Open',
+      description: notificationView.summary.unread > 0 ? 'Unread operational alerts need triage.' : 'Support workspace remains available.',
+      tone: 'support',
+    },
+    {
+      label: 'Automation queue',
+      value: priorityWork.find((item) => item.label === 'Automation signals')?.value ?? '—',
+      description: 'Automation and rule signals.',
+      tone: 'automation',
+    },
+  ];
 
   return (
     <section className="op-page dashboard-command-center dashboard-enterprise-shell">
@@ -462,12 +492,130 @@ export function DashboardPage() {
             <span>Last sync</span>
             <strong>—</strong>
           </div>
-          <StatusBadge tone={needsAttention > 0 ? 'warning' : 'success'}>{needsAttention} Attention</StatusBadge>
+          <StatusBadge tone={operationalActionTotal > 0 ? 'warning' : 'success'}>{operationalActionTotal} Actions</StatusBadge>
         </div>
       </header>
 
-      <div className="dashboard-enterprise-kpi-row">
-        {!appReadiness.ready || (isLoading && !dashboard) ? (
+      <OperationalSection title="Needs attention" description={`${operationalActionTotal} immediate operational actions across fulfillment, returns, refunds, and automation.`}>
+        {isError && !dashboard ? (
+          <SectionErrorRetry
+            title="Operational overview unavailable"
+            description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
+            onRetry={() => void refetchDashboard()}
+          />
+        ) : isDashboardInitialLoading ? (
+          <div className="dashboard-action-grid" aria-label="Dashboard action skeleton">
+            {Array.from({ length: 4 }, (_, index) => (
+              <article key={`dashboard-action-skeleton-${index}`} className="dashboard-action-card op-skeleton-row">
+                <SkeletonText width="52%" />
+                <SkeletonText width="24%" />
+                <SkeletonText width="64%" />
+              </article>
+            ))}
+          </div>
+        ) : priorityWork.length === 0 ? (
+          <EmptyStatePanel title="No attention items" description="No active attention items." />
+        ) : (
+          <div className="dashboard-action-grid">
+            {priorityWork.map((item) => {
+              const value = getPriorityValue([item], item.label);
+              const isActive = value > 0;
+
+              return (
+                <article key={item.label} className={`dashboard-action-card ${item.tone} ${isActive ? 'is-active' : 'is-quiet'}`}>
+                  <div className="dashboard-action-card-top">
+                    <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
+                    <span>{formatPriorityLabel(item.tone)}</span>
+                  </div>
+                  <strong>{item.label}</strong>
+                  <div className="dashboard-action-card-count">
+                    <span>{item.value}</span>
+                    <StatusBadge tone={isActive ? 'warning' : 'success'}>{isActive ? 'Action needed' : 'Clear'}</StatusBadge>
+                  </div>
+                  {item.description ? <p>{item.description}</p> : null}
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </OperationalSection>
+
+      <OperationalSection title="Operational queues" description="Live work queues before passive reporting.">
+        <div className="dashboard-queue-card-grid">
+          {queueCards.map((queue) => (
+            <article key={queue.label} className={`dashboard-queue-card dashboard-queue-${queue.tone}`}>
+              <span>{queue.label}</span>
+              <strong>{isDashboardInitialLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
+              <small>{queue.description}</small>
+            </article>
+          ))}
+        </div>
+        {isError && !dashboard ? (
+          <SectionErrorRetry
+            title="Operational queues unavailable"
+            description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
+            onRetry={() => void refetchDashboard()}
+          />
+        ) : isDashboardInitialLoading ? (
+          <div className="dashboard-priority-table" aria-label="Dashboard priority skeleton">
+            <div className="dashboard-priority-head" aria-hidden="true">
+              <span>Priority</span>
+              <span>Type</span>
+              <span>Count</span>
+              <span>Oldest</span>
+              <span>Status</span>
+              <span>Action</span>
+            </div>
+            {Array.from({ length: 3 }, (_, index) => (
+              <article key={`dashboard-priority-skeleton-${index}`} className="dashboard-priority-row op-skeleton-row">
+                <SkeletonText width="56%" />
+                <SkeletonText width="70%" />
+                <SkeletonText width="28%" />
+                <SkeletonText width="42%" />
+                <SkeletonText width="48%" />
+                <SkeletonText width="36%" />
+              </article>
+            ))}
+          </div>
+        ) : priorityWork.length === 0 ? (
+          <EmptyStatePanel title="No records available" description="No records available." />
+        ) : (
+          <div className="dashboard-priority-table">
+            <div className="dashboard-priority-head" aria-hidden="true">
+              <span>Priority</span>
+              <span>Type</span>
+              <span>Count</span>
+              <span>Oldest</span>
+              <span>Status</span>
+              <span>Action</span>
+            </div>
+            {priorityWork.map((item) => (
+              <article key={item.label} className="dashboard-priority-row">
+                <div className="dashboard-priority-cell">
+                  <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
+                  <span>{formatPriorityLabel(item.tone)}</span>
+                </div>
+                <div>
+                  <strong>{item.label}</strong>
+                  {item.description ? <p>{item.description}</p> : null}
+                </div>
+                <strong className="dashboard-count-value">{item.value}</strong>
+                <span className="dashboard-muted-value">—</span>
+                <span className="dashboard-muted-value">—</span>
+                <span className="dashboard-muted-value">—</span>
+              </article>
+            ))}
+          </div>
+        )}
+      </OperationalSection>
+
+      <div className="dashboard-passive-heading">
+        <span>Passive insights</span>
+        <p>Reporting, history, and notification context sit below immediate action work.</p>
+      </div>
+
+      <div className="dashboard-enterprise-kpi-row dashboard-passive-kpis">
+        {isDashboardInitialLoading ? (
           <MetricSkeletonGrid labels={['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate']} />
         ) : dashboardKpis.map((stat) => (
           <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
@@ -478,73 +626,10 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="dashboard-enterprise-grid">
+      <div className="dashboard-enterprise-grid dashboard-passive-grid">
         <div className="dashboard-enterprise-main">
-          <OperationalSection
-            title="Operational priority queue"
-            description="High priority operational items that require attention."
-          >
-            {isError && !dashboard ? (
-              <SectionErrorRetry
-                title="Operational overview unavailable"
-                description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
-                onRetry={() => void refetchDashboard()}
-              />
-            ) : !appReadiness.ready || (isLoading && !dashboard) ? (
-              <div className="dashboard-priority-table" aria-label="Dashboard priority skeleton">
-                <div className="dashboard-priority-head" aria-hidden="true">
-                  <span>Priority</span>
-                  <span>Type</span>
-                  <span>Count</span>
-                  <span>Oldest</span>
-                  <span>Status</span>
-                  <span>Action</span>
-                </div>
-                {Array.from({ length: 3 }, (_, index) => (
-                  <article key={`dashboard-priority-skeleton-${index}`} className="dashboard-priority-row op-skeleton-row">
-                    <SkeletonText width="56%" />
-                    <SkeletonText width="70%" />
-                    <SkeletonText width="28%" />
-                    <SkeletonText width="42%" />
-                    <SkeletonText width="48%" />
-                    <SkeletonText width="36%" />
-                  </article>
-                ))}
-              </div>
-            ) : priorityWork.length === 0 ? (
-              <EmptyStatePanel title="No records available" description="No records available." />
-            ) : (
-              <div className="dashboard-priority-table">
-                <div className="dashboard-priority-head" aria-hidden="true">
-                  <span>Priority</span>
-                  <span>Type</span>
-                  <span>Count</span>
-                  <span>Oldest</span>
-                  <span>Status</span>
-                  <span>Action</span>
-                </div>
-                {priorityWork.map((item) => (
-                  <article key={item.label} className="dashboard-priority-row">
-                    <div className="dashboard-priority-cell">
-                      <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
-                      <span>{formatPriorityLabel(item.tone)}</span>
-                    </div>
-                    <div>
-                      <strong>{item.label}</strong>
-                      {item.description ? <p>{item.description}</p> : null}
-                    </div>
-                    <strong className="dashboard-count-value">{item.value}</strong>
-                    <span className="dashboard-muted-value">—</span>
-                    <span className="dashboard-muted-value">—</span>
-                    <span className="dashboard-muted-value">—</span>
-                  </article>
-                ))}
-              </div>
-            )}
-          </OperationalSection>
-
-          <OperationalSection title="Recent operational events" description="Latest events from returns, refunds, and automation.">
-            {!appReadiness.ready || (isLoading && !dashboard) ? (
+          <OperationalSection title="Recent operational events" description="Grouped historical activity for context.">
+            {isDashboardInitialLoading ? (
               <ul className="dashboard-activity-list dashboard-event-list" aria-label="Dashboard activity skeleton">
                 {Array.from({ length: 3 }, (_, index) => (
                   <li key={`dashboard-activity-skeleton-${index}`} className="op-skeleton-row">
@@ -598,8 +683,8 @@ export function DashboardPage() {
           </OperationalSection>
 
           <OperationalSection
-            title={isAdmin ? 'Admin notification center' : 'Notification center'}
-            description={isAdmin ? 'Global admin operational alerts.' : 'System notifications and operational alerts.'}
+            title={isAdmin ? 'Admin notification history' : 'Notification history'}
+            description={isAdmin ? 'Grouped global admin alert history.' : 'Grouped system notification history.'}
           >
             {notifications ? (
               <div className="notification-center">
@@ -716,34 +801,6 @@ export function DashboardPage() {
         </div>
 
         <aside className="dashboard-enterprise-aside">
-          <OperationalSection title="Needs attention" description={`${needsAttention} items require your attention.`}>
-            {!appReadiness.ready || (isLoading && !dashboard) ? (
-              <div className="dashboard-attention-list" aria-label="Dashboard attention skeleton">
-                {Array.from({ length: 3 }, (_, index) => (
-                  <article key={`dashboard-attention-skeleton-${index}`} className="dashboard-attention-row op-skeleton-row">
-                    <SkeletonText width="70%" />
-                    <SkeletonText width="24%" />
-                  </article>
-                ))}
-              </div>
-            ) : attentionItems.length === 0 ? (
-              <EmptyStatePanel title="No attention items" description="No active attention items." />
-            ) : (
-              <div className="dashboard-attention-list">
-                {attentionItems.map((item) => (
-                  <article key={item.label} className={`dashboard-attention-row ${item.tone}`}>
-                    <span className={`dashboard-status-dot ${getStatusDotTone(item.tone === 'severity-warning' ? 'warning' : item.tone === 'severity-attention' ? 'attention' : 'info')}`} aria-hidden="true" />
-                    <div className="dashboard-attention-copy">
-                      <strong>{item.label}</strong>
-                      {item.description ? <p>{item.description}</p> : null}
-                    </div>
-                    <span className={`severity-chip ${item.tone}`}>{item.value}</span>
-                  </article>
-                ))}
-              </div>
-            )}
-          </OperationalSection>
-
           <OperationalSection title="Finance snapshot" description="Overview of financial performance.">
             <div className="dashboard-status-metric-list dashboard-finance-rows">
               <div className="dashboard-status-metric-row">
@@ -860,7 +917,7 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Pending attention</span>
-            <strong>{needsAttention}</strong>
+            <strong>{operationalActionTotal}</strong>
           </div>
           <div>
             <span>Queue items</span>
