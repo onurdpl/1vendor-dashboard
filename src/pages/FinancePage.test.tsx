@@ -675,9 +675,11 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect((await screen.findAllByText('Invoice visibility incomplete')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Invoice visibility is reconciled from the merchant accounting workflow.')).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Finance control center' })).toBeInTheDocument();
     expect(getInvoiceExecutionResponseSummaryMock).not.toHaveBeenCalled();
+    expect(screen.queryByText('Invoice visibility incomplete')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Invoice visibility is reconciled from the merchant accounting workflow.')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Provider issue summary')).not.toBeInTheDocument();
     expect(screen.queryByText(/Content type:/)).not.toBeInTheDocument();
   });
@@ -756,11 +758,13 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Draft payout review').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
     expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
-    expect(screen.getByText('Latest review artifact')).toBeInTheDocument();
+    expect(screen.getByText('Latest review status')).toBeInTheDocument();
+    expect(screen.queryByText('Latest review artifact')).not.toBeInTheDocument();
+    expect(screen.queryByText('Draft payout review')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
@@ -783,10 +787,54 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
     expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Draft payout review').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
-    expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
+    expect(screen.queryByText('Customer invoice/accounting')).not.toBeInTheDocument();
+    expect(screen.queryByText('Accounting sync')).not.toBeInTheDocument();
+    expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Payable|Balance|Confirmed|Final payout/i)).not.toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
+  });
+
+  it('hides payment evidence internals from vendor finance timeline and statuses', async () => {
+    setCurrentUser({
+      email: 'vendor@demo.com',
+      name: 'Demo Vendor',
+      role: 'vendor',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      payoutBatchSummary: {
+        ...financeDashboard.payoutBatchSummary!,
+        latestBatch: {
+          ...financeDashboard.payoutBatchSummary!.latestBatch!,
+          status: 'paid_placeholder',
+        },
+      },
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutBatch: {
+            ...financeDashboard.transactions[0].payoutBatch!,
+            status: 'paid_placeholder',
+          },
+        },
+        ...financeDashboard.transactions.slice(1),
+      ],
+    });
+
+    renderFinancePage();
+
+    await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
+
+    expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
+    expect(screen.getAllByText('Pending review').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Payment evidence pending')).not.toBeInTheDocument();
+    expect(screen.queryByText('Included in draft review')).not.toBeInTheDocument();
   });
 
   it('communicates negative upcoming payout without enabling vendor actions', async () => {

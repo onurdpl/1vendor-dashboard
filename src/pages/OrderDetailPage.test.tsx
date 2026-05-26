@@ -6662,6 +6662,71 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('recipient@example.test')).not.toBeInTheDocument();
   });
 
+  it('hides payment evidence internals from vendor order finance timeline', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    getFinanceDashboardMock.mockResolvedValueOnce({
+      summary: {
+        grossSales: 'TRY 0.00',
+        refunds: 'TRY 0.00',
+        netRevenue: 'TRY 0.00',
+        platformFee: 'TRY 0.00',
+        payoutEstimate: 'TRY 0.00',
+        totalRevenue: 'TRY 0.00',
+        availableBalance: 'TRY 0.00',
+        pendingPayouts: 'TRY 0.00',
+        refundsThisMonth: 'TRY 0.00',
+      },
+      transactions: [
+        {
+          id: 'finance-payment-evidence-1028',
+          date: '2026-05-15T12:08:00.000Z',
+          description: 'Sale recorded',
+          counterparty: 'Shopify',
+          category: 'Payout',
+          amount: 'TRY 4,999.00',
+          status: 'Pending',
+          shopifyOrderNumber: '#1028',
+          shopifyOrderId: 'gid://shopify/Order/7616544244049',
+          payoutCalculation: {
+            grossAmount: 'TRY 4,999.00',
+            commission: 'TRY 499.90',
+            commissionVat: 'TRY 0.00',
+            shippingDeduction: 'TRY 0.00',
+            refundImpact: 'TRY 0.00',
+            estimatedPayout: 'TRY 4,499.10',
+            shippingApplied: false,
+            shippingMode: 'disabled',
+            profileSource: 'snapshot',
+            commissionPercent: '10.00',
+            commissionVatPercent: '0.00',
+          },
+          payoutBatch: {
+            id: 'batch-payment-evidence-1028',
+            status: 'paid_placeholder',
+            netAmount: 'TRY 4,499.10',
+            createdAt: '2026-05-16T12:08:00.000Z',
+          },
+        },
+      ],
+    });
+
+    renderOrderDetail();
+
+    const financeTimeline = await screen.findByLabelText('Finance timeline');
+    expect(financeTimeline).toHaveTextContent('Settlement preview generated');
+    expect(financeTimeline).toHaveTextContent('Settlement awaiting review');
+    expect(financeTimeline).not.toHaveTextContent('Payment evidence pending');
+    expect(financeTimeline).not.toHaveTextContent('Evidence pending');
+  });
+
   it('matches related returns and finance records across Shopify GID and numeric order ids', async () => {
     setCurrentUser({
       email: 'vendor@example.com',

@@ -65,6 +65,13 @@ type FinanceDeepLinkTarget = {
   value: string;
 };
 
+type FinanceTimelineItem = {
+  label: string;
+  at: string | null;
+  status: string;
+  visibility?: 'admin';
+};
+
 const FINANCE_ESTIMATE_HELPER =
   'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
 const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement review is completed.';
@@ -307,7 +314,7 @@ function getPayoutActivityDetail(record: FinanceTransaction) {
   return 'Settlement preview';
 }
 
-function getPayoutActivityStatusLabel(record: FinanceTransaction) {
+function getPayoutActivityStatusLabel(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
   const status = normalizeFinanceStatus(record.status);
   if (status === 'Failed' || record.settlement?.status === 'held' || record.settlement?.status === 'disputed') {
     return 'Blocked';
@@ -316,7 +323,7 @@ function getPayoutActivityStatusLabel(record: FinanceTransaction) {
     return 'Refund impact';
   }
   if (record.payoutBatch) {
-    return getPayoutBatchStatusLabel(record.payoutBatch.status);
+    return getPayoutBatchStatusLabel(record.payoutBatch.status, audience);
   }
   if (record.settlement?.payoutReady || record.settlement?.status === 'payable' || record.settlement?.status === 'partially_refunded') {
     return 'Pending review';
@@ -327,8 +334,8 @@ function getPayoutActivityStatusLabel(record: FinanceTransaction) {
   return status;
 }
 
-function getPayoutActivityTone(record: FinanceTransaction) {
-  const label = getPayoutActivityStatusLabel(record);
+function getPayoutActivityTone(record: FinanceTransaction, audience: 'admin' | 'vendor' = 'admin') {
+  const label = getPayoutActivityStatusLabel(record, audience);
   if (label === 'Blocked') {
     return 'danger' as const;
   }
@@ -352,7 +359,7 @@ function formatDeductionValue(value: string) {
   return `-${value}`;
 }
 
-function getPayoutBatchStatusLabel(status?: string) {
+function getPayoutBatchStatusLabel(status?: string, audience: 'admin' | 'vendor' = 'admin') {
   if (!status) {
     return 'Not batched';
   }
@@ -370,7 +377,7 @@ function getPayoutBatchStatusLabel(status?: string) {
     return 'Scheduled';
   }
   if (status === 'paid_placeholder') {
-    return 'Payment evidence pending';
+    return audience === 'vendor' ? 'Pending review' : 'Payment evidence pending';
   }
   if (status === 'cancelled') {
     return 'Blocked';
@@ -508,8 +515,8 @@ function getTotalDeductions(record: FinanceTransaction) {
   return `${currency}${total.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function getFinanceTimelineItems(record: FinanceTransaction) {
-  return [
+function getFinanceTimelineItems(record: FinanceTransaction): FinanceTimelineItem[] {
+  const items: Array<FinanceTimelineItem | null> = [
     {
       label: isRefundRecord(record) ? 'Refund impact captured' : 'Order captured',
       at: record.date,
@@ -525,9 +532,12 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
           label: record.payoutBatch.status === 'paid_placeholder' ? 'Payment evidence pending' : 'Included in draft review',
           at: record.payoutBatch.createdAt,
           status: getPayoutBatchStatusLabel(record.payoutBatch.status),
+          visibility: 'admin' as const,
         }
       : null,
-  ].filter((item): item is { label: string; at: string | null; status: string } => Boolean(item));
+  ];
+
+  return items.filter((item): item is FinanceTimelineItem => Boolean(item));
 }
 
 function formatSupportStatus(status: SupportTicket['status']) {
@@ -613,6 +623,7 @@ export function FinancePage() {
   const [shippingVatAmount, setShippingVatAmount] = useState('');
   const isAdmin = currentUser?.role === 'admin';
   const isVendorUser = currentUser?.role === 'vendor';
+  const financeAudience = isAdmin ? 'admin' : 'vendor';
 
   useEffect(() => {
     setSelectedRecordId(null);
@@ -775,7 +786,7 @@ export function FinancePage() {
   const filteredRecords = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
     return (finance?.transactions ?? []).filter((record) => {
-      const displayStatus = getPayoutActivityStatusLabel(record);
+      const displayStatus = getPayoutActivityStatusLabel(record, financeAudience);
       const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
       const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
       const searchableText = [
@@ -796,7 +807,7 @@ export function FinancePage() {
 
       return matchesStatus && matchesCategory && (!query || searchableText.includes(query));
     });
-  }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, searchTerm, statusFilter]);
+  }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, financeAudience, searchTerm, statusFilter]);
 
   const selectedRecord = useMemo(() => {
     const selectedByClick = selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : null;
@@ -895,6 +906,7 @@ export function FinancePage() {
         at: item.at,
         status: item.status,
         tone: selectedRecord.category === 'Refund' ? ('warning' as const) : ('success' as const),
+        visibility: item.visibility,
       })),
     );
     if (supportActivitySummary) {
@@ -1037,9 +1049,11 @@ export function FinancePage() {
           },
           {
             icon: 'D',
-            label: 'Draft payout review',
+            label: isVendorUser ? 'Settlement review' : 'Draft payout review',
             value: getUpcomingPayoutLabel(financeView),
-            detail: getUpcomingPayoutDetail(financeView),
+            detail: isVendorUser
+              ? `${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`
+              : getUpcomingPayoutDetail(financeView),
             tone: 'info',
           },
           {
@@ -1158,7 +1172,7 @@ export function FinancePage() {
                     <strong>{record.shopifyOrderNumber ? `#${record.shopifyOrderNumber}` : '—'}</strong>
                     <small>{isRefundRecord(record) ? 'Customer return' : 'Shopify order'}</small>
                   </span>
-                  <StatusBadge tone={getPayoutActivityTone(record)}>{getPayoutActivityStatusLabel(record)}</StatusBadge>
+                  <StatusBadge tone={getPayoutActivityTone(record, financeAudience)}>{getPayoutActivityStatusLabel(record, financeAudience)}</StatusBadge>
                   <strong className={isRefundRecord(record) || record.category === 'Adjustment' ? 'finance-negative finance-amount-emphasis' : 'finance-positive finance-amount-emphasis'}>
                     {isRefundRecord(record) || record.category === 'Adjustment' ? '-' : ''}
                     {record.amount}
@@ -1261,7 +1275,7 @@ export function FinancePage() {
             <section className="finance-footer-card">
               <div>
                 <p className="eyebrow">Settlement review</p>
-                <h3>Draft payout review</h3>
+                <h3>{isVendorUser ? 'Settlement review' : 'Draft payout review'}</h3>
                 <p className="page-description">
                   {isVendorUser
                     ? 'A read-only view of estimate rows currently eligible for settlement review.'
@@ -1273,11 +1287,13 @@ export function FinancePage() {
                 <MetadataRow label="Estimated net" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
                 <MetadataRow label="Needs review" value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
                 <MetadataRow
-                  label={isVendorUser ? 'Latest review artifact' : 'Latest draft review'}
+                  label={isVendorUser ? 'Latest review status' : 'Latest draft review'}
                   value={
                     financeView.payoutBatchSummary?.latestBatch
-                      ? `${getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
-                      : 'No draft prepared'
+                      ? `${getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status, financeAudience)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
+                      : isVendorUser
+                        ? 'No review scheduled'
+                        : 'No draft prepared'
                   }
                 />
               </div>
@@ -1314,8 +1330,8 @@ export function FinancePage() {
                 </Link>
               ) : null}
               <div className="op-detail-status-row">
-                <StatusBadge tone={getPayoutActivityTone(selectedRecord)}>{getPayoutActivityStatusLabel(selectedRecord)}</StatusBadge>
-                {selectedRecord.category === 'Invoice' ? (
+                <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>{getPayoutActivityStatusLabel(selectedRecord, financeAudience)}</StatusBadge>
+                {isAdmin && selectedRecord.category === 'Invoice' ? (
                   <StatusBadge tone={getInvoiceVisibilityTone(selectedRecord.invoiceExecution)}>
                     {getInvoiceVisibilityLabel(selectedRecord)}
                   </StatusBadge>
@@ -1338,74 +1354,69 @@ export function FinancePage() {
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
               <AdminCollaborationNotes contextType="finance" contextId={selectedRecord.id} currentUser={currentUser} />
-              <div className="finance-detail-card finance-invoice-card">
-                <div className="finance-detail-card-heading">
-                  <h4>Customer invoice/accounting</h4>
-                  <StatusBadge tone={getInvoiceVisibilityTone(selectedRecord.invoiceExecution)}>
-                    {getInvoiceVisibilityLabel(selectedRecord)}
-                  </StatusBadge>
+              {isAdmin ? (
+                <div className="finance-detail-card finance-invoice-card">
+                  <div className="finance-detail-card-heading">
+                    <h4>Customer invoice/accounting</h4>
+                    <StatusBadge tone={getInvoiceVisibilityTone(selectedRecord.invoiceExecution)}>
+                      {getInvoiceVisibilityLabel(selectedRecord)}
+                    </StatusBadge>
+                  </div>
+                  <div className="finance-detail-rows">
+                    <MetadataRow label="Provider" value={getProviderName(selectedRecord.invoiceExecution?.provider)} />
+                    <MetadataRow label="Provider status" value={selectedRecord.invoiceExecution?.visibilityLabel ?? 'Not synced'} />
+                    <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not available'} />
+                    <MetadataRow
+                      label="PDF"
+                      value={
+                        selectedRecord.invoiceExecution?.providerPdfUrl ? (
+                          <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
+                        ) : (
+                          'Not available'
+                        )
+                      }
+                    />
+                    <MetadataRow
+                      label="Final invoice state"
+                      value={getFinalInvoiceStateLabel(selectedRecord.invoiceExecution?.finalInvoiceState)}
+                    />
+                    <MetadataRow
+                      label="Accounting sync"
+                      value={getSyncSemanticsLabel(selectedRecord.invoiceExecution?.syncSemantics)}
+                    />
+                    <MetadataRow label="Provider note" value={selectedInvoiceCapabilities.note} />
+                    {shouldLoadInvoiceResponseSummary ? (
+                      <div className="finance-provider-summary" aria-label="Provider issue summary">
+                        <strong>Provider issue</strong>
+                        {invoiceResponseSummaryQuery.isLoading ? (
+                          <span>Loading safe response summary...</span>
+                        ) : invoiceResponseSummary ? (
+                          <>
+                            <span>HTTP: {invoiceResponseSummary.httpStatus ?? 'Unknown'}</span>
+                            <span>Content type: {invoiceResponseSummary.contentType ?? 'Unknown'}</span>
+                            <span>Keys: {invoiceResponseSummary.bodyKeys.length ? invoiceResponseSummary.bodyKeys.join(', ') : '—'}</span>
+                            <span>Provider error: {invoiceResponseSummary.providerError ?? '—'}</span>
+                            <span>GUID present: {invoiceResponseSummary.parsedGuidPresent ? 'yes' : 'no'}</span>
+                            <span>PDF present: {invoiceResponseSummary.parsedPdfUrlPresent ? 'yes' : 'no'}</span>
+                          </>
+                        ) : (
+                          <span>No provider response summary available.</span>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-                <div className="finance-detail-rows">
-                  <MetadataRow label="Provider" value={getProviderName(selectedRecord.invoiceExecution?.provider)} />
-                  <MetadataRow label="Provider status" value={selectedRecord.invoiceExecution?.visibilityLabel ?? 'Not synced'} />
-                  <MetadataRow label="Invoice number" value={selectedRecord.invoiceExecution?.providerInvoiceNo ?? 'Not available'} />
-                  <MetadataRow
-                    label="PDF"
-                    value={
-                      selectedRecord.invoiceExecution?.providerPdfUrl ? (
-                        <a href={selectedRecord.invoiceExecution.providerPdfUrl} target="_blank" rel="noreferrer">PDF available</a>
-                      ) : (
-                        'Not available'
-                      )
-                    }
-                  />
-                  <MetadataRow
-                    label="Final invoice state"
-                    value={getFinalInvoiceStateLabel(selectedRecord.invoiceExecution?.finalInvoiceState)}
-                  />
-                  <MetadataRow
-                    label="Accounting sync"
-                    value={getSyncSemanticsLabel(selectedRecord.invoiceExecution?.syncSemantics)}
-                  />
-                  <MetadataRow
-                    label="Provider note"
-                    value={
-                      isAdmin
-                        ? selectedInvoiceCapabilities.note
-                        : 'Invoice visibility is reconciled from the merchant accounting workflow.'
-                    }
-                  />
-                  {isAdmin && shouldLoadInvoiceResponseSummary ? (
-                    <div className="finance-provider-summary" aria-label="Provider issue summary">
-                      <strong>Provider issue</strong>
-                      {invoiceResponseSummaryQuery.isLoading ? (
-                        <span>Loading safe response summary...</span>
-                      ) : invoiceResponseSummary ? (
-                        <>
-                          <span>HTTP: {invoiceResponseSummary.httpStatus ?? 'Unknown'}</span>
-                          <span>Content type: {invoiceResponseSummary.contentType ?? 'Unknown'}</span>
-                          <span>Keys: {invoiceResponseSummary.bodyKeys.length ? invoiceResponseSummary.bodyKeys.join(', ') : '—'}</span>
-                          <span>Provider error: {invoiceResponseSummary.providerError ?? '—'}</span>
-                          <span>GUID present: {invoiceResponseSummary.parsedGuidPresent ? 'yes' : 'no'}</span>
-                          <span>PDF present: {invoiceResponseSummary.parsedPdfUrlPresent ? 'yes' : 'no'}</span>
-                        </>
-                      ) : (
-                        <span>No provider response summary available.</span>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
+              ) : null}
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
                   <h4>Settlement preview</h4>
-                  <StatusBadge tone={getPayoutActivityTone(selectedRecord)}>
-                    {getPayoutActivityStatusLabel(selectedRecord)}
+                  <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>
+                    {getPayoutActivityStatusLabel(selectedRecord, financeAudience)}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
                   <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
-                  <MetadataRow label="Review status" value={getPayoutActivityStatusLabel(selectedRecord)} />
+                  <MetadataRow label="Review status" value={getPayoutActivityStatusLabel(selectedRecord, financeAudience)} />
                   <MetadataRow
                     label="Estimated payout"
                     value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
@@ -1418,7 +1429,10 @@ export function FinancePage() {
                     label="Settlement impact"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
                   />
-                  <MetadataRow label="Payout review" value={selectedRecord.payoutBatch ? 'Draft review artifact' : 'No payout review scheduled'} />
+                  <MetadataRow
+                    label={isVendorUser ? 'Settlement review' : 'Payout review'}
+                    value={selectedRecord.payoutBatch ? (isVendorUser ? 'Pending review' : 'Draft review artifact') : 'No review scheduled'}
+                  />
                 </div>
               </div>
 
@@ -1454,14 +1468,14 @@ export function FinancePage() {
                 title="Finance timeline"
                 subtitle={FINANCE_TIMELINE_HELPER}
                 events={financeTimelineEvents}
-                audience={isAdmin ? 'admin' : 'vendor'}
+                audience={financeAudience}
               />
 
               <OperationalLinkCards
                 title="Related records"
                 subtitle="Grouped order, return, and support context for this finance row."
                 links={financeCrossLinks}
-                audience={isAdmin ? 'admin' : 'vendor'}
+                audience={financeAudience}
               />
 
               {relatedSupportTickets.length > 1 ? (
