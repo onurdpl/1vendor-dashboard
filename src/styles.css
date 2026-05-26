@@ -9940,6 +9940,96 @@ summary.provider-response-heading::-webkit-details-marker {
   margin-top: 0.2rem;
 }
 
+.vendor-profile-page {
+  gap: 18px;
+}
+
+.vendor-profile-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 22px;
+}
+
+.vendor-profile-hero h1 {
+  margin: 0;
+  font-size: clamp(1.8rem, 2vw, 2.4rem);
+  letter-spacing: 0;
+}
+
+.vendor-profile-hero p {
+  max-width: 720px;
+  margin: 0.45rem 0 0;
+  color: #64748b;
+}
+
+.vendor-profile-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.vendor-profile-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.vendor-profile-page .op-section {
+  min-width: 0;
+}
+
+.vendor-profile-page .op-meta-group {
+  margin-top: 0;
+}
+
+.vendor-profile-page .op-meta-grid {
+  grid-template-columns: minmax(150px, 0.72fr) minmax(0, 1fr);
+}
+
+.vendor-profile-support-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 14px;
+}
+
+.vendor-profile-support-panel p {
+  margin: 0.3rem 0 0;
+  color: #64748b;
+}
+
+.vendor-profile-missing-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding-left: 1.1rem;
+  color: #475569;
+}
+
+@media (max-width: 980px) {
+  .vendor-profile-hero,
+  .vendor-profile-support-panel {
+    display: grid;
+  }
+
+  .vendor-profile-actions {
+    justify-content: flex-start;
+  }
+
+  .vendor-profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 1180px) {
   .communication-layout {
     grid-template-columns: 1fr;

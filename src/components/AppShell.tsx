@@ -10,6 +10,7 @@ import { ActionFeedback } from './ActionFeedback';
 
 const workspaceNavItems = [
   { to: '/', label: 'Dashboard', icon: 'D' },
+  { to: '/vendor/profile', label: 'Profile', icon: 'P' },
   { to: '/support/inbox', label: 'Inbox', icon: 'I' },
   { to: '/support', label: 'Support', icon: 'S' },
 ];
@@ -45,7 +46,8 @@ export function AppShell() {
   const isOrdersRoute = location.pathname === '/orders';
   const isOrderDetailRoute = location.pathname.startsWith('/orders/');
   const isFinanceRoute = location.pathname === '/finance';
-  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute || isOrderDetailRoute || isFinanceRoute;
+  const isVendorProfileRoute = location.pathname === '/vendor/profile';
+  const usesModernWorkspaceFrame = isDashboardRoute || isOrdersRoute || isOrderDetailRoute || isFinanceRoute || isVendorProfileRoute;
   const { message, tone, showFeedback } = useActionFeedback();
   const vendors = getAvailableVendors();
   const [selectedVendorId, setSelectedVendorId] = useState(() => getCurrentVendorContext().vendorId);

@@ -62,4 +62,10 @@ export const queryKeys = {
     tickets: (vendorId = getCurrentVendorContext().vendorId) => ['support', 'tickets', vendorId] as const,
     detail: (ticketId: string, vendorId = getCurrentVendorContext().vendorId) => ['support', 'tickets', vendorId, ticketId] as const,
   },
+  vendorProfile: {
+    summary: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'summary', vendorId] as const,
+    shippingConfig: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'shipping-config', vendorId] as const,
+    financeProfile: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'finance-profile', vendorId] as const,
+    supportTickets: (vendorId = getCurrentVendorContext().vendorId) => ['vendor-profile', 'support', vendorId] as const,
+  },
 } as const;

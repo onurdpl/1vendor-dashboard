@@ -48,6 +48,9 @@ const FinancePage = lazy(() => import('./pages/FinancePage').then((module) => ({
 const AutomationPage = lazy(() =>
   import('./pages/AutomationPage').then((module) => ({ default: module.AutomationPage })),
 );
+const VendorProfilePage = lazy(() =>
+  import('./pages/VendorProfilePage').then((module) => ({ default: module.VendorProfilePage })),
+);
 
 const loadingFallback = (
   <section className="op-page route-loading-frame">
@@ -190,6 +193,14 @@ export default function App() {
             element={
               <RequirePermission permission="automation:read">
                 {resilientRoute('Automation', <AutomationPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/vendor/profile"
+            element={
+              <RequirePermission permission="orders:read">
+                {resilientRoute('Vendor profile', <VendorProfilePage />)}
               </RequirePermission>
             }
           />
