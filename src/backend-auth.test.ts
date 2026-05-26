@@ -1,0 +1,48 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { login } from './services/backend-auth';
+
+describe('backend auth client diagnostics', () => {
+  const fetchMock = vi.fn();
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          token: 'token-redacted-in-test',
+          user: {
+            id: 'user-1',
+            email: 'vendor@example.com',
+            name: 'Vendor User',
+            role: 'vendor',
+            status: 'active',
+            vendorAccess: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+          },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('sends a safe auth attempt id header without changing the login body', async () => {
+    await login('vendor@example.com', 'demo123', { authAttemptId: 'auth-test123' });
+
+    const [, init] = fetchMock.mock.calls.at(-1) ?? [];
+    const headers = (init as RequestInit).headers as Headers;
+
+    expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-test123');
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      email: 'vendor@example.com',
+      password: 'demo123',
+    });
+  });
+});

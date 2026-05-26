@@ -26,6 +26,7 @@ export type SafeRequestTimingLog = {
   statusCode: number;
   elapsedMs: number;
   responseBytes: number | null;
+  authAttemptId?: string;
 };
 
 export function getSafeRouteName(request: Pick<FastifyRequest, 'method' | 'routeOptions'>) {
@@ -48,20 +49,38 @@ export function getPayloadSize(payload: unknown) {
   return null;
 }
 
+export function normalizeAuthAttemptId(value: unknown) {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+
+  const trimmed = candidate.trim();
+  return /^[A-Za-z0-9_-]{4,64}$/.test(trimmed) ? trimmed : null;
+}
+
 export function createSafeRequestTimingLog(input: {
   routeName: string;
   method: string;
   statusCode: number;
   elapsedMs: number;
   responseBytes?: number | null;
+  authAttemptId?: unknown;
 }): SafeRequestTimingLog {
-  return {
+  const log: SafeRequestTimingLog = {
     routeName: input.routeName,
     method: input.method.toUpperCase(),
     statusCode: input.statusCode,
     elapsedMs: Math.max(0, Math.round(input.elapsedMs)),
     responseBytes: typeof input.responseBytes === 'number' ? input.responseBytes : null,
   };
+
+  const authAttemptId = normalizeAuthAttemptId(input.authAttemptId);
+  if (authAttemptId) {
+    log.authAttemptId = authAttemptId;
+  }
+
+  return log;
 }
 
 export function registerRequestTimingHooks(app: FastifyInstance) {
@@ -91,6 +110,7 @@ export function registerRequestTimingHooks(app: FastifyInstance) {
       statusCode: reply.statusCode,
       elapsedMs,
       responseBytes: responseSizes.get(request) ?? null,
+      authAttemptId: request.headers['x-auth-attempt-id'],
     });
 
     app.log.info(log, 'request timing');

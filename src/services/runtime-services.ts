@@ -216,10 +216,13 @@ export const runtimeServices = {
     async login(
       email: string,
       password: string,
-      options: { signal?: AbortSignal } = {},
+      options: { authAttemptId?: string; signal?: AbortSignal } = {},
     ): Promise<{ token: string; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
-        const response = await backendAuth.login(email, password, { signal: options.signal });
+        const response = await backendAuth.login(email, password, {
+          authAttemptId: options.authAttemptId,
+          signal: options.signal,
+        });
         return {
           token: response.token,
           user: createCurrentUserFromVendorAccess({

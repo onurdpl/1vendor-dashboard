@@ -30,6 +30,19 @@ const LOGIN_TIMEOUT_MS = 15_000;
 const LOGIN_TIMEOUT_MESSAGE = 'Sign-in is taking longer than expected. Please try again.';
 const AUTH_DEBUG_STORAGE_KEY = 'vendor-dashboard.debug-auth';
 
+// Temporary diagnostic for correlating intermittent production login timeouts with backend logs.
+function createAuthAttemptId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return `auth-${crypto.randomUUID().replace(/-/g, '').slice(0, 10)}`;
+  }
+
+  return `auth-${Math.random().toString(36).slice(2, 12).padEnd(10, '0')}`;
+}
+
+function formatLoginTimeoutMessage(authAttemptId: string) {
+  return `${LOGIN_TIMEOUT_MESSAGE} Reference: ${authAttemptId}`;
+}
+
 function shouldLogAuthDiagnostics() {
   if (runtimeConfig.appEnvironment !== 'production') {
     return true;
@@ -111,24 +124,28 @@ export function LoginPage() {
     setErrorMessage(null);
 
     const abortController = new AbortController();
+    const authAttemptId = createAuthAttemptId();
     const startedAt = Date.now();
     let timeoutTriggered = false;
     const timeoutId = window.setTimeout(() => {
       timeoutTriggered = true;
       logAuthDiagnostic('auth timeout triggered', {
+        authAttemptId,
         elapsedMs: Date.now() - startedAt,
       });
       abortController.abort();
     }, LOGIN_TIMEOUT_MS);
 
-    logAuthDiagnostic('auth request start');
+    logAuthDiagnostic('auth request start', { authAttemptId });
 
     try {
       const { token, user } = await runtimeServices.auth.login(email, password, {
+        authAttemptId,
         signal: abortController.signal,
       });
 
       logAuthDiagnostic('auth request completed', {
+        authAttemptId,
         elapsedMs: Date.now() - startedAt,
         timedOut: false,
       });
@@ -139,11 +156,12 @@ export function LoginPage() {
       navigate(from, { replace: true });
     } catch (error) {
       logAuthDiagnostic('auth request completed', {
+        authAttemptId,
         elapsedMs: Date.now() - startedAt,
         timedOut: timeoutTriggered,
       });
       setErrorMessage(
-        timeoutTriggered ? LOGIN_TIMEOUT_MESSAGE : error instanceof Error ? error.message : 'Unable to sign in.',
+        timeoutTriggered ? formatLoginTimeoutMessage(authAttemptId) : error instanceof Error ? error.message : 'Unable to sign in.',
       );
     } finally {
       window.clearTimeout(timeoutId);

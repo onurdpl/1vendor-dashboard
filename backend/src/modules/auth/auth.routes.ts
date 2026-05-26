@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
+import { normalizeAuthAttemptId } from '../../lib/request-timing.js';
 import { createAuthService } from './auth.service.js';
 import { createAuthMiddleware } from './auth.middleware.js';
 import type { AuthLoginRouteTiming, LoginBody } from './auth.types.js';
@@ -12,6 +13,11 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
   app.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
     const routeStartedAt = process.hrtime.bigint();
+    const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    if (authAttemptId) {
+      reply.header('X-Auth-Attempt-Id', authAttemptId);
+    }
+
     const email = request.body?.email;
     const password = request.body?.password;
     const routeEntryToBodyValidationMs = elapsedMs(routeStartedAt);
@@ -54,6 +60,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
         routeName: 'POST /auth/login',
         statusCode: 200,
         success: true,
+        authAttemptId,
         role: loginResult.user.role,
         vendorAccessCount: loginResult.user.vendorAccess.length,
         responseBytes,

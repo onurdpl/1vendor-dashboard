@@ -19,8 +19,13 @@ export type BackendLoginResponse = {
   user: BackendAuthUser;
 };
 
-export async function login(email: string, password: string, options: { signal?: AbortSignal } = {}) {
+export async function login(
+  email: string,
+  password: string,
+  options: { authAttemptId?: string; signal?: AbortSignal } = {},
+) {
   return apiClient.post<BackendLoginResponse>('/auth/login', { email, password }, {
+    headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
     vendorId: null,
     signal: options.signal,
   });

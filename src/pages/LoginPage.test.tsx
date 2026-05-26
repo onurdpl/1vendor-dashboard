@@ -121,6 +121,7 @@ describe('LoginPage expired session flow', () => {
       'vendor@example.com',
       'demo123',
       expect.objectContaining({
+        authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
         signal: expect.any(AbortSignal),
       }),
     );
@@ -164,8 +165,13 @@ describe('LoginPage expired session flow', () => {
       await Promise.resolve();
     });
 
-    expect(screen.getByText('Sign-in is taking longer than expected. Please try again.')).toBeInTheDocument();
+    expect(
+      screen.getByText(/^Sign-in is taking longer than expected\. Please try again\. Reference: auth-[a-z0-9]{10}$/i),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
     expect((loginMock.mock.calls[0][2] as { signal?: AbortSignal }).signal?.aborted).toBe(true);
+    expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
+      expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
+    );
   });
 });

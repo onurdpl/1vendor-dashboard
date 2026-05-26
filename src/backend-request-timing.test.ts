@@ -3,6 +3,7 @@ import {
   createSafeRequestTimingLog,
   getPayloadSize,
   getSafeRouteName,
+  normalizeAuthAttemptId,
   shouldLogRequestTiming,
 } from '../backend/src/lib/request-timing';
 
@@ -50,6 +51,30 @@ describe('backend request timing instrumentation', () => {
     });
     expect(JSON.stringify(log)).not.toContain('return-request-');
     expect(JSON.stringify(log)).not.toContain('customer');
+  });
+
+  it('includes only safe auth attempt ids in timing logs', () => {
+    expect(normalizeAuthAttemptId('auth-abc12345')).toBe('auth-abc12345');
+    expect(normalizeAuthAttemptId('customer@example.com')).toBeNull();
+    expect(normalizeAuthAttemptId('auth with spaces')).toBeNull();
+
+    const log = createSafeRequestTimingLog({
+      routeName: 'POST /auth/login',
+      method: 'post',
+      statusCode: 200,
+      elapsedMs: 128.9,
+      responseBytes: 512,
+      authAttemptId: 'auth-abc12345',
+    });
+
+    expect(log).toMatchObject({
+      routeName: 'POST /auth/login',
+      method: 'POST',
+      statusCode: 200,
+      elapsedMs: 129,
+      responseBytes: 512,
+      authAttemptId: 'auth-abc12345',
+    });
   });
 
   it('measures response payload size without inspecting content', () => {

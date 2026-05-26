@@ -23,4 +23,26 @@ describe('backend request id diagnostics', () => {
       await app.close();
     }
   });
+
+  it('echoes a safe auth attempt id header on login validation failures', async () => {
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/auth/login',
+        headers: {
+          'x-auth-attempt-id': 'auth-test123',
+        },
+        payload: {},
+      });
+
+      expect(response.statusCode).toBe(400);
+      expect(response.headers['x-auth-attempt-id']).toBe('auth-test123');
+      expect(response.body).not.toContain('token');
+      expect(response.body).not.toContain('@');
+    } finally {
+      await app.close();
+    }
+  });
 });

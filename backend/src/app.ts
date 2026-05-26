@@ -222,13 +222,14 @@ export function createApp() {
       'Authorization',
       'Content-Type',
       'X-Request-Id',
+      'X-Auth-Attempt-Id',
       'X-Vendor-Id',
       'X-Shopify-Hmac-Sha256',
       'X-Shopify-Shop-Domain',
       'X-Shopify-Webhook-Id',
       'X-Shopify-Topic',
     ],
-    exposedHeaders: ['X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id'],
   });
 
   app.addHook('onRequest', async (request, reply) => {
