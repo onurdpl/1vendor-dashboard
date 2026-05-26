@@ -26,6 +26,36 @@ type LoginRedirectState = {
 
 type LoginLocationState = LoginRedirectState | null;
 
+const LOGIN_TIMEOUT_MS = 15_000;
+const LOGIN_TIMEOUT_MESSAGE = 'Sign-in is taking longer than expected. Please try again.';
+const AUTH_DEBUG_STORAGE_KEY = 'vendor-dashboard.debug-auth';
+
+function shouldLogAuthDiagnostics() {
+  if (runtimeConfig.appEnvironment !== 'production') {
+    return true;
+  }
+
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  return window.localStorage.getItem(AUTH_DEBUG_STORAGE_KEY) === 'true';
+}
+
+function logAuthDiagnostic(
+  event: 'auth request start' | 'auth timeout triggered' | 'auth request completed',
+  details: Record<string, unknown> = {},
+) {
+  if (!shouldLogAuthDiagnostics()) {
+    return;
+  }
+
+  console.debug('[auth-login]', {
+    event,
+    ...details,
+  });
+}
+
 function buildRouteFromLocationState(from: LoginRedirectState['from']) {
   if (typeof from === 'string') {
     return from;
@@ -78,17 +108,45 @@ export function LoginPage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setIsSubmitting(true);
+    setErrorMessage(null);
+
+    const abortController = new AbortController();
+    const startedAt = Date.now();
+    let timeoutTriggered = false;
+    const timeoutId = window.setTimeout(() => {
+      timeoutTriggered = true;
+      logAuthDiagnostic('auth timeout triggered', {
+        elapsedMs: Date.now() - startedAt,
+      });
+      abortController.abort();
+    }, LOGIN_TIMEOUT_MS);
+
+    logAuthDiagnostic('auth request start');
 
     try {
-      const { token, user } = await runtimeServices.auth.login(email, password);
+      const { token, user } = await runtimeServices.auth.login(email, password, {
+        signal: abortController.signal,
+      });
+
+      logAuthDiagnostic('auth request completed', {
+        elapsedMs: Date.now() - startedAt,
+        timedOut: false,
+      });
 
       setErrorMessage(null);
       setSession(token, user);
       setCurrentVendorId(user.defaultVendorId as VendorId);
       navigate(from, { replace: true });
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to sign in.');
+      logAuthDiagnostic('auth request completed', {
+        elapsedMs: Date.now() - startedAt,
+        timedOut: timeoutTriggered,
+      });
+      setErrorMessage(
+        timeoutTriggered ? LOGIN_TIMEOUT_MESSAGE : error instanceof Error ? error.message : 'Unable to sign in.',
+      );
     } finally {
+      window.clearTimeout(timeoutId);
       setIsSubmitting(false);
     }
   }

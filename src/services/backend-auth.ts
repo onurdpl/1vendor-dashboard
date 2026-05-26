@@ -19,8 +19,11 @@ export type BackendLoginResponse = {
   user: BackendAuthUser;
 };
 
-export async function login(email: string, password: string) {
-  return apiClient.post<BackendLoginResponse>('/auth/login', { email, password }, { vendorId: null });
+export async function login(email: string, password: string, options: { signal?: AbortSignal } = {}) {
+  return apiClient.post<BackendLoginResponse>('/auth/login', { email, password }, {
+    vendorId: null,
+    signal: options.signal,
+  });
 }
 
 export async function me(token: string) {
