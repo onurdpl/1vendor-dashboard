@@ -514,8 +514,9 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
-    expect(screen.getByText('Order recorded')).toBeInTheDocument();
+    expect(screen.getByText('Order captured')).toBeInTheDocument();
     expect(screen.getByText('Settlement awaiting review')).toBeInTheDocument();
+    expect(screen.getByText('Finance events are previews until settlement review is completed.')).toBeInTheDocument();
     expect(screen.getAllByText('Support activity').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/3 linked tickets/i).length).toBeGreaterThan(0);
     expect(screen.queryByText('Support ticket opened')).not.toBeInTheDocument();
@@ -526,7 +527,8 @@ describe('FinancePage control center', () => {
     expect(within(relatedRecordsCard as HTMLElement).getByText('Support activity')).toBeInTheDocument();
     expect(within(relatedRecordsCard as HTMLElement).queryByText('Help with order #1021')).not.toBeInTheDocument();
     expect(screen.getByText('Support history')).toBeInTheDocument();
-    expect(screen.getByText('3 records')).toBeInTheDocument();
+    expect(screen.getByText('Latest status: In Review')).toBeInTheDocument();
+    expect(screen.getAllByText('3 linked tickets').length).toBeGreaterThan(0);
   });
 
   it('hides the empty finance actions section when no action is available', async () => {

@@ -75,7 +75,7 @@ function formatOptionalDate(value?: string, fallback = '—') {
 }
 
 function formatSupportTicketStatus(status: SupportTicket['status']) {
-  return status.replace(/_/g, ' ');
+  return toTitleCaseLabel(status.toLowerCase());
 }
 
 function formatSupportTicketPriority(priority: SupportTicket['priority']) {
@@ -1038,6 +1038,40 @@ function dedupeSupportTickets(tickets: SupportTicket[]) {
 
 function isOpenSupportTicket(ticket: SupportTicket) {
   return OPEN_SUPPORT_TICKET_STATUSES.has(ticket.status);
+}
+
+function getSupportLatestActivityAt(ticket: SupportTicket) {
+  return ticket.lastReplyAt ?? ticket.updatedAt ?? ticket.createdAt;
+}
+
+function getLatestSupportTicket(tickets: SupportTicket[]) {
+  return [...tickets].sort((left, right) => {
+    const leftTime = new Date(getSupportLatestActivityAt(left)).getTime();
+    const rightTime = new Date(getSupportLatestActivityAt(right)).getTime();
+    return rightTime - leftTime;
+  })[0] ?? null;
+}
+
+function getSupportActivitySummary(tickets: SupportTicket[]) {
+  const latestTicket = getLatestSupportTicket(tickets);
+  if (!latestTicket) {
+    return null;
+  }
+
+  const ticketCount = tickets.length;
+  const openCount = tickets.filter(isOpenSupportTicket).length;
+  const latestStatus = formatSupportTicketStatus(latestTicket.status);
+  const ticketLabel = `${ticketCount} linked ticket${ticketCount === 1 ? '' : 's'}`;
+  const activeLabel = openCount > 0 ? ` · ${openCount} active` : '';
+
+  return {
+    latestTicket,
+    latestStatus,
+    latestAt: getSupportLatestActivityAt(latestTicket),
+    ticketLabel,
+    description: `${ticketLabel} · Latest status: ${latestStatus}${activeLabel}`,
+    tone: 'neutral' as const,
+  };
 }
 
 function compactDiagnosticsValue(value: unknown) {
@@ -3927,6 +3961,7 @@ export function OrderDetailPage() {
       ),
     [currentVendor.vendorId, isAdmin, order?.id, order?.sourceShopifyOrderNumber, relatedSupportTicketsData],
   );
+  const supportActivitySummary = getSupportActivitySummary(relatedSupportTickets);
 
   const handleSaveShippingConfig = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -4258,6 +4293,19 @@ export function OrderDetailPage() {
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
   const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
   const financeTimelineItems = [
+    financePreview || payoutCalculation || settlementTimelineRecord
+      ? {
+          id: 'finance-settlement-preview-generated',
+          title: 'Settlement preview generated',
+          description: isKnownFinanceValue(estimatedSettlementValue)
+            ? `${estimatedSettlementValue} · Estimated from available order finance data.`
+            : 'Settlement preview is waiting for complete finance inputs.',
+          at: settlementTimelineRecord?.date ?? financePreviewEntryTime('ORDER_CAPTURED') ?? order.date,
+          status: 'Preview',
+          tone: 'info' as const,
+          href: settlementTimelineRecord ? buildFinanceHref(settlementTimelineRecord) : undefined,
+        }
+      : null,
     isKnownFinanceValue(commissionEstimateValue)
       ? {
           id: 'finance-commission-estimated',
@@ -4310,7 +4358,7 @@ export function OrderDetailPage() {
             ? `${estimatedSettlementValue} · Not approved for settlement.`
             : 'Settlement estimate needs more finance evidence.',
           at: settlementTimelineRecord?.settlement?.payableAt ?? settlementTimelineRecord?.settlement?.eligibleAt ?? settlementTimelineRecord?.date ?? order.date,
-          status: 'Preview',
+          status: 'Review',
           tone: 'attention' as const,
           href: settlementTimelineRecord ? buildFinanceHref(settlementTimelineRecord) : undefined,
         }
@@ -4502,7 +4550,7 @@ export function OrderDetailPage() {
       title: 'Support ticket created',
       description: ticket.subject,
       at: ticket.createdAt,
-      status: ticket.status.replace(/_/g, ' '),
+      status: formatSupportTicketStatus(ticket.status),
       tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
       href: `${supportBasePath}/${ticket.id}`,
     })),
@@ -4525,7 +4573,7 @@ export function OrderDetailPage() {
         title: 'Support ticket resolved',
         description: ticket.subject,
         at: ticket.resolvedAt ?? ticket.closedAt ?? ticket.updatedAt,
-        status: ticket.status.replace(/_/g, ' '),
+        status: formatSupportTicketStatus(ticket.status),
         tone: 'success' as const,
         href: `${supportBasePath}/${ticket.id}`,
       })),
@@ -4548,23 +4596,27 @@ export function OrderDetailPage() {
     ...relatedFinanceRecords.map((record) => ({
       id: `finance-${record.id}`,
       eyebrow: 'Finance',
-      title: record.category === 'Refund' ? 'Refund impact' : 'Payout activity',
+      title: record.category === 'Refund' ? 'Refund impact' : 'Settlement activity',
       description: `${record.amount} · ${record.status}`,
       actionLabel: 'Open finance detail',
       href: buildFinanceHref(record),
-      status: record.status === 'Pending' ? 'Payout pending' : record.category,
+      status: record.status === 'Pending' ? 'Pending review' : record.category,
       tone: record.category === 'Refund' ? ('warning' as const) : ('success' as const),
     })),
-    ...relatedSupportTickets.map((ticket) => ({
-      id: `support-${ticket.id}`,
-      eyebrow: 'Support',
-      title: ticket.subject,
-      description: [ticket.status.replace(/_/g, ' '), ticket.vendorName ?? ticket.vendorId].filter(Boolean).join(' · '),
-      actionLabel: 'Open support ticket',
-      href: `${supportBasePath}/${ticket.id}`,
-      status: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? 'Support resolved' : 'Support active',
-      tone: ticket.status === 'RESOLVED' || ticket.status === 'CLOSED' ? ('success' as const) : ('info' as const),
-    })),
+    ...(supportActivitySummary
+      ? [
+          {
+            id: `support-group-${order.id}`,
+            eyebrow: 'Support',
+            title: 'Support activity',
+            description: supportActivitySummary.description,
+            actionLabel: 'Open latest support ticket',
+            href: `${supportBasePath}/${supportActivitySummary.latestTicket.id}`,
+            status: supportActivitySummary.latestStatus,
+            tone: supportActivitySummary.tone,
+          },
+        ]
+      : []),
   ];
   const activeReturn = relatedReturns.find((returnRecord) => !['Closed', 'Processed', 'Refunded'].includes(returnRecord.status));
   const waitingSupportTicket = relatedSupportTickets.find((ticket) => ticket.status === 'WAITING_FOR_VENDOR');
@@ -5323,12 +5375,12 @@ export function OrderDetailPage() {
               <div className="order-card-heading">
                 <div>
                   <h2>Finance ledger preview</h2>
-                  <p>Read-only simulation. Not payout, refund, invoice, or tax truth.</p>
+                  <p>Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.</p>
                 </div>
               </div>
               <div className="order-financial-impact-grid">
                 <div>
-                  <span>Vendor payable estimate</span>
+                  <span>Vendor settlement estimate</span>
                   <strong>{formatCurrency(order.financeLedgerPreview.balance.vendorPayable, order.financeLedgerPreview.currency)}</strong>
                 </div>
                 <div>
@@ -5384,7 +5436,7 @@ export function OrderDetailPage() {
                       <span>{toTitleCaseLabel(entry.eventType)}</span>
                       <strong>
                         {[
-                          entry.impact.vendorPayable ? `payable ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
+                          entry.impact.vendorPayable ? `settlement ${formatCurrency(entry.impact.vendorPayable, entry.currency)}` : null,
                           entry.impact.marketplaceCommission ? `commission ${formatCurrency(entry.impact.marketplaceCommission, entry.currency)}` : null,
                           entry.impact.shippingCostReserved ? `shipping ${formatCurrency(entry.impact.shippingCostReserved, entry.currency)}` : null,
                           entry.impact.vendorDebt ? `debt ${formatCurrency(entry.impact.vendorDebt, entry.currency)}` : null,
@@ -5400,10 +5452,32 @@ export function OrderDetailPage() {
           <div className="order-linked-records-panel">
             <OperationalLinkCards
               title="Linked records"
-              subtitle="Returns, payout activity, and support linked to this order."
+              subtitle="Returns, settlement activity, and grouped support context linked to this order."
               links={orderCrossLinks}
               audience={audience}
             />
+            {relatedSupportTickets.length > 1 ? (
+              <details className="finance-support-history">
+                <summary>
+                  <span>
+                    <strong>Support history</strong>
+                    {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
+                  </span>
+                  <span className="op-badge op-tone-neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</span>
+                </summary>
+                <div className="finance-support-history-list">
+                  {relatedSupportTickets.map((ticket) => (
+                    <Link key={ticket.id} to={`${supportBasePath}/${ticket.id}`}>
+                      <span>
+                        <strong>{ticket.subject}</strong>
+                        <small>{formatSupportTicketStatus(ticket.status)} · {formatSupportTicketPriority(ticket.priority)}</small>
+                      </span>
+                      <small>{formatOptionalDate(getSupportLatestActivityAt(ticket))}</small>
+                    </Link>
+                  ))}
+                </div>
+              </details>
+            ) : null}
           </div>
         </main>
 
@@ -5508,7 +5582,7 @@ export function OrderDetailPage() {
                         </div>
                         <div className="summary-row">
                           <span>Latest status</span>
-                          <strong>{relatedSupportTickets[0].status.replace(/_/g, ' ')}</strong>
+                          <strong>{formatSupportTicketStatus(relatedSupportTickets[0].status)}</strong>
                         </div>
                       </>
                     ) : null}

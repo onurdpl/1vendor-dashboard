@@ -67,6 +67,7 @@ type FinanceDeepLinkTarget = {
 
 const FINANCE_ESTIMATE_HELPER =
   'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
+const FINANCE_TIMELINE_HELPER = 'Finance events are previews until settlement review is completed.';
 const UNKNOWN_FINANCE_VALUE = 'Unknown';
 
 function formatDate(value: string) {
@@ -501,12 +502,12 @@ function getTotalDeductions(record: FinanceTransaction) {
 function getFinanceTimelineItems(record: FinanceTransaction) {
   return [
     {
-      label: isRefundRecord(record) ? 'Refund recorded' : 'Order recorded',
+      label: isRefundRecord(record) ? 'Refund impact captured' : 'Order captured',
       at: record.date,
       status: normalizeFinanceStatus(record.status),
     },
     {
-      label: record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement estimate pending',
+      label: record.settlement?.payoutReady ? 'Settlement awaiting review' : 'Settlement preview generated',
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
       status: record.settlement?.payoutReady ? 'Review' : 'Preview',
     },
@@ -557,7 +558,6 @@ function getSupportActivitySummary(tickets: SupportTicket[]) {
   const ticketCount = tickets.length;
   const openCount = tickets.filter(isOpenSupportTicket).length;
   const latestStatus = formatSupportStatus(latestTicket.status);
-  const highPriority = tickets.some((ticket) => ticket.priority === 'high' || Boolean(ticket.escalatedAt));
   const ticketLabel = `${ticketCount} linked ticket${ticketCount === 1 ? '' : 's'}`;
   const activeLabel = openCount > 0 ? ` · ${openCount} active` : '';
 
@@ -568,7 +568,7 @@ function getSupportActivitySummary(tickets: SupportTicket[]) {
     ticketCount,
     ticketLabel,
     description: `${ticketLabel} · Latest status: ${latestStatus}${activeLabel}`,
-    tone: highPriority ? ('warning' as const) : ('neutral' as const),
+    tone: 'neutral' as const,
   };
 }
 
@@ -1395,7 +1395,7 @@ export function FinancePage() {
                     label="Settlement impact"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
                   />
-                  <MetadataRow label="Payment evidence" value={selectedRecord.payoutBatch ? 'Draft review artifact' : 'Not scheduled'} />
+                  <MetadataRow label="Payout review" value={selectedRecord.payoutBatch ? 'Draft review artifact' : 'No payout review scheduled'} />
                 </div>
               </div>
 
@@ -1429,7 +1429,7 @@ export function FinancePage() {
 
               <OperationalTimeline
                 title="Finance timeline"
-                subtitle="Primary settlement lifecycle with grouped support activity."
+                subtitle={FINANCE_TIMELINE_HELPER}
                 events={financeTimelineEvents}
                 audience={isAdmin ? 'admin' : 'vendor'}
               />
@@ -1444,8 +1444,11 @@ export function FinancePage() {
               {relatedSupportTickets.length > 1 ? (
                 <details className="finance-support-history">
                   <summary>
-                    <span>Support history</span>
-                    <StatusBadge tone="neutral">{relatedSupportTickets.length} records</StatusBadge>
+                    <span>
+                      <strong>Support history</strong>
+                      {supportActivitySummary ? <small>Latest status: {supportActivitySummary.latestStatus}</small> : null}
+                    </span>
+                    <StatusBadge tone="neutral">{supportActivitySummary?.ticketLabel ?? `${relatedSupportTickets.length} linked tickets`}</StatusBadge>
                   </summary>
                   <div className="finance-support-history-list">
                     {relatedSupportTickets.map((ticket) => (

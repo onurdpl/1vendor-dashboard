@@ -3395,6 +3395,25 @@ h3 {
   display: none;
 }
 
+.finance-support-history summary > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.finance-support-history summary strong {
+  color: #334155;
+  font-size: 0.72rem;
+  line-height: 1.2;
+}
+
+.finance-support-history summary small {
+  color: #64748b;
+  font-size: 0.64rem;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
 .finance-support-history-list {
   display: grid;
   gap: 0.35rem;
@@ -5787,6 +5806,8 @@ h3 {
   grid-column: 1;
   grid-row: 5;
   order: 6;
+  display: grid;
+  gap: 0.5rem;
 }
 
 .order-finance-ledger-card + .order-linked-records-panel {

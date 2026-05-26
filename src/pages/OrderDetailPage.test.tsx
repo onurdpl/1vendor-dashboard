@@ -2060,6 +2060,38 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(within(ticketSummary).getByText(/Updated May 15, 2026/)).toBeInTheDocument();
   });
 
+  it('groups support activity in order linked records while preserving support history access', async () => {
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+    listVendorSupportTicketsMock.mockResolvedValueOnce([
+      buildSupportTicket({ id: 'ticket-shipment-1', status: 'OPEN', updatedAt: '2026-05-15T20:05:00.000Z' }),
+      buildSupportTicket({
+        id: 'ticket-finance-review',
+        subject: 'Settlement review question for #1028',
+        status: 'IN_REVIEW',
+        priority: 'high',
+        updatedAt: '2026-05-16T09:15:00.000Z',
+      }),
+    ]);
+    getOrderMock.mockResolvedValueOnce(orderWithShipmentSummary);
+
+    renderOrderDetail();
+
+    const linkedRecords = (await screen.findByRole('heading', { name: 'Linked records' })).closest('.order-linked-records-panel');
+    expect(linkedRecords).toBeTruthy();
+    expect(within(linkedRecords as HTMLElement).getByText('Support activity')).toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).getAllByText(/2 linked tickets/i).length).toBeGreaterThan(0);
+    expect(within(linkedRecords as HTMLElement).getByText('Latest status: In Review')).toBeInTheDocument();
+    expect(within(linkedRecords as HTMLElement).getByText('Settlement review question for #1028')).toBeInTheDocument();
+  });
+
   it('shows finance ledger preview to admins and hides it from vendors', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -2160,6 +2192,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const financeTimeline = screen.getByLabelText('Finance timeline');
     expect(within(financeTimeline).getByRole('heading', { name: 'Finance timeline' })).toBeInTheDocument();
     expect(financeTimeline).toHaveTextContent('Finance events are previews until settlement review is completed.');
+    expect(within(financeTimeline).getByText('Settlement preview generated')).toBeInTheDocument();
     expect(within(financeTimeline).getByText('Commission estimated')).toBeInTheDocument();
     expect(within(financeTimeline).getByText('Shipping deduction unknown')).toBeInTheDocument();
     expect(within(financeTimeline).getByText('Settlement awaiting review')).toBeInTheDocument();
@@ -2167,7 +2200,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(financeTimeline).not.toHaveTextContent(/Payout scheduled|Payout paid|Confirmed settlement/i);
 
     expect(await screen.findByLabelText('Finance ledger preview')).toBeInTheDocument();
-    expect(screen.getByText('Read-only simulation. Not payout, refund, invoice, or tax truth.')).toBeInTheDocument();
+    expect(screen.getByText('Admin-only calculation trace for reconciliation. Not settlement, invoice, tax, or payout truth.')).toBeInTheDocument();
     expect(screen.getAllByText('shipping_cost').length).toBeGreaterThan(0);
     expect(screen.getByText(/Marketplace commission reserved/i)).toBeInTheDocument();
 
@@ -6699,10 +6732,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Shopify shipping address available in future detail sync.')).toBeInTheDocument();
     const returnLink = screen.getByRole('link', { name: /Return for #1028/i });
     expect(returnLink).toHaveAttribute('href', '/returns/return-1028');
-    const financeLink = screen.getByRole('link', { name: /Payout activity/i });
+    const financeLink = screen.getByRole('link', { name: /Settlement activity/i });
     expect(financeLink.getAttribute('href')).toContain('/finance');
     expect(screen.getAllByText('Return linked').length).toBeGreaterThan(0);
-    expect(screen.getByText('Payout pending')).toBeInTheDocument();
+    expect(screen.getByText('Pending review')).toBeInTheDocument();
     expect(screen.getByText('TRY 4,999.00 · Pending')).toBeInTheDocument();
     const financeTimeline = screen.getByLabelText('Finance timeline');
     expect(within(financeTimeline).getByText('Refund impact pending')).toBeInTheDocument();
