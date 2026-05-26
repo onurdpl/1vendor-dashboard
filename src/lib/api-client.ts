@@ -10,6 +10,7 @@ type ApiClientRequestOptions = {
   body?: unknown;
   token?: string | null;
   vendorId?: string | null;
+  skipVendorContext?: boolean;
   headers?: HeadersInit;
   signal?: AbortSignal;
 };
@@ -39,7 +40,7 @@ function getCurrentRouteForAuthRedirect() {
 function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   const headers = new Headers(options.headers);
   const token = options.token ?? getToken();
-  const vendorId = options.vendorId ?? getCurrentVendorContext().vendorId;
+  const vendorId = options.skipVendorContext ? null : options.vendorId ?? getCurrentVendorContext().vendorId;
 
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);

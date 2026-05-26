@@ -26,7 +26,7 @@ export async function login(
 ) {
   return apiClient.post<BackendLoginResponse>('/auth/login', { email, password }, {
     headers: options.authAttemptId ? { 'X-Auth-Attempt-Id': options.authAttemptId } : undefined,
-    vendorId: null,
+    skipVendorContext: true,
     signal: options.signal,
   });
 }

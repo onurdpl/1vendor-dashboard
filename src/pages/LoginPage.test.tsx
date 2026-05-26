@@ -139,8 +139,35 @@ describe('LoginPage expired session flow', () => {
     expect(screen.queryByText('Sign-in is taking longer than expected. Please try again.')).not.toBeInTheDocument();
   });
 
+  it('logs safe POST dispatch diagnostics without credentials', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+    const events = debugSpy.mock.calls
+      .map((call) => call[1])
+      .filter((entry): entry is { event?: string; authAttemptId?: string } => Boolean(entry) && typeof entry === 'object');
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ event: 'auth request start', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'fetch dispatch started', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'fetch promise created', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'fetch resolved', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'auth request completed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+      ]),
+    );
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
+    expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
+
+    debugSpy.mockRestore();
+  });
+
   it('aborts a hanging login request and shows a retryable timeout error', async () => {
     vi.useFakeTimers();
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     loginMock.mockImplementation(
       (_email: string, _password: string, options?: { signal?: AbortSignal }) =>
         new Promise((_resolve, reject) => {
@@ -173,5 +200,9 @@ describe('LoginPage expired session flow', () => {
     expect((loginMock.mock.calls[0][2] as { authAttemptId?: string }).authAttemptId).toEqual(
       expect.stringMatching(/^auth-[a-z0-9]{10}$/i),
     );
+    expect(debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event)).toEqual(
+      expect.arrayContaining(['auth timeout triggered', 'abort fired', 'fetch rejected', 'auth request completed']),
+    );
+    debugSpy.mockRestore();
   });
 });

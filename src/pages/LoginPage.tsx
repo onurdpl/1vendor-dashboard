@@ -56,7 +56,15 @@ function shouldLogAuthDiagnostics() {
 }
 
 function logAuthDiagnostic(
-  event: 'auth request start' | 'auth timeout triggered' | 'auth request completed',
+  event:
+    | 'auth request start'
+    | 'fetch dispatch started'
+    | 'fetch promise created'
+    | 'abort fired'
+    | 'auth timeout triggered'
+    | 'fetch resolved'
+    | 'fetch rejected'
+    | 'auth request completed',
   details: Record<string, unknown> = {},
 ) {
   if (!shouldLogAuthDiagnostics()) {
@@ -133,15 +141,33 @@ export function LoginPage() {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,
       });
+      logAuthDiagnostic('abort fired', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
+      });
       abortController.abort();
     }, LOGIN_TIMEOUT_MS);
 
     logAuthDiagnostic('auth request start', { authAttemptId });
 
     try {
-      const { token, user } = await runtimeServices.auth.login(email, password, {
+      logAuthDiagnostic('fetch dispatch started', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      const loginPromise = runtimeServices.auth.login(email, password, {
         authAttemptId,
         signal: abortController.signal,
+      });
+      logAuthDiagnostic('fetch promise created', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      const { token, user } = await loginPromise;
+
+      logAuthDiagnostic('fetch resolved', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
       });
 
       logAuthDiagnostic('auth request completed', {
@@ -155,6 +181,11 @@ export function LoginPage() {
       setCurrentVendorId(user.defaultVendorId as VendorId);
       navigate(from, { replace: true });
     } catch (error) {
+      logAuthDiagnostic('fetch rejected', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
+        timedOut: timeoutTriggered,
+      });
       logAuthDiagnostic('auth request completed', {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,

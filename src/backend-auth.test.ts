@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setCurrentUser, setCurrentVendorId, setToken } from './lib/auth';
 import { login } from './services/backend-auth';
 
 describe('backend auth client diagnostics', () => {
@@ -34,12 +35,28 @@ describe('backend auth client diagnostics', () => {
   });
 
   it('sends a safe auth attempt id header without changing the login body', async () => {
+    setToken('stale-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['yalispor', 'sporjinal'],
+      vendorDetails: [
+        { vendorId: 'yalispor', vendorName: 'Yalı Spor' },
+        { vendorId: 'sporjinal', vendorName: 'Sporjinal' },
+      ],
+      canSwitchVendors: true,
+      defaultVendorId: 'yalispor',
+    });
+    setCurrentVendorId('sporjinal');
+
     await login('vendor@example.com', 'demo123', { authAttemptId: 'auth-test123' });
 
     const [, init] = fetchMock.mock.calls.at(-1) ?? [];
     const headers = (init as RequestInit).headers as Headers;
 
     expect(headers.get('X-Auth-Attempt-Id')).toBe('auth-test123');
+    expect(headers.get('X-Vendor-Id')).toBeNull();
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({
       email: 'vendor@example.com',
       password: 'demo123',

@@ -54,6 +54,18 @@ describe('apiClient vendor-scoped headers', () => {
     expect(headers.get('X-Vendor-Id')).toBe('demo-vendor-a');
   });
 
+  it('can explicitly skip vendor context for pre-auth requests', async () => {
+    setCurrentVendorId('demo-vendor-a');
+
+    await apiClient.post('/auth/login', { email: 'redacted@example.com' }, { skipVendorContext: true });
+
+    const init = fetchMock.mock.calls.at(-1)?.[1] as RequestInit;
+    const headers = init.headers as Headers;
+
+    expect(headers.get('X-Vendor-Id')).toBeNull();
+    expect(headers.get('Authorization')).toBe('Bearer test-token');
+  });
+
   it('clears stale session state when the backend rejects the token', async () => {
     window.history.pushState({}, '', '/orders?status=open#row-1029');
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ message: 'Unauthorized' }), {
