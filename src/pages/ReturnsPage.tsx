@@ -54,13 +54,18 @@ function formatDate(value: string | null | undefined) {
     return '—';
   }
 
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatDateParts(value: string | null | undefined) {
@@ -69,6 +74,10 @@ function formatDateParts(value: string | null | undefined) {
   }
 
   const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return { date: '—', time: '' };
+  }
+
   return {
     date: new Intl.DateTimeFormat('en-US', {
       month: 'short',

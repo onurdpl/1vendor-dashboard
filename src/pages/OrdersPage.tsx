@@ -45,13 +45,18 @@ function formatDate(value?: string | null) {
     return 'Not synced';
   }
 
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return 'Not synced';
+  }
+
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function getStatusTone(status: string) {

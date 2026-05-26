@@ -16,14 +16,23 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { listVendorSupportTickets, type SupportTicket } from '../features/support/api';
 import { formatSupportLabel, getSupportStatusTone } from './AdminSupportTicketsPage';
 
-function formatDate(value: string) {
+function formatDate(value: string | null | undefined) {
+  if (!value) {
+    return '—';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '—';
+  }
+
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
     day: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(new Date(value));
+  }).format(date);
 }
 
 function formatLastReply(ticket: SupportTicket) {
