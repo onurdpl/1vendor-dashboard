@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
@@ -276,6 +277,43 @@ function groupNotifications(notifications: NotificationIntent[]) {
   });
 }
 
+function getDashboardActionRoute(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('refund') || normalized.includes('return')) {
+    return '/returns';
+  }
+  if (normalized.includes('automation')) {
+    return '/automation';
+  }
+  if (normalized.includes('support')) {
+    return '/support';
+  }
+  if (normalized.includes('finance') || normalized.includes('settlement') || normalized.includes('payout')) {
+    return '/finance';
+  }
+  return '/orders';
+}
+
+function getDashboardActionLabel(label: string) {
+  const normalized = label.toLowerCase();
+  if (normalized.includes('awaiting') || normalized.includes('shipment')) {
+    return 'Review shipments';
+  }
+  if (normalized.includes('blocked')) {
+    return 'Review allocations';
+  }
+  if (normalized.includes('refund') || normalized.includes('return')) {
+    return 'Review returns';
+  }
+  if (normalized.includes('automation')) {
+    return 'Review automation';
+  }
+  if (normalized.includes('tracking')) {
+    return 'Review tracking';
+  }
+  return 'Review queue';
+}
+
 export function DashboardPage() {
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
@@ -435,7 +473,7 @@ export function DashboardPage() {
   const dashboardStats = safeArray(dashboardView.stats);
   const groupedRecentActivity = groupRecentActivity(recentActivity);
   const groupedNotifications = groupNotifications(notificationView.notifications);
-  const visibleNotificationGroups = groupedNotifications.slice(0, 4);
+  const visibleNotificationGroups = groupedNotifications.slice(0, 3);
   const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
   const operationalActionTotal = priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
@@ -447,30 +485,40 @@ export function DashboardPage() {
       value: priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '—',
       description: 'Shipment work waiting for action.',
       tone: 'fulfillment',
+      to: '/orders',
+      action: 'Open orders',
     },
     {
       label: 'Returns queue',
       value: priorityWork.find((item) => item.label === 'Refund attention')?.value ?? '—',
       description: 'Return and refund review workload.',
       tone: 'returns',
+      to: '/returns',
+      action: 'Open returns',
     },
     {
       label: 'Finance review queue',
       value: dashboardView.financeSnapshot?.payoutEstimate ?? dashboardStats.find((stat) => stat.label === 'Payout estimate')?.value ?? '—',
       description: 'Settlement estimate visibility.',
       tone: 'finance',
+      to: '/finance',
+      action: 'Open finance',
     },
     {
       label: 'Support queue',
       value: notificationView.summary.unread > 0 ? String(notificationView.summary.unread) : 'Open',
       description: notificationView.summary.unread > 0 ? 'Unread operational alerts need triage.' : 'Support workspace remains available.',
       tone: 'support',
+      to: '/support',
+      action: 'Open support',
     },
     {
       label: 'Automation queue',
       value: priorityWork.find((item) => item.label === 'Automation signals')?.value ?? '—',
       description: 'Automation and rule signals.',
       tone: 'automation',
+      to: '/automation',
+      action: 'Open automation',
     },
   ];
 
@@ -533,6 +581,9 @@ export function DashboardPage() {
                     <StatusBadge tone={isActive ? 'warning' : 'success'}>{isActive ? 'Action needed' : 'Clear'}</StatusBadge>
                   </div>
                   {item.description ? <p>{item.description}</p> : null}
+                  <Link className="dashboard-action-link" to={getDashboardActionRoute(item.label)}>
+                    {getDashboardActionLabel(item.label)}
+                  </Link>
                 </article>
               );
             })}
@@ -547,6 +598,9 @@ export function DashboardPage() {
               <span>{queue.label}</span>
               <strong>{isDashboardInitialLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
               <small>{queue.description}</small>
+              <Link className="dashboard-queue-link" to={queue.to}>
+                {queue.action}
+              </Link>
             </article>
           ))}
         </div>

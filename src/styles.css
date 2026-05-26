@@ -8303,6 +8303,43 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 650;
 }
 
+.dashboard-action-link,
+.dashboard-queue-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 28px;
+  margin-top: auto;
+  padding: 5px 9px;
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  border-radius: 9px;
+  background: #ffffff;
+  color: #1d4ed8;
+  font-size: 0.72rem;
+  font-weight: 900;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.dashboard-action-card.is-active .dashboard-action-link {
+  border-color: rgba(249, 115, 22, 0.24);
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+.dashboard-action-card.severity-warning .dashboard-action-link,
+.dashboard-action-card.severity-critical .dashboard-action-link,
+.dashboard-action-card.severity-high .dashboard-action-link {
+  border-color: rgba(220, 38, 38, 0.2);
+  background: #fff7f7;
+  color: #b91c1c;
+}
+
+.dashboard-queue-link {
+  color: #334155;
+}
+
 .dashboard-queue-card {
   min-height: 112px;
   background: #f8fafc;
@@ -8435,6 +8472,14 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-passive-grid .op-section {
   box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
+}
+
+.dashboard-passive-grid .notification-summary-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dashboard-passive-grid .notification-card {
+  padding: 9px 10px;
 }
 
 .dashboard-enterprise-grid {

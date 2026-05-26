@@ -222,6 +222,11 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
     expect(screen.getByText('Support queue')).toBeInTheDocument();
     expect(screen.getByText('Automation queue')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Review allocations' })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: 'Review shipments' })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: 'Review returns' })).toHaveAttribute('href', '/returns');
+    expect(screen.getByRole('link', { name: 'Open support' })).toHaveAttribute('href', '/support');
+    expect(screen.getByRole('link', { name: 'Open automation' })).toHaveAttribute('href', '/automation');
   });
 
   it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {
