@@ -65,6 +65,10 @@ type FinanceDeepLinkTarget = {
   value: string;
 };
 
+const FINANCE_ESTIMATE_HELPER =
+  'Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.';
+const UNKNOWN_FINANCE_VALUE = 'Unknown';
+
 function formatDate(value: string) {
   return new Intl.DateTimeFormat('en-US', {
     month: 'short',
@@ -275,7 +279,10 @@ function isPendingOrHoldRecord(record: FinanceTransaction) {
 
 function getPayoutActivityType(record: FinanceTransaction) {
   if (record.category === 'Invoice') {
-    return 'Sale';
+    return 'Sale estimate';
+  }
+  if (record.category === 'Refund') {
+    return 'Refund deduction';
   }
   return record.category;
 }
@@ -285,35 +292,41 @@ function getPayoutActivityDetail(record: FinanceTransaction) {
     return 'Shopify order';
   }
   if (record.category === 'Refund') {
-    return 'Customer return';
+    return 'Customer refund impact';
   }
-  return 'Payout activity';
+  return 'Settlement preview';
 }
 
 function getPayoutActivityStatusLabel(record: FinanceTransaction) {
   const status = normalizeFinanceStatus(record.status);
-  if (status === 'Failed') {
-    return 'Needs review';
+  if (status === 'Failed' || record.settlement?.status === 'held' || record.settlement?.status === 'disputed') {
+    return 'Blocked';
   }
   if (isRefundRecord(record) && ['Recorded', 'Completed', 'Reconciled'].includes(status)) {
-    return 'Refunded';
+    return 'Refund impact';
   }
   if (record.payoutBatch) {
-    return 'Included in payout';
+    return getPayoutBatchStatusLabel(record.payoutBatch.status);
   }
-  if (record.settlement?.payoutReady || status === 'Pending' || status === 'Recorded') {
-    return 'Awaiting payout';
+  if (record.settlement?.payoutReady || record.settlement?.status === 'payable' || record.settlement?.status === 'partially_refunded') {
+    return 'Pending review';
+  }
+  if (status === 'Pending' || status === 'Recorded' || status === 'Completed' || status === 'Reconciled') {
+    return 'Estimated';
   }
   return status;
 }
 
 function getPayoutActivityTone(record: FinanceTransaction) {
   const label = getPayoutActivityStatusLabel(record);
-  if (label === 'Needs review') {
+  if (label === 'Blocked') {
     return 'danger' as const;
   }
-  if (label === 'Refunded' || label === 'Included in payout') {
+  if (label === 'Approved' || label === 'Scheduled' || label === 'Paid') {
     return 'success' as const;
+  }
+  if (label === 'Estimated') {
+    return 'info' as const;
   }
   return 'attention' as const;
 }
@@ -334,10 +347,33 @@ function getPayoutBatchStatusLabel(status?: string) {
     return 'Not batched';
   }
 
-  return status
-    .split('_')
-    .map((part) => `${part.charAt(0).toUpperCase()}${part.slice(1)}`)
-    .join(' ');
+  if (status === 'draft') {
+    return 'Estimated';
+  }
+  if (status === 'review') {
+    return 'Pending review';
+  }
+  if (status === 'approved') {
+    return 'Approved';
+  }
+  if (status === 'execution_pending') {
+    return 'Scheduled';
+  }
+  if (status === 'paid_placeholder') {
+    return 'Payment evidence pending';
+  }
+  if (status === 'cancelled') {
+    return 'Blocked';
+  }
+  return UNKNOWN_FINANCE_VALUE;
+}
+
+function financeValueOrUnknown(value?: string | null) {
+  return typeof value === 'string' && value.trim() ? value : UNKNOWN_FINANCE_VALUE;
+}
+
+function optionalDeductionValue(value?: string | null) {
+  return typeof value === 'string' && value.trim() ? formatDeductionValue(value) : UNKNOWN_FINANCE_VALUE;
 }
 
 function getInvoiceStatusLabel(status?: string) {
@@ -426,11 +462,13 @@ function getProviderCapabilities(execution?: InvoiceExecution | null) {
 function getUpcomingPayoutLabel(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
   return finance.payoutBatchSummary?.latestBatch?.createdAt
     ? formatDateParts(finance.payoutBatchSummary.latestBatch.createdAt).date
-    : finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate;
+    : financeValueOrUnknown(finance.payoutBatchSummary?.eligibleNetAmount ?? finance.summary.payableBalance ?? finance.summary.payoutEstimate);
 }
 
 function getUpcomingPayoutDetail(finance: NonNullable<Awaited<ReturnType<typeof getFinanceDashboard>>>) {
-  return finance.payoutBatchSummary?.latestBatch?.createdAt ? 'Estimated date' : `${finance.payoutBatchSummary?.eligibleRowCount ?? 0} payable rows`;
+  return finance.payoutBatchSummary?.latestBatch?.createdAt
+    ? 'Draft review created'
+    : `${finance.payoutBatchSummary?.eligibleRowCount ?? 0} rows pending review`;
 }
 
 function getPayoutImpact(record: FinanceTransaction) {
@@ -449,7 +487,7 @@ function getTotalDeductions(record: FinanceTransaction) {
   ].filter((value): value is string => Boolean(value));
 
   if (!values.length) {
-    return '$0.00';
+    return UNKNOWN_FINANCE_VALUE;
   }
 
   const total = values.reduce((sum, value) => {
@@ -468,13 +506,13 @@ function getFinanceTimelineItems(record: FinanceTransaction) {
       status: normalizeFinanceStatus(record.status),
     },
     {
-      label: record.settlement?.payoutReady ? 'Awaiting payout' : 'Payout pending',
+      label: record.settlement?.payoutReady ? 'Pending review' : 'Settlement estimate pending',
       at: record.settlement?.payableAt ?? record.settlement?.eligibleAt ?? null,
-      status: record.settlement?.payoutReady ? 'Ready' : 'Pending',
+      status: record.settlement?.payoutReady ? 'Pending review' : 'Pending',
     },
     record.payoutBatch
       ? {
-          label: record.payoutBatch.status === 'paid_placeholder' ? 'Paid out' : 'Included in payout',
+          label: record.payoutBatch.status === 'paid_placeholder' ? 'Payment evidence pending' : 'Included in draft review',
           at: record.payoutBatch.createdAt,
           status: getPayoutBatchStatusLabel(record.payoutBatch.status),
         }
@@ -537,10 +575,10 @@ export function FinancePage() {
       invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async (batch) => {
         await refetch();
-        showFeedback(`Draft payout batch ${batch.id} prepared for review.`, 'success');
+        showFeedback(`Draft payout review ${batch.id} prepared.`, 'success');
       },
       onError: (mutationError) =>
-        showFeedback(mutationError instanceof Error ? mutationError.message : 'Payout batch could not be prepared.', 'error'),
+        showFeedback(mutationError instanceof Error ? mutationError.message : 'Draft review could not be prepared.', 'error'),
     },
   );
   const attachShippingCostMutation = useMutationAction(
@@ -565,7 +603,7 @@ export function FinancePage() {
       invalidateQueryKeys: [queryKeys.finance.summary(currentVendor.vendorId)],
       onSuccess: async () => {
         await refetch();
-        showFeedback('Shipping cost saved for future payout context.', 'success');
+        showFeedback('Shipping cost saved for future settlement context.', 'success');
       },
       onError: (mutationError) =>
         showFeedback(mutationError instanceof Error ? mutationError.message : 'Shipping cost could not be saved.', 'error'),
@@ -843,11 +881,11 @@ export function FinancePage() {
         id: `finance-rec-payout-${selectedRecord.id}`,
         type: 'finance_review',
         severity: 'warning',
-        title: 'Review payout issue',
+        title: 'Review settlement issue',
         description: selectedRecord.shopifyOrderNumber
-          ? `Payout activity for ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)} needs operator review.`
+          ? `Settlement activity for ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)} needs operator review.`
           : 'This finance row needs operator review.',
-        recommendedAction: 'Review payout status before settlement preparation',
+        recommendedAction: 'Review settlement status before draft preparation',
         relatedObjectType: 'Finance row',
         relatedObjectId: selectedRecord.id,
         vendor: {
@@ -864,15 +902,15 @@ export function FinancePage() {
 
   const financeView = finance ?? {
     summary: {
-      grossSales: '$0.00',
-      refunds: '$0.00',
-      netRevenue: '$0.00',
-      platformFee: '$0.00',
-      payoutEstimate: '$0.00',
-      totalRevenue: '$0.00',
-      availableBalance: '$0.00',
-      pendingPayouts: '$0.00',
-      refundsThisMonth: '$0.00',
+      grossSales: UNKNOWN_FINANCE_VALUE,
+      refunds: UNKNOWN_FINANCE_VALUE,
+      netRevenue: UNKNOWN_FINANCE_VALUE,
+      platformFee: UNKNOWN_FINANCE_VALUE,
+      payoutEstimate: UNKNOWN_FINANCE_VALUE,
+      totalRevenue: UNKNOWN_FINANCE_VALUE,
+      availableBalance: UNKNOWN_FINANCE_VALUE,
+      pendingPayouts: UNKNOWN_FINANCE_VALUE,
+      refundsThisMonth: UNKNOWN_FINANCE_VALUE,
     },
     transactions: [],
     profile: {
@@ -900,8 +938,9 @@ export function FinancePage() {
           <p className="eyebrow">Finance</p>
           <h2>Finance control center</h2>
           <p className="page-description">
-            Track payouts, refunds, holds, and your settlement activity.
+            Review settlement estimates, refund impact, shipping reconciliation, and payout preparation.
           </p>
+          <p className="page-description">{FINANCE_ESTIMATE_HELPER}</p>
         </div>
         <div className="op-heading-meta">
           <button type="button" className="button button-secondary button-compact">
@@ -921,16 +960,16 @@ export function FinancePage() {
         {[
           {
             icon: 'B',
-            label: 'Available balance',
-            value: financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate,
-            detail: 'Ready for payout',
+            label: 'Settlement estimate',
+            value: financeValueOrUnknown(financeView.summary.availableBalance ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate),
+            detail: 'Operational preview',
             tone: 'success',
           },
           {
             icon: 'P',
-            label: 'Pending payout',
-            value: financeView.summary.pendingPayouts ?? financeView.summary.heldBalance ?? '$0.00',
-            detail: `Includes ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} items`,
+            label: 'Pending review',
+            value: financeValueOrUnknown(financeView.summary.pendingPayouts ?? financeView.summary.heldBalance),
+            detail: `Includes ${financeView.payoutBatchSummary?.eligibleRowCount ?? 0} estimate rows`,
             tone: 'info',
           },
           {
@@ -942,7 +981,7 @@ export function FinancePage() {
           },
           {
             icon: 'D',
-            label: 'Upcoming payout',
+            label: 'Draft payout review',
             value: getUpcomingPayoutLabel(financeView),
             detail: getUpcomingPayoutDetail(financeView),
             tone: 'info',
@@ -977,16 +1016,18 @@ export function FinancePage() {
             <FilterBar>
               <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
                 <option value="all">All statuses</option>
-                <option value="Awaiting payout">Awaiting payout</option>
-                <option value="Included in payout">Included in payout</option>
-                <option value="Refunded">Refunded</option>
-                <option value="Needs review">Needs review</option>
+                <option value="Estimated">Estimated</option>
+                <option value="Pending review">Pending review</option>
+                <option value="Approved">Approved</option>
+                <option value="Scheduled">Scheduled</option>
+                <option value="Refund impact">Refund impact</option>
+                <option value="Blocked">Blocked</option>
               </select>
               <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
                 <option value="all">All types</option>
                 <option value="Invoice">Sale</option>
                 <option value="Refund">Refund</option>
-                <option value="Payout">Payout</option>
+                <option value="Payout">Payout review</option>
                 <option value="Adjustment">Adjustment</option>
               </select>
               <select defaultValue="week" aria-label="Date range">
@@ -1008,13 +1049,13 @@ export function FinancePage() {
             </FilterBar>
           </OperationalToolbar>
           <div className="finance-filter-chips" aria-label="Finance quick filters">
-            {['All', 'Sales', 'Refunds', 'Holds', 'Payouts'].map((chip) => (
+            {['All', 'Sales', 'Refunds', 'Holds', 'Payout reviews'].map((chip) => (
               <span key={chip} className={chip === 'All' ? 'is-active' : ''}>{chip}</span>
             ))}
           </div>
 
           <OperationalTable
-            columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Payout impact', 'Updated', 'Action']}
+            columns={['Date', 'Type', 'Order', 'Status', 'Amount', 'Settlement impact', 'Updated', 'Action']}
             className="finance-op-table finance-op-table-v2"
           >
             {isError && !finance ? (
@@ -1030,8 +1071,8 @@ export function FinancePage() {
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
-                  title="No payout activity in this view"
-                  description="Adjust the status, type, or search filters to review payout activity."
+                  title="No finance preview activity in this view"
+                  description="Adjust the status, type, or search filters to review settlement estimates."
                 />
               </OperationalTableRow>
             ) : filteredRecords.map((record) => (
@@ -1084,7 +1125,7 @@ export function FinancePage() {
             <section className="finance-footer-card">
               <div>
                 <p className="eyebrow">Vendor profile</p>
-                <h3>{currentVendor.vendorName} payout settings</h3>
+                <h3>{currentVendor.vendorName} marketplace terms</h3>
                 <p className="page-description">Applies to new payout estimates from now on. Past activity keeps its original rates.</p>
               </div>
               <div className="finance-profile-summary">
@@ -1155,20 +1196,20 @@ export function FinancePage() {
 
             <section className="finance-footer-card">
               <div>
-                <p className="eyebrow">Payout preparation</p>
-                <h3>Upcoming payout</h3>
+                <p className="eyebrow">Settlement review</p>
+                <h3>Draft payout review</h3>
                 <p className="page-description">
                   {isVendorUser
-                    ? 'A read-only view of rows currently eligible for upcoming payout.'
-                    : 'Prepare payable rows for review. No payment is executed here.'}
+                    ? 'A read-only view of estimate rows currently eligible for settlement review.'
+                    : 'Prepare eligible estimate rows for review. No payment is executed here.'}
                 </p>
               </div>
               <div className="finance-profile-summary">
-                <MetadataRow label="Eligible rows" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
-                <MetadataRow label="Eligible net" value={financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate} />
+                <MetadataRow label="Rows pending review" value={financeView.payoutBatchSummary?.eligibleRowCount ?? 0} />
+                <MetadataRow label="Estimated net" value={financeValueOrUnknown(financeView.payoutBatchSummary?.eligibleNetAmount ?? financeView.summary.payableBalance ?? financeView.summary.payoutEstimate)} />
                 <MetadataRow label="Needs review" value={financeView.payoutBatchSummary?.blockedRowCount ?? 0} />
                 <MetadataRow
-                  label={isVendorUser ? 'Latest payout' : 'Latest draft'}
+                  label={isVendorUser ? 'Latest review artifact' : 'Latest draft review'}
                   value={
                     financeView.payoutBatchSummary?.latestBatch
                       ? `${getPayoutBatchStatusLabel(financeView.payoutBatchSummary.latestBatch.status)} · ${financeView.payoutBatchSummary.latestBatch.netAmount}`
@@ -1184,22 +1225,22 @@ export function FinancePage() {
                     disabled={preparePayoutBatchMutation.isPending || (financeView.payoutBatchSummary?.eligibleRowCount ?? 0) === 0}
                     onClick={() => preparePayoutBatchMutation.mutate(undefined)}
                   >
-                    {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft payout'}
+                    {preparePayoutBatchMutation.isPending ? 'Preparing...' : 'Prepare draft review'}
                   </button>
                   <StatusBadge tone={(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'success' : 'neutral'}>
-                    {(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows ready' : 'No payable rows'}
+                    {(financeView.payoutBatchSummary?.eligibleRowCount ?? 0) > 0 ? 'Rows pending review' : 'No review rows'}
                   </StatusBadge>
                 </div>
               ) : (
-                <StatusBadge tone="neutral">Read-only upcoming payout</StatusBadge>
+                <StatusBadge tone="neutral">Read-only settlement preview</StatusBadge>
               )}
             </section>
           </div>
         </div>
 
         <SideDetailPanel
-          eyebrow="Payout summary"
-          title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : 'Payout summary'}
+          eyebrow="Settlement estimate"
+          title={selectedRecord?.shopifyOrderNumber ? `Order ${formatShopifyOrderNumber(selectedRecord.shopifyOrderNumber)}` : 'Settlement estimate'}
         >
           {selectedRecord ? (
             <>
@@ -1288,27 +1329,27 @@ export function FinancePage() {
               </div>
               <div className="finance-detail-card">
                 <div className="finance-detail-card-heading">
-                  <h4>Supplier settlement/payout</h4>
-                  <StatusBadge tone={selectedRecord.settlement?.payoutReady ? 'success' : 'attention'}>
-                    {selectedRecord.settlement?.payoutReady ? 'Payable' : 'Pending'}
+                  <h4>Settlement preview</h4>
+                  <StatusBadge tone={getPayoutActivityTone(selectedRecord)}>
+                    {getPayoutActivityStatusLabel(selectedRecord)}
                   </StatusBadge>
                 </div>
                 <div className="finance-detail-rows">
-                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : '—'} />
-                  <MetadataRow label="Payout status" value={getPayoutActivityStatusLabel(selectedRecord)} />
+                  <MetadataRow label="Order" value={selectedRecord.shopifyOrderNumber ? `#${selectedRecord.shopifyOrderNumber}` : UNKNOWN_FINANCE_VALUE} />
+                  <MetadataRow label="Review status" value={getPayoutActivityStatusLabel(selectedRecord)} />
                   <MetadataRow
-                    label="Expected payout"
-                    value={<span className="finance-payout-value">{selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount}</span>}
+                    label="Estimated payout"
+                    value={<span className="finance-payout-value">{financeValueOrUnknown(selectedRecord.payoutCalculation?.estimatedPayout ?? selectedRecord.amount)}</span>}
                   />
                   <MetadataRow
                     label="Refund impact"
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.refundImpact ?? '$0.00')}</span>}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.refundImpact)}</span>}
                   />
                   <MetadataRow
-                    label="Payout impact"
+                    label="Settlement impact"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
                   />
-                  <MetadataRow label="Payment method" value={selectedRecord.payoutBatch ? 'Bank transfer' : '—'} />
+                  <MetadataRow label="Payment evidence" value={selectedRecord.payoutBatch ? 'Draft review artifact' : 'Not scheduled'} />
                 </div>
               </div>
 
@@ -1319,22 +1360,22 @@ export function FinancePage() {
                 <div className="finance-detail-rows">
                   <MetadataRow
                     label={`Commission (${selectedRecord.payoutCalculation?.commissionPercent ?? financeView.profile?.commissionPercent ?? '10.00'}%)`}
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commission ?? '$0.00')}</span>}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commission)}</span>}
                   />
                   <MetadataRow
                     label={`Tax (${selectedRecord.payoutCalculation?.commissionVatPercent ?? financeView.profile?.commissionVatPercent ?? '0.00'}%)`}
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.commissionVat ?? '$0.00')}</span>}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.commissionVat)}</span>}
                   />
                   <MetadataRow
                     label="Shipping fee"
-                    value={<span className="finance-deduction-value">{formatDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction ?? '$0.00')}</span>}
+                    value={<span className="finance-deduction-value">{optionalDeductionValue(selectedRecord.payoutCalculation?.shippingDeduction)}</span>}
                   />
                   <MetadataRow
                     label="Total deductions"
-                    value={<span className="finance-deduction-value">{formatDeductionValue(getTotalDeductions(selectedRecord))}</span>}
+                    value={<span className="finance-deduction-value">{getTotalDeductions(selectedRecord) === UNKNOWN_FINANCE_VALUE ? UNKNOWN_FINANCE_VALUE : formatDeductionValue(getTotalDeductions(selectedRecord))}</span>}
                   />
                   <MetadataRow
-                    label="Final payout impact"
+                    label="Net estimate impact"
                     value={<span className={isRefundRecord(selectedRecord) ? 'finance-deduction-value' : 'finance-payout-value'}>{getPayoutImpact(selectedRecord)}</span>}
                   />
                 </div>
@@ -1437,7 +1478,7 @@ export function FinancePage() {
                     {attachShippingCostMutation.isPending ? 'Saving...' : 'Save shipping cost'}
                   </button>
                   <p className="page-description">
-                    Shipping cost can affect payout calculations.
+                    Shipping cost can change settlement estimates after reconciliation.
                   </p>
                 </form>
               ) : null}
@@ -1448,7 +1489,7 @@ export function FinancePage() {
               description={
                 requestedFinanceTarget
                   ? 'The linked finance record is not available in the current vendor scope.'
-                  : 'Choose a finance row to review payout and invoice details.'
+                  : 'Choose a finance row to review settlement estimate and invoice details.'
               }
             />
           )}

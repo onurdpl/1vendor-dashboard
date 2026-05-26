@@ -282,7 +282,7 @@ describe('FinancePage control center', () => {
     expect(screen.getByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search by order #, type, status, amount...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Date' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Payout impact' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Settlement impact' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Finance unavailable')).not.toBeInTheDocument();
   });
@@ -294,10 +294,13 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
     expect(getFinanceDashboardMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'demo-vendor-a' }));
-    expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Blocked').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Refund impact').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Needs review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
-    expect(screen.getByText('Available balance')).toBeInTheDocument();
+    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
   });
 
   it('opens the finance detail panel for a selected ledger row', async () => {
@@ -310,13 +313,26 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Order #1002' })).toBeInTheDocument();
-    expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
+    expect(screen.getByText('Settlement preview')).toBeInTheDocument();
     expect(screen.getByText('Deductions')).toBeInTheDocument();
     const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
     expect(inspectorBody?.querySelector(':scope > .admin-collab-card')).toBeTruthy();
     expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
     expect(inspectorBody?.querySelectorAll(':scope > .finance-detail-card').length).toBeGreaterThanOrEqual(3);
     expect(screen.queryByText('Shopify identifiers')).not.toBeInTheDocument();
+  });
+
+  it('renders unknown instead of fake zero when a row has no calculation snapshot', async () => {
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+
+    renderFinancePage();
+
+    await screen.findByText('#1002');
+    await userEvent.click(screen.getAllByRole('button', { name: 'View' })[2]);
+
+    expect(await screen.findByText('Review status')).toBeInTheDocument();
+    expect(screen.getAllByText('Unknown').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement impact').length).toBeGreaterThan(0);
   });
 
   it('renders recommendation, invoice, and settlement sections in the same finance inspector stack', async () => {
@@ -342,14 +358,14 @@ describe('FinancePage control center', () => {
 
     expect(await screen.findByText('Suggested next steps')).toBeInTheDocument();
     expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
-    expect(screen.getByText('Supplier settlement/payout')).toBeInTheDocument();
+    expect(screen.getByText('Settlement preview')).toBeInTheDocument();
 
     const inspectorBody = container.querySelector('.finance-control-center .op-side-panel-body');
     expect(inspectorBody?.querySelector(':scope > .operational-recommendations-card')).toBeTruthy();
     expect(inspectorBody?.querySelector(':scope > .finance-invoice-card')).toBeTruthy();
     expect(
       Array.from(inspectorBody?.querySelectorAll(':scope > .finance-detail-card') ?? []).some((section) =>
-        section.textContent?.includes('Supplier settlement/payout'),
+        section.textContent?.includes('Settlement preview'),
       ),
     ).toBe(true);
   });
@@ -561,7 +577,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('Recorded')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Awaiting payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Estimated').length).toBeGreaterThan(0);
   });
 
   it('shows editable vendor profile controls once for admins', async () => {
@@ -570,7 +586,7 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     const profilePanel = await screen.findByLabelText('Vendor finance profile settings');
-    expect(screen.getByText('Demo Vendor A payout settings')).toBeInTheDocument();
+    expect(screen.getByText('Demo Vendor A marketplace terms')).toBeInTheDocument();
     expect(within(profilePanel).getAllByLabelText(/commission %/i)).toHaveLength(1);
     expect(screen.getByRole('button', { name: /save vendor profile/i })).toBeInTheDocument();
   });
@@ -597,10 +613,10 @@ describe('FinancePage control center', () => {
 
     renderFinancePage();
 
-    expect(await screen.findByRole('heading', { name: 'Upcoming payout' })).toBeInTheDocument();
-    expect(screen.getByText('Eligible rows')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /prepare draft payout/i })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: /prepare draft payout/i }));
+    expect(await screen.findByRole('heading', { name: 'Draft payout review' })).toBeInTheDocument();
+    expect(screen.getAllByText('Rows pending review').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /prepare draft review/i })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /prepare draft review/i }));
 
     await waitFor(() => expect(preparePayoutBatchMock).toHaveBeenCalledWith('demo-vendor-a'));
   });
@@ -620,14 +636,14 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect(await screen.findByRole('heading', { name: /finance control center/i })).toBeInTheDocument();
-    expect(screen.getByText('Available balance')).toBeInTheDocument();
-    expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Draft payout review').length).toBeGreaterThan(0);
     expect(screen.getByText('Refund deductions')).toBeInTheDocument();
     expect(await screen.findByText('Read-only vendor profile')).toBeInTheDocument();
-    expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
-    expect(screen.getByText('Latest payout')).toBeInTheDocument();
+    expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
+    expect(screen.getByText('Latest review artifact')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save vendor profile/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
 
   it('shows vendor payout status and upcoming payout in read-only detail', async () => {
@@ -647,8 +663,8 @@ describe('FinancePage control center', () => {
     await userEvent.click((await screen.findAllByRole('button', { name: 'View' }))[0]);
 
     expect(await screen.findByRole('heading', { name: 'Order #1021' })).toBeInTheDocument();
-    expect(screen.getByText('Payout summary')).toBeInTheDocument();
-    expect(screen.getAllByText('Upcoming payout').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Settlement estimate').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Draft payout review').length).toBeGreaterThan(0);
     expect(screen.getAllByText('$3,059.10').length).toBeGreaterThan(0);
     expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.queryByText('Current vendor-scoped finance query')).not.toBeInTheDocument();
@@ -681,8 +697,8 @@ describe('FinancePage control center', () => {
     renderFinancePage();
 
     expect((await screen.findAllByText('-$125.00')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Read-only upcoming payout')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /prepare draft payout/i })).not.toBeInTheDocument();
+    expect(screen.getByText('Read-only settlement preview')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /prepare draft review/i })).not.toBeInTheDocument();
   });
 
   it('refetches finance data after saving the vendor profile', async () => {
