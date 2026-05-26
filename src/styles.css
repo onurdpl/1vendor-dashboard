@@ -9952,6 +9952,30 @@ summary.provider-response-heading::-webkit-details-marker {
   padding: 22px;
 }
 
+.vendor-profile-identity {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+}
+
+.vendor-profile-avatar {
+  display: grid;
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border: 1px solid rgba(37, 99, 235, 0.16);
+  border-radius: 16px;
+  background:
+    linear-gradient(145deg, rgba(37, 99, 235, 0.14), rgba(14, 165, 233, 0.08)),
+    #ffffff;
+  color: #1d4ed8;
+  font-size: 1.05rem;
+  font-weight: 800;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08);
+}
+
 .vendor-profile-hero h1 {
   margin: 0;
   font-size: clamp(1.8rem, 2vw, 2.4rem);
@@ -9973,6 +9997,37 @@ summary.provider-response-heading::-webkit-details-marker {
   min-width: 220px;
 }
 
+.vendor-profile-readiness-strip {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
+.vendor-profile-readiness-strip > div {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  padding: 14px 16px;
+  border-right: 1px solid #e2e8f0;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.72), rgba(255, 255, 255, 0.94)),
+    #ffffff;
+}
+
+.vendor-profile-readiness-strip > div:last-child {
+  border-right: 0;
+}
+
+.vendor-profile-readiness-strip span:first-child {
+  min-width: 0;
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
 .vendor-profile-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -9991,6 +10046,50 @@ summary.provider-response-heading::-webkit-details-marker {
   grid-template-columns: minmax(150px, 0.72fr) minmax(0, 1fr);
 }
 
+.vendor-profile-location-value {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.vendor-profile-location-value strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 0.92rem;
+  font-weight: 750;
+}
+
+.vendor-profile-location-value small {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.vendor-profile-integration-list {
+  display: grid;
+  gap: 10px;
+}
+
+.vendor-profile-integration-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  padding: 10px 12px;
+}
+
+.vendor-profile-integration-list > div > span {
+  min-width: 0;
+  color: #475569;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
 .vendor-profile-support-panel {
   display: flex;
   align-items: center;
@@ -10007,11 +10106,50 @@ summary.provider-response-heading::-webkit-details-marker {
   color: #64748b;
 }
 
+.vendor-profile-disclosure {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  overflow: hidden;
+}
+
+.vendor-profile-disclosure summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  cursor: pointer;
+  list-style: none;
+  padding: 12px 14px;
+  color: #334155;
+  font-weight: 750;
+}
+
+.vendor-profile-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.vendor-profile-disclosure summary::after {
+  content: "+";
+  color: #64748b;
+  font-weight: 800;
+}
+
+.vendor-profile-disclosure[open] summary::after {
+  content: "-";
+}
+
+.vendor-profile-disclosure summary small {
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
 .vendor-profile-missing-list {
   display: grid;
   gap: 8px;
   margin: 0;
-  padding-left: 1.1rem;
+  padding: 0 14px 14px 1.8rem;
   color: #475569;
 }
 
@@ -10025,8 +10163,27 @@ summary.provider-response-heading::-webkit-details-marker {
     justify-content: flex-start;
   }
 
+  .vendor-profile-readiness-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .vendor-profile-readiness-strip > div {
+    border-right: 0;
+    border-bottom: 1px solid #e2e8f0;
+  }
+
   .vendor-profile-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .vendor-profile-readiness-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .vendor-profile-identity {
+    display: grid;
   }
 }
 

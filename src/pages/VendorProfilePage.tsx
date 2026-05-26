@@ -35,7 +35,7 @@ function formatBoolean(value: boolean | null | undefined) {
 }
 
 function formatSource(value: string | null | undefined) {
-  return value === 'configured' ? 'Configured by admin' : 'Default fallback';
+  return value === 'configured' ? 'Managed by marketplace operations' : 'Marketplace default fallback';
 }
 
 function formatShippingMode(value: string | null | undefined) {
@@ -93,6 +93,51 @@ function getNavlungoReturnLocation(config: VendorShippingConfig | null) {
   ]
     .filter(Boolean)
     .join(' / ');
+}
+
+function getNavlungoSenderLocation(config: VendorShippingConfig | null) {
+  return [
+    readMetadataString(config, ['navlungoSenderCity', 'senderCity', 'sender_city']),
+    readMetadataString(config, ['navlungoSenderDistrict', 'senderDistrict', 'sender_district']),
+  ]
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function getVendorInitials(name: string | null | undefined) {
+  const normalized = name?.trim();
+  if (!normalized) {
+    return 'V';
+  }
+
+  const initials = normalized
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
+
+  return initials || normalized.slice(0, 1).toUpperCase();
+}
+
+function LocationValue({
+  id,
+  location,
+  fallback = 'Location not configured',
+}: {
+  id: string | null | undefined;
+  location: string | null | undefined;
+  fallback?: string;
+}) {
+  const readableLocation = formatValue(location, fallback);
+  const operationalId = formatValue(id, 'ID not configured');
+
+  return (
+    <span className="vendor-profile-location-value">
+      <strong>{readableLocation}</strong>
+      <small>{operationalId}</small>
+    </span>
+  );
 }
 
 function findOpenVendorProfileTicket(tickets: SupportTicket[] | null, vendorId: string) {
@@ -154,6 +199,13 @@ export function VendorProfilePage() {
   const navlungoSenderAddressId = getNavlungoSenderAddressId(shippingConfig);
   const navlungoReturnRecipientAddressId = getNavlungoReturnRecipientAddressId(shippingConfig);
   const navlungoReturnLocation = getNavlungoReturnLocation(shippingConfig);
+  const navlungoSenderLocation = getNavlungoSenderLocation(shippingConfig);
+  const forwardWarehouseLocation = navlungoSenderLocation || defaultWarehouse?.address || defaultWarehouse?.name || null;
+  const returnDestinationLocation = navlungoReturnLocation || 'Return destination location not configured';
+  const shippingConfigured = Boolean(shippingConfig?.shippingEnabled && shippingConfig.preferredProvider);
+  const returnsConfigured = Boolean(navlungoReturnRecipientAddressId);
+  const supportWorkflowReady = appReadiness.ready && !supportQuery.isError;
+  const marketplaceTermsActive = financeProfile?.active === true;
 
   const supportMutation = useMutationAction(
     async () =>
@@ -183,7 +235,7 @@ export function VendorProfilePage() {
           queryClient.invalidateQueries({ queryKey: queryKeys.vendorProfile.supportTickets(currentVendor.vendorId) }),
           queryClient.invalidateQueries({ queryKey: queryKeys.admin.support.tickets() }),
         ]);
-        showFeedback('Support ticket created for vendor profile corrections.', 'success');
+        showFeedback('Profile correction ticket created.', 'success');
         navigate(getTicketHref(ticket, isAdmin));
       },
       onError: (error) => {
@@ -204,16 +256,22 @@ export function VendorProfilePage() {
   return (
     <section className="op-page vendor-profile-page">
       <div className="vendor-profile-hero operational-card">
-        <div>
-          <p className="eyebrow">Marketplace vendor profile</p>
-          <h1>{currentVendor.vendorName || 'Vendor profile'}</h1>
-          <p>
-            Review the store identity, commercial terms, shipping setup, and return destination currently defined for this
-            vendor scope. Admin-owned fields are read-only here.
-          </p>
+        <div className="vendor-profile-identity">
+          <div className="vendor-profile-avatar" aria-hidden="true">
+            {getVendorInitials(currentVendor.vendorName)}
+          </div>
+          <div>
+            <p className="eyebrow">Marketplace seller workspace</p>
+            <h1>{currentVendor.vendorName || 'Vendor profile'}</h1>
+            <p>
+              Review the seller identity, marketplace terms, shipping operations, and return destination currently managed
+              for this store. Marketplace-owned fields are read-only here.
+            </p>
+          </div>
         </div>
         <div className="vendor-profile-actions">
           <StatusBadge tone={isAdmin ? 'info' : 'neutral'}>{isAdmin ? 'Admin view' : 'Read-only vendor view'}</StatusBadge>
+          <StatusBadge tone={appReadiness.ready ? 'success' : 'warning'}>{appReadiness.ready ? 'Active workspace' : 'Context loading'}</StatusBadge>
           {existingProfileTicket ? <StatusBadge tone="attention">Support ticket open</StatusBadge> : null}
           <button
             type="button"
@@ -221,15 +279,44 @@ export function VendorProfilePage() {
             onClick={handleContactSupport}
             disabled={!appReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
           >
-            {existingProfileTicket ? 'Open support ticket' : supportMutation.isPending ? 'Contacting support...' : 'Contact support'}
+            {existingProfileTicket
+              ? 'Open correction ticket'
+              : supportMutation.isPending
+                ? 'Requesting correction...'
+                : 'Request profile correction'}
           </button>
+        </div>
+      </div>
+
+      <div className="vendor-profile-readiness-strip operational-card" aria-label="Vendor operational readiness">
+        <div>
+          <span>Shipping configured</span>
+          <StatusBadge tone={shippingConfigured ? 'success' : 'warning'}>{shippingConfigured ? 'Ready' : 'Needs setup'}</StatusBadge>
+        </div>
+        <div>
+          <span>Returns configured</span>
+          <StatusBadge tone={returnsConfigured ? 'success' : 'warning'}>{returnsConfigured ? 'Ready' : 'Needs destination'}</StatusBadge>
+        </div>
+        <div>
+          <span>Tracking data source</span>
+          <StatusBadge tone={shippingConfigured ? 'success' : 'neutral'}>{shippingConfigured ? 'Provider configured' : 'Not configured'}</StatusBadge>
+        </div>
+        <div>
+          <span>Support workflow</span>
+          <StatusBadge tone={supportWorkflowReady ? 'success' : 'warning'}>{supportWorkflowReady ? 'Active' : 'Loading'}</StatusBadge>
+        </div>
+        <div>
+          <span>Marketplace terms</span>
+          <StatusBadge tone={marketplaceTermsActive ? 'success' : 'attention'}>
+            {marketplaceTermsActive ? 'Active' : 'Awaiting verification'}
+          </StatusBadge>
         </div>
       </div>
 
       <div className="vendor-profile-grid">
         <OperationalSection
           title="Store identity"
-          description="Vendor identity currently available to operational users."
+          description="Seller identity currently available to marketplace operations."
         >
           <MetadataGroup>
             <MetadataRow label="Display name" value={formatValue(currentVendor.vendorName, 'Vendor unavailable')} />
@@ -242,31 +329,31 @@ export function VendorProfilePage() {
         </OperationalSection>
 
         <OperationalSection
-          title="Commercial terms"
+          title="Marketplace terms"
           description="Read-only commercial profile used for operational visibility. This does not implement payout execution."
         >
           {financeQuery.isError && !financeProfile ? (
             <SectionErrorRetry
-              title="Commercial terms unavailable"
+              title="Marketplace terms unavailable"
               description={financeQuery.error ?? 'Unable to load the vendor commercial profile.'}
               onRetry={() => void financeQuery.refetch()}
             />
           ) : financeQuery.isInitialLoading || !financeProfile ? (
-            <SectionSkeleton title="Loading commercial terms" description="Fetching the current vendor finance profile." />
+            <SectionSkeleton title="Loading marketplace terms" description="Fetching the current vendor finance profile." />
           ) : (
             <MetadataGroup>
               <MetadataRow label="Commission" value={`${financeProfile.commissionPercent}%`} />
               <MetadataRow label="Commission VAT" value={`${financeProfile.commissionVatPercent}%`} />
               <MetadataRow label="Shipping deduction" value={formatShippingMode(financeProfile.shippingMode)} />
               <MetadataRow label="Fixed shipping fee" value={formatValue(financeProfile.fixedShippingFee)} />
-              <MetadataRow label="Profile source" value={formatSource(financeProfile.source)} />
-              <MetadataRow label="Profile active" value={formatBoolean(financeProfile.active)} />
+              <MetadataRow label="Managed by" value={formatSource(financeProfile.source)} />
+              <MetadataRow label="Terms active" value={formatBoolean(financeProfile.active)} />
             </MetadataGroup>
           )}
         </OperationalSection>
 
         <OperationalSection
-          title="Shipping and integrations"
+          title="Shipping operations"
           description="Admin-owned shipping setup used by shipment creation and recovery workflows."
         >
           {shippingQuery.isError && !shippingConfig ? (
@@ -281,19 +368,47 @@ export function VendorProfilePage() {
             <MetadataGroup>
               <MetadataRow label="Preferred provider" value={formatValue(formatShippingProviderName(shippingConfig.preferredProvider))} />
               <MetadataRow label="Shipping enabled" value={formatBoolean(shippingConfig.shippingEnabled)} />
-              <MetadataRow label="Config source" value={formatSource(shippingConfig.source)} />
+              <MetadataRow label="Managed by" value={formatSource(shippingConfig.source)} />
               <MetadataRow label="Default desi" value={shippingConfig.defaultDesi} />
               <MetadataRow label="Cargo integration ID" value={formatValue(shippingConfig.cargoIntegrationId)} />
               <MetadataRow label="Default warehouse ID" value={formatValue(shippingConfig.defaultWarehouseId)} />
               <MetadataRow label="Shipping VAT" value={`${shippingConfig.shippingVatPercent}%`} />
-              <MetadataRow label="Provider metadata" value={metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'} />
+              <MetadataRow label="Provider configuration status" value={metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'} />
             </MetadataGroup>
           )}
         </OperationalSection>
 
         <OperationalSection
+          title="Integration status"
+          description="Marketplace systems connected to this seller workspace."
+        >
+          <div className="vendor-profile-integration-list">
+            <div>
+              <span>Shopify workspace</span>
+              <StatusBadge tone={appReadiness.ready ? 'success' : 'warning'}>{appReadiness.ready ? 'Connected' : 'Loading'}</StatusBadge>
+            </div>
+            <div>
+              <span>Shipping provider</span>
+              <StatusBadge tone={shippingConfigured ? 'success' : 'warning'}>
+                {shippingConfigured ? formatShippingProviderName(shippingConfig?.preferredProvider) : 'Not configured'}
+              </StatusBadge>
+            </div>
+            <div>
+              <span>Return workflow</span>
+              <StatusBadge tone={returnsConfigured ? 'success' : 'warning'}>{returnsConfigured ? 'Configured' : 'Needs destination'}</StatusBadge>
+            </div>
+            <div>
+              <span>Provider configuration status</span>
+              <StatusBadge tone={metadataConfigured(shippingConfig) ? 'success' : 'neutral'}>
+                {metadataConfigured(shippingConfig) ? 'Configured' : 'Not configured'}
+              </StatusBadge>
+            </div>
+          </div>
+        </OperationalSection>
+
+        <OperationalSection
           title="Warehouse and returns"
-          description="Return destination and branch metadata visible to the vendor as read-only operational truth."
+          description="Address-book destinations visible to the seller as read-only operational truth."
         >
           {shippingQuery.isError && !shippingConfig ? (
             <SectionErrorRetry
@@ -312,10 +427,15 @@ export function VendorProfilePage() {
                 <MetadataRow label="Default" value={formatBoolean(defaultWarehouse?.isDefault)} />
                 <MetadataRow label="Address summary" value={formatValue(defaultWarehouse?.address)} />
               </MetadataGroup>
-              <MetadataGroup title="Navlungo address book">
-                <MetadataRow label="Forward sender addressId" value={formatValue(navlungoSenderAddressId)} />
-                <MetadataRow label="Return recipient addressId" value={formatValue(navlungoReturnRecipientAddressId)} />
-                <MetadataRow label="Return location" value={formatValue(navlungoReturnLocation)} />
+              <MetadataGroup title="Marketplace warehouse destinations">
+                <MetadataRow
+                  label="Forward warehouse"
+                  value={<LocationValue id={navlungoSenderAddressId} location={forwardWarehouseLocation} />}
+                />
+                <MetadataRow
+                  label="Return destination"
+                  value={<LocationValue id={navlungoReturnRecipientAddressId} location={returnDestinationLocation} />}
+                />
               </MetadataGroup>
             </>
           )}
@@ -332,7 +452,7 @@ export function VendorProfilePage() {
             <p>
               {existingProfileTicket
                 ? `${existingProfileTicket.subject} is ${existingProfileTicket.status.toLowerCase().replace(/_/g, ' ')}.`
-                : 'Create a support ticket with vendor profile settings context so operations can review the admin-owned data.'}
+                : 'Report a marketplace profile or configuration issue so operations can review the admin-owned data.'}
             </p>
           </div>
           <OperationalActionGroup>
@@ -342,23 +462,29 @@ export function VendorProfilePage() {
               onClick={handleContactSupport}
               disabled={!appReadiness.ready || supportQuery.isInitialLoading || supportMutation.isPending}
             >
-              {existingProfileTicket ? 'Open existing ticket' : 'Contact support'}
+              {existingProfileTicket ? 'Open correction ticket' : 'Report configuration issue'}
             </button>
           </OperationalActionGroup>
         </div>
       </OperationalSection>
 
       <OperationalSection
-        title="Fields not modeled yet"
-        description="These marketplace profile fields are intentionally not inferred until the data model is confirmed."
+        title="Additional seller profile fields"
+        description="Compact reference for profile data that is intentionally not inferred until the model is confirmed."
       >
-        <ul className="vendor-profile-missing-list">
-          <li>Legal entity name, tax office, and tax identity</li>
-          <li>Dedicated store operations contact email and phone</li>
-          <li>Seller-of-record / commercial authority status</li>
-          <li>Public marketplace storefront profile content</li>
-          <li>Full provider address-book detail sync beyond configured IDs and safe metadata</li>
-        </ul>
+        <details className="vendor-profile-disclosure">
+          <summary>
+            <span>Fields not modeled yet</span>
+            <small>Open for data-model notes</small>
+          </summary>
+          <ul className="vendor-profile-missing-list">
+            <li>Legal entity name, tax office, and tax identity</li>
+            <li>Dedicated store operations contact email and phone</li>
+            <li>Seller-of-record / commercial authority status</li>
+            <li>Public marketplace storefront profile content</li>
+            <li>Full provider address-book detail sync beyond configured IDs and safe metadata</li>
+          </ul>
+        </details>
       </OperationalSection>
 
       {isAdmin ? (

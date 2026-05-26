@@ -62,9 +62,11 @@ const shippingConfig: VendorShippingConfig = {
   ],
   providerMetadata: {
     navlungoSenderAddressId: '55574',
+    navlungoSenderCity: 'Mugla',
+    navlungoSenderDistrict: 'Fethiye',
     navlungoReturnRecipientAddressId: '55578',
-    navlungoReturnRecipientCity: 'Istanbul',
-    navlungoReturnRecipientDistrict: 'Kadikoy',
+    navlungoReturnRecipientCity: 'Konya',
+    navlungoReturnRecipientDistrict: 'Selcuklu',
   },
 };
 
@@ -188,7 +190,9 @@ describe('VendorProfilePage', () => {
     renderVendorProfilePage();
 
     expect(await screen.findByRole('heading', { name: 'Demo Vendor A' })).toBeInTheDocument();
+    expect(screen.getByText('Marketplace seller workspace')).toBeInTheDocument();
     expect(screen.getByText('Read-only vendor view')).toBeInTheDocument();
+    expect(screen.getByText('Active workspace')).toBeInTheDocument();
     expect(screen.getByText('Legal name')).toBeInTheDocument();
     expect(screen.getAllByText('Not modeled yet').length).toBeGreaterThan(0);
     expect(await screen.findByText('12.50%')).toBeInTheDocument();
@@ -196,7 +200,18 @@ describe('VendorProfilePage', () => {
     expect(screen.getAllByText('Navlungo').length).toBeGreaterThan(0);
     expect(screen.getAllByText('55574').length).toBeGreaterThan(0);
     expect(screen.getByText('55578')).toBeInTheDocument();
-    expect(screen.getByText('Istanbul / Kadikoy')).toBeInTheDocument();
+    expect(screen.getByText('Mugla / Fethiye')).toBeInTheDocument();
+    expect(screen.getByText('Konya / Selcuklu')).toBeInTheDocument();
+    expect(screen.getByText('Forward warehouse')).toBeInTheDocument();
+    expect(screen.getByText('Return destination')).toBeInTheDocument();
+    expect(screen.getByLabelText('Vendor operational readiness')).toBeInTheDocument();
+    expect(screen.getByText('Shipping configured')).toBeInTheDocument();
+    expect(screen.getByText('Returns configured')).toBeInTheDocument();
+    expect(screen.getByText('Integration status')).toBeInTheDocument();
+    expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
+    expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
+    expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
+    expect(screen.getByText('Legal entity name, tax office, and tax identity')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
   });
 
@@ -206,7 +221,7 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    const contactButtons = await screen.findAllByRole('button', { name: 'Contact support' });
+    const contactButtons = await screen.findAllByRole('button', { name: 'Request profile correction' });
     await waitFor(() => expect(contactButtons[0]).not.toBeDisabled());
     await userEvent.click(contactButtons[0]);
 
@@ -234,7 +249,7 @@ describe('VendorProfilePage', () => {
 
     renderVendorProfilePage();
 
-    const supportButtons = await screen.findAllByRole('button', { name: 'Open support ticket' });
+    const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(supportButtons[0]).not.toBeDisabled());
     await userEvent.click(supportButtons[0]);
 
@@ -264,7 +279,7 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
 
-    const supportButtons = await screen.findAllByRole('button', { name: 'Open support ticket' });
+    const supportButtons = await screen.findAllByRole('button', { name: 'Open correction ticket' });
     await waitFor(() => expect(supportButtons[0]).not.toBeDisabled());
     await userEvent.click(supportButtons[0]);
     expect(await screen.findByText('Admin support detail route')).toBeInTheDocument();
