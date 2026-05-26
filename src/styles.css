@@ -181,7 +181,7 @@ a:focus-visible {
 
 .vendor-card {
   padding: 12px;
-  margin-top: auto;
+  margin-top: 8px;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   background: rgba(15, 23, 42, 0.72);
@@ -8009,7 +8009,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .dashboard-shell-active .vendor-card {
-  margin-top: auto;
+  margin-top: 8px;
 }
 
 .dashboard-shell-active .session-state {
@@ -8112,7 +8112,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .finance-shell-active .vendor-card {
-  margin-top: auto;
+  margin-top: 8px;
 }
 
 .finance-shell-active .vendor-fixed-chip,
