@@ -480,7 +480,6 @@ export function ReturnDetailPage() {
   const [rejectReason, setRejectReason] = useState('');
   const [supportOpen, setSupportOpen] = useState(false);
   const [navlungoReturnPickupLiveConfirmed, setNavlungoReturnPickupLiveConfirmed] = useState(false);
-  const [navlungoReturnPickupApiVersionOverride, setNavlungoReturnPickupApiVersionOverride] = useState<'current' | 'v2' | 'v2.1'>('current');
   const [navlungoReturnPickupCarrierOverride, setNavlungoReturnPickupCarrierOverride] = useState<'current' | '9' | '10'>('current');
   const [navlungoReturnPickupEndpointPathOverride, setNavlungoReturnPickupEndpointPathOverride] =
     useState<'/post/create' | '/post/return'>('/post/return');
@@ -613,7 +612,6 @@ export function ReturnDetailPage() {
         if (!variables.dryRun && data.returnProviderShipmentId) {
           setRetainedReturnPickupMissingFields([]);
           setNavlungoReturnPickupLiveConfirmed(false);
-          setNavlungoReturnPickupApiVersionOverride('current');
           setNavlungoReturnPickupCarrierOverride('current');
           setNavlungoReturnPickupEndpointPathOverride('/post/return');
         }
@@ -1917,7 +1915,7 @@ export function ReturnDetailPage() {
                         void navlungoReturnPickupMutation
                           .mutateAsync({
                             dryRun: true,
-                            endpointVersionOverride: navlungoReturnPickupApiVersionOverride,
+                            endpointVersionOverride: 'v2.1',
                             carrierIdOverride: navlungoReturnPickupCarrierOverride,
                             endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
                           })
@@ -2045,19 +2043,11 @@ export function ReturnDetailPage() {
                     <span>3. Live create</span>
                     {isAdmin ? (
                       <div className="return-review-compact-grid" aria-label="Navlungo return pickup diagnostics options">
-                        <label>
+                        <div>
                           <span>API version</span>
-                          <select
-                            value={navlungoReturnPickupApiVersionOverride}
-                            onChange={(event) =>
-                              setNavlungoReturnPickupApiVersionOverride(event.target.value as 'current' | 'v2' | 'v2.1')
-                            }
-                          >
-                            <option value="current">Default/current</option>
-                            <option value="v2">v2</option>
-                            <option value="v2.1">v2.1</option>
-                          </select>
-                        </label>
+                          <strong>v2.1</strong>
+                          <small>Navlungo return pickup uses v2.1 /post/return.</small>
+                        </div>
                         <label>
                           <span>Carrier</span>
                           <select
@@ -2095,7 +2085,7 @@ export function ReturnDetailPage() {
                             void navlungoReturnPickupMutation
                               .mutateAsync({
                                 dryRun: false,
-                                endpointVersionOverride: navlungoReturnPickupApiVersionOverride,
+                                endpointVersionOverride: 'v2.1',
                                 carrierIdOverride: navlungoReturnPickupCarrierOverride,
                                 endpointPathOverride: navlungoReturnPickupEndpointPathOverride,
                                 diagnosticConfirm: navlungoReturnPickupLiveConfirmed ? 'YES' : undefined,

@@ -75,6 +75,7 @@ const {
   '../backend/src/modules/shipping/shipping-execution.service.js'
 );
 const { KargoEntegratorAdapter, ShippingProviderExecutionError, TryOtoAdapter } = await import('../backend/src/modules/shipping/shipping-provider.adapter.js');
+const { NavlungoAdapter } = await import('../backend/src/modules/shipping/navlungo-provider.adapter.js');
 const { registerShippingExecutionRoutes } = await import('../backend/src/modules/shipping/shipping-execution.routes.js');
 const { clearKargonomiLocationLookupCache } = await import('../backend/src/modules/shipping/kargonomi-provider.adapter.js');
 const {
@@ -5872,6 +5873,45 @@ describe('shipping execution foundation', () => {
     });
   });
 
+  it('locks Navlungo return pickup preview to v2.1 even when base URL is v2', async () => {
+    const returnRecord = buildNavlungoReturnRecord();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+    prismaMock.returnRecord.findFirst.mockResolvedValue(returnRecord);
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+      vendorId: 'sporjinal',
+      preferredProvider: 'NAVLUNGO',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '55574',
+      shippingVatPercent: 18,
+      providerMetadata: buildNavlungoProviderMetadata({ navlungoSenderAddressId: '55574' }),
+      warehouses: [],
+      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    });
+
+    const result = await createNavlungoReturnPickupForReturn(
+      'return-request-1',
+      { role: 'admin', vendorId: null },
+      {
+        ...env,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+      },
+      {
+        dryRun: true,
+        endpointVersionOverride: 'current',
+      },
+    );
+
+    expect(result.returnProviderSnapshot).toMatchObject({
+      navlungoReturnPickupDryRun: true,
+      navlungoReturnEndpointVersionTried: 'v2.1',
+      navlungoReturnEndpointPathTried: '/post/return',
+      navlungoReturnResolvedProviderPath: '/v2.1/post/return',
+      navlungoReturnResolvedProviderUrl: 'https://domestic-api.navlungo.com/v2.1/post/return',
+    });
+  });
+
 	  it('persists live Navlungo return pickup evidence on the return request', async () => {
     const returnRecord = {
       id: 'return-request-1',
@@ -6412,7 +6452,7 @@ describe('shipping execution foundation', () => {
 	    }));
   });
 
-  it('applies admin Navlungo return pickup diagnostic API version and carrier overrides', async () => {
+  it('locks Navlungo return pickup live create to v2.1 while applying carrier overrides', async () => {
     const returnRecord = buildNavlungoReturnRecord();
     const adapter = buildAdapter({
       provider: 'NAVLUNGO' as const,
@@ -6457,7 +6497,7 @@ describe('shipping execution foundation', () => {
       },
       {
         adapter,
-        endpointVersionOverride: 'v2.1',
+        endpointVersionOverride: 'v2',
         carrierIdOverride: '10',
         diagnosticConfirm: 'YES',
       },
@@ -6523,7 +6563,7 @@ describe('shipping execution foundation', () => {
       },
       {
         adapter,
-        endpointVersionOverride: 'v2.1',
+        endpointVersionOverride: 'v2',
         carrierIdOverride: '10',
         endpointPathOverride: '/post/return',
         diagnosticConfirm: 'YES',
@@ -6546,6 +6586,54 @@ describe('shipping execution foundation', () => {
         }),
       }),
     }));
+  });
+
+  it('blocks lower-layer Navlungo return pickup calls that would use v2 post return', async () => {
+    const fetchImpl = vi.fn();
+    const adapter = new NavlungoAdapter(
+      {
+        ...env,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2',
+        NAVLUNGO_API_USERNAME: 'user',
+        NAVLUNGO_API_PASSWORD: 'pass',
+      },
+      { fetchImpl },
+    );
+
+    await expect(adapter.createReturnShipment({
+      orderId: 'return-request-1',
+      items: [],
+      endpointPath: '/post/return',
+      requestSnapshot: {
+        platform: 'shopify',
+        posts: [
+          {
+            reference_id: 'SP-RET-1054-ABC123',
+            carrier_id: 9,
+            post_type: 3,
+            cod_payment_type: '',
+            sender: {
+              name: 'Return sender',
+              phone: '+90 532 123 45 67',
+              email: 'sender@example.test',
+              address: 'Return address',
+              country: 'tr',
+              city: 'Istanbul',
+              district: 'Kadikoy',
+              post_code: '',
+            },
+            recipient: { addressId: 55574 },
+            post: { desi: 3, package_count: 1, price: '', note: '' },
+            barcode_format: 'pdf-A5',
+            custom_data_1: '1054',
+            custom_data_2: 'return-request-1',
+            custom_data_3: 'return',
+            custom_data_4: 'navlungo-return',
+          },
+        ],
+      },
+    })).rejects.toThrow('Navlungo return pickup requires v2.1 /post/return.');
+    expect(fetchImpl).not.toHaveBeenCalled();
   });
 
   it('blocks Navlungo return pickup live create when endpoint override is post create', async () => {

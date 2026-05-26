@@ -700,14 +700,14 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(createNavlungoReturnPickupMock).toHaveBeenCalledWith(returnDetail.id, {
       dryRun: true,
-      endpointVersionOverride: 'current',
+      endpointVersionOverride: 'v2.1',
       carrierIdOverride: 'current',
       endpointPathOverride: '/post/return',
     });
     expect(await screen.findByText('Navlungo return pickup preview generated. No provider call was made.')).toBeInTheDocument();
   });
 
-  it('lets admin send Navlungo return pickup diagnostic API version and carrier overrides', async () => {
+  it('lets admin send Navlungo return pickup carrier overrides while locking API version', async () => {
     const user = userEvent.setup();
     setCurrentUser({
       email: 'admin@example.com',
@@ -738,7 +738,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Provider return shipment' });
-    await user.selectOptions(screen.getByLabelText('API version'), 'v2.1');
+    expect(screen.queryByLabelText('API version')).not.toBeInTheDocument();
+    expect(screen.getByText('Navlungo return pickup uses v2.1 /post/return.')).toBeInTheDocument();
     await user.selectOptions(screen.getByLabelText('Carrier'), '10');
     await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
     await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
@@ -783,7 +784,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     await screen.findByRole('heading', { name: 'Provider return shipment' });
-    await user.selectOptions(screen.getByLabelText('API version'), 'v2.1');
+    expect(screen.queryByLabelText('API version')).not.toBeInTheDocument();
+    expect(screen.getByText('Navlungo return pickup uses v2.1 /post/return.')).toBeInTheDocument();
     await user.click(screen.getByLabelText('I understand this may create a live Navlungo return pickup.'));
     await user.click(screen.getByRole('button', { name: 'Create live Navlungo return pickup' }));
 

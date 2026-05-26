@@ -517,36 +517,27 @@ function resolveNavlungoDiagnosticEndpointPath(
   return endpointPathOverride === '/post/create' ? '/post/create' : '/post/return';
 }
 
-function resolveNavlungoDiagnosticBaseUrl(
+function resolveNavlungoReturnPickupBaseUrl(
   env: AppEnv,
-  apiVersionOverride: NavlungoReturnPickupInput['apiVersionOverride'] | NavlungoReturnPickupInput['endpointVersionOverride'],
   endpointPathOverride: NavlungoReturnPickupInput['endpointPathOverride'],
 ) {
-  const selectedVersion = apiVersionOverride === 'v2' || apiVersionOverride === 'v2.1' ? apiVersionOverride : 'current';
+  const selectedVersion = 'v2.1';
   const baseUrl = env.NAVLUNGO_BASE_URL?.trim();
   const endpointPath = resolveNavlungoDiagnosticEndpointPath(endpointPathOverride);
-  if (!baseUrl || selectedVersion === 'current') {
-    let resolvedProviderPath: string = endpointPath;
-    if (baseUrl) {
-      try {
-        resolvedProviderPath = `${new URL(baseUrl).pathname.replace(/\/$/, '') || ''}${endpointPath}`;
-      } catch {
-        resolvedProviderPath = endpointPath;
-      }
-    }
+  if (!baseUrl) {
     return {
       env,
       versionTried: selectedVersion,
       endpointPath,
       baseUrlOverride: null,
-      resolvedProviderPath,
-      resolvedProviderUrl: baseUrl ? `${baseUrl.replace(/\/$/, '')}${endpointPath}` : null,
+      resolvedProviderPath: `/v2.1${endpointPath}`,
+      resolvedProviderUrl: null,
     };
   }
 
   try {
     const url = new URL(baseUrl);
-    url.pathname = `/${selectedVersion}`;
+    url.pathname = '/v2.1';
     const nextBaseUrl = url.toString().replace(/\/$/, '');
     return {
       env: {
@@ -556,7 +547,7 @@ function resolveNavlungoDiagnosticBaseUrl(
       versionTried: selectedVersion,
       endpointPath,
       baseUrlOverride: nextBaseUrl,
-      resolvedProviderPath: `/${selectedVersion}${endpointPath}`,
+      resolvedProviderPath: `/v2.1${endpointPath}`,
       resolvedProviderUrl: `${nextBaseUrl}${endpointPath}`,
     };
   } catch {
@@ -565,7 +556,7 @@ function resolveNavlungoDiagnosticBaseUrl(
       versionTried: selectedVersion,
       endpointPath,
       baseUrlOverride: null,
-      resolvedProviderPath: endpointPath,
+      resolvedProviderPath: `/v2.1${endpointPath}`,
       resolvedProviderUrl: null,
     };
   }
@@ -1521,21 +1512,17 @@ export async function createNavlungoReturnPickupForReturn(
 
   const config = await getVendorShippingConfigForReturn(record.vendorAllocation.assignedVendorId);
   const diagnosticOverrideRequested =
-    input.apiVersionOverride === 'v2' ||
-    input.apiVersionOverride === 'v2.1' ||
-    input.endpointVersionOverride === 'v2' ||
-    input.endpointVersionOverride === 'v2.1' ||
     input.carrierOverride === '9' ||
     input.carrierOverride === '10' ||
     input.carrierIdOverride === '9' ||
     input.carrierIdOverride === '10' ||
-    input.endpointPathOverride === '/post/return';
+    input.endpointPathOverride === '/post/return' ||
+    input.endpointPathOverride === '/post/create';
   if (diagnosticOverrideRequested && input.dryRun !== true && input.diagnosticConfirm !== 'YES') {
     throw new ReturnReviewError('Explicit confirmation is required for Navlungo return pickup diagnostic live create.', 400);
   }
-  const endpointVersionOverride = input.endpointVersionOverride ?? input.apiVersionOverride;
   const carrierIdOverride = input.carrierIdOverride ?? input.carrierOverride;
-  const requestBase = resolveNavlungoDiagnosticBaseUrl(env, endpointVersionOverride, input.endpointPathOverride);
+  const requestBase = resolveNavlungoReturnPickupBaseUrl(env, input.endpointPathOverride);
   const savedCompletion = readNavlungoReturnPickupCompletion(record.returnProviderSnapshot);
   const built = buildNavlungoReturnPickupPayload({
     record,

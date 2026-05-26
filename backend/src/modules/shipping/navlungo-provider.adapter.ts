@@ -402,6 +402,19 @@ function normalizeNavlungoCreatePostEndpointPath(value: unknown): NavlungoCreate
   return value === '/post/return' ? '/post/return' : '/post/create';
 }
 
+function isDeprecatedNavlungoV2BaseUrlForReturnPickup(env: Pick<AppEnv, 'NAVLUNGO_BASE_URL'>) {
+  const baseUrl = env.NAVLUNGO_BASE_URL?.trim();
+  if (!baseUrl) {
+    return false;
+  }
+
+  try {
+    return new URL(baseUrl).pathname.replace(/\/$/, '') === '/v2';
+  } catch {
+    return false;
+  }
+}
+
 function summarizeResponseShape(value: unknown): NavlungoAuthDiagnostics['responseShapeSummary'] {
   if (isRecord(value)) {
     return {
@@ -2042,13 +2055,27 @@ export class NavlungoAdapter implements ShippingProviderAdapter {
         providerError: 'Missing Navlungo return pickup payload.',
       });
     }
+    const endpointPath = normalizeNavlungoCreatePostEndpointPath(input.endpointPath);
+    if (endpointPath === '/post/return' && isDeprecatedNavlungoV2BaseUrlForReturnPickup(this.env)) {
+      throw new ProviderExecutionError('Navlungo return pickup requires v2.1 /post/return.', {
+        provider: NAVLUNGO_PROVIDER_KEY,
+        flow: 'return_pickup',
+        providerError: 'Navlungo return pickup uses v2.1 /post/return.',
+        navlungoReturnEndpointVersionTried: 'v2',
+        navlungoReturnEndpointPathTried: '/post/return',
+        navlungoReturnResolvedProviderPath: '/v2/post/return',
+        navlungoReturnCreateSucceeded: false,
+        navlungoReturnPickupAttempted: false,
+        navlungoReturnAutoCreateSkippedReason: 'invalid_return_endpoint_version',
+      });
+    }
 
     const result = await this.createShipment({
       allocationId: 'navlungo-return-pickup',
       vendorId: 'navlungo-return-pickup',
       provider: NAVLUNGO_PROVIDER_KEY,
       requestSnapshot: payload,
-      endpointPath: input.endpointPath,
+      endpointPath,
     });
 
     return {

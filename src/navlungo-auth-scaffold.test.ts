@@ -134,7 +134,13 @@ describe('Navlungo dormant auth scaffold', () => {
         headers: { 'content-type': 'application/json' },
       });
     }) as typeof fetch;
-    const adapter = new NavlungoAdapter(buildEnv({ SHIPPING_EXECUTION_ENABLED: true }), { fetchImpl });
+    const adapter = new NavlungoAdapter(
+      buildEnv({
+        SHIPPING_EXECUTION_ENABLED: true,
+        NAVLUNGO_BASE_URL: 'https://domestic-api.navlungo.com/v2.1',
+      }),
+      { fetchImpl },
+    );
 
     const result = await adapter.createReturnShipment({
       orderId: 'return-1',
@@ -171,9 +177,9 @@ describe('Navlungo dormant auth scaffold', () => {
     });
 
     expect(calls.map((call) => [call.init.method, call.url])).toEqual([
-      ['POST', 'https://domestic-api.navlungo.com/v2/auth/api'],
-      ['POST', 'https://domestic-api.navlungo.com/v2/post/return'],
-      ['GET', 'https://domestic-api.navlungo.com/v2/post/check/RET123'],
+      ['POST', 'https://domestic-api.navlungo.com/v2.1/auth/api'],
+      ['POST', 'https://domestic-api.navlungo.com/v2.1/post/return'],
+      ['GET', 'https://domestic-api.navlungo.com/v2.1/post/check/RET123'],
     ]);
     expect(result.responseSnapshot).toMatchObject({
       flow: 'return_pickup',
