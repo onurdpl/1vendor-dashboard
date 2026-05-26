@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 
 const TIMED_ROUTE_NAMES = new Set([
+  'POST /auth/login',
   'GET /orders',
   'GET /orders/:orderId',
   'GET /returns',

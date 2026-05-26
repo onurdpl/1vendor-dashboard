@@ -25,6 +25,26 @@ export type AuthUserResponse = AuthUserContext & {
   vendorAccess: AuthVendorAccess[];
 };
 
+export type AuthLoginServiceTiming = {
+  dbConnectionAcquisitionMs: number | null;
+  dbConnectionAcquisitionMode: 'probed' | 'not_probed';
+  userLookupMs: number;
+  passwordVerificationMs: number;
+  vendorAccessLookupMs: number;
+  vendorAccessLookupMode: 'separate_query' | 'included_in_user_lookup';
+  tokenSignMs: number;
+  serviceTotalMs: number;
+  passwordHashMode: 'demo_sha256_v1' | 'unsupported';
+};
+
+export type AuthLoginRouteTiming = AuthLoginServiceTiming & {
+  routeEntryToBodyValidationMs: number;
+  routeEntryToServiceStartMs: number;
+  responsePreparationMs: number;
+  responseSerializationMs: number;
+  routeHandlerMs: number;
+};
+
 export type JwtPayload = {
   sub: string;
   email: string;
@@ -59,4 +79,3 @@ declare module 'fastify' {
     authUser?: AuthUserContext;
   }
 }
-
