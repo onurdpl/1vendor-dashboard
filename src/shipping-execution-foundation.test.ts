@@ -211,6 +211,54 @@ function buildNavlungoReturnRecord(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function buildNavlungoForwardShipmentExecution(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'shipment-execution-1',
+    provider: 'NAVLUNGO',
+    shipmentStatus: 'CREATED',
+    providerShipmentId: 'NAV-POST-1',
+    trackingNumber: 'TRK-1',
+    trackingUrl: 'https://tracking.example/TRK-1',
+    labelUrl: 'barcode-string',
+    warehouseId: '55574',
+    requestSnapshot: {
+      platform: 'shopify',
+      posts: [
+        {
+          reference_id: 'SP-1054-ABC123',
+          carrier_id: 9,
+          post_type: 2,
+          sender: { addressId: 55574 },
+          recipient: { name: 'redacted' },
+          post: { desi: 3, package_count: 1, price: '', note: '' },
+          barcode_format: 'pdf-A6',
+          custom_data_4: '55574',
+        },
+      ],
+    },
+    responseSnapshot: {
+      senderMode: 'addressId',
+      providerShipmentId: 'NAV-POST-1',
+    },
+    updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+    ...overrides,
+  };
+}
+
+function buildNavlungoReturnRecordWithShipmentExecutions(
+  shipmentExecutions: Array<Record<string, unknown>>,
+  overrides: Record<string, unknown> = {},
+) {
+  const base = buildNavlungoReturnRecord(overrides);
+  return {
+    ...base,
+    vendorAllocation: {
+      ...base.vendorAllocation,
+      shipmentExecutions,
+    },
+  };
+}
+
 function buildAllocation(overrides: Record<string, unknown> = {}) {
   return {
     id: 'alloc-1',
@@ -5824,7 +5872,7 @@ describe('shipping execution foundation', () => {
     });
   });
 
-  it('persists live Navlungo return pickup evidence on the return request', async () => {
+	  it('persists live Navlungo return pickup evidence on the return request', async () => {
     const returnRecord = {
       id: 'return-request-1',
       vendorAllocationId: 'alloc-1',
@@ -5959,14 +6007,266 @@ describe('shipping execution foundation', () => {
       }),
     }));
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      returnProvider: 'navlungo',
-      returnProviderShipmentId: 'NAV-RETURN-1',
-      returnTrackingNumber: 'RET-TRACK-1',
-    });
-  });
+	    expect(result).toMatchObject({
+	      returnProvider: 'navlungo',
+	      returnProviderShipmentId: 'NAV-RETURN-1',
+	      returnTrackingNumber: 'RET-TRACK-1',
+	    });
+	  });
 
-  it('merges partial Navlungo shipping config metadata without wiping sender details', async () => {
+	  it('resolves Navlungo return recipient address id from original forward sender.addressId', async () => {
+	    const returnRecord = buildNavlungoReturnRecordWithShipmentExecutions([
+	      buildNavlungoForwardShipmentExecution({
+	        warehouseId: '55574',
+	        requestSnapshot: {
+	          platform: 'shopify',
+	          posts: [
+	            {
+	              reference_id: 'SP-1054-ABC123',
+	              carrier_id: 9,
+	              post_type: 2,
+	              sender: { addressId: 88888 },
+	              recipient: { name: 'redacted' },
+	              post: { desi: 3, package_count: 1, price: '', note: '' },
+	              barcode_format: 'pdf-A6',
+	              custom_data_4: '55574',
+	            },
+	          ],
+	        },
+	        responseSnapshot: {
+	          senderMode: 'addressId',
+	          providerShipmentId: 'NAV-POST-1',
+	        },
+	      }),
+	    ]);
+	    const adapter = buildAdapter({
+	      provider: 'NAVLUNGO' as const,
+	      createReturnShipment: vi.fn().mockResolvedValue({
+	        returnOrderId: 'NAV-RETURN-1',
+	        returnTrackingNumber: 'RET-TRACK-1',
+	        returnTrackingUrl: 'https://tracking.example/RET-TRACK-1',
+	        returnBarcode: 'barcode-string',
+	        returnCarrierName: 'Sürat Kargo',
+	        returnStatus: 'created',
+	        responseSnapshot: {
+	          createPostHttpStatus: 201,
+	          providerMessage: 'Created',
+	        },
+	      }),
+	    });
+	    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+	    prismaMock.returnRecord.findFirst.mockResolvedValue({
+	      ...returnRecord,
+	      returnProvider: 'navlungo',
+	      returnProviderShipmentId: 'NAV-RETURN-1',
+	    });
+	    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+	      vendorId: 'sporjinal',
+	      preferredProvider: 'NAVLUNGO',
+	      shippingEnabled: true,
+	      defaultDesi: 3,
+	      cargoIntegrationId: null,
+	      defaultWarehouseId: '55574',
+	      shippingVatPercent: 18,
+	      providerMetadata: buildNavlungoProviderMetadata({ navlungoReturnRecipientAddressId: '77701' }),
+	      warehouses: [],
+	      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+	    });
+
+	    await createNavlungoReturnPickupForReturn(
+	      'return-request-1',
+	      { role: 'admin', vendorId: null },
+	      env,
+	      { adapter },
+	    );
+
+	    expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
+	      requestSnapshot: expect.objectContaining({
+	        posts: [
+	          expect.objectContaining({
+	            recipient: { addressId: 88888 },
+	          }),
+	        ],
+	      }),
+	    }));
+	    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+	      data: expect.objectContaining({
+	        returnProviderSnapshot: expect.objectContaining({
+	          navlungoReturnOriginalSenderMode: 'address_id',
+	          navlungoReturnOriginalPayloadSenderAddressIdPresent: true,
+	          navlungoReturnOriginalWarehouseAddressIdPresent: true,
+	          navlungoReturnResolvedRecipientAddressId: '88888',
+	          navlungoReturnResolvedRecipientAddressIdSource: 'original_forward_payload_sender_address_id',
+	          navlungoReturnRecipientFallbackUsed: false,
+	        }),
+	      }),
+	    }));
+	  });
+
+	  it('falls back to original forward warehouse id when forward shipment used full sender details', async () => {
+	    const returnRecord = buildNavlungoReturnRecordWithShipmentExecutions([
+	      buildNavlungoForwardShipmentExecution({
+	        warehouseId: '55574',
+	        requestSnapshot: {
+	          platform: 'shopify',
+	          posts: [
+	            {
+	              reference_id: 'YA-1061-GSHCTC',
+	              carrier_id: 9,
+	              post_type: 2,
+	              sender: {
+	                name: 'Warehouse',
+	                phone: '+90 532 123 45 67',
+	                email: 'warehouse@example.test',
+	                address: 'Warehouse address',
+	                country: 'tr',
+	                city: 'Istanbul',
+	                district: 'Kadikoy',
+	                post_code: '',
+	              },
+	              recipient: { name: 'redacted' },
+	              post: { desi: 3, package_count: 1, price: '', note: '' },
+	              barcode_format: 'pdf-A6',
+	              custom_data_4: '55574',
+	            },
+	          ],
+	        },
+	        responseSnapshot: {
+	          senderMode: 'fullSender',
+	          fullSenderRetryRequested: true,
+	          providerShipmentId: 'NAV-POST-1061',
+	        },
+	      }),
+	    ]);
+	    const adapter = buildAdapter({
+	      provider: 'NAVLUNGO' as const,
+	      createReturnShipment: vi.fn().mockResolvedValue({
+	        returnOrderId: 'NAV-RETURN-1061',
+	        returnTrackingNumber: 'RET-TRACK-1061',
+	        returnTrackingUrl: 'https://tracking.example/RET-TRACK-1061',
+	        returnBarcode: 'barcode-string',
+	        returnCarrierName: 'Sürat Kargo',
+	        returnStatus: 'created',
+	        responseSnapshot: {
+	          createPostHttpStatus: 201,
+	          providerMessage: 'Created',
+	        },
+	      }),
+	    });
+	    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+	    prismaMock.returnRecord.findFirst.mockResolvedValue({
+	      ...returnRecord,
+	      returnProvider: 'navlungo',
+	      returnProviderShipmentId: 'NAV-RETURN-1061',
+	    });
+	    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+	      vendorId: 'sporjinal',
+	      preferredProvider: 'NAVLUNGO',
+	      shippingEnabled: true,
+	      defaultDesi: 3,
+	      cargoIntegrationId: null,
+	      defaultWarehouseId: '55574',
+	      shippingVatPercent: 18,
+	      providerMetadata: buildNavlungoProviderMetadata({ navlungoReturnRecipientAddressId: '77701' }),
+	      warehouses: [],
+	      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+	    });
+
+	    await createNavlungoReturnPickupForReturn(
+	      'return-request-1',
+	      { role: 'admin', vendorId: null },
+	      env,
+	      { adapter },
+	    );
+
+	    expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
+	      requestSnapshot: expect.objectContaining({
+	        posts: [
+	          expect.objectContaining({
+	            recipient: { addressId: 55574 },
+	          }),
+	        ],
+	      }),
+	    }));
+	    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+	      data: expect.objectContaining({
+	        returnProviderSnapshot: expect.objectContaining({
+	          navlungoReturnOriginalSenderMode: 'full_sender_details',
+	          navlungoReturnOriginalPayloadSenderAddressIdPresent: false,
+	          navlungoReturnOriginalWarehouseAddressIdPresent: true,
+	          navlungoReturnResolvedRecipientAddressId: '55574',
+	          navlungoReturnResolvedRecipientAddressIdSource: 'original_forward_warehouse_id',
+	          navlungoReturnRecipientFallbackUsed: false,
+	        }),
+	      }),
+	    }));
+	  });
+
+	  it('uses configured return recipient address id only when original forward address id is unavailable', async () => {
+	    const returnRecord = buildNavlungoReturnRecord();
+	    const adapter = buildAdapter({
+	      provider: 'NAVLUNGO' as const,
+	      createReturnShipment: vi.fn().mockResolvedValue({
+	        returnOrderId: 'NAV-RETURN-1',
+	        returnTrackingNumber: 'RET-TRACK-1',
+	        returnTrackingUrl: 'https://tracking.example/RET-TRACK-1',
+	        returnBarcode: 'barcode-string',
+	        returnCarrierName: 'Sürat Kargo',
+	        returnStatus: 'created',
+	        responseSnapshot: {
+	          createPostHttpStatus: 201,
+	          providerMessage: 'Created',
+	        },
+	      }),
+	    });
+	    prismaMock.returnRecord.findUnique.mockResolvedValue(returnRecord);
+	    prismaMock.returnRecord.findFirst.mockResolvedValue({
+	      ...returnRecord,
+	      returnProvider: 'navlungo',
+	      returnProviderShipmentId: 'NAV-RETURN-1',
+	    });
+	    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
+	      vendorId: 'sporjinal',
+	      preferredProvider: 'NAVLUNGO',
+	      shippingEnabled: true,
+	      defaultDesi: 3,
+	      cargoIntegrationId: null,
+	      defaultWarehouseId: '55574',
+	      shippingVatPercent: 18,
+	      providerMetadata: buildNavlungoProviderMetadata({ navlungoReturnRecipientAddressId: '77701' }),
+	      warehouses: [],
+	      updatedAt: new Date('2026-05-22T09:00:00.000Z'),
+	    });
+
+	    await createNavlungoReturnPickupForReturn(
+	      'return-request-1',
+	      { role: 'admin', vendorId: null },
+	      env,
+	      { adapter },
+	    );
+
+	    expect(adapter.createReturnShipment).toHaveBeenCalledWith(expect.objectContaining({
+	      requestSnapshot: expect.objectContaining({
+	        posts: [
+	          expect.objectContaining({
+	            recipient: { addressId: 77701 },
+	          }),
+	        ],
+	      }),
+	    }));
+	    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
+	      data: expect.objectContaining({
+	        returnProviderSnapshot: expect.objectContaining({
+	          navlungoReturnOriginalSenderMode: 'unknown',
+	          navlungoReturnResolvedRecipientAddressId: '77701',
+	          navlungoReturnResolvedRecipientAddressIdSource: 'provider_metadata',
+	          navlungoReturnRecipientFallbackUsed: true,
+	        }),
+	      }),
+	    }));
+	  });
+
+	  it('merges partial Navlungo shipping config metadata without wiping sender details', async () => {
     const existingConfig = {
       id: 'shipping-config-sporjinal',
       vendorId: 'sporjinal',
@@ -6058,13 +6358,16 @@ describe('shipping execution foundation', () => {
           navlungoReturnPickupStatus: 'needs_attention',
           navlungoReturnPickupMissingFields: ['recipient.addressId'],
           navlungoReturnMissingFields: ['recipient.addressId'],
-          recipientAddressIdValid: false,
-          navlungoReturnRecipientAddressIdPresent: false,
-          navlungoReturnRecipientAddressIdNumeric: false,
-          navlungoReturnRecipientAddressIdSource: 'missing',
-        }),
-      }),
-    }));
+	          recipientAddressIdValid: false,
+	          navlungoReturnRecipientAddressIdPresent: false,
+	          navlungoReturnRecipientAddressIdNumeric: false,
+	          navlungoReturnRecipientAddressIdSource: 'missing',
+	          navlungoReturnResolvedRecipientAddressId: null,
+	          navlungoReturnResolvedRecipientAddressIdNumeric: false,
+	          navlungoReturnRecipientFallbackUsed: false,
+	        }),
+	      }),
+	    }));
   });
 
   it('blocks Navlungo return pickup when recipient address id is non-numeric', async () => {
@@ -6098,13 +6401,15 @@ describe('shipping execution foundation', () => {
     expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(expect.objectContaining({
       data: expect.objectContaining({
         returnProviderSnapshot: expect.objectContaining({
-          recipientAddressIdValid: false,
-          navlungoReturnRecipientAddressIdPresent: true,
-          navlungoReturnRecipientAddressIdNumeric: false,
-          navlungoReturnRecipientAddressIdSource: 'provider_metadata',
-        }),
-      }),
-    }));
+	          recipientAddressIdValid: false,
+	          navlungoReturnRecipientAddressIdPresent: true,
+	          navlungoReturnRecipientAddressIdNumeric: false,
+	          navlungoReturnRecipientAddressIdSource: 'provider_metadata',
+	          navlungoReturnResolvedRecipientAddressIdNumeric: false,
+	          navlungoReturnRecipientFallbackUsed: true,
+	        }),
+	      }),
+	    }));
   });
 
   it('applies admin Navlungo return pickup diagnostic API version and carrier overrides', async () => {

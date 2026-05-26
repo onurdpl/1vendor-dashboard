@@ -246,7 +246,157 @@ function resolveNavlungoSenderAddressId(config: {
   );
 }
 
-function resolveNavlungoReturnRecipientAddressId(config: {
+type NavlungoForwardShipmentExecutionContext = {
+  id?: string | null;
+  provider?: unknown;
+  shipmentStatus?: unknown;
+  providerShipmentId?: string | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  labelUrl?: string | null;
+  warehouseId?: string | null;
+  requestSnapshot?: unknown;
+  responseSnapshot?: unknown;
+  updatedAt?: Date | string | null;
+};
+
+function readNavlungoFirstPost(snapshot: unknown) {
+  const request = readSnapshot(snapshot);
+  const posts = Array.isArray(request?.posts) ? request.posts : [];
+  const post = posts[0];
+  return isRecord(post) ? post : null;
+}
+
+function readNavlungoPayloadSenderAddressId(snapshot: unknown) {
+  const post = readNavlungoFirstPost(snapshot);
+  const sender = isRecord(post?.sender) ? post.sender : null;
+  return readString(sender, ['addressId', 'address_id']);
+}
+
+function readNavlungoConfiguredSenderAddressIdFromPayload(snapshot: unknown) {
+  const post = readNavlungoFirstPost(snapshot);
+  return readString(post, ['custom_data_4']);
+}
+
+function inferOriginalNavlungoSenderMode(execution: NavlungoForwardShipmentExecutionContext) {
+  const responseSnapshot = readSnapshot(execution.responseSnapshot);
+  const senderMode = readString(responseSnapshot, ['senderMode', 'navlungoSenderMode']);
+  if (senderMode === 'addressId' || senderMode === 'address_id') {
+    return 'address_id';
+  }
+  if (senderMode === 'fullSender' || senderMode === 'full_sender' || senderMode === 'full_sender_details') {
+    return 'full_sender_details';
+  }
+
+  const post = readNavlungoFirstPost(execution.requestSnapshot);
+  const sender = isRecord(post?.sender) ? post.sender : null;
+  if (readNavlungoPayloadSenderAddressId(execution.requestSnapshot)) {
+    return 'address_id';
+  }
+  if (sender && Object.keys(sender).length > 0) {
+    return 'full_sender_details';
+  }
+  return 'unknown';
+}
+
+function navlungoForwardExecutionHasProviderEvidence(execution: NavlungoForwardShipmentExecutionContext) {
+  const responseSnapshot = readSnapshot(execution.responseSnapshot);
+  return Boolean(
+    execution.providerShipmentId?.trim() ||
+      execution.trackingNumber?.trim() ||
+      execution.trackingUrl?.trim() ||
+      execution.labelUrl?.trim() ||
+      readString(responseSnapshot, ['providerShipmentId', 'post_number', 'postNumber', 'trackingNumber', 'trackingUrl', 'barcode']),
+  );
+}
+
+function isSuccessfulNavlungoForwardExecution(execution: NavlungoForwardShipmentExecutionContext) {
+  const provider = typeof execution.provider === 'string' ? execution.provider.toLowerCase() : '';
+  if (provider !== 'navlungo' || !navlungoForwardExecutionHasProviderEvidence(execution)) {
+    return false;
+  }
+
+  const status = typeof execution.shipmentStatus === 'string' ? execution.shipmentStatus.toLowerCase() : '';
+  return status !== 'failed' && status !== 'cancelled' && status !== 'canceled';
+}
+
+function resolveOriginalForwardNavlungoAddressId(executions: NavlungoForwardShipmentExecutionContext[] | undefined) {
+  const candidates = [...(executions ?? [])]
+    .filter(isSuccessfulNavlungoForwardExecution)
+    .sort((left, right) => {
+      const leftTime = left.updatedAt ? new Date(left.updatedAt).getTime() : 0;
+      const rightTime = right.updatedAt ? new Date(right.updatedAt).getTime() : 0;
+      return rightTime - leftTime;
+    });
+
+  for (const execution of candidates) {
+    const originalSenderMode = inferOriginalNavlungoSenderMode(execution);
+    const payloadSenderAddressId = readNavlungoPayloadSenderAddressId(execution.requestSnapshot);
+    const payloadSenderAddressIdNumeric = parsePositiveInteger(payloadSenderAddressId);
+    const warehouseAddressIdNumeric = parsePositiveInteger(execution.warehouseId ?? null);
+    const configuredSenderAddressId = readNavlungoConfiguredSenderAddressIdFromPayload(execution.requestSnapshot);
+    const configuredSenderAddressIdNumeric = parsePositiveInteger(configuredSenderAddressId);
+    const originalForwardDiagnostics = {
+      originalForwardSenderMode: originalSenderMode,
+      originalPayloadSenderAddressIdPresent: Boolean(payloadSenderAddressId?.trim()),
+      originalPayloadSenderAddressId: payloadSenderAddressIdNumeric ? String(payloadSenderAddressIdNumeric) : null,
+      originalForwardWarehouseAddressIdPresent: Boolean(
+        execution.warehouseId?.trim() || configuredSenderAddressId?.trim(),
+      ),
+      originalForwardWarehouseAddressId: warehouseAddressIdNumeric
+        ? String(warehouseAddressIdNumeric)
+        : configuredSenderAddressIdNumeric
+          ? String(configuredSenderAddressIdNumeric)
+          : null,
+      originalForwardShipmentExecutionId: execution.id ?? null,
+      originalForwardProviderShipmentIdPresent: Boolean(execution.providerShipmentId?.trim()),
+    };
+
+    if (payloadSenderAddressIdNumeric) {
+      return {
+        value: String(payloadSenderAddressIdNumeric),
+        source: 'original_forward_payload_sender_address_id',
+        ...originalForwardDiagnostics,
+      };
+    }
+
+    if (warehouseAddressIdNumeric) {
+      return {
+        value: String(warehouseAddressIdNumeric),
+        source: 'original_forward_warehouse_id',
+        ...originalForwardDiagnostics,
+      };
+    }
+
+    if (configuredSenderAddressIdNumeric) {
+      return {
+        value: String(configuredSenderAddressIdNumeric),
+        source: 'original_forward_configured_sender_address_id',
+        ...originalForwardDiagnostics,
+      };
+    }
+
+    return {
+      value: null,
+      source: 'original_forward_missing_numeric_address_id',
+      ...originalForwardDiagnostics,
+    };
+  }
+
+  return {
+    value: null,
+    source: 'original_forward_unavailable',
+    originalForwardSenderMode: 'unknown',
+    originalPayloadSenderAddressIdPresent: false,
+    originalPayloadSenderAddressId: null,
+    originalForwardWarehouseAddressIdPresent: false,
+    originalForwardWarehouseAddressId: null,
+    originalForwardShipmentExecutionId: null,
+    originalForwardProviderShipmentIdPresent: false,
+  };
+}
+
+function resolveConfiguredNavlungoReturnRecipientAddressId(config: {
   providerMetadata: unknown;
 }, env: AppEnv) {
   const metadataValue = readString(config.providerMetadata, [
@@ -273,6 +423,39 @@ function resolveNavlungoReturnRecipientAddressId(config: {
   return {
     value: null,
     source: 'missing',
+  };
+}
+
+function resolveNavlungoReturnRecipientAddressId(input: {
+  shipmentExecutions?: NavlungoForwardShipmentExecutionContext[];
+  config: {
+    providerMetadata: unknown;
+  };
+  env: AppEnv;
+}) {
+  const original = resolveOriginalForwardNavlungoAddressId(input.shipmentExecutions);
+  if (parsePositiveInteger(original.value)) {
+    return {
+      ...original,
+      fallbackUsed: false,
+      configuredFallbackSource: null,
+      returnRecipientEqualsOriginalSenderAddressId: true,
+    };
+  }
+
+  const configured = resolveConfiguredNavlungoReturnRecipientAddressId(input.config, input.env);
+  const configuredNumeric = parsePositiveInteger(configured.value);
+  return {
+    ...original,
+    value: configured.value,
+    source: configured.source,
+    fallbackUsed: configured.source !== 'missing',
+    configuredFallbackSource: configured.source,
+    returnRecipientEqualsOriginalSenderAddressId: Boolean(
+      configuredNumeric &&
+        parsePositiveInteger(original.originalPayloadSenderAddressId ?? original.originalForwardWarehouseAddressId) ===
+          configuredNumeric,
+    ),
   };
 }
 
@@ -1194,6 +1377,7 @@ function buildNavlungoReturnPickupPayload(input: {
         shippingDistrict: string | null;
         shippingAddress: string | null;
       };
+      shipmentExecutions?: NavlungoForwardShipmentExecutionContext[];
     };
   };
   config: Awaited<ReturnType<typeof getVendorShippingConfigForReturn>>;
@@ -1215,7 +1399,11 @@ function buildNavlungoReturnPickupPayload(input: {
     district: overrides.district?.trim() || order.shippingDistrict?.trim() || '',
     post_code: overrides.postcode?.trim() || overrides.post_code?.trim() || order.shippingPostcode?.trim() || '',
   };
-  const returnRecipientAddress = resolveNavlungoReturnRecipientAddressId(input.config, input.env);
+  const returnRecipientAddress = resolveNavlungoReturnRecipientAddressId({
+    shipmentExecutions: input.record.vendorAllocation.shipmentExecutions,
+    config: input.config,
+    env: input.env,
+  });
   const returnRecipientMetadata = summarizeNavlungoReturnRecipientMetadata(input.config.providerMetadata);
   const recipientAddressId = parsePositiveInteger(returnRecipientAddress.value);
   const returnRecipientAddressIdPresent = Boolean(returnRecipientAddress.value?.trim());
@@ -1273,6 +1461,21 @@ function buildNavlungoReturnPickupPayload(input: {
     navlungoReturnRecipientAddressIdPresent: returnRecipientAddressIdPresent,
     navlungoReturnRecipientAddressIdNumeric: returnRecipientAddressIdNumeric,
     navlungoReturnRecipientAddressIdSource: returnRecipientAddress.source,
+    navlungoReturnOriginalSenderMode: returnRecipientAddress.originalForwardSenderMode,
+    navlungoReturnOriginalPayloadSenderAddressIdPresent: returnRecipientAddress.originalPayloadSenderAddressIdPresent,
+    navlungoReturnOriginalPayloadSenderAddressId: returnRecipientAddress.originalPayloadSenderAddressId,
+    navlungoReturnOriginalWarehouseAddressIdPresent: returnRecipientAddress.originalForwardWarehouseAddressIdPresent,
+    navlungoReturnOriginalWarehouseAddressId: returnRecipientAddress.originalForwardWarehouseAddressId,
+    navlungoReturnOriginalForwardShipmentExecutionId: returnRecipientAddress.originalForwardShipmentExecutionId,
+    navlungoReturnOriginalForwardProviderShipmentIdPresent:
+      returnRecipientAddress.originalForwardProviderShipmentIdPresent,
+    navlungoReturnResolvedRecipientAddressId: recipientAddressId ? String(recipientAddressId) : null,
+    navlungoReturnResolvedRecipientAddressIdSource: returnRecipientAddress.source,
+    navlungoReturnResolvedRecipientAddressIdNumeric: Boolean(recipientAddressId),
+    navlungoReturnRecipientFallbackUsed: returnRecipientAddress.fallbackUsed,
+    navlungoReturnRecipientConfiguredFallbackSource: returnRecipientAddress.configuredFallbackSource,
+    navlungoReturnRecipientEqualsOriginalSenderAddressId:
+      returnRecipientAddress.returnRecipientEqualsOriginalSenderAddressId,
     navlungoReturnRecipientMetadataConfigured: returnRecipientMetadata.configured,
     navlungoReturnRecipientName: returnRecipientMetadata.name,
     navlungoReturnRecipientCity: returnRecipientMetadata.city,
@@ -1292,6 +1495,9 @@ export async function createNavlungoReturnPickupForReturn(
       vendorAllocation: {
         include: {
           order: true,
+          shipmentExecutions: {
+            orderBy: { updatedAt: 'desc' },
+          },
         },
       },
     },
@@ -1365,6 +1571,21 @@ export async function createNavlungoReturnPickupForReturn(
     navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
     navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
     navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+    navlungoReturnOriginalSenderMode: built.navlungoReturnOriginalSenderMode,
+    navlungoReturnOriginalPayloadSenderAddressIdPresent: built.navlungoReturnOriginalPayloadSenderAddressIdPresent,
+    navlungoReturnOriginalPayloadSenderAddressId: built.navlungoReturnOriginalPayloadSenderAddressId,
+    navlungoReturnOriginalWarehouseAddressIdPresent: built.navlungoReturnOriginalWarehouseAddressIdPresent,
+    navlungoReturnOriginalWarehouseAddressId: built.navlungoReturnOriginalWarehouseAddressId,
+    navlungoReturnOriginalForwardShipmentExecutionId: built.navlungoReturnOriginalForwardShipmentExecutionId,
+    navlungoReturnOriginalForwardProviderShipmentIdPresent:
+      built.navlungoReturnOriginalForwardProviderShipmentIdPresent,
+    navlungoReturnResolvedRecipientAddressId: built.navlungoReturnResolvedRecipientAddressId,
+    navlungoReturnResolvedRecipientAddressIdSource: built.navlungoReturnResolvedRecipientAddressIdSource,
+    navlungoReturnResolvedRecipientAddressIdNumeric: built.navlungoReturnResolvedRecipientAddressIdNumeric,
+    navlungoReturnRecipientFallbackUsed: built.navlungoReturnRecipientFallbackUsed,
+    navlungoReturnRecipientConfiguredFallbackSource: built.navlungoReturnRecipientConfiguredFallbackSource,
+    navlungoReturnRecipientEqualsOriginalSenderAddressId:
+      built.navlungoReturnRecipientEqualsOriginalSenderAddressId,
     navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
     navlungoReturnRecipientName: built.navlungoReturnRecipientName,
     navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,
@@ -1545,6 +1766,9 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
       vendorAllocation: {
         include: {
           order: true,
+          shipmentExecutions: {
+            orderBy: { updatedAt: 'desc' },
+          },
         },
       },
     },
@@ -1614,6 +1838,21 @@ export async function autoCreateNavlungoReturnPickupForApprovedReturn(
           navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
           navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
           navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+          navlungoReturnOriginalSenderMode: built.navlungoReturnOriginalSenderMode,
+          navlungoReturnOriginalPayloadSenderAddressIdPresent: built.navlungoReturnOriginalPayloadSenderAddressIdPresent,
+          navlungoReturnOriginalPayloadSenderAddressId: built.navlungoReturnOriginalPayloadSenderAddressId,
+          navlungoReturnOriginalWarehouseAddressIdPresent: built.navlungoReturnOriginalWarehouseAddressIdPresent,
+          navlungoReturnOriginalWarehouseAddressId: built.navlungoReturnOriginalWarehouseAddressId,
+          navlungoReturnOriginalForwardShipmentExecutionId: built.navlungoReturnOriginalForwardShipmentExecutionId,
+          navlungoReturnOriginalForwardProviderShipmentIdPresent:
+            built.navlungoReturnOriginalForwardProviderShipmentIdPresent,
+          navlungoReturnResolvedRecipientAddressId: built.navlungoReturnResolvedRecipientAddressId,
+          navlungoReturnResolvedRecipientAddressIdSource: built.navlungoReturnResolvedRecipientAddressIdSource,
+          navlungoReturnResolvedRecipientAddressIdNumeric: built.navlungoReturnResolvedRecipientAddressIdNumeric,
+          navlungoReturnRecipientFallbackUsed: built.navlungoReturnRecipientFallbackUsed,
+          navlungoReturnRecipientConfiguredFallbackSource: built.navlungoReturnRecipientConfiguredFallbackSource,
+          navlungoReturnRecipientEqualsOriginalSenderAddressId:
+            built.navlungoReturnRecipientEqualsOriginalSenderAddressId,
           navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
           navlungoReturnRecipientName: built.navlungoReturnRecipientName,
           navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,
@@ -1659,6 +1898,9 @@ export async function saveNavlungoReturnPickupAddressCompletion(
       vendorAllocation: {
         include: {
           order: true,
+          shipmentExecutions: {
+            orderBy: { updatedAt: 'desc' },
+          },
         },
       },
     },
@@ -1706,6 +1948,21 @@ export async function saveNavlungoReturnPickupAddressCompletion(
         navlungoReturnRecipientAddressIdPresent: built.navlungoReturnRecipientAddressIdPresent,
         navlungoReturnRecipientAddressIdNumeric: built.navlungoReturnRecipientAddressIdNumeric,
         navlungoReturnRecipientAddressIdSource: built.navlungoReturnRecipientAddressIdSource,
+        navlungoReturnOriginalSenderMode: built.navlungoReturnOriginalSenderMode,
+        navlungoReturnOriginalPayloadSenderAddressIdPresent: built.navlungoReturnOriginalPayloadSenderAddressIdPresent,
+        navlungoReturnOriginalPayloadSenderAddressId: built.navlungoReturnOriginalPayloadSenderAddressId,
+        navlungoReturnOriginalWarehouseAddressIdPresent: built.navlungoReturnOriginalWarehouseAddressIdPresent,
+        navlungoReturnOriginalWarehouseAddressId: built.navlungoReturnOriginalWarehouseAddressId,
+        navlungoReturnOriginalForwardShipmentExecutionId: built.navlungoReturnOriginalForwardShipmentExecutionId,
+        navlungoReturnOriginalForwardProviderShipmentIdPresent:
+          built.navlungoReturnOriginalForwardProviderShipmentIdPresent,
+        navlungoReturnResolvedRecipientAddressId: built.navlungoReturnResolvedRecipientAddressId,
+        navlungoReturnResolvedRecipientAddressIdSource: built.navlungoReturnResolvedRecipientAddressIdSource,
+        navlungoReturnResolvedRecipientAddressIdNumeric: built.navlungoReturnResolvedRecipientAddressIdNumeric,
+        navlungoReturnRecipientFallbackUsed: built.navlungoReturnRecipientFallbackUsed,
+        navlungoReturnRecipientConfiguredFallbackSource: built.navlungoReturnRecipientConfiguredFallbackSource,
+        navlungoReturnRecipientEqualsOriginalSenderAddressId:
+          built.navlungoReturnRecipientEqualsOriginalSenderAddressId,
         navlungoReturnRecipientMetadataConfigured: built.navlungoReturnRecipientMetadataConfigured,
         navlungoReturnRecipientName: built.navlungoReturnRecipientName,
         navlungoReturnRecipientCity: built.navlungoReturnRecipientCity,

@@ -1727,19 +1727,55 @@ export function ReturnDetailPage() {
                     <div>
                       <span>Recipient addressId source</span>
                       <strong>
-                        {typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
-                          ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
-                          : '—'}
+                        {typeof returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdSource === 'string'
+                          ? returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdSource
+                          : typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
+                            ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
+                            : '—'}
                       </strong>
                     </div>
                     <div>
-                      <span>Recipient addressId configured</span>
+                      <span>Recipient addressId resolved</span>
                       <strong>
                         {returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true ? 'yes' : 'no'}
                         {' · numeric '}
-                        {returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true ? 'yes' : 'no'}
+                        {returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdNumeric === true ||
+                        returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true
+                          ? 'yes'
+                          : 'no'}
                       </strong>
                     </div>
+                    <div>
+                      <span>Original sender mode</span>
+                      <strong>
+                        {typeof returnProviderSnapshot.navlungoReturnOriginalSenderMode === 'string'
+                          ? returnProviderSnapshot.navlungoReturnOriginalSenderMode
+                          : 'unknown'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Original sender addressId</span>
+                      <strong>
+                        {returnProviderSnapshot.navlungoReturnOriginalPayloadSenderAddressIdPresent === true
+                          ? 'present'
+                          : 'absent'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Original warehouse addressId</span>
+                      <strong>
+                        {returnProviderSnapshot.navlungoReturnOriginalWarehouseAddressIdPresent === true
+                          ? 'present'
+                          : 'absent'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Fallback used</span>
+                      <strong>{returnProviderSnapshot.navlungoReturnRecipientFallbackUsed === true ? 'yes' : 'no'}</strong>
+                    </div>
+                    <p className="muted">
+                      Navlungo returns should go back to the original shipment warehouse addressId.
+                    </p>
                     <div>
                       <span>Return recipient metadata</span>
                       <strong>
@@ -1921,19 +1957,55 @@ export function ReturnDetailPage() {
                       <div className="summary-row">
                         <span>Recipient addressId source</span>
                         <strong>
-                          {typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
-                            ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
-                            : '—'}
+                          {typeof returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdSource === 'string'
+                            ? returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdSource
+                            : typeof returnProviderSnapshot.navlungoReturnRecipientAddressIdSource === 'string'
+                              ? returnProviderSnapshot.navlungoReturnRecipientAddressIdSource
+                              : '—'}
                         </strong>
                       </div>
                       <div className="summary-row">
-                        <span>Recipient addressId configured</span>
+                        <span>Recipient addressId resolved</span>
                         <strong>
                           {returnProviderSnapshot.navlungoReturnRecipientAddressIdPresent === true ? 'yes' : 'no'}
                           {' · numeric '}
-                          {returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true ? 'yes' : 'no'}
+                          {returnProviderSnapshot.navlungoReturnResolvedRecipientAddressIdNumeric === true ||
+                          returnProviderSnapshot.navlungoReturnRecipientAddressIdNumeric === true
+                            ? 'yes'
+                            : 'no'}
                         </strong>
                       </div>
+                      <div className="summary-row">
+                        <span>Original sender mode</span>
+                        <strong>
+                          {typeof returnProviderSnapshot.navlungoReturnOriginalSenderMode === 'string'
+                            ? returnProviderSnapshot.navlungoReturnOriginalSenderMode
+                            : 'unknown'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Original sender addressId</span>
+                        <strong>
+                          {returnProviderSnapshot.navlungoReturnOriginalPayloadSenderAddressIdPresent === true
+                            ? 'present'
+                            : 'absent'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Original warehouse addressId</span>
+                        <strong>
+                          {returnProviderSnapshot.navlungoReturnOriginalWarehouseAddressIdPresent === true
+                            ? 'present'
+                            : 'absent'}
+                        </strong>
+                      </div>
+                      <div className="summary-row">
+                        <span>Fallback used</span>
+                        <strong>{returnProviderSnapshot.navlungoReturnRecipientFallbackUsed === true ? 'yes' : 'no'}</strong>
+                      </div>
+                      <p className="muted">
+                        Navlungo returns should go back to the original shipment warehouse addressId.
+                      </p>
                       <div className="summary-row">
                         <span>Return recipient metadata</span>
                         <strong>

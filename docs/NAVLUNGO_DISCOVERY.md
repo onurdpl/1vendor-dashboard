@@ -379,7 +379,7 @@ Confirmed from v2.1 docs navigation:
   - List Address
   - Address Detail
   - Delete Address
-- Return Pickup (`POST /post/return`) validates `posts.0.recipient.addressId` separately from the forward-shipment `sender.addressId` field. The integration now treats the return recipient address ID as its own explicit configuration value (`navlungoReturnRecipientAddressId` / `NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID`) instead of silently reusing the forward sender address ID.
+- Navlungo support guidance: Return Pickup (`POST /post/return`) `posts.0.recipient.addressId` should point to the warehouse/address number where the original forward shipment was created. The integration resolves this from the successful forward shipment context first, then falls back to explicit return recipient config (`navlungoReturnRecipientAddressId` / `NAVLUNGO_RETURN_RECIPIENT_ADDRESS_ID`) only when the original shipment address number is unavailable.
 
 Likely implication:
 

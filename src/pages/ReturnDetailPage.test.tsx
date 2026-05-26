@@ -1272,6 +1272,12 @@ describe('ReturnDetailPage vendor review screen', () => {
           recipientAddressIdValid: true,
           navlungoReturnRecipientAddressIdPresent: true,
           navlungoReturnRecipientAddressIdNumeric: true,
+          navlungoReturnOriginalSenderMode: 'full_sender_details',
+          navlungoReturnOriginalPayloadSenderAddressIdPresent: false,
+          navlungoReturnOriginalWarehouseAddressIdPresent: true,
+          navlungoReturnResolvedRecipientAddressIdSource: 'original_forward_warehouse_id',
+          navlungoReturnResolvedRecipientAddressIdNumeric: true,
+          navlungoReturnRecipientFallbackUsed: false,
           navlungoReturnPickupPayloadSummary: {
             endpointPath: '/post/return',
             requestedPostType: 3,
@@ -1293,6 +1299,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     const diagnostics = await screen.findByLabelText('Navlungo return auto-create diagnostics');
     expect(within(diagnostics).getByText('422')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Validation Errors')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('original_forward_warehouse_id')).toBeInTheDocument();
+    expect(within(diagnostics).getByText('Navlungo returns should go back to the original shipment warehouse addressId.')).toBeInTheDocument();
     expect(within(diagnostics).getByText('posts.0.recipient.addressId')).toBeInTheDocument();
     expect(within(diagnostics).getByText('Recipient address id validation failed.')).toBeInTheDocument();
     expect(within(diagnostics).getByText('/post/return')).toBeInTheDocument();
