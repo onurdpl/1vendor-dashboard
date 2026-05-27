@@ -274,6 +274,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage(['/returns?workflow=pending-review']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
+    expect(screen.getByRole('button', { name: /Pending review/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Barcode gateway license')).not.toBeInTheDocument();
 

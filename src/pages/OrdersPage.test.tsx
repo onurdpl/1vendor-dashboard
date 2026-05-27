@@ -243,6 +243,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
+    expect(screen.getByRole('button', { name: /Awaiting shipment/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
 
@@ -279,8 +280,13 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?workflow=blocked-allocation']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Blocked allocation');
+    expect(screen.getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+
+    expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
   });
 
   it('renders an honest empty state for empty workflow order queues', async () => {

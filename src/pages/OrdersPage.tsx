@@ -368,13 +368,6 @@ export function OrdersPage() {
     setSelectedOrderId(null);
   }, [requestedOrderTargetKey]);
 
-  useEffect(() => {
-    if (!activeWorkflowFilter) {
-      return;
-    }
-    setQuickFilter(activeWorkflowFilter.quickFilter);
-  }, [activeWorkflowFilter]);
-
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
       return;
@@ -422,6 +415,7 @@ export function OrdersPage() {
 
   const filteredOrders = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
+    const effectiveQuickFilter = activeWorkflowFilter?.quickFilter ?? quickFilter;
 
     return rankedOrders.filter((order) => {
       const matchesStatus = statusFilter === 'all' || order.allocationStatus === statusFilter || order.status === statusFilter;
@@ -446,16 +440,16 @@ export function OrdersPage() {
         .toLowerCase();
 
       const matchesQuickFilter =
-        quickFilter === 'all' ||
-        (quickFilter === 'blocked' && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
-        (quickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
-        (quickFilter === 'tracking_missing' && !order.trackingNumber && !order.carrier) ||
-        (quickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
-        (quickFilter === 'returns' && searchableText.includes('return'));
+        effectiveQuickFilter === 'all' ||
+        (effectiveQuickFilter === 'blocked' && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
+        (effectiveQuickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
+        (effectiveQuickFilter === 'tracking_missing' && !order.trackingNumber && !order.carrier) ||
+        (effectiveQuickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
+        (effectiveQuickFilter === 'returns' && searchableText.includes('return'));
 
       return matchesStatus && matchesFulfillment && matchesShipping && matchesQuickFilter && (!query || searchableText.includes(query));
     });
-  }, [currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
+  }, [activeWorkflowFilter, currentVendor.vendorId, currentVendor.vendorName, fulfillmentFilter, quickFilter, rankedOrders, searchTerm, shippingFilter, statusFilter]);
 
   const selectedOrderSummary = useMemo(() => {
     const selectedByClick = selectedOrderId ? filteredOrders.find((order) => order.id === selectedOrderId) : null;
@@ -549,6 +543,7 @@ export function OrdersPage() {
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
     { key: 'returns', label: 'Returns', count: safeArray(orders).filter((order) => `${order.status} ${order.shippingStatus}`.toLowerCase().includes('return')).length },
   ];
+  const effectiveQuickFilter = activeWorkflowFilter?.quickFilter ?? quickFilter;
 
   async function handleSmartLabelAction(order: OrderSummary | OrderDetail) {
     const shipmentExecution = (order as OrderDetail).shipmentExecution;
@@ -727,7 +722,7 @@ export function OrdersPage() {
                   <button
                     key={filter.key}
                     type="button"
-                    className={quickFilter === filter.key ? 'is-active' : ''}
+                    className={effectiveQuickFilter === filter.key ? 'is-active' : ''}
                     onClick={() => {
                       clearWorkflowFilter();
                       setQuickFilter(filter.key);

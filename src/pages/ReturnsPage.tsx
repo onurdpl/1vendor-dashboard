@@ -509,13 +509,6 @@ export function ReturnsPage() {
     setSelectedReturnId(null);
   }, [requestedReturnTarget]);
 
-  useEffect(() => {
-    if (!activeWorkflowFilter) {
-      return;
-    }
-    setSourceFilter(activeWorkflowFilter.sourceFilter);
-  }, [activeWorkflowFilter]);
-
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
       return;
@@ -536,6 +529,7 @@ export function ReturnsPage() {
   const vendorLookup = useMemo(() => {
     return new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
   }, []);
+  const effectiveSourceFilter = activeWorkflowFilter?.sourceFilter ?? sourceFilter;
 
   const filteredReturns = useMemo(() => {
     const query = searchTerm.trim().toLowerCase();
@@ -602,12 +596,12 @@ export function ReturnsPage() {
       const matchesStatus = statusFilter === 'all' || item.status === statusFilter;
       const matchesVendor = vendorFilter === 'all' || item.assignedVendorId === vendorFilter;
       const matchesSource =
-        sourceFilter === 'all' ||
-        (sourceFilter === 'pending' && item.sourceType === 'shopify_return_request') ||
-        (sourceFilter === 'refunded' && item.sourceType !== 'shopify_return_request');
+        effectiveSourceFilter === 'all' ||
+        (effectiveSourceFilter === 'pending' && item.sourceType === 'shopify_return_request') ||
+        (effectiveSourceFilter === 'refunded' && item.sourceType !== 'shopify_return_request');
       return matchesQuery && matchesStatus && matchesVendor && matchesSource;
     });
-  }, [returns, searchTerm, sourceFilter, statusFilter, vendorFilter]);
+  }, [effectiveSourceFilter, returns, searchTerm, statusFilter, vendorFilter]);
 
   const selectedReturn = useMemo(() => {
     const returnList = safeArray(returns);
@@ -724,7 +718,7 @@ export function ReturnsPage() {
                 ))}
               </select>
               <select
-                value={sourceFilter}
+                value={effectiveSourceFilter}
                 onChange={(event) => {
                   clearWorkflowFilter();
                   setSourceFilter(event.target.value as ReturnSourceFilter);
@@ -776,7 +770,7 @@ export function ReturnsPage() {
           <div className="returns-filter-summary">
             <button
               type="button"
-              className={sourceFilter === 'all' ? 'is-active' : ''}
+              className={effectiveSourceFilter === 'all' ? 'is-active' : ''}
               onClick={() => {
                 clearWorkflowFilter();
                 setSourceFilter('all');
@@ -786,7 +780,7 @@ export function ReturnsPage() {
             </button>
             <button
               type="button"
-              className={sourceFilter === 'pending' ? 'is-active' : ''}
+              className={effectiveSourceFilter === 'pending' ? 'is-active' : ''}
               onClick={() => {
                 clearWorkflowFilter();
                 setSourceFilter('pending');
@@ -796,7 +790,7 @@ export function ReturnsPage() {
             </button>
             <button
               type="button"
-              className={sourceFilter === 'refunded' ? 'is-active' : ''}
+              className={effectiveSourceFilter === 'refunded' ? 'is-active' : ''}
               onClick={() => {
                 clearWorkflowFilter();
                 setSourceFilter('refunded');
