@@ -222,12 +222,13 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
     expect(screen.getByText('Open support issues')).toBeInTheDocument();
     expect(screen.getByText('Automation issue groups')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute('href', '/orders');
-    expect(screen.getByRole('link', { name: 'Create shipment' })).toHaveAttribute('href', '/orders');
-    expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns');
+    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute('href', '/orders?workflow=awaiting-shipment');
+    expect(screen.getByRole('link', { name: 'Create shipment' })).toHaveAttribute('href', '/orders?workflow=awaiting-shipment');
+    expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns?workflow=pending-review');
     expect(screen.getAllByLabelText('Workflow action guidance').some((node) => node.textContent?.includes('Create shipment'))).toBe(true);
-    expect(screen.getByRole('link', { name: 'Open support' })).toHaveAttribute('href', '/support');
-    expect(screen.getByRole('link', { name: 'Open automation' })).toHaveAttribute('href', '/automation');
+    expect(screen.getByRole('link', { name: 'Open finance' })).toHaveAttribute('href', '/finance?workflow=settlement-review');
+    expect(screen.getByRole('link', { name: 'Open support' })).toHaveAttribute('href', '/support?workflow=open-support-issues');
+    expect(screen.getByRole('link', { name: 'Open automation' })).toHaveAttribute('href', '/automation?workflow=active-issue-groups');
     expect(screen.getAllByLabelText('Workflow action guidance').length).toBeGreaterThan(0);
   });
 

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
   FilterBar,
@@ -38,10 +38,17 @@ export function isVendorSupportUnread(ticket: SupportTicket) {
   return ticket.vendorUnreadCount > 0;
 }
 
+function isOpenSupportIssue(ticket: SupportTicket) {
+  const status = String(ticket.status ?? '').toUpperCase();
+  return !ticket.closedAt && !ticket.resolvedAt && !['CLOSED', 'RESOLVED'].includes(status);
+}
+
 export function VendorSupportTicketsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const workflowOpenSupportIssues = searchParams.get('workflow') === 'open-support-issues';
   const { data: tickets, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.support.tickets(currentVendor.vendorId),
     ({ signal }) => listVendorSupportTickets({ signal }),
@@ -49,8 +56,21 @@ export function VendorSupportTicketsPage() {
   );
 
   const filteredTickets = useMemo(() => {
-    return safeArray(tickets).filter((ticket) => !unreadOnly || isVendorSupportUnread(ticket));
-  }, [tickets, unreadOnly]);
+    return safeArray(tickets).filter((ticket) => {
+      const matchesWorkflow = !workflowOpenSupportIssues || isOpenSupportIssue(ticket);
+      const matchesUnread = !unreadOnly || isVendorSupportUnread(ticket);
+      return matchesWorkflow && matchesUnread;
+    });
+  }, [tickets, unreadOnly, workflowOpenSupportIssues]);
+
+  function clearWorkflowFilter() {
+    if (!searchParams.has('workflow')) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
 
   return (
     <section className="op-page support-ops-page">
@@ -65,11 +85,31 @@ export function VendorSupportTicketsPage() {
       <OperationalToolbar>
         <FilterBar>
           <label className="support-toggle">
-            <input type="checkbox" checked={unreadOnly} onChange={(event) => setUnreadOnly(event.target.checked)} />
+            <input
+              type="checkbox"
+              checked={unreadOnly}
+              onChange={(event) => {
+                clearWorkflowFilter();
+                setUnreadOnly(event.target.checked);
+              }}
+            />
             Unread only
           </label>
         </FilterBar>
       </OperationalToolbar>
+
+      {workflowOpenSupportIssues ? (
+        <div className="workflow-filter-banner" aria-label="Active workflow filter">
+          <div>
+            <span>Workflow filter</span>
+            <strong>Open support issues</strong>
+            <small>Showing active support records that need follow-up.</small>
+          </div>
+          <button type="button" className="button button-secondary button-compact" onClick={clearWorkflowFilter}>
+            Clear workflow
+          </button>
+        </div>
+      ) : null}
 
       {isError && !tickets ? (
         <SectionErrorRetry

@@ -456,9 +456,20 @@ function returnMatchesTarget(item: ReturnSummary, target: string | null) {
   );
 }
 
+function getReturnsWorkflowFilter(workflow: string | null) {
+  if (workflow === 'pending-review') {
+    return {
+      label: 'Pending review',
+      description: 'Showing Shopify return requests that need vendor review.',
+      sourceFilter: 'pending' as ReturnSourceFilter,
+    };
+  }
+  return null;
+}
+
 export function ReturnsPage() {
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
@@ -474,6 +485,7 @@ export function ReturnsPage() {
   const [sourceFilter, setSourceFilter] = useState<ReturnSourceFilter>('all');
   const [selectedReturnId, setSelectedReturnId] = useState<string | null>(null);
   const [supportOpen, setSupportOpen] = useState(false);
+  const activeWorkflowFilter = useMemo(() => getReturnsWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const isRealMode = runtimeConfig.apiMode === 'real';
   const isAdmin = currentUser?.role === 'admin';
   const requestedReturnTarget =
@@ -494,6 +506,30 @@ export function ReturnsPage() {
   useEffect(() => {
     setSelectedReturnId(null);
   }, [requestedReturnTarget]);
+
+  useEffect(() => {
+    if (!activeWorkflowFilter) {
+      return;
+    }
+    setSourceFilter(activeWorkflowFilter.sourceFilter);
+  }, [activeWorkflowFilter]);
+
+  function clearWorkflowFilter() {
+    if (!searchParams.has('workflow')) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function handleResetFilters() {
+    clearWorkflowFilter();
+    setSearchTerm('');
+    setStatusFilter('all');
+    setVendorFilter('all');
+    setSourceFilter('all');
+  }
 
   const vendorLookup = useMemo(() => {
     return new Map(getAvailableVendors().map((vendor) => [vendor.vendorId, vendor.vendorName] as const));
@@ -665,10 +701,19 @@ export function ReturnsPage() {
             <SearchInput
               placeholder="Search returns by order, return #, customer or SKU..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) => {
+                clearWorkflowFilter();
+                setSearchTerm(event.target.value);
+              }}
             />
             <FilterBar>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  clearWorkflowFilter();
+                  setStatusFilter(event.target.value);
+                }}
+              >
                 <option value="all">All statuses</option>
                 {statuses.map((status) => (
                   <option key={status} value={status}>
@@ -676,13 +721,25 @@ export function ReturnsPage() {
                   </option>
                 ))}
               </select>
-              <select value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value as ReturnSourceFilter)}>
+              <select
+                value={sourceFilter}
+                onChange={(event) => {
+                  clearWorkflowFilter();
+                  setSourceFilter(event.target.value as ReturnSourceFilter);
+                }}
+              >
                 <option value="all">All returns</option>
                 <option value="pending">Pending returns</option>
                 <option value="refunded">Refunds completed</option>
               </select>
               {isAdmin ? (
-                <select value={vendorFilter} onChange={(event) => setVendorFilter(event.target.value)}>
+                <select
+                  value={vendorFilter}
+                  onChange={(event) => {
+                    clearWorkflowFilter();
+                    setVendorFilter(event.target.value);
+                  }}
+                >
                   <option value="all">All visible vendors</option>
                   {vendors.map((vendorId) => (
                     <option key={vendorId} value={vendorId}>
@@ -694,26 +751,55 @@ export function ReturnsPage() {
               <button
                 type="button"
                 className="button button-secondary"
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                  setVendorFilter('all');
-                  setSourceFilter('all');
-                }}
+                onClick={handleResetFilters}
               >
                 Reset
               </button>
             </FilterBar>
           </OperationalToolbar>
 
+          {activeWorkflowFilter ? (
+            <div className="workflow-filter-banner" aria-label="Active workflow filter">
+              <div>
+                <span>Workflow filter</span>
+                <strong>{activeWorkflowFilter.label}</strong>
+                <small>{activeWorkflowFilter.description}</small>
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
+                Clear workflow
+              </button>
+            </div>
+          ) : null}
+
           <div className="returns-filter-summary">
-            <button type="button" className={sourceFilter === 'all' ? 'is-active' : ''} onClick={() => setSourceFilter('all')}>
+            <button
+              type="button"
+              className={sourceFilter === 'all' ? 'is-active' : ''}
+              onClick={() => {
+                clearWorkflowFilter();
+                setSourceFilter('all');
+              }}
+            >
               All returns <strong>{returnRows.length}</strong>
             </button>
-            <button type="button" className={sourceFilter === 'pending' ? 'is-active' : ''} onClick={() => setSourceFilter('pending')}>
+            <button
+              type="button"
+              className={sourceFilter === 'pending' ? 'is-active' : ''}
+              onClick={() => {
+                clearWorkflowFilter();
+                setSourceFilter('pending');
+              }}
+            >
               Pending review <strong>{pendingCount}</strong>
             </button>
-            <button type="button" className={sourceFilter === 'refunded' ? 'is-active' : ''} onClick={() => setSourceFilter('refunded')}>
+            <button
+              type="button"
+              className={sourceFilter === 'refunded' ? 'is-active' : ''}
+              onClick={() => {
+                clearWorkflowFilter();
+                setSourceFilter('refunded');
+              }}
+            >
               Refunded <strong>{processedCount}</strong>
             </button>
             <span>Needs action <strong>{attentionCount}</strong></span>

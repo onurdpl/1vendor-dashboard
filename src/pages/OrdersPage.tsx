@@ -298,8 +298,33 @@ function getRequestedOrderTargets(searchParams: URLSearchParams) {
     .filter((value): value is string => Boolean(value));
 }
 
+function getOrdersWorkflowFilter(workflow: string | null) {
+  if (workflow === 'awaiting-shipment') {
+    return {
+      label: 'Awaiting shipment',
+      description: 'Showing orders that need shipment creation or provider progress.',
+      quickFilter: 'awaiting' as OrderQuickFilter,
+    };
+  }
+  if (workflow === 'stale-fulfillment') {
+    return {
+      label: 'Stale fulfillment',
+      description: 'Showing fulfillment work that still needs shipment progress.',
+      quickFilter: 'awaiting' as OrderQuickFilter,
+    };
+  }
+  if (workflow === 'tracking-missing') {
+    return {
+      label: 'Tracking missing',
+      description: 'Showing orders without carrier or tracking evidence.',
+      quickFilter: 'tracking_missing' as OrderQuickFilter,
+    };
+  }
+  return null;
+}
+
 export function OrdersPage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
   const currentUser = appReadiness.currentUser;
@@ -319,6 +344,7 @@ export function OrdersPage() {
   const [quickFilter, setQuickFilter] = useState<OrderQuickFilter>('all');
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
   const [labelActionFeedback, setLabelActionFeedback] = useState<LabelActionFeedback | null>(null);
+  const activeWorkflowFilter = useMemo(() => getOrdersWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const requestedOrderTargets = useMemo(() => getRequestedOrderTargets(searchParams), [searchParams]);
   const hasRequestedOrderTarget = requestedOrderTargets.length > 0;
   const requestedOrderTargetKey = requestedOrderTargets.join('|');
@@ -326,6 +352,31 @@ export function OrdersPage() {
   useEffect(() => {
     setSelectedOrderId(null);
   }, [requestedOrderTargetKey]);
+
+  useEffect(() => {
+    if (!activeWorkflowFilter) {
+      return;
+    }
+    setQuickFilter(activeWorkflowFilter.quickFilter);
+  }, [activeWorkflowFilter]);
+
+  function clearWorkflowFilter() {
+    if (!searchParams.has('workflow')) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function handleResetFilters() {
+    clearWorkflowFilter();
+    setSearchTerm('');
+    setStatusFilter('all');
+    setFulfillmentFilter('all');
+    setShippingFilter('all');
+    setQuickFilter('all');
+  }
 
   const rankedOrders = useMemo(() => {
     const rank = (order: OrderSummary) => {
@@ -586,24 +637,45 @@ export function OrdersPage() {
                 <SearchInput
                   placeholder="Search order, customer, tracking, carrier..."
                   value={searchTerm}
-                  onChange={(event) => setSearchTerm(event.target.value)}
+                  onChange={(event) => {
+                    clearWorkflowFilter();
+                    setSearchTerm(event.target.value);
+                  }}
                 />
                 <FilterBar>
-                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                  <select
+                    value={statusFilter}
+                    onChange={(event) => {
+                      clearWorkflowFilter();
+                      setStatusFilter(event.target.value);
+                    }}
+                  >
                     <option value="all">All allocation states</option>
                     <option value="active">Active</option>
                     <option value="pending_reassignment">Pending reassignment</option>
                     <option value="vendor_blocked">Vendor blocked</option>
                     <option value="fulfilled">Fulfilled allocation</option>
                   </select>
-                  <select value={fulfillmentFilter} onChange={(event) => setFulfillmentFilter(event.target.value)}>
+                  <select
+                    value={fulfillmentFilter}
+                    onChange={(event) => {
+                      clearWorkflowFilter();
+                      setFulfillmentFilter(event.target.value);
+                    }}
+                  >
                     <option value="all">All fulfillment</option>
                     <option value="Pending">Pending</option>
                     <option value="Processing">Processing</option>
                     <option value="Partially Fulfilled">Partially fulfilled</option>
                     <option value="Fulfilled">Fulfilled</option>
                   </select>
-                  <select value={shippingFilter} onChange={(event) => setShippingFilter(event.target.value)}>
+                  <select
+                    value={shippingFilter}
+                    onChange={(event) => {
+                      clearWorkflowFilter();
+                      setShippingFilter(event.target.value);
+                    }}
+                  >
                     <option value="all">All shipping</option>
                     <option value="Awaiting Shipment">Awaiting shipment</option>
                     <option value="Label Created">Label created</option>
@@ -613,18 +685,25 @@ export function OrdersPage() {
                   <button
                     type="button"
                     className="button button-secondary"
-                    onClick={() => {
-                      setSearchTerm('');
-                      setStatusFilter('all');
-                      setFulfillmentFilter('all');
-                      setShippingFilter('all');
-                      setQuickFilter('all');
-                    }}
+                    onClick={handleResetFilters}
                   >
                     Filters
                   </button>
                 </FilterBar>
               </OperationalToolbar>
+
+              {activeWorkflowFilter ? (
+                <div className="workflow-filter-banner" aria-label="Active workflow filter">
+                  <div>
+                    <span>Workflow filter</span>
+                    <strong>{activeWorkflowFilter.label}</strong>
+                    <small>{activeWorkflowFilter.description}</small>
+                  </div>
+                  <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
+                    Clear workflow
+                  </button>
+                </div>
+              ) : null}
 
               <div className="orders-filter-summary" aria-label="Order quick filters">
                 {quickFilters.map((filter) => (
@@ -632,7 +711,10 @@ export function OrdersPage() {
                     key={filter.key}
                     type="button"
                     className={quickFilter === filter.key ? 'is-active' : ''}
-                    onClick={() => setQuickFilter(filter.key)}
+                    onClick={() => {
+                      clearWorkflowFilter();
+                      setQuickFilter(filter.key);
+                    }}
                   >
                     {filter.label}
                     <strong>{filter.count}</strong>

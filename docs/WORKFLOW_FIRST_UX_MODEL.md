@@ -130,12 +130,33 @@ Guidance must not hide uncertainty:
 - A failed optional section should not remove the primary action for the loaded entity.
 - A disabled vendor-scoped query should show waiting/select-vendor state, not a false workflow action.
 
-## Phase B Candidates
+## Phase B Route Filtering
 
-Future work can make the guidance more precise without changing Phase A principles:
+Dashboard workflow actions should carry intent into the destination queue with lightweight query params. The destination page owns the actual filtering, renders the active workflow filter visibly, and lets the user clear or override it through the normal filter controls.
 
-1. Add route query params so dashboard action cards open destination pages with matching filters.
-2. Extend backend normalized dashboard fields with `recommendedAction`, `destination`, and `sourceEntityType`.
-3. Share action guidance with Admin Operations queue recommendations.
-4. Persist operational issue group lifecycle before adding acknowledge/resolve/dismiss workflows.
-5. Add role-aware guidance tests for vendor/admin dashboard variants.
+Current route mappings:
+
+- `Create shipment` -> `/orders?workflow=awaiting-shipment`
+- `Review stale fulfillment` -> `/orders?workflow=stale-fulfillment`
+- `Sync tracking` -> `/orders?workflow=tracking-missing`
+- `Review return` -> `/returns?workflow=pending-review`
+- `Review settlement` -> `/finance?workflow=settlement-review`
+- `Open linked support record` -> `/support?workflow=open-support-issues`
+- `Review automation queue` -> `/automation?workflow=active-issue-groups`
+
+Rules:
+
+1. Workflow params initialize existing local filters; they do not add hidden backend scope.
+2. The active workflow filter must be visible in the page body.
+3. Manual filter changes clear the workflow param so users are not trapped in a hidden queue context.
+4. Reset/clear returns the page to its normal unfiltered state.
+5. Existing deep links can coexist with `workflow`; clearing workflow must preserve other query params.
+
+## Phase C Candidates
+
+Future work can make the guidance more precise without changing Phase A/B principles:
+
+1. Extend backend normalized dashboard fields with `recommendedAction`, `destination`, and `sourceEntityType`.
+2. Share action guidance with Admin Operations queue recommendations.
+3. Persist operational issue group lifecycle before adding acknowledge/resolve/dismiss workflows.
+4. Add role-aware guidance tests for vendor/admin dashboard variants.

@@ -267,6 +267,21 @@ describe('ReturnsPage control center', () => {
     expect(screen.queryByText('1 item')).not.toBeInTheDocument();
   });
 
+  it('uses workflow query params to open pending return review and allows reset', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(pendingReturn), toSummary(processedRefund)]);
+    getReturnMock.mockImplementation(async (returnId) => (returnId === processedRefund.id ? processedRefund : pendingReturn));
+
+    renderReturnsPage(['/returns?workflow=pending-review']);
+
+    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
+    expect((await screen.findAllByText('Wireless label printer')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Barcode gateway license')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+
+    expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+  });
+
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
     const returnWithoutImage: ReturnDetail = {
       ...pendingReturn,

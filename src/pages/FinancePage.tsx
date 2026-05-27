@@ -587,8 +587,19 @@ function getSupportActivitySummary(tickets: SupportTicket[]) {
   };
 }
 
+function getFinanceWorkflowFilter(workflow: string | null) {
+  if (workflow === 'settlement-review') {
+    return {
+      label: 'Settlement review',
+      description: 'Showing finance rows that need settlement review.',
+      statusFilter: 'Pending review',
+    };
+  }
+  return null;
+}
+
 export function FinancePage() {
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentUser = appReadiness.currentUser;
   const currentVendor = appReadiness.currentVendor;
@@ -608,6 +619,7 @@ export function FinancePage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const activeWorkflowFilter = useMemo(() => getFinanceWorkflowFilter(searchParams.get('workflow')), [searchParams]);
   const requestedFinanceTarget = useMemo(() => getFinanceDeepLinkTarget(searchParams), [searchParams]);
   const [commissionPercent, setCommissionPercent] = useState('10.00');
   const [commissionVatPercent, setCommissionVatPercent] = useState('0.00');
@@ -624,6 +636,30 @@ export function FinancePage() {
   useEffect(() => {
     setSelectedRecordId(null);
   }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value]);
+
+  useEffect(() => {
+    if (!activeWorkflowFilter) {
+      return;
+    }
+    setStatusFilter(activeWorkflowFilter.statusFilter);
+  }, [activeWorkflowFilter]);
+
+  function clearWorkflowFilter() {
+    if (!searchParams.has('workflow')) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function handleResetFilters() {
+    clearWorkflowFilter();
+    setSearchTerm('');
+    setStatusFilter('all');
+    setCategoryFilter('all');
+  }
+
   const saveProfileMutation = useMutationAction(
     (input: VendorProfileFormInput) =>
       updateVendorFinancialProfile(currentVendor.vendorId, input),
@@ -1086,10 +1122,19 @@ export function FinancePage() {
             <SearchInput
               placeholder="Search by order #, type, status, amount..."
               value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
+              onChange={(event) => {
+                clearWorkflowFilter();
+                setSearchTerm(event.target.value);
+              }}
             />
             <FilterBar>
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+              <select
+                value={statusFilter}
+                onChange={(event) => {
+                  clearWorkflowFilter();
+                  setStatusFilter(event.target.value);
+                }}
+              >
                 <option value="all">All statuses</option>
                 <option value="Estimated">Estimated</option>
                 <option value="Pending review">Pending review</option>
@@ -1098,7 +1143,13 @@ export function FinancePage() {
                 <option value="Refund impact">Refund impact</option>
                 <option value="Blocked">Blocked</option>
               </select>
-              <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value)}>
+              <select
+                value={categoryFilter}
+                onChange={(event) => {
+                  clearWorkflowFilter();
+                  setCategoryFilter(event.target.value);
+                }}
+              >
                 <option value="all">All types</option>
                 <option value="Invoice">Sale</option>
                 <option value="Refund">Refund</option>
@@ -1113,16 +1164,26 @@ export function FinancePage() {
               <button
                 type="button"
                 className="button button-secondary"
-                onClick={() => {
-                  setSearchTerm('');
-                  setStatusFilter('all');
-                  setCategoryFilter('all');
-                }}
+                onClick={handleResetFilters}
               >
                 Reset
               </button>
             </FilterBar>
           </OperationalToolbar>
+
+          {activeWorkflowFilter ? (
+            <div className="workflow-filter-banner" aria-label="Active workflow filter">
+              <div>
+                <span>Workflow filter</span>
+                <strong>{activeWorkflowFilter.label}</strong>
+                <small>{activeWorkflowFilter.description}</small>
+              </div>
+              <button type="button" className="button button-secondary button-compact" onClick={handleResetFilters}>
+                Clear workflow
+              </button>
+            </div>
+          ) : null}
+
           <div className="finance-filter-chips" aria-label="Finance quick filters">
             {['All', 'Sales', 'Refunds', 'Holds', 'Payout reviews'].map((chip) => (
               <span key={chip} className={chip === 'All' ? 'is-active' : ''}>{chip}</span>

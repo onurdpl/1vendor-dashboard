@@ -6,6 +6,16 @@ export type WorkflowActionGuidance = {
   tone: WorkflowActionTone;
 };
 
+export const workflowRoutes = {
+  awaitingShipment: '/orders?workflow=awaiting-shipment',
+  staleFulfillment: '/orders?workflow=stale-fulfillment',
+  trackingMissing: '/orders?workflow=tracking-missing',
+  pendingReturnReview: '/returns?workflow=pending-review',
+  settlementReview: '/finance?workflow=settlement-review',
+  openSupportIssues: '/support?workflow=open-support-issues',
+  activeAutomationIssueGroups: '/automation?workflow=active-issue-groups',
+} as const;
+
 function normalize(value: unknown) {
   return String(value ?? '').toLowerCase().replace(/[_-]+/g, ' ').trim();
 }
@@ -78,6 +88,34 @@ export function getDashboardWorkflowAction(label: string): WorkflowActionGuidanc
     description: 'Open the linked workspace and inspect the current item.',
     tone: 'info',
   };
+}
+
+export function getDashboardWorkflowRoute(label: string) {
+  const normalized = normalize(label);
+
+  if (normalized.includes('tracking')) {
+    return workflowRoutes.trackingMissing;
+  }
+  if (normalized.includes('stale fulfillment')) {
+    return workflowRoutes.staleFulfillment;
+  }
+  if (hasAny(normalized, ['awaiting shipment', 'shipment', 'fulfillment', 'blocked allocation'])) {
+    return workflowRoutes.awaitingShipment;
+  }
+  if (hasAny(normalized, ['return', 'refund'])) {
+    return workflowRoutes.pendingReturnReview;
+  }
+  if (hasAny(normalized, ['settlement', 'finance', 'payout'])) {
+    return workflowRoutes.settlementReview;
+  }
+  if (normalized.includes('support')) {
+    return workflowRoutes.openSupportIssues;
+  }
+  if (normalized.includes('automation')) {
+    return workflowRoutes.activeAutomationIssueGroups;
+  }
+
+  return '/orders';
 }
 
 export function getOrderWorkflowAction(input: {

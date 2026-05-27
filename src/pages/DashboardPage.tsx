@@ -20,7 +20,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import type { NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
-import { getDashboardWorkflowAction } from '../lib/workflowActionGuidance';
+import { getDashboardWorkflowAction, getDashboardWorkflowRoute, workflowRoutes } from '../lib/workflowActionGuidance';
 
 function parseDashboardCount(value: string | number | null | undefined) {
   if (typeof value === 'number') {
@@ -448,20 +448,7 @@ function normalizePriorityWork(items: Array<{ label: string; value: string; tone
 }
 
 function getDashboardActionRoute(label: string) {
-  const normalized = label.toLowerCase();
-  if (normalized.includes('refund') || normalized.includes('return')) {
-    return '/returns';
-  }
-  if (normalized.includes('automation')) {
-    return '/automation';
-  }
-  if (normalized.includes('support')) {
-    return '/support';
-  }
-  if (normalized.includes('finance') || normalized.includes('settlement') || normalized.includes('payout')) {
-    return '/finance';
-  }
-  return '/orders';
+  return getDashboardWorkflowRoute(label);
 }
 
 function getDashboardActionLabel(label: string) {
@@ -690,7 +677,9 @@ export function DashboardPage() {
       description: fulfillmentQueueDescription,
       guidance: getDashboardWorkflowAction(fulfillmentQueueLabel),
       tone: 'fulfillment',
-      to: '/orders',
+      to: hasNormalizedStaleFulfillmentCount || staleFulfillmentGroups.length > 0
+        ? workflowRoutes.staleFulfillment
+        : workflowRoutes.awaitingShipment,
       action: 'Open orders',
     },
     {
@@ -699,7 +688,7 @@ export function DashboardPage() {
       description: 'Return and refund review workload.',
       guidance: getDashboardWorkflowAction('Return pending review'),
       tone: 'returns',
-      to: '/returns',
+      to: workflowRoutes.pendingReturnReview,
       action: 'Open returns',
     },
     {
@@ -708,7 +697,7 @@ export function DashboardPage() {
       description: financeQueueDescription,
       guidance: getDashboardWorkflowAction('Settlement pending review'),
       tone: 'finance',
-      to: '/finance',
+      to: workflowRoutes.settlementReview,
       action: 'Open finance',
     },
     {
@@ -717,7 +706,7 @@ export function DashboardPage() {
       description: supportQueueDescription,
       guidance: getDashboardWorkflowAction(supportQueueLabel),
       tone: 'support',
-      to: '/support',
+      to: workflowRoutes.openSupportIssues,
       action: 'Open support',
     },
     {
@@ -726,7 +715,7 @@ export function DashboardPage() {
       description: automationProjection?.description ?? 'Grouped automation and rule issues.',
       guidance: getDashboardWorkflowAction('Automation issue groups'),
       tone: 'automation',
-      to: '/automation',
+      to: workflowRoutes.activeAutomationIssueGroups,
       action: 'Open automation',
     },
   ];

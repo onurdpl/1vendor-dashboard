@@ -1,3 +1,5 @@
+import { useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -23,8 +25,10 @@ function getClassToken(value: string | null | undefined) {
 }
 
 export function AutomationPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const appReadiness = useAppReadiness();
   const currentVendor = appReadiness.currentVendor;
+  const workflowActiveIssues = searchParams.get('workflow') === 'active-issue-groups';
   const { data: automation, isLoading, isError, error, refetch } = useQueryResource(
     queryKeys.automation.alerts(currentVendor.vendorId),
     ({ signal }) => getAutomationDashboard({ signal }),
@@ -34,14 +38,34 @@ export function AutomationPage() {
   const canRunAutomationAction = canPerformAction('automation:write');
   const currentRole = appReadiness.currentUser?.role ?? 'vendor';
 
-  const automationView = {
-    alerts: safeArray(automation?.alerts),
-    suggestions: safeArray(automation?.suggestions),
-  };
+  const automationView = useMemo(() => {
+    const alerts = safeArray(automation?.alerts);
+    const suggestions = safeArray(automation?.suggestions);
+    const visibleAlerts = workflowActiveIssues
+      ? alerts.filter((alert) => {
+          const status = String(alert.status ?? '').toLowerCase();
+          return !['closed', 'resolved', 'dismissed'].includes(status);
+        })
+      : alerts;
+
+    return {
+      alerts: visibleAlerts,
+      suggestions,
+    };
+  }, [automation?.alerts, automation?.suggestions, workflowActiveIssues]);
   const totalAlerts = automationView.alerts.length;
   const criticalAlerts = automationView.alerts.filter((alert) => alert.type === 'Critical' || alert.status === 'New').length;
   const suggestedActions = automationView.suggestions.length;
   const restrictedActions = canRunAutomationAction ? 0 : suggestedActions;
+
+  function clearWorkflowFilter() {
+    if (!searchParams.has('workflow')) {
+      return;
+    }
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('workflow');
+    setSearchParams(nextParams, { replace: true });
+  }
 
   return (
     <section className="dashboard automation-dashboard automation-workspace">
@@ -60,6 +84,19 @@ export function AutomationPage() {
           <span className="severity-chip severity-attention">Role {currentRole}</span>
         </div>
       </div>
+
+      {workflowActiveIssues ? (
+        <div className="workflow-filter-banner" aria-label="Active workflow filter">
+          <div>
+            <span>Workflow filter</span>
+            <strong>Active automation issue groups</strong>
+            <small>Showing active operational alerts before passive automation history.</small>
+          </div>
+          <button type="button" className="button button-secondary button-compact" onClick={clearWorkflowFilter}>
+            Clear workflow
+          </button>
+        </div>
+      ) : null}
 
       <div className="finance-summary-grid automation-summary-grid">
         <article className="finance-summary-card operational-card">

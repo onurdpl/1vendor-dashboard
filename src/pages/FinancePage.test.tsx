@@ -356,6 +356,29 @@ describe('FinancePage control center', () => {
     expect(screen.getByText('Values may change after refunds, shipping reconciliation, manual review, or settlement adjustments.')).toBeInTheDocument();
   });
 
+  it('uses workflow query params to open settlement review rows and allows reset', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [
+        {
+          ...financeDashboard.transactions[0],
+          payoutBatch: undefined,
+        },
+        ...financeDashboard.transactions.slice(1),
+      ],
+    });
+
+    renderFinancePage(['/finance?workflow=settlement-review']);
+
+    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Settlement review');
+    expect((await screen.findAllByText('#1021')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('#1001')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+
+    expect(await screen.findByText('#1001')).toBeInTheDocument();
+  });
+
   it('renders order settlement deep links for finance rows with order detail route ids', async () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboardWithOrderSettlementRoute);
 

@@ -215,6 +215,42 @@ describe('OrdersPage control center', () => {
     expect(screen.queryByRole('img', { name: 'Barcode gateway license product image' })).not.toBeInTheDocument();
   });
 
+  it('uses workflow query params to open the matching orders queue and allows reset', async () => {
+    const awaitingShipmentOrder: OrderDetail = {
+      ...orderDetail,
+      id: 'ORD-A-1001',
+      sourceShopifyOrderNumber: '#1001',
+      customer: 'Awaiting Customer',
+      status: 'Pending',
+      allocationStatus: 'active',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      trackingNumber: null,
+      trackingUrl: null,
+      carrier: null,
+      date: '2026-05-10T09:20:00Z',
+    };
+    const deliveredOrder: OrderDetail = {
+      ...orderDetail,
+      id: 'ORD-A-1002',
+      sourceShopifyOrderNumber: '#1002',
+      customer: 'Delivered Customer',
+      date: '2026-05-08T09:20:00Z',
+    };
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder), toSummary(deliveredOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => (orderId === awaitingShipmentOrder.id ? awaitingShipmentOrder : deliveredOrder));
+
+    renderOrdersPage(['/orders?workflow=awaiting-shipment']);
+
+    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
+    expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('#1002')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
+
+    expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
+  });
+
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
     const summary = buildSummary({
       id: 'ORD-A-1038',
