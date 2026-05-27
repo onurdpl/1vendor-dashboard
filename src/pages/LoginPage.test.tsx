@@ -156,12 +156,68 @@ describe('LoginPage expired session flow', () => {
         expect.objectContaining({ event: 'fetch dispatch started', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ event: 'fetch promise created', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ event: 'fetch resolved', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'response parsed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
         expect.objectContaining({ event: 'auth request completed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'setSession completed', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'vendor selected', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
+        expect.objectContaining({ event: 'navigate called', authAttemptId: expect.stringMatching(/^auth-[a-z0-9]{10}$/i) }),
       ]),
     );
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('vendor@example.com');
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('demo123');
 
+    debugSpy.mockRestore();
+  });
+
+  it('clears the login timeout after a successful backend response', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/');
+
+    const events = debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event);
+    expect(events).toContain('fetch resolved');
+    expect(events).toContain('response parsed');
+    expect(events).toContain('navigate called');
+    expect(events).not.toContain('auth timeout triggered');
+    expect(events).not.toContain('abort fired');
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+
+    clearTimeoutSpy.mockRestore();
+    debugSpy.mockRestore();
+  });
+
+  it('does not report a timeout when local session setup fails after backend success', async () => {
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+    const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
+    loginMock.mockResolvedValueOnce({
+      token: 'fresh-token',
+      user: {
+        ...testUser,
+        name: BigInt(1) as unknown as string,
+      },
+    });
+    renderStandaloneLogin();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByText(/serialize a BigInt/i)).toBeInTheDocument();
+
+    const events = debugSpy.mock.calls.map((call) => (call[1] as { event?: string })?.event);
+    expect(events).toContain('fetch resolved');
+    expect(events).toContain('response parsed');
+    expect(events).toContain('post-response failed');
+    expect(events).not.toContain('auth timeout triggered');
+    expect(events).not.toContain('abort fired');
+    expect(clearTimeoutSpy).toHaveBeenCalled();
+    expect(screen.queryByText(/^Sign-in is taking longer than expected/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeEnabled();
+
+    clearTimeoutSpy.mockRestore();
     debugSpy.mockRestore();
   });
 

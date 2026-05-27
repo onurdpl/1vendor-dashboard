@@ -64,6 +64,11 @@ function logAuthDiagnostic(
     | 'auth timeout triggered'
     | 'fetch resolved'
     | 'fetch rejected'
+    | 'response parsed'
+    | 'setSession completed'
+    | 'vendor selected'
+    | 'navigate called'
+    | 'post-response failed'
     | 'auth request completed',
   details: Record<string, unknown> = {},
 ) {
@@ -135,7 +140,8 @@ export function LoginPage() {
     const authAttemptId = createAuthAttemptId();
     const startedAt = Date.now();
     let timeoutTriggered = false;
-    const timeoutId = window.setTimeout(() => {
+    let responseReceived = false;
+    let timeoutId: number | null = window.setTimeout(() => {
       timeoutTriggered = true;
       logAuthDiagnostic('auth timeout triggered', {
         authAttemptId,
@@ -147,6 +153,14 @@ export function LoginPage() {
       });
       abortController.abort();
     }, LOGIN_TIMEOUT_MS);
+    const clearLoginTimeout = () => {
+      if (timeoutId === null) {
+        return;
+      }
+
+      window.clearTimeout(timeoutId);
+      timeoutId = null;
+    };
 
     logAuthDiagnostic('auth request start', { authAttemptId });
 
@@ -164,8 +178,14 @@ export function LoginPage() {
         elapsedMs: Date.now() - startedAt,
       });
       const { token, user } = await loginPromise;
+      responseReceived = true;
+      clearLoginTimeout();
 
       logAuthDiagnostic('fetch resolved', {
+        authAttemptId,
+        elapsedMs: Date.now() - startedAt,
+      });
+      logAuthDiagnostic('response parsed', {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,
       });
@@ -178,24 +198,51 @@ export function LoginPage() {
 
       setErrorMessage(null);
       setSession(token, user);
-      setCurrentVendorId(user.defaultVendorId as VendorId);
-      navigate(from, { replace: true });
-    } catch (error) {
-      logAuthDiagnostic('fetch rejected', {
+      logAuthDiagnostic('setSession completed', {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,
-        timedOut: timeoutTriggered,
       });
+      setCurrentVendorId(user.defaultVendorId as VendorId);
+      logAuthDiagnostic('vendor selected', {
+        authAttemptId,
+        vendorIdPresent: Boolean(user.defaultVendorId),
+        elapsedMs: Date.now() - startedAt,
+      });
+      navigate(from, { replace: true });
+      logAuthDiagnostic('navigate called', {
+        authAttemptId,
+        destination: from,
+        elapsedMs: Date.now() - startedAt,
+      });
+    } catch (error) {
+      if (responseReceived) {
+        logAuthDiagnostic('post-response failed', {
+          authAttemptId,
+          elapsedMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : 'unknown',
+        });
+      }
+      if (!responseReceived) {
+        logAuthDiagnostic('fetch rejected', {
+          authAttemptId,
+          elapsedMs: Date.now() - startedAt,
+          timedOut: timeoutTriggered,
+        });
+      }
       logAuthDiagnostic('auth request completed', {
         authAttemptId,
         elapsedMs: Date.now() - startedAt,
         timedOut: timeoutTriggered,
       });
       setErrorMessage(
-        timeoutTriggered ? formatLoginTimeoutMessage(authAttemptId) : error instanceof Error ? error.message : 'Unable to sign in.',
+        timeoutTriggered && !responseReceived
+          ? formatLoginTimeoutMessage(authAttemptId)
+          : error instanceof Error
+            ? error.message
+            : 'Unable to sign in.',
       );
     } finally {
-      window.clearTimeout(timeoutId);
+      clearLoginTimeout();
       setIsSubmitting(false);
     }
   }
