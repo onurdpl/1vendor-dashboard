@@ -8499,7 +8499,8 @@ summary.provider-response-heading::-webkit-details-marker {
   gap: 6px 12px;
   align-items: baseline;
   justify-content: space-between;
-  padding: 2px 2px 0;
+  padding: 0 2px;
+  opacity: 0.82;
 }
 
 .dashboard-passive-heading span {
@@ -8513,7 +8514,7 @@ summary.provider-response-heading::-webkit-details-marker {
 .dashboard-passive-heading p {
   margin: 0;
   color: #64748b;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 650;
 }
 
@@ -8576,13 +8577,37 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .dashboard-passive-kpis .dashboard-enterprise-kpi {
-  min-height: 104px;
-  padding: 16px;
-  box-shadow: inset 0 2px 0 #cbd5e1, 0 8px 18px rgba(15, 23, 42, 0.035);
+  gap: 5px;
+  min-height: 74px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fbfdff;
+  box-shadow: inset 0 2px 0 #dbe4ee, 0 5px 12px rgba(15, 23, 42, 0.025);
+}
+
+.dashboard-passive-kpis .dashboard-enterprise-kpi strong {
+  font-size: 1.1rem;
+}
+
+.dashboard-passive-kpis .dashboard-enterprise-kpi small,
+.dashboard-passive-kpis .dashboard-enterprise-kpi span {
+  font-size: 0.68rem;
 }
 
 .dashboard-passive-grid .op-section {
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.035);
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fbfdff;
+  box-shadow: 0 5px 14px rgba(15, 23, 42, 0.025);
+}
+
+.dashboard-passive-grid .op-section-heading h3 {
+  font-size: 0.9rem;
+}
+
+.dashboard-passive-grid .op-section-heading p {
+  font-size: 0.72rem;
 }
 
 .dashboard-passive-grid .notification-summary-row {
@@ -8590,7 +8615,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .dashboard-passive-grid .notification-card {
-  padding: 9px 10px;
+  padding: 7px 9px;
 }
 
 .dashboard-enterprise-grid {
@@ -8873,19 +8898,19 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-event-list li {
   display: grid;
-  grid-template-columns: 30px minmax(0, 1fr) auto;
-  gap: 12px;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
   align-items: flex-start;
-  min-height: 54px;
-  padding: 10px 0;
+  min-height: 40px;
+  padding: 7px 0;
 }
 
 .dashboard-event-dot {
-  width: 28px;
-  height: 28px;
+  width: 18px;
+  height: 18px;
   border-radius: 999px;
   background: #dbeafe;
-  box-shadow: inset 0 0 0 8px #eff6ff;
+  box-shadow: inset 0 0 0 5px #eff6ff;
 }
 
 .dashboard-event-copy {
@@ -8896,7 +8921,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-event-copy strong {
   color: #0f172a;
-  font-size: 0.86rem;
+  font-size: 0.8rem;
   line-height: 1.35;
 }
 
@@ -8968,12 +8993,12 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-enterprise-shell .notification-card {
   display: grid;
-  grid-template-columns: minmax(78px, 0.54fr) minmax(0, 1.7fr) minmax(150px, 0.85fr) auto;
-  gap: 12px;
+  grid-template-columns: minmax(66px, 0.42fr) minmax(0, 1.8fr) minmax(122px, 0.7fr) auto;
+  gap: 8px;
   align-items: center;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-color: #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #ffffff;
   box-shadow: none;
 }
@@ -9018,13 +9043,13 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .dashboard-notification-copy strong {
   color: #0f172a;
-  font-size: 0.84rem;
+  font-size: 0.78rem;
 }
 
 .dashboard-notification-copy p {
   margin: 0;
   color: #64748b;
-  font-size: 0.76rem;
+  font-size: 0.7rem;
   line-height: 1.35;
 }
 
@@ -9041,7 +9066,7 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .dashboard-notification-more {
-  padding: 8px 10px;
+  padding: 6px 9px;
   border: 1px dashed #cbd5e1;
   border-radius: 10px;
   background: #f8fafc;
@@ -9051,18 +9076,38 @@ summary.provider-response-heading::-webkit-details-marker {
   text-align: center;
 }
 
+.dashboard-event-more {
+  opacity: 0.78;
+}
+
+.dashboard-workspace-compact .op-section {
+  padding: 10px 12px;
+  border-style: dashed;
+  border-radius: 12px;
+  background: #fbfdff;
+  box-shadow: none;
+}
+
+.dashboard-workspace-compact .op-section-heading h3 {
+  font-size: 0.86rem;
+}
+
+.dashboard-workspace-compact .op-section-heading p {
+  font-size: 0.72rem;
+}
+
 .dashboard-workspace-status-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
+  gap: 8px;
 }
 
 .dashboard-workspace-status-grid div {
   display: grid;
-  gap: 4px;
-  padding: 12px;
+  gap: 2px;
+  padding: 8px 9px;
   border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  border-radius: 10px;
   background: #f8fafc;
 }
 

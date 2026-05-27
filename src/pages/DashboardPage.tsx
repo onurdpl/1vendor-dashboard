@@ -624,11 +624,13 @@ export function DashboardPage() {
   const dashboardStats = safeArray(dashboardView.stats);
   const normalizedCounts = dashboardView.normalizedOperationalCounts;
   const groupedRecentActivity = groupRecentActivity(recentActivity);
+  const visibleRecentActivity = groupedRecentActivity.slice(0, 3);
+  const collapsedRecentActivityCount = Math.max(0, groupedRecentActivity.length - visibleRecentActivity.length);
   const staleFulfillmentGroups = groupStaleFulfillmentSignals(recentActivity);
   const groupedNotifications = groupNotifications(notificationView.notifications);
   const supportActivityGroups = groupSupportActivity(notificationView.notifications);
   const actionProjections = normalizePriorityWork(priorityWork);
-  const visibleNotificationGroups = groupedNotifications.slice(0, 3);
+  const visibleNotificationGroups = groupedNotifications.slice(0, 2);
   const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
   const operationalActionTotal = actionProjections.reduce((sum, item) => sum + (item.count ?? 0), 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
@@ -879,7 +881,7 @@ export function DashboardPage() {
 
       <div className="dashboard-passive-heading">
         <span>Passive insights</span>
-        <p>Reporting, history, and notification context sit below immediate action work.</p>
+        <p>Compact reporting and history. Active work remains above.</p>
       </div>
 
       <div className="dashboard-enterprise-kpi-row dashboard-passive-kpis">
@@ -894,9 +896,9 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="dashboard-enterprise-grid dashboard-passive-grid">
+      <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Compact passive dashboard insights">
         <div className="dashboard-enterprise-main">
-          <OperationalSection title="Recent operational events" description="Grouped historical activity for context.">
+          <OperationalSection title="Recent operational events" description="Compact grouped history for context.">
             {isDashboardInitialLoading ? (
               <ul className="dashboard-activity-list dashboard-event-list" aria-label="Dashboard activity skeleton">
                 {Array.from({ length: 3 }, (_, index) => (
@@ -916,7 +918,7 @@ export function DashboardPage() {
               <EmptyStatePanel title="No records available" description="No records available." />
             ) : (
               <ul className="dashboard-activity-list dashboard-event-list">
-                {groupedRecentActivity.map((activity) => {
+                {visibleRecentActivity.map((activity) => {
                   const hasGroup = activity.count > 1;
 
                   return (
@@ -946,13 +948,24 @@ export function DashboardPage() {
                     </li>
                   );
                 })}
+                {collapsedRecentActivityCount > 0 ? (
+                  <li className="dashboard-event-more">
+                    <span className="dashboard-event-dot" aria-hidden="true" />
+                    <div className="dashboard-event-copy">
+                      <strong>
+                        {collapsedRecentActivityCount} older event group{collapsedRecentActivityCount === 1 ? '' : 's'} collapsed
+                      </strong>
+                      <span>Historical records remain available in operational detail pages.</span>
+                    </div>
+                  </li>
+                ) : null}
               </ul>
             )}
           </OperationalSection>
 
           <OperationalSection
-            title={isAdmin ? 'Admin notification history' : 'Notification history'}
-            description={isAdmin ? 'Grouped global admin alert history.' : 'Grouped system notification history.'}
+            title={isAdmin ? 'Admin passive notification history' : 'Passive notification history'}
+            description={isAdmin ? 'Top grouped admin alert history. Lower priority groups stay collapsed.' : 'Top grouped system notification history. Lower priority groups stay collapsed.'}
           >
             {notifications ? (
               <div className="notification-center">
@@ -1182,38 +1195,40 @@ export function DashboardPage() {
         </aside>
       </div>
 
-      <OperationalSection title="Workspace status" description="Summary of vendor-scoped operations.">
-        <div className="dashboard-workspace-status-grid">
-          <div>
-            <span>Vendor</span>
-            <strong>{dashboardView.vendorName ?? 'Unknown'}</strong>
+      <div className="dashboard-workspace-compact">
+        <OperationalSection title="Workspace context" description="Scope and passive evidence mode for this dashboard.">
+          <div className="dashboard-workspace-status-grid">
+            <div>
+              <span>Vendor</span>
+              <strong>{dashboardView.vendorName ?? 'Unknown'}</strong>
+            </div>
+            <div>
+              <span>Scope</span>
+              <strong>Vendor-scoped</strong>
+            </div>
+            <div>
+              <span>History mode</span>
+              <strong>Grouped</strong>
+            </div>
+            <div>
+              <span>Notifications</span>
+              <strong>Top groups</strong>
+            </div>
+            <div>
+              <span>Evidence</span>
+              <strong>Traceable</strong>
+            </div>
           </div>
-          <div>
-            <span>Scope</span>
-            <strong>Vendor-scoped</strong>
-          </div>
-          <div>
-            <span>Operational items</span>
-            <strong>{operationalActionTotal}</strong>
-          </div>
-          <div>
-            <span>Pending attention</span>
-            <strong>{operationalActionTotal}</strong>
-          </div>
-          <div>
-            <span>Queue items</span>
-            <strong>{actionProjections.length}</strong>
-          </div>
-        </div>
-        <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>
-        {partialDataWarnings.length ? (
-          <ul className="dashboard-activity-list">
-            {partialDataWarnings.map((warning) => (
-              <li key={warning}>{warning}</li>
-            ))}
-          </ul>
-        ) : null}
-      </OperationalSection>
+          <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>
+          {partialDataWarnings.length ? (
+            <ul className="dashboard-activity-list">
+              {partialDataWarnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+          ) : null}
+        </OperationalSection>
+      </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
     </section>

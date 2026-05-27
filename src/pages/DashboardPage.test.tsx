@@ -258,8 +258,8 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
     expect(listNotificationsMock).toHaveBeenCalledWith(null);
-    expect(screen.getByText('Admin notification history')).toBeInTheDocument();
-    expect(screen.getByText('Grouped global admin alert history.')).toBeInTheDocument();
+    expect(screen.getByText('Admin passive notification history')).toBeInTheDocument();
+    expect(screen.getByText('Top grouped admin alert history. Lower priority groups stay collapsed.')).toBeInTheDocument();
   });
 
   it('loads vendor notifications with the selected vendor scope for vendor users', async () => {
@@ -322,6 +322,24 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByText('3 fulfillment delays')).toBeInTheDocument();
     expect(screen.getByText('Latest issue: A shipment has not progressed for 102 hours.')).toBeInTheDocument();
     expect(screen.getByText('Show 3 matching events')).toBeInTheDocument();
+  });
+
+  it('limits passive event history while preserving collapsed evidence access', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      recentActivity: [
+        'Fulfillment is stale: 102h awaiting shipment',
+        'Refund webhook processed: Refund ID 123 processed successfully.',
+        'Return requested: Return waiting for refund review.',
+        'Shipping cost is pending: External-provider shipping cost is missing.',
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByLabelText('Compact passive dashboard insights')).toBeInTheDocument();
+    expect(await screen.findByText('1 older event group collapsed')).toBeInTheDocument();
+    expect(screen.getByText('Historical records remain available in operational detail pages.')).toBeInTheDocument();
   });
 
   it('labels support workload as notification-based when only notification data is available', async () => {
@@ -452,7 +470,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
-    expect(screen.getByText('Grouped global admin alert history.')).toBeInTheDocument();
+    expect(screen.getByText('Top grouped admin alert history. Lower priority groups stay collapsed.')).toBeInTheDocument();
     expect(screen.getByText('Open support issues')).toBeInTheDocument();
     expect(screen.getByText('Support workspace remains available; no unread support notification groups.')).toBeInTheDocument();
   });
@@ -531,6 +549,78 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('3 linked alerts')).toBeInTheDocument();
     expect(screen.getByText('3 unread')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+  });
+
+  it('keeps notification history compact by collapsing lower priority groups', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 4,
+        unread: 4,
+        critical: 0,
+        high: 2,
+        warning: 2,
+      },
+      notifications: [
+        {
+          ...notification,
+          id: 'notif-ship',
+          signalId: 'signal-shipping-cost',
+          title: 'Shipping cost is pending',
+          message: 'External-provider shipping cost is missing.',
+          severity: 'high',
+          createdAt: '2026-05-13T12:00:00.000Z',
+        },
+        {
+          ...notification,
+          id: 'notif-return',
+          signalId: 'signal-return-review',
+          title: 'Return request against refund',
+          message: 'A return request needs refund review.',
+          severity: 'high',
+          createdAt: '2026-05-13T11:00:00.000Z',
+        },
+        {
+          ...notification,
+          id: 'notif-automation',
+          signalId: 'signal-automation',
+          title: 'Automation signal active',
+          message: 'Raw backend automation signals are active.',
+          severity: 'warning',
+          createdAt: '2026-05-13T10:00:00.000Z',
+        },
+        {
+          ...notification,
+          id: 'notif-fulfillment',
+          signalId: 'signal-fulfillment',
+          title: 'Fulfillment is stale',
+          message: 'Order #1058 has waited 88h.',
+          severity: 'warning',
+          createdAt: '2026-05-13T09:00:00.000Z',
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('2 lower-priority notification groups collapsed')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /mark as read/i }).length).toBeGreaterThan(0);
+    expect(screen.getByText(/passive notification history/i)).toBeInTheDocument();
+  });
+
+  it('renders workspace context without duplicating action counts as passive status', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('Workspace context')).toBeInTheDocument();
+    expect(screen.getByText('History mode')).toBeInTheDocument();
+    expect(screen.getByText('Grouped')).toBeInTheDocument();
+    expect(screen.getByText('Top groups')).toBeInTheDocument();
+    expect(screen.getByText('Traceable')).toBeInTheDocument();
+    expect(screen.queryByText('Operational items')).not.toBeInTheDocument();
+    expect(screen.queryByText('Pending attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Queue items')).not.toBeInTheDocument();
   });
 
   it('projects raw operational identifiers into readable dashboard history copy', async () => {
