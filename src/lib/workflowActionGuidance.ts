@@ -123,6 +123,7 @@ export function getDashboardWorkflowRoute(label: string) {
 }
 
 export function getOrderWorkflowAction(input: {
+  allocationStatus?: string | null;
   shippingStatus?: string | null;
   fulfillmentStatus?: string | null;
   trackingNumber?: string | null;
@@ -130,9 +131,18 @@ export function getOrderWorkflowAction(input: {
   hasShipment?: boolean;
   hasLabel?: boolean;
 }): WorkflowActionGuidance {
+  const allocationStatus = normalize(input.allocationStatus);
   const shippingStatus = normalize(input.shippingStatus);
   const fulfillmentStatus = normalize(input.fulfillmentStatus);
   const trackingMissing = !input.trackingNumber && !input.carrier;
+
+  if (hasAny(allocationStatus, ['vendor blocked', 'vendor_blocked', 'pending reassignment', 'pending_reassignment'])) {
+    return {
+      actionLabel: 'Review allocation',
+      description: 'Open the order detail to inspect the blocked assignment and resolve vendor scope before shipment work.',
+      tone: 'warning',
+    };
+  }
 
   if (!input.hasShipment && hasAny(shippingStatus, ['awaiting shipment', 'pending'])) {
     return {

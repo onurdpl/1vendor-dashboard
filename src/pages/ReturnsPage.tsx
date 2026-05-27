@@ -615,7 +615,7 @@ export function ReturnsPage() {
     if (requestedReturnTarget) {
       return returnList.find((item) => returnMatchesTarget(item, requestedReturnTarget)) ?? null;
     }
-    return filteredReturns[0] ?? returnList[0];
+    return filteredReturns[0] ?? null;
   }, [filteredReturns, requestedReturnTarget, returns, selectedReturnId]);
 
   const detailQuery = useQueryResource(

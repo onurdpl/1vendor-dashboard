@@ -292,6 +292,8 @@ describe('ReturnsPage control center', () => {
     expect(await screen.findByText('No returns currently awaiting review')).toBeInTheDocument();
     expect(screen.getByText('The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.')).toBeInTheDocument();
     expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
+    expect(screen.getByText('No return selected')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Workflow action guidance')).not.toBeInTheDocument();
   });
 
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {

@@ -11,6 +11,9 @@ describe('workflow action guidance', () => {
   it('maps shipment and tracking states to existing order workflows', () => {
     expect(getOrderWorkflowAction({ shippingStatus: 'Awaiting Shipment', hasShipment: false }).actionLabel).toBe('Create shipment');
     expect(getOrderWorkflowAction({ shippingStatus: 'Awaiting Shipment', hasShipment: true }).actionLabel).toBe('Sync tracking');
+    expect(getOrderWorkflowAction({ allocationStatus: 'vendor_blocked', shippingStatus: 'Awaiting Shipment', hasShipment: false }).actionLabel).toBe(
+      'Review allocation',
+    );
   });
 
   it('maps return states to review actions without inventing refund execution', () => {

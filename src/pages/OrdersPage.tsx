@@ -830,6 +830,7 @@ export function OrdersPage() {
               const trackingUrl = selectedOrder.trackingUrl ?? shipmentExecution?.trackingUrl ?? null;
               const labelUrl = shipmentExecution?.labelUrl ?? null;
               const workflowGuidance = getOrderWorkflowAction({
+                allocationStatus: selectedOrder.allocationStatus,
                 shippingStatus: selectedOrder.shippingStatus,
                 fulfillmentStatus: selectedOrder.fulfillmentStatus,
                 trackingNumber: selectedOrder.trackingNumber ?? shipmentExecution?.trackingNumber,

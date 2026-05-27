@@ -283,6 +283,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
 
     await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
 
