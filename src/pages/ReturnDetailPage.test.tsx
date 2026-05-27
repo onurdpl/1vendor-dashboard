@@ -295,6 +295,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('DJ1196-002-40,5')).toBeInTheDocument();
     expect(screen.getByText('White / 42')).toBeInTheDocument();
     expect(screen.getByText('Vendor review')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review return');
     expect(screen.getByText('Mark received')).toBeInTheDocument();
     expect(screen.getByText('Contact support')).toBeInTheDocument();
     expect(screen.getAllByText('Return requested').length).toBeGreaterThan(0);

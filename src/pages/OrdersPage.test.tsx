@@ -193,6 +193,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
     expect(screen.getByRole('link', { name: 'İNCELE' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor delivery evidence');
     expect(screen.getByRole('img', { name: 'Barcode gateway license product image' })).toHaveAttribute(
       'src',
       'https://cdn.example.com/barcode-license.png',
@@ -424,19 +425,33 @@ describe('OrdersPage control center', () => {
   });
 
   it('uses the existing shipment create flow for the smart label action when no shipment exists', async () => {
+    const awaitingShipmentOrder = {
+      ...orderDetail,
+      status: 'Pending',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      fulfillmentActionState: 'awaiting_shipment',
+      fulfilledAt: undefined,
+      shipmentCreatedAt: undefined,
+      shipmentUpdatedAt: undefined,
+      trackingNumber: undefined,
+      trackingUrl: undefined,
+      carrier: undefined,
+    };
     const createdShipment = {
       ...shipmentExecution,
       id: 'shipment-created',
       labelUrl: 'https://labels.example/new-label.pdf',
     };
     const openMock = vi.spyOn(globalThis, 'open').mockImplementation(() => null);
-    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
-    getOrderMock.mockResolvedValue(orderDetail);
+    listOrdersMock.mockResolvedValue([toSummary(awaitingShipmentOrder)]);
+    getOrderMock.mockResolvedValue(awaitingShipmentOrder);
     createShipmentExecutionMock.mockResolvedValue(createdShipment);
 
     renderOrdersPage();
 
     const labelButton = await screen.findByRole('button', { name: /Kargo etiketi yazdır/i });
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Create shipment');
     await userEvent.click(labelButton);
 
     await waitFor(() =>

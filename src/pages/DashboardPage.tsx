@@ -9,6 +9,7 @@ import {
   SectionErrorRetry,
   SkeletonText,
   StatusBadge,
+  WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
 import { getDashboardOverview } from '../lib/api/dashboard';
@@ -19,6 +20,7 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
 import type { NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
+import { getDashboardWorkflowAction } from '../lib/workflowActionGuidance';
 
 function parseDashboardCount(value: string | number | null | undefined) {
   if (typeof value === 'number') {
@@ -463,23 +465,7 @@ function getDashboardActionRoute(label: string) {
 }
 
 function getDashboardActionLabel(label: string) {
-  const normalized = label.toLowerCase();
-  if (normalized.includes('awaiting') || normalized.includes('shipment')) {
-    return 'Review shipments';
-  }
-  if (normalized.includes('blocked')) {
-    return 'Review allocations';
-  }
-  if (normalized.includes('refund') || normalized.includes('return')) {
-    return 'Review returns';
-  }
-  if (normalized.includes('automation')) {
-    return 'Review automation';
-  }
-  if (normalized.includes('tracking')) {
-    return 'Review tracking';
-  }
-  return 'Review queue';
+  return getDashboardWorkflowAction(label).actionLabel;
 }
 
 export function DashboardPage() {
@@ -702,6 +688,7 @@ export function DashboardPage() {
       label: fulfillmentQueueLabel,
       value: fulfillmentQueueValue,
       description: fulfillmentQueueDescription,
+      guidance: getDashboardWorkflowAction(fulfillmentQueueLabel),
       tone: 'fulfillment',
       to: '/orders',
       action: 'Open orders',
@@ -710,6 +697,7 @@ export function DashboardPage() {
       label: 'Returns queue',
       value: returnsProjection?.value ?? '—',
       description: 'Return and refund review workload.',
+      guidance: getDashboardWorkflowAction('Return pending review'),
       tone: 'returns',
       to: '/returns',
       action: 'Open returns',
@@ -718,6 +706,7 @@ export function DashboardPage() {
       label: 'Finance review queue',
       value: financeQueueValue,
       description: financeQueueDescription,
+      guidance: getDashboardWorkflowAction('Settlement pending review'),
       tone: 'finance',
       to: '/finance',
       action: 'Open finance',
@@ -726,6 +715,7 @@ export function DashboardPage() {
       label: supportQueueLabel,
       value: supportQueueValue,
       description: supportQueueDescription,
+      guidance: getDashboardWorkflowAction(supportQueueLabel),
       tone: 'support',
       to: '/support',
       action: 'Open support',
@@ -734,6 +724,7 @@ export function DashboardPage() {
       label: 'Automation issue groups',
       value: hasNormalizedAutomationCount ? String(normalizedAutomationCount) : automationProjection?.value ?? '—',
       description: automationProjection?.description ?? 'Grouped automation and rule issues.',
+      guidance: getDashboardWorkflowAction('Automation issue groups'),
       tone: 'automation',
       to: '/automation',
       action: 'Open automation',
@@ -785,6 +776,7 @@ export function DashboardPage() {
           <div className="dashboard-action-grid">
             {actionProjections.map((item) => {
               const isActive = (item.count ?? 0) > 0;
+              const guidance = getDashboardWorkflowAction(item.label);
 
               return (
                 <article key={item.label} className={`dashboard-action-card ${item.tone} ${isActive ? 'is-active' : 'is-quiet'}`}>
@@ -798,6 +790,11 @@ export function DashboardPage() {
                     <StatusBadge tone={isActive ? 'warning' : 'success'}>{isActive ? 'Action needed' : 'Clear'}</StatusBadge>
                   </div>
                   {item.description ? <p>{item.description}</p> : null}
+                  <WorkflowActionGuidance
+                    actionLabel={guidance.actionLabel}
+                    description={guidance.description}
+                    tone={guidance.tone}
+                  />
                   <Link className="dashboard-action-link" to={getDashboardActionRoute(item.label)}>
                     {getDashboardActionLabel(item.label)}
                   </Link>
@@ -815,6 +812,7 @@ export function DashboardPage() {
               <span>{queue.label}</span>
               <strong>{isDashboardInitialLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
               <small>{queue.description}</small>
+              <small>Next: {queue.guidance.actionLabel}</small>
               <Link className="dashboard-queue-link" to={queue.to}>
                 {queue.action}
               </Link>

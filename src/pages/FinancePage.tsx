@@ -14,6 +14,7 @@ import {
   SideDetailPanel,
   StatusBadge,
   TableSkeletonRows,
+  WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -42,6 +43,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameNormalizedIdentifier, sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateParts as formatSafeDateParts, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 
 type InvoiceExecution = NonNullable<FinanceTransaction['invoiceExecution']>;
 
@@ -850,6 +852,15 @@ export function FinancePage() {
   const hasSelectedRecordActions =
     Boolean(selectedRecord?.invoiceExecution?.providerPdfUrl) || Boolean(isAdmin && selectedRecord?.category === 'Invoice');
   const selectedOrderSettlementHref = selectedRecord ? buildOrderSettlementHref(selectedRecord) : null;
+  const selectedFinanceGuidance = selectedRecord
+    ? getFinanceWorkflowAction({
+        status: selectedRecord.status,
+        settlementStatus: selectedRecord.settlement?.status,
+        payoutReady: selectedRecord.settlement?.payoutReady,
+        hasRefundImpact: isRefundRecord(selectedRecord) || Boolean(selectedRecord.payoutCalculation?.refundImpact),
+        audience: financeAudience,
+      })
+    : null;
   const financeCrossLinks: OperationalLinkInput[] = [];
   const financeTimelineEvents: OperationalEventInput[] = [];
   if (selectedRecord) {
@@ -1318,10 +1329,18 @@ export function FinancePage() {
         >
           {selectedRecord ? (
             <>
-              {selectedOrderSettlementHref ? (
-                <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedOrderSettlementHref}>
-                  View order settlement
-                </Link>
+              {selectedFinanceGuidance ? (
+                <WorkflowActionGuidance
+                  actionLabel={selectedFinanceGuidance.actionLabel}
+                  description={selectedFinanceGuidance.description}
+                  tone={selectedFinanceGuidance.tone}
+                >
+                  {selectedOrderSettlementHref ? (
+                    <Link className="button button-secondary button-compact finance-order-settlement-link" to={selectedOrderSettlementHref}>
+                      View order settlement
+                    </Link>
+                  ) : null}
+                </WorkflowActionGuidance>
               ) : null}
               <div className="op-detail-status-row">
                 <StatusBadge tone={getPayoutActivityTone(selectedRecord, financeAudience)}>{getPayoutActivityStatusLabel(selectedRecord, financeAudience)}</StatusBadge>

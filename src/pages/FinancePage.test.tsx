@@ -429,6 +429,7 @@ describe('FinancePage control center', () => {
     const { container } = renderFinancePage();
 
     expect(await screen.findByText('Suggested next steps')).toBeInTheDocument();
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review settlement');
     expect(screen.getByText('Customer invoice/accounting')).toBeInTheDocument();
     expect(screen.getByText('Settlement preview')).toBeInTheDocument();
 

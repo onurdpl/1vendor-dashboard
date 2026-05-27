@@ -15,6 +15,7 @@ import {
   SideDetailPanel,
   StatusBadge,
   TimelineBlock,
+  WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
@@ -34,6 +35,7 @@ import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 
 type OrderQuickFilter = 'all' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type LabelActionFeedback = {
@@ -733,6 +735,14 @@ export function OrdersPage() {
                 : shipmentExecution?.trackingNumber ?? '—';
               const trackingUrl = selectedOrder.trackingUrl ?? shipmentExecution?.trackingUrl ?? null;
               const labelUrl = shipmentExecution?.labelUrl ?? null;
+              const workflowGuidance = getOrderWorkflowAction({
+                shippingStatus: selectedOrder.shippingStatus,
+                fulfillmentStatus: selectedOrder.fulfillmentStatus,
+                trackingNumber: selectedOrder.trackingNumber ?? shipmentExecution?.trackingNumber,
+                carrier: selectedOrder.carrier ?? shipmentExecution?.provider,
+                hasShipment: Boolean(shipmentExecution),
+                hasLabel: Boolean(labelUrl),
+              });
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
@@ -767,6 +777,12 @@ export function OrdersPage() {
                 <span>{shippingOperational.label}</span>
                 <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span>
               </div>
+
+              <WorkflowActionGuidance
+                actionLabel={workflowGuidance.actionLabel}
+                description={workflowGuidance.description}
+                tone={workflowGuidance.tone}
+              />
 
               <section className="orders-smart-label-card" aria-label="Smart label action">
                 <button

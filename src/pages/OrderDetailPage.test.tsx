@@ -2188,6 +2188,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(settlementPreview).toHaveTextContent(/TRY\s*4,499\.10/);
     expect(within(settlementPreview).getAllByText('Unknown').length).toBeGreaterThan(0);
     expect(within(settlementPreview).getAllByText('Estimated').length).toBeGreaterThan(0);
+    expect(within(settlementPreview).getByLabelText('Workflow action guidance')).toHaveTextContent('Review settlement estimate');
     expect(settlementPreview).not.toHaveTextContent(/Payable|Balance|Confirmed/i);
 
     const financeTimeline = screen.getByLabelText('Finance timeline');

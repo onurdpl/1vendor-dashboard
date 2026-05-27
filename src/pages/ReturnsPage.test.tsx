@@ -409,6 +409,7 @@ describe('ReturnsPage control center', () => {
     renderReturnsPage();
 
     expect((await screen.findAllByText('Awaiting review')).length).toBeGreaterThan(0);
+    expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review return');
     expect(screen.getAllByText('Review return').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Contact support').length).toBeGreaterThan(0);
     expect(screen.getAllByLabelText('İncele return for order #1001').length).toBeGreaterThan(0);

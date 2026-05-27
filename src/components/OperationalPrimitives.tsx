@@ -281,6 +281,31 @@ export function OperationalActionGroup({ children }: { children: ReactNode }) {
 
 export const ActionGroup = OperationalActionGroup;
 
+export function WorkflowActionGuidance({
+  actionLabel,
+  description,
+  tone = 'info',
+  title = 'Next action',
+  children,
+}: {
+  actionLabel: ReactNode;
+  description: ReactNode;
+  tone?: Tone;
+  title?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <div className={`op-workflow-guidance ${toneClass(tone)}`} aria-label="Workflow action guidance">
+      <div>
+        <span>{title}</span>
+        <strong>{actionLabel}</strong>
+        <p>{description}</p>
+      </div>
+      {children ? <div className="op-workflow-guidance-action">{children}</div> : null}
+    </div>
+  );
+}
+
 export function OperationalToolbar({ children }: { children: ReactNode }) {
   return <div className="op-toolbar">{children}</div>;
 }

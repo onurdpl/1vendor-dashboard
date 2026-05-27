@@ -2,7 +2,7 @@ import { Link, useLocation, useParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { ActionFeedback } from '../components/ActionFeedback';
-import { SectionErrorRetry, SkeletonText } from '../components/OperationalPrimitives';
+import { SectionErrorRetry, SkeletonText, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -38,6 +38,7 @@ import { runtimeServices } from '../services/runtime-services';
 import { ApiError } from '../lib/api/errors';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { formatCurrency, formatDateTime, getSafeTimestamp, parseSafeDate, safeArray, safeStatusLabel, toTitleCaseLabel } from '../services/real/formatting';
+import { getFinanceWorkflowAction } from '../lib/workflowActionGuidance';
 import { SupportTicketModal } from '../components/SupportTicketModal';
 import { useAppReadiness } from '../lib/appReadiness';
 import { listReturns } from '../features/returns/api';
@@ -4309,6 +4310,13 @@ export function OrderDetailPage() {
   const paymentEvidenceRecord = relatedFinanceRecords.find((record) => record.payoutBatch?.status === 'paid_placeholder');
   const manualAdjustmentRecords = relatedFinanceRecords.filter((record) => record.category === 'Adjustment');
   const settlementTimelineRecord = settlementFinanceRecord ?? (payoutCalculation ? payoutFinanceRecord : null);
+  const orderSettlementGuidance = getFinanceWorkflowAction({
+    status: settlementTimelineRecord?.status ?? financePreview?.status ?? null,
+    settlementStatus: settlementTimelineRecord?.settlement?.status ?? null,
+    payoutReady: settlementTimelineRecord?.settlement?.payoutReady ?? false,
+    hasRefundImpact: currentRefundEvidencePresent,
+    audience: isAdmin ? 'admin' : 'vendor',
+  });
   const financeTimelineItems = [
     financePreview || payoutCalculation || settlementTimelineRecord
       ? {
@@ -5340,6 +5348,11 @@ export function OrderDetailPage() {
               </div>
               <span className="order-preview-badge">Preview</span>
             </div>
+            <WorkflowActionGuidance
+              actionLabel={orderSettlementGuidance.actionLabel}
+              description={orderSettlementGuidance.description}
+              tone={orderSettlementGuidance.tone}
+            />
             <div className="order-financial-impact-grid order-finance-preview-grid">
               {financePreviewRows.map((row) => (
                 <div key={row.label}>

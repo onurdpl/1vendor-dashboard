@@ -222,11 +222,13 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
     expect(screen.getByText('Open support issues')).toBeInTheDocument();
     expect(screen.getByText('Automation issue groups')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Review allocations' })).toHaveAttribute('href', '/orders');
-    expect(screen.getByRole('link', { name: 'Review shipments' })).toHaveAttribute('href', '/orders');
-    expect(screen.getByRole('link', { name: 'Review returns' })).toHaveAttribute('href', '/returns');
+    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: 'Create shipment' })).toHaveAttribute('href', '/orders');
+    expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns');
+    expect(screen.getAllByLabelText('Workflow action guidance').some((node) => node.textContent?.includes('Create shipment'))).toBe(true);
     expect(screen.getByRole('link', { name: 'Open support' })).toHaveAttribute('href', '/support');
     expect(screen.getByRole('link', { name: 'Open automation' })).toHaveAttribute('href', '/automation');
+    expect(screen.getAllByLabelText('Workflow action guidance').length).toBeGreaterThan(0);
   });
 
   it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {

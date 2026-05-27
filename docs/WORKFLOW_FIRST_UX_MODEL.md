@@ -1,0 +1,141 @@
+# Workflow-First UX Model
+
+## Purpose
+
+Operational pages should answer a simple question after they show the current state:
+
+```text
+Current state -> next recommended action
+```
+
+This document defines Phase A workflow action guidance. It is a lightweight UI guidance layer only. It does not implement workflow orchestration, automation execution, provider calls, payout/accounting behavior, backend business logic, or new route ownership.
+
+## Files Inspected
+
+- `docs/OPERATIONALLY_TRUSTWORTHY_SYSTEM_MODEL.md`
+- `docs/UNIFIED_OPERATIONAL_WORKSPACE_MODEL.md`
+- `docs/DASHBOARD_SIGNAL_TRUTH_MODEL.md`
+- `docs/OPERATIONAL_SIGNAL_DEDUPLICATION_MODEL.md`
+- `src/pages/DashboardPage.tsx`
+- `src/pages/OrdersPage.tsx`
+- `src/pages/ReturnsPage.tsx`
+- `src/pages/FinancePage.tsx`
+- `src/pages/OrderDetailPage.tsx`
+- `src/pages/ReturnDetailPage.tsx`
+- `src/components/OperationalPrimitives.tsx`
+- `src/lib/workflowActionGuidance.ts`
+
+## Phase A Scope
+
+Phase A adds contextual guidance to existing surfaces:
+
+- Dashboard action cards
+- Dashboard operational queue cards
+- Orders inspector
+- Returns inspector
+- Finance inspector
+- Order Detail settlement preview
+- Return Detail vendor review card
+
+The guidance is intentionally descriptive. It points users toward existing routes and workflows; it does not execute new actions.
+
+## Action Guidance Mapping
+
+| Operational state | Recommended action | Existing destination or workflow |
+| --- | --- | --- |
+| Awaiting shipment | Create shipment | Orders row/inspector shipment action |
+| Stale fulfillment | Create shipment | Orders queue or detail shipment workspace |
+| Tracking missing | Sync tracking | Orders detail tracking/provider workflow |
+| Return pending review | Review return | Returns queue/detail review workflow |
+| Return received, not reviewed | Approve or reject return | Return Detail vendor review workflow |
+| Refund still pending | Monitor refund progress | Return Detail and Finance context |
+| Settlement pending review | Review settlement | Finance row/inspector and Order Detail settlement preview |
+| Refund impact present | Review refund impact | Finance inspector settlement preview |
+| Support issue active | Open linked support record | Support workspace or linked ticket |
+| Automation issue active | Review automation queue | Automation workspace |
+
+## Primary Action Principles
+
+1. Each active operational state should expose one primary next action.
+2. Guidance should not create a second competing button when a working primary action already exists.
+3. If an action already exists, the guidance explains why that action is next.
+4. If the action must happen in another workspace, the guidance names the target workspace.
+5. If the workflow is read-only for the current role, guidance should use review/open language, not execution language.
+6. If prerequisites are missing, the prerequisite step is the next action.
+7. Passive history, timelines, linked records, diagnostics, and notifications do not get primary action treatment unless they are the current blocker.
+
+## Escalation And Action Hierarchy
+
+Use this hierarchy when several possible actions exist:
+
+1. Resolve the current blocker in the primary workflow.
+2. Open the canonical entity detail page if the list/inspector cannot complete the work.
+3. Open the linked support record if human coordination is already active.
+4. Contact support only when no linked support record exists and the operator needs correction/help.
+5. Review admin diagnostics only after the user has exhausted the workflow action or when the diagnostic is the blocker.
+
+Examples:
+
+- If an order has no shipment, "Create shipment" outranks "Open support".
+- If tracking is missing but provider evidence exists, "Sync tracking" outranks "Review timeline".
+- If a support ticket already exists, "Open linked support record" outranks "Contact support".
+- If finance is pending review, "Review settlement" outranks "Download PDF".
+- If return receipt is not marked, "Review return" or "Mark received" outranks refund monitoring.
+
+## Role-Aware Guidance
+
+Vendor-facing guidance should:
+
+- use operational wording;
+- avoid provider and accounting internals;
+- avoid final payout/payable certainty;
+- point to support only when the vendor can act there;
+- keep admin-owned settings read-only.
+
+Admin-facing guidance may:
+
+- mention reconciliation and diagnostics;
+- point to automation or diagnostic queues;
+- expose provider evidence in collapsed admin sections;
+- still avoid implying provider success, payout approval, or accounting finality before it exists.
+
+## Action Language Rules
+
+Use:
+
+- Create shipment
+- Sync tracking
+- Review return
+- Approve or reject return
+- Review settlement
+- Review refund impact
+- Open linked support record
+- Review automation queue
+
+Avoid:
+
+- No actions available, unless that absence is operationally meaningful
+- Payable, confirmed, final payout, or balance for estimates
+- Retry provider, unless the user is in an admin/provider-safe context
+- Contact support when an existing linked ticket should be reused
+- Generic "Review" when the current state can name the next workflow step
+
+## Degraded State Rules
+
+Guidance must not hide uncertainty:
+
+- Unknown data should produce review/open guidance, not fake execution guidance.
+- Missing provider evidence should not imply provider success.
+- Missing finance inputs should stay `Unknown`.
+- A failed optional section should not remove the primary action for the loaded entity.
+- A disabled vendor-scoped query should show waiting/select-vendor state, not a false workflow action.
+
+## Phase B Candidates
+
+Future work can make the guidance more precise without changing Phase A principles:
+
+1. Add route query params so dashboard action cards open destination pages with matching filters.
+2. Extend backend normalized dashboard fields with `recommendedAction`, `destination`, and `sourceEntityType`.
+3. Share action guidance with Admin Operations queue recommendations.
+4. Persist operational issue group lifecycle before adding acknowledge/resolve/dismiss workflows.
+5. Add role-aware guidance tests for vendor/admin dashboard variants.

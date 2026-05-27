@@ -12,6 +12,7 @@ import {
   SideDetailPanel,
   StatusBadge,
   TableSkeletonRows,
+  WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -24,6 +25,7 @@ import { SupportTicketModal } from '../components/SupportTicketModal';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { safeArray } from '../services/real/formatting';
+import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
 
 type ReturnSourceFilter = 'all' | 'pending' | 'refunded';
 type ReturnRowItemCandidate = {
@@ -803,6 +805,14 @@ export function ReturnsPage() {
           }
         >
           {selectedReturn ? (
+            (() => {
+              const workflowGuidance = getReturnWorkflowAction({
+                status: selectedReturn.status,
+                sourceType: selectedReturn.sourceType,
+                refundStatus: getRefundStatusLabel(selectedReturn),
+              });
+
+              return (
             <>
               <div className="returns-summary-card returns-summary-card-compact">
                 <h4>Summary</h4>
@@ -904,6 +914,11 @@ export function ReturnsPage() {
 
               <div className="returns-actions-card returns-actions-card-compact">
                 <h4>Actions</h4>
+                <WorkflowActionGuidance
+                  actionLabel={workflowGuidance.actionLabel}
+                  description={workflowGuidance.description}
+                  tone={workflowGuidance.tone}
+                />
                 <OperationalActionGroup>
                   <Link to={`/returns/${selectedReturn.id}`} className="button button-primary button-link">
                     Review return
@@ -914,6 +929,8 @@ export function ReturnsPage() {
                 </OperationalActionGroup>
               </div>
             </>
+              );
+            })()
           ) : (
             <EmptyStatePanel
               title={requestedReturnTarget ? 'Linked return unavailable' : 'Select a return'}

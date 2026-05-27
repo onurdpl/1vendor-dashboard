@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation, useParams } from 'react-router-dom';
-import { EmptyStatePanel, SectionErrorRetry, SkeletonText, StatusBadge } from '../components/OperationalPrimitives';
+import { EmptyStatePanel, SectionErrorRetry, SkeletonText, StatusBadge, WorkflowActionGuidance } from '../components/OperationalPrimitives';
 import { ProductImagePreview } from '../components/ProductImagePreview';
 import { queryKeys } from '../lib/api/queryKeys';
 import { useQueryResource } from '../hooks/useQueryResource';
@@ -34,6 +34,7 @@ import {
 } from '../lib/operationalCrossLinks';
 import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { formatDateTime, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { getReturnWorkflowAction } from '../lib/workflowActionGuidance';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -1016,6 +1017,13 @@ export function ReturnDetailPage() {
     (currentUser?.role === 'vendor' && returnRequest.assignedVendorId === currentVendor.vendorId);
   const hasReceivedReturn = Boolean(returnRequest.vendorReceivedAt);
   const hasReviewedReturn = Boolean(returnRequest.vendorReviewedAt && returnRequest.vendorDecision);
+  const returnWorkflowGuidance = getReturnWorkflowAction({
+    status: returnRequest.status,
+    sourceType: returnRequest.sourceType,
+    vendorReceivedAt: returnRequest.vendorReceivedAt,
+    vendorDecision: returnRequest.vendorDecision,
+    refundStatus: getRefundStatus(returnRequest),
+  });
   const supportSnapshot = {
     route: location.pathname,
     orderNumber: formatShopifyOrderNumber(returnRequest.sourceShopifyOrderNumber),
@@ -1372,6 +1380,11 @@ export function ReturnDetailPage() {
             <p className="eyebrow">Next action</p>
             <h3>Vendor review</h3>
             <p>Vendor review only. Shopify refund is not issued here.</p>
+            <WorkflowActionGuidance
+              actionLabel={returnWorkflowGuidance.actionLabel}
+              description={returnWorkflowGuidance.description}
+              tone={returnWorkflowGuidance.tone}
+            />
             <div className="return-review-summary-list return-review-state-list">
               <div>
                 <span>Receipt</span>
