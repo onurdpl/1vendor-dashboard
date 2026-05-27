@@ -465,11 +465,12 @@ describe('ReturnDetailPage vendor review screen', () => {
     renderPage();
 
     expect(await screen.findByText('Nike Air Force 1 07')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Finance records could not load' })).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Support tickets could not load' })).toBeInTheDocument();
+    const financeErrorHeading = await screen.findByRole('heading', { name: 'Finance records could not load' });
+    expect(financeErrorHeading).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Support tickets could not load' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Return unavailable' })).not.toBeInTheDocument();
 
-    const financeRetrySection = screen.getByRole('heading', { name: 'Finance records could not load' }).closest('.op-empty-state');
+    const financeRetrySection = financeErrorHeading.closest('.op-empty-state');
     expect(financeRetrySection).not.toBeNull();
     await user.click(within(financeRetrySection as HTMLElement).getByRole('button', { name: 'Retry' }));
 

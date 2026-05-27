@@ -1302,7 +1302,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const updatePanel = await screen.findByLabelText('Navlungo shipment update');
 
-    expect(within(updatePanel).getByLabelText('City *')).toHaveValue('Istanbul');
+    await waitFor(() => expect(within(updatePanel).getByLabelText('City *')).toHaveValue('Istanbul'));
     expect(within(updatePanel).getByLabelText('District *')).toHaveValue('Kartal');
     expect(within(updatePanel).getByLabelText('Postcode')).toHaveValue('34870');
     expect(within(updatePanel).getByLabelText('Post note')).toHaveValue('Leave at reception');
@@ -1979,9 +1979,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const supportCard = await screen.findByLabelText('Shipment and return support');
-    const contactSupport = within(supportCard).getByRole('link', { name: 'Contact support' });
+    const contactSupport = await within(supportCard).findByRole('link', { name: 'Contact support' });
     expect(contactSupport).toHaveAttribute('href', '/support/ticket-shipment-1');
-    expect(within(supportCard).getByText(/already open/i)).toBeInTheDocument();
+    expect(await within(supportCard).findByText(/already open/i)).toBeInTheDocument();
     expect(within(supportCard).queryByRole('button', { name: 'Contact support' })).not.toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
@@ -2086,7 +2086,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     const linkedRecords = (await screen.findByRole('heading', { name: 'Linked records' })).closest('.order-linked-records-panel');
     expect(linkedRecords).toBeTruthy();
-    expect(within(linkedRecords as HTMLElement).getByText('Support activity')).toBeInTheDocument();
+    expect(await within(linkedRecords as HTMLElement).findByText('Support activity')).toBeInTheDocument();
     expect(within(linkedRecords as HTMLElement).getAllByText(/2 linked tickets/i).length).toBeGreaterThan(0);
     expect(within(linkedRecords as HTMLElement).getByText('Latest status: In Review')).toBeInTheDocument();
     expect(within(linkedRecords as HTMLElement).getByText('Settlement review question for #1028')).toBeInTheDocument();
