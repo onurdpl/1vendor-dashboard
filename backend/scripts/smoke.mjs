@@ -479,6 +479,32 @@ async function runSmoke() {
       throw new Error(`/webhooks/shopify/orders-create valid signature expected 202, got ${validWebhookResponse.status}`);
     }
     const validWebhookJson = await validWebhookResponse.json();
+    if (!backendEnv.DATABASE_URL) {
+      if (
+        validWebhookJson?.duplicate !== false ||
+        validWebhookJson?.action !== 'accepted' ||
+        validWebhookJson?.processingStatus !== 'deferred'
+      ) {
+        throw new Error(`/webhooks/shopify/orders-create no-db deferred payload invalid: ${JSON.stringify(validWebhookJson)}`);
+      }
+
+      const invalidWebhookResponse = await fetch(`${baseUrl}/webhooks/shopify/orders-create`, {
+        method: 'POST',
+        headers: {
+          ...webhookHeaders,
+          'x-shopify-hmac-sha256': 'invalid-signature',
+          'x-shopify-webhook-id': `smoke-invalid-${runId}`,
+        },
+        body: webhookPayload,
+      });
+      if (invalidWebhookResponse.status !== 401) {
+        throw new Error(`/webhooks/shopify/orders-create invalid signature expected 401, got ${invalidWebhookResponse.status}`);
+      }
+
+      console.log('Backend smoke check passed (database not configured; DB-backed webhook processing skipped).');
+      return;
+    }
+
     if (
       validWebhookJson?.duplicate !== false ||
       validWebhookJson?.action !== 'accepted' ||
