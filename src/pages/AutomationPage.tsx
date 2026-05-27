@@ -9,6 +9,7 @@ import { getAutomationDashboard } from '../features/automation/api';
 import { canPerformAction } from '../lib/auth';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatDateTime, safeArray } from '../services/real/formatting';
+import { formatOperationalSource, projectOperationalEvent } from '../lib/operationalEventProjection';
 
 function formatDate(value: string) {
   return formatDateTime(value, {
@@ -142,36 +143,48 @@ export function AutomationPage() {
             </div>
           ) : (
             <div className="automation-alerts">
-              {automationView.alerts.map((alert) => (
-                <article key={alert.id} className="automation-alert queue-item">
-                  <div className="automation-alert-top">
-                    <div className={`status-badge automation-type automation-${getClassToken(alert.type)}`}>
-                      {alert.type ?? 'Unknown'}
+              {automationView.alerts.map((alert) => {
+                const projection = projectOperationalEvent({
+                  title: alert.message,
+                  source: alert.source,
+                });
+                const sourceLabel = formatOperationalSource(alert.source);
+
+                return (
+                  <article key={alert.id} className="automation-alert queue-item">
+                    <div className="automation-alert-top">
+                      <div className={`status-badge automation-type automation-${getClassToken(alert.type)}`}>
+                        {alert.type ?? 'Unknown'}
+                      </div>
+                      <div className={`status-badge status-${getClassToken(alert.status)}`}>
+                        {alert.status ?? 'Unknown'}
+                      </div>
                     </div>
-                    <div className={`status-badge status-${getClassToken(alert.status)}`}>
-                      {alert.status ?? 'Unknown'}
+                    <div className="queue-title-block">
+                      <h4>{projection.title}</h4>
+                      <span className="queue-description">{projection.description}</span>
                     </div>
-                  </div>
-                  <div className="queue-title-block">
-                    <h4>{alert.message}</h4>
-                    <span className="queue-description">Source: {alert.source}</span>
-                  </div>
-                  <div className="automation-meta">
-                    <span>
-                      <strong>Alert:</strong> {alert.id}
-                    </span>
-                    <span>
-                      <strong>Area:</strong> {alert.source}
-                    </span>
-                    <span>{formatDate(alert.timestamp)}</span>
-                  </div>
-                  <div className="queue-actions">
-                    <span className="queue-muted-action">
-                      Recommended: {alert.type === 'Critical' ? 'Review immediately' : 'Monitor and triage'}
-                    </span>
-                  </div>
-                </article>
-              ))}
+                    <div className="automation-meta">
+                      <span>
+                        <strong>Area:</strong> {sourceLabel}
+                      </span>
+                      <span>{formatDate(alert.timestamp)}</span>
+                      {currentRole === 'admin' ? (
+                        <details className="automation-debug-reference">
+                          <summary>Internal reference</summary>
+                          <span>{alert.id}</span>
+                          <span>{alert.source}</span>
+                        </details>
+                      ) : null}
+                    </div>
+                    <div className="queue-actions">
+                      <span className="queue-muted-action">
+                        Recommended: {alert.type === 'Critical' ? 'Review immediately' : 'Monitor and triage'}
+                      </span>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           )}
         </article>

@@ -1,9 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationPage } from './AutomationPage';
-import { setCurrentUser, setToken } from '../lib/auth';
+import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 import type { AutomationDashboard } from '../lib/api/contracts';
 
 const getAutomationDashboardMock = vi.fn<() => Promise<AutomationDashboard>>();
@@ -61,6 +61,10 @@ const automationDashboard: AutomationDashboard = {
 };
 
 describe('AutomationPage suggested actions', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     setToken('test-token');
@@ -73,6 +77,7 @@ describe('AutomationPage suggested actions', () => {
       canSwitchVendors: false,
       defaultVendorId: 'demo-vendor-a',
     });
+    setCurrentVendorId('demo-vendor-a');
     getAutomationDashboardMock.mockReset();
     getAutomationDashboardMock.mockResolvedValue(automationDashboard);
   });
@@ -106,8 +111,33 @@ describe('AutomationPage suggested actions', () => {
     renderAutomationPage(['/automation?workflow=active-issue-groups']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Active automation issue groups');
-    expect(screen.getByText('Return request is overdue.')).toBeInTheDocument();
+    expect(await screen.findByText('Return request is overdue.')).toBeInTheDocument();
     expect(screen.queryByText('Resolved automation history item.')).not.toBeInTheDocument();
+  });
+
+  it('projects raw automation signal keys into readable alert copy', async () => {
+    getAutomationDashboardMock.mockResolvedValue({
+      ...automationDashboard,
+      alerts: [
+        {
+          id: 'signal-fulfillment-stale-awaiting-shipment-sporjinal-1061',
+          type: 'Critical',
+          message: 'signal-fulfillment-stale-awaiting-shipment',
+          status: 'New',
+          timestamp: '2026-05-13T10:00:00.000Z',
+          source: 'signal-fulfillment-stale-awaiting-shipment',
+        },
+      ],
+    });
+
+    renderAutomationPage();
+
+    expect(await screen.findByRole('heading', { name: 'Fulfillment progress delayed' })).toBeInTheDocument();
+    expect(screen.getByText('A shipment has not progressed within the expected window.')).toBeInTheDocument();
+    expect(screen.getByText('Fulfillment Stale Awaiting Shipment')).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'signal-fulfillment-stale-awaiting-shipment' })).not.toBeInTheDocument();
+    expect(screen.getAllByText('Internal reference').length).toBeGreaterThan(0);
+    expect(screen.getByText('signal-fulfillment-stale-awaiting-shipment-sporjinal-1061')).toBeInTheDocument();
   });
 
   it('renders an honest empty state for empty automation workflow queues', async () => {

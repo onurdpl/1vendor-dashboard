@@ -21,6 +21,7 @@ import { runtimeServices } from '../services/runtime-services';
 import type { NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 import { getDashboardWorkflowAction, getDashboardWorkflowRoute, workflowRoutes } from '../lib/workflowActionGuidance';
+import { projectOperationalEvent } from '../lib/operationalEventProjection';
 
 function parseDashboardCount(value: string | number | null | undefined) {
   if (typeof value === 'number') {
@@ -146,11 +147,10 @@ function getStatusDotTone(tone: 'success' | 'warning' | 'danger' | 'attention' |
 function formatRecentActivity(item: string) {
   const [title, ...descriptionParts] = item.split(':');
   const description = descriptionParts.join(':').trim();
-
-  return {
+  return projectOperationalEvent({
     title: title.trim() || 'Unknown',
     description: description || '—',
-  };
+  });
 }
 
 function normalizeGroupKey(value: string) {
@@ -159,8 +159,8 @@ function normalizeGroupKey(value: string) {
 
 function formatGroupedActivityTitle(title: string, count: number) {
   const normalized = normalizeGroupKey(title);
-  if (normalized.includes('fulfillment') && normalized.includes('stale')) {
-    return `${count} stale fulfillments`;
+  if (normalized.includes('fulfillment') && (normalized.includes('stale') || normalized.includes('delayed'))) {
+    return `${count} fulfillment delays`;
   }
   if (normalized.includes('refund')) {
     return `${count} refund events`;
@@ -235,8 +235,8 @@ function getNotificationTime(notification: NotificationIntent) {
 
 function formatGroupedNotificationTitle(title: string, count: number) {
   const normalized = normalizeGroupKey(title);
-  if (normalized.includes('fulfillment') && normalized.includes('stale')) {
-    return `${count} stale fulfillment alerts`;
+  if (normalized.includes('fulfillment') && (normalized.includes('stale') || normalized.includes('delayed'))) {
+    return `${count} fulfillment delay alerts`;
   }
   if (normalized.includes('shipping')) {
     return `${count} shipping alerts`;
@@ -262,7 +262,8 @@ function groupNotifications(notifications: NotificationIntent[]) {
 
   notifications.forEach((notification, index) => {
     const source = formatNotificationSource(notification);
-    const key = `${normalizeGroupKey(notification.title)}|${source}|${notification.severity}`;
+    const projection = projectNotificationForDisplay(notification);
+    const key = `${normalizeGroupKey(projection.title)}|${source}|${notification.severity}`;
     const time = getNotificationTime(notification);
     const severityRank = getNotificationSeverityRank(notification.severity);
     const unread = notification.status !== 'read' && notification.status !== 'dismissed' ? 1 : 0;
@@ -297,6 +298,14 @@ function groupNotifications(notifications: NotificationIntent[]) {
       return b.severityRank - a.severityRank;
     }
     return b.latestTime - a.latestTime;
+  });
+}
+
+function projectNotificationForDisplay(notification: NotificationIntent) {
+  return projectOperationalEvent({
+    title: notification.title,
+    description: notification.message,
+    source: formatNotificationSource(notification),
   });
 }
 
@@ -435,13 +444,14 @@ function normalizePriorityWork(items: Array<{ label: string; value: string; tone
       };
     }
 
+    const projection = projectOperationalEvent({ title: item.label, description: item.description });
     return {
       id: normalized || item.label,
-      label: item.label,
+      label: projection.title,
       value: item.value,
       count,
       tone: item.tone,
-      description: item.description ?? 'Operational workload item.',
+      description: projection.description,
       sourceLabel: item.label,
     };
   });
@@ -957,6 +967,7 @@ export function DashboardPage() {
                   <div className="notification-list dashboard-notification-list">
                     {visibleNotificationGroups.map((group) => {
                       const notification = group.representative;
+                      const notificationProjection = projectNotificationForDisplay(notification);
                       const hasGroup = group.notifications.length > 1;
                       const groupStatus = hasGroup
                         ? group.unread > 0
@@ -974,20 +985,25 @@ export function DashboardPage() {
                             {hasGroup ? <span className="dashboard-notification-count">{group.notifications.length}</span> : null}
                           </div>
                           <div className="dashboard-notification-copy">
-                            <strong>{hasGroup ? formatGroupedNotificationTitle(notification.title, group.notifications.length) : notification.title}</strong>
-                            <p>{hasGroup ? `Latest issue: ${notification.message}` : notification.message}</p>
+                            <strong>{hasGroup ? formatGroupedNotificationTitle(notificationProjection.title, group.notifications.length) : notificationProjection.title}</strong>
+                            <p>{hasGroup ? `Latest issue: ${notificationProjection.description}` : notificationProjection.description}</p>
                             <div className="notification-meta">
                               <span>{formatNotificationSource(notification)}</span>
-                              {notification.signalId ? <span>Signal {notification.signalId}</span> : null}
                               {hasGroup ? <span>{group.notifications.length} linked alerts</span> : null}
                             </div>
+                            {isAdmin && notification.signalId ? (
+                              <details className="dashboard-notification-details">
+                                <summary>Internal reference</summary>
+                                <small>Signal {notification.signalId}</small>
+                              </details>
+                            ) : null}
                             {hasGroup ? (
                               <details className="dashboard-notification-details">
                                 <summary>Show matching alerts</summary>
                                 <ul>
                                   {group.notifications.map((groupedNotification) => (
                                     <li key={groupedNotification.id}>
-                                      <span>{groupedNotification.title}</span>
+                                      <span>{projectNotificationForDisplay(groupedNotification).title}</span>
                                       <small>{formatDateTime(groupedNotification.createdAt)}</small>
                                     </li>
                                   ))}
@@ -1042,7 +1058,14 @@ export function DashboardPage() {
               <div className="op-meta-grid">
                 <MetadataRow label="Unread" value={dashboardView.notificationSummary.unread} />
                 <MetadataRow label="High priority" value={dashboardView.notificationSummary.highPriority} />
-                <MetadataRow label="Latest" value={safeArray(dashboardView.notificationSummary.latest).map((item) => item.title).join(', ') || 'No notifications'} />
+                <MetadataRow
+                  label="Latest"
+                  value={
+                    safeArray(dashboardView.notificationSummary.latest)
+                      .map((item) => projectOperationalEvent({ title: item.title }).title)
+                      .join(', ') || 'No notifications'
+                  }
+                />
               </div>
             ) : (
               <EmptyStatePanel title="Notifications unavailable" description="Not synced for this scope." />

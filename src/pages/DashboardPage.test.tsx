@@ -287,9 +287,11 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
-    expect(screen.getByText('Shipping cost is pending')).toBeInTheDocument();
-    expect(screen.getByText('External-provider shipping cost is missing.')).toBeInTheDocument();
+    expect(screen.getByText('Shipping cost review needed')).toBeInTheDocument();
+    expect(screen.getByText('External-provider shipping cost is missing from the operational record.')).toBeInTheDocument();
     expect(screen.getByText('shipping cost')).toBeInTheDocument();
+    expect(screen.getByText('Internal reference')).toBeInTheDocument();
+    expect(screen.getByText('Signal signal-1')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
   });
@@ -301,8 +303,8 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(await screen.findByText('Recent operational events')).toBeInTheDocument();
-    expect(screen.getByText('Refund webhook processed')).toBeInTheDocument();
-    expect(screen.getByText('Refund ID 123 processed successfully.')).toBeInTheDocument();
+    expect(screen.getByText('Refund processed')).toBeInTheDocument();
+    expect(screen.getByText('Refund event processing completed successfully.')).toBeInTheDocument();
   });
 
   it('groups repeated recent operational events into one dashboard signal', async () => {
@@ -317,8 +319,8 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByText('3 stale fulfillments')).toBeInTheDocument();
-    expect(screen.getByText('Latest issue: 102h awaiting shipment')).toBeInTheDocument();
+    expect(await screen.findByText('3 fulfillment delays')).toBeInTheDocument();
+    expect(screen.getByText('Latest issue: A shipment has not progressed for 102 hours.')).toBeInTheDocument();
     expect(screen.getByText('Show 3 matching events')).toBeInTheDocument();
   });
 
@@ -524,11 +526,54 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByText('3 stale fulfillment alerts')).toBeInTheDocument();
-    expect(screen.getByText('Latest issue: Order #1061 has waited 102h.')).toBeInTheDocument();
+    expect(await screen.findByText('3 fulfillment delay alerts')).toBeInTheDocument();
+    expect(screen.getByText('Latest issue: Order #1061 has not progressed for 102 hours.')).toBeInTheDocument();
     expect(screen.getByText('3 linked alerts')).toBeInTheDocument();
     expect(screen.getByText('3 unread')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+  });
+
+  it('projects raw operational identifiers into readable dashboard history copy', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      recentActivity: [
+        'alloc-sporjinal-7637649883473 is awaiting shipment for Shopify order ##1061: 75h awaiting shipment',
+        'return-request-23165600081-sporjinal-20393734144337 is requested against refund',
+      ],
+    });
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 1,
+        unread: 1,
+        critical: 0,
+        high: 1,
+        warning: 0,
+      },
+      notifications: [
+        {
+          ...notification,
+          id: 'notif-raw-signal',
+          signalId: 'signal-fulfillment-stale-awaiting-shipment-sporjinal-1061',
+          title: 'signal-fulfillment-stale-awaiting-shipment',
+          message: 'alloc-sporjinal-7637649883473 is awaiting shipment for Shopify order ##1061 after 75h.',
+          severity: 'high',
+          metadata: {
+            signalSourceArea: 'FULFILLMENT_STALE',
+          },
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect((await screen.findAllByText('Shipment awaiting fulfillment')).length).toBeGreaterThan(0);
+    expect(screen.getByText('Return review requested')).toBeInTheDocument();
+    expect((await screen.findAllByText('Fulfillment progress delayed')).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/alloc-sporjinal/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/return-request-23165600081/i)).not.toBeInTheDocument();
+    expect(screen.queryByText('signal-fulfillment-stale-awaiting-shipment')).not.toBeInTheDocument();
+    expect(screen.getByText('Internal reference')).toBeInTheDocument();
+    expect(screen.getByText('Signal signal-fulfillment-stale-awaiting-shipment-sporjinal-1061')).toBeInTheDocument();
   });
 
   it('renders an empty notification state', async () => {
