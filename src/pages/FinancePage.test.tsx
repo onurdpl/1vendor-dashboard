@@ -357,16 +357,7 @@ describe('FinancePage control center', () => {
   });
 
   it('uses workflow query params to open settlement review rows and allows reset', async () => {
-    getFinanceDashboardMock.mockResolvedValue({
-      ...financeDashboard,
-      transactions: [
-        {
-          ...financeDashboard.transactions[0],
-          payoutBatch: undefined,
-        },
-        ...financeDashboard.transactions.slice(1),
-      ],
-    });
+    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
 
     renderFinancePage(['/finance?workflow=settlement-review']);
 
@@ -377,6 +368,19 @@ describe('FinancePage control center', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Clear workflow' }));
 
     expect(await screen.findByText('#1001')).toBeInTheDocument();
+  });
+
+  it('renders an honest empty state for empty settlement workflow queues', async () => {
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      transactions: [financeDashboard.transactions[1], financeDashboard.transactions[2]],
+    });
+
+    renderFinancePage(['/finance?workflow=settlement-review']);
+
+    expect(await screen.findByText('No settlement review rows currently pending')).toBeInTheDocument();
+    expect(screen.getByText('This workflow queue has no settlement rows waiting for review. Clear the workflow to inspect all finance activity.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Settlement review');
   });
 
   it('renders order settlement deep links for finance rows with order detail route ids', async () => {

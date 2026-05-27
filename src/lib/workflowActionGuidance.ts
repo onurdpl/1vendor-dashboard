@@ -7,6 +7,7 @@ export type WorkflowActionGuidance = {
 };
 
 export const workflowRoutes = {
+  blockedAllocation: '/orders?workflow=blocked-allocation',
   awaitingShipment: '/orders?workflow=awaiting-shipment',
   staleFulfillment: '/orders?workflow=stale-fulfillment',
   trackingMissing: '/orders?workflow=tracking-missing',
@@ -96,10 +97,13 @@ export function getDashboardWorkflowRoute(label: string) {
   if (normalized.includes('tracking')) {
     return workflowRoutes.trackingMissing;
   }
+  if (normalized.includes('blocked')) {
+    return workflowRoutes.blockedAllocation;
+  }
   if (normalized.includes('stale fulfillment')) {
     return workflowRoutes.staleFulfillment;
   }
-  if (hasAny(normalized, ['awaiting shipment', 'shipment', 'fulfillment', 'blocked allocation'])) {
+  if (hasAny(normalized, ['awaiting shipment', 'shipment', 'fulfillment'])) {
     return workflowRoutes.awaitingShipment;
   }
   if (hasAny(normalized, ['return', 'refund'])) {

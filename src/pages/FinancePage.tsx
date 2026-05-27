@@ -591,11 +591,17 @@ function getFinanceWorkflowFilter(workflow: string | null) {
   if (workflow === 'settlement-review') {
     return {
       label: 'Settlement review',
-      description: 'Showing finance rows that need settlement review.',
-      statusFilter: 'Pending review',
+      description: 'Showing settlement rows that need review.',
+      emptyTitle: 'No settlement review rows currently pending',
+      emptyDescription: 'This workflow queue has no settlement rows waiting for review. Clear the workflow to inspect all finance activity.',
     };
   }
   return null;
+}
+
+function isSettlementReviewWorkflowRecord(record: FinanceTransaction, audience: 'admin' | 'vendor') {
+  const displayStatus = getPayoutActivityStatusLabel(record, audience);
+  return record.category === 'Payout' || Boolean(record.payoutBatch) || displayStatus === 'Pending review';
 }
 
 export function FinancePage() {
@@ -636,13 +642,6 @@ export function FinancePage() {
   useEffect(() => {
     setSelectedRecordId(null);
   }, [requestedFinanceTarget?.type, requestedFinanceTarget?.value]);
-
-  useEffect(() => {
-    if (!activeWorkflowFilter) {
-      return;
-    }
-    setStatusFilter(activeWorkflowFilter.statusFilter);
-  }, [activeWorkflowFilter]);
 
   function clearWorkflowFilter() {
     if (!searchParams.has('workflow')) {
@@ -819,6 +818,8 @@ export function FinancePage() {
     const query = searchTerm.trim().toLowerCase();
     return safeArray(finance?.transactions).filter((record) => {
       const displayStatus = getPayoutActivityStatusLabel(record, financeAudience);
+      const matchesWorkflow =
+        !activeWorkflowFilter || isSettlementReviewWorkflowRecord(record, financeAudience);
       const matchesStatus = statusFilter === 'all' || displayStatus === statusFilter;
       const matchesCategory = categoryFilter === 'all' || record.category === categoryFilter;
       const searchableText = [
@@ -837,9 +838,9 @@ export function FinancePage() {
         .join(' ')
         .toLowerCase();
 
-      return matchesStatus && matchesCategory && (!query || searchableText.includes(query));
+      return matchesWorkflow && matchesStatus && matchesCategory && (!query || searchableText.includes(query));
     });
-  }, [categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, financeAudience, searchTerm, statusFilter]);
+  }, [activeWorkflowFilter, categoryFilter, currentVendor.vendorId, currentVendor.vendorName, finance?.transactions, financeAudience, searchTerm, statusFilter]);
 
   const selectedRecord = useMemo(() => {
     const selectedByClick = selectedRecordId ? filteredRecords.find((record) => record.id === selectedRecordId) : null;
@@ -1207,8 +1208,8 @@ export function FinancePage() {
             ) : filteredRecords.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
-                  title="No finance preview activity in this view"
-                  description="Adjust the status, type, or search filters to review settlement estimates."
+                  title={activeWorkflowFilter?.emptyTitle ?? 'No finance preview activity in this view'}
+                  description={activeWorkflowFilter?.emptyDescription ?? 'Adjust the status, type, or search filters to review settlement estimates.'}
                 />
               </OperationalTableRow>
             ) : filteredRecords.map((record) => {

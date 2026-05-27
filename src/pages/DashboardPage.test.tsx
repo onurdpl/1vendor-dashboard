@@ -222,7 +222,7 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
     expect(screen.getByText('Open support issues')).toBeInTheDocument();
     expect(screen.getByText('Automation issue groups')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute('href', '/orders?workflow=awaiting-shipment');
+    expect(screen.getByRole('link', { name: 'Review allocation' })).toHaveAttribute('href', '/orders?workflow=blocked-allocation');
     expect(screen.getByRole('link', { name: 'Create shipment' })).toHaveAttribute('href', '/orders?workflow=awaiting-shipment');
     expect(screen.getByRole('link', { name: 'Review return' })).toHaveAttribute('href', '/returns?workflow=pending-review');
     expect(screen.getAllByLabelText('Workflow action guidance').some((node) => node.textContent?.includes('Create shipment'))).toBe(true);

@@ -133,9 +133,11 @@ export function AutomationPage() {
           ) : automationView.alerts.length === 0 ? (
             <div className="queue-empty">
               <p className="eyebrow">Alerts</p>
-              <h3>No automation alerts</h3>
+              <h3>{workflowActiveIssues ? 'No active automation issue groups' : 'No automation alerts'}</h3>
               <p className="page-description">
-                No active automation attention signals for this vendor scope. New webhook, shipment, or refund risks will appear here.
+                {workflowActiveIssues
+                  ? 'This workflow queue is clear. Clear the workflow to inspect passive automation history.'
+                  : 'No active automation attention signals for this vendor scope. New webhook, shipment, or refund risks will appear here.'}
               </p>
             </div>
           ) : (

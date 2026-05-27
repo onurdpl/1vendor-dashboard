@@ -37,7 +37,7 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 
-type OrderQuickFilter = 'all' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
+type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
 type LabelActionFeedback = {
   tone: 'success' | 'warning' | 'error';
   message: string;
@@ -299,10 +299,21 @@ function getRequestedOrderTargets(searchParams: URLSearchParams) {
 }
 
 function getOrdersWorkflowFilter(workflow: string | null) {
+  if (workflow === 'blocked-allocation') {
+    return {
+      label: 'Blocked allocation',
+      description: 'Showing orders with blocked or reassignment-needed vendor allocations.',
+      emptyTitle: 'No blocked allocations currently need action',
+      emptyDescription: 'This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.',
+      quickFilter: 'blocked' as OrderQuickFilter,
+    };
+  }
   if (workflow === 'awaiting-shipment') {
     return {
       label: 'Awaiting shipment',
       description: 'Showing orders that need shipment creation or provider progress.',
+      emptyTitle: 'No shipments currently awaiting action',
+      emptyDescription: 'This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.',
       quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
@@ -310,6 +321,8 @@ function getOrdersWorkflowFilter(workflow: string | null) {
     return {
       label: 'Stale fulfillment',
       description: 'Showing fulfillment work that still needs shipment progress.',
+      emptyTitle: 'No stale fulfillment work in this queue',
+      emptyDescription: 'No stale fulfillment items match this workflow right now. Clear the workflow to inspect the full orders list.',
       quickFilter: 'awaiting' as OrderQuickFilter,
     };
   }
@@ -317,6 +330,8 @@ function getOrdersWorkflowFilter(workflow: string | null) {
     return {
       label: 'Tracking missing',
       description: 'Showing orders without carrier or tracking evidence.',
+      emptyTitle: 'No orders missing tracking',
+      emptyDescription: 'Tracking evidence is present for the current workflow queue. Clear the workflow to review all orders.',
       quickFilter: 'tracking_missing' as OrderQuickFilter,
     };
   }
@@ -432,6 +447,7 @@ export function OrdersPage() {
 
       const matchesQuickFilter =
         quickFilter === 'all' ||
+        (quickFilter === 'blocked' && (order.allocationStatus === 'vendor_blocked' || order.allocationStatus === 'pending_reassignment')) ||
         (quickFilter === 'awaiting' && order.shippingStatus === 'Awaiting Shipment') ||
         (quickFilter === 'tracking_missing' && !order.trackingNumber && !order.carrier) ||
         (quickFilter === 'high_value' && parseOperationalAmount(order.amount) >= 3000) ||
@@ -527,6 +543,7 @@ export function OrdersPage() {
 
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
+    { key: 'blocked', label: 'Blocked', count: summary.blocked },
     { key: 'awaiting', label: 'Awaiting shipment', count: summary.awaitingShipment },
     { key: 'tracking_missing', label: 'Tracking missing', count: summary.trackingMissing },
     { key: 'high_value', label: 'High value', count: safeArray(orders).filter((order) => parseOperationalAmount(order.amount) >= 3000).length },
@@ -755,8 +772,8 @@ export function OrdersPage() {
                 ) : filteredOrders.length === 0 ? (
                   <OperationalTableRow>
                     <EmptyStatePanel
-                      title="No orders in this view"
-                      description="Adjust the search or filters to inspect vendor-scoped Shopify orders."
+                      title={activeWorkflowFilter?.emptyTitle ?? 'No orders in this view'}
+                      description={activeWorkflowFilter?.emptyDescription ?? 'Adjust the search or filters to inspect vendor-scoped Shopify orders.'}
                     />
                   </OperationalTableRow>
                 ) : filteredOrders.map((order) => {

@@ -282,6 +282,17 @@ describe('ReturnsPage control center', () => {
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
   });
 
+  it('renders an honest empty state for empty return workflow queues', async () => {
+    listReturnsMock.mockResolvedValue([toSummary(processedRefund)]);
+    getReturnMock.mockResolvedValue(processedRefund);
+
+    renderReturnsPage(['/returns?workflow=pending-review']);
+
+    expect(await screen.findByText('No returns currently awaiting review')).toBeInTheDocument();
+    expect(screen.getByText('The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Pending review');
+  });
+
   it('renders the returned item thumbnail fallback when no image URL is available', async () => {
     const returnWithoutImage: ReturnDetail = {
       ...pendingReturn,

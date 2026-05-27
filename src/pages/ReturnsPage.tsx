@@ -461,6 +461,8 @@ function getReturnsWorkflowFilter(workflow: string | null) {
     return {
       label: 'Pending review',
       description: 'Showing Shopify return requests that need vendor review.',
+      emptyTitle: 'No returns currently awaiting review',
+      emptyDescription: 'The pending return review queue is clear. Clear the workflow to inspect processed refunds and all return records.',
       sourceFilter: 'pending' as ReturnSourceFilter,
     };
   }
@@ -829,8 +831,8 @@ export function ReturnsPage() {
             ) : filteredReturns.length === 0 ? (
               <OperationalTableRow>
                 <EmptyStatePanel
-                  title="No returns match this view"
-                  description="Adjust search or filters to find return requests and refunds."
+                  title={activeWorkflowFilter?.emptyTitle ?? 'No returns match this view'}
+                  description={activeWorkflowFilter?.emptyDescription ?? 'Adjust search or filters to find return requests and refunds.'}
                 />
               </OperationalTableRow>
             ) : filteredReturns.map((item) => {

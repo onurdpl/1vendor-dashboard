@@ -251,6 +251,49 @@ describe('OrdersPage control center', () => {
     expect((await screen.findAllByText('#1002')).length).toBeGreaterThan(0);
   });
 
+  it('uses workflow query params to open blocked allocation queues', async () => {
+    const blockedOrder: OrderDetail = {
+      ...orderDetail,
+      id: 'ORD-A-BLOCKED',
+      sourceShopifyOrderNumber: '#1005',
+      customer: 'Blocked Customer',
+      allocationStatus: 'vendor_blocked',
+      status: 'Pending',
+      fulfillmentStatus: 'Pending',
+      shippingStatus: 'Awaiting Shipment',
+      trackingNumber: null,
+      trackingUrl: null,
+      carrier: null,
+      date: '2026-05-10T09:20:00Z',
+    };
+    const deliveredOrder: OrderDetail = {
+      ...orderDetail,
+      id: 'ORD-A-1002',
+      sourceShopifyOrderNumber: '#1002',
+      customer: 'Delivered Customer',
+      date: '2026-05-08T09:20:00Z',
+    };
+    listOrdersMock.mockResolvedValue([toSummary(blockedOrder), toSummary(deliveredOrder)]);
+    getOrderMock.mockImplementation(async (orderId) => (orderId === blockedOrder.id ? blockedOrder : deliveredOrder));
+
+    renderOrdersPage(['/orders?workflow=blocked-allocation']);
+
+    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Blocked allocation');
+    expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('#1002')).not.toBeInTheDocument();
+  });
+
+  it('renders an honest empty state for empty workflow order queues', async () => {
+    listOrdersMock.mockResolvedValue([toSummary(orderDetail)]);
+    getOrderMock.mockResolvedValue(orderDetail);
+
+    renderOrdersPage(['/orders?workflow=awaiting-shipment']);
+
+    expect(await screen.findByText('No shipments currently awaiting action')).toBeInTheDocument();
+    expect(screen.getByText('This workflow queue is clear for the current vendor scope. Clear the workflow to review all orders.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
+  });
+
   it('renders list summary line item counts for Shopify orders without waiting for detail data', async () => {
     const summary = buildSummary({
       id: 'ORD-A-1038',

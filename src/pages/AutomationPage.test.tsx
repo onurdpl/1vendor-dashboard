@@ -12,7 +12,7 @@ vi.mock('../features/automation/api', () => ({
   getAutomationDashboard: () => getAutomationDashboardMock(),
 }));
 
-function renderAutomationPage() {
+function renderAutomationPage(initialEntries = ['/automation']) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -23,7 +23,7 @@ function renderAutomationPage() {
 
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <AutomationPage />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -85,5 +85,49 @@ describe('AutomationPage suggested actions', () => {
     expect(screen.getByRole('button', { name: 'Create queue' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Summarize' })).toBeDisabled();
     expect(screen.getAllByText(/Action execution coming in a future phase/i).length).toBeGreaterThan(0);
+  });
+
+  it('uses workflow query params to show active automation issue context', async () => {
+    getAutomationDashboardMock.mockResolvedValue({
+      ...automationDashboard,
+      alerts: [
+        ...automationDashboard.alerts,
+        {
+          id: 'alert-resolved',
+          type: 'Info',
+          message: 'Resolved automation history item.',
+          status: 'Resolved',
+          timestamp: '2026-05-13T11:00:00.000Z',
+          source: 'Automation engine',
+        },
+      ],
+    });
+
+    renderAutomationPage(['/automation?workflow=active-issue-groups']);
+
+    expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Active automation issue groups');
+    expect(screen.getByText('Return request is overdue.')).toBeInTheDocument();
+    expect(screen.queryByText('Resolved automation history item.')).not.toBeInTheDocument();
+  });
+
+  it('renders an honest empty state for empty automation workflow queues', async () => {
+    getAutomationDashboardMock.mockResolvedValue({
+      ...automationDashboard,
+      alerts: [
+        {
+          id: 'alert-resolved',
+          type: 'Info',
+          message: 'Resolved automation history item.',
+          status: 'Resolved',
+          timestamp: '2026-05-13T11:00:00.000Z',
+          source: 'Automation engine',
+        },
+      ],
+    });
+
+    renderAutomationPage(['/automation?workflow=active-issue-groups']);
+
+    expect(await screen.findByText('No active automation issue groups')).toBeInTheDocument();
+    expect(screen.getByText('This workflow queue is clear. Clear the workflow to inspect passive automation history.')).toBeInTheDocument();
   });
 });

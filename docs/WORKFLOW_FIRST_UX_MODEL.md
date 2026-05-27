@@ -137,6 +137,7 @@ Dashboard workflow actions should carry intent into the destination queue with l
 Current route mappings:
 
 - `Create shipment` -> `/orders?workflow=awaiting-shipment`
+- `Review allocation` -> `/orders?workflow=blocked-allocation`
 - `Review stale fulfillment` -> `/orders?workflow=stale-fulfillment`
 - `Sync tracking` -> `/orders?workflow=tracking-missing`
 - `Review return` -> `/returns?workflow=pending-review`

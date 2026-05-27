@@ -143,7 +143,14 @@ export function VendorSupportTicketsPage() {
           ))}
         </OperationalTable>
       ) : (
-        <EmptyStatePanel title="No support requests" description="Submitted support tickets will appear here." />
+        <EmptyStatePanel
+          title={workflowOpenSupportIssues ? 'No open support issues' : 'No support requests'}
+          description={
+            workflowOpenSupportIssues
+              ? 'This workflow queue is clear. Clear the workflow to inspect all support history.'
+              : 'Submitted support tickets will appear here.'
+          }
+        />
       )}
     </section>
   );
