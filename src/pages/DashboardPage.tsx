@@ -639,6 +639,7 @@ export function DashboardPage() {
   const recentActivity = safeArray(dashboardView.recentActivity);
   const partialDataWarnings = safeArray(dashboardView.partialDataWarnings);
   const dashboardStats = safeArray(dashboardView.stats);
+  const normalizedCounts = dashboardView.normalizedOperationalCounts;
   const groupedRecentActivity = groupRecentActivity(recentActivity);
   const staleFulfillmentGroups = groupStaleFulfillmentSignals(recentActivity);
   const groupedNotifications = groupNotifications(notificationView.notifications);
@@ -654,21 +655,53 @@ export function DashboardPage() {
   const returnsProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('refund attention'));
   const automationProjection = actionProjections.find((item) => item.id === 'automation-issue-groups');
   const financeProjection = actionProjections.find((item) => item.id === 'finance-review');
-  const supportQueueLabel = supportActivityGroups.length > 0 ? 'Unread support notifications' : 'Open support issues';
-  const supportQueueValue = supportActivityGroups.length > 0 ? String(supportActivityGroups.length) : 'Open';
-  const supportQueueDescription =
-    supportActivityGroups.length > 0
+  const normalizedSupportCount = normalizedCounts?.openSupportIssueCount;
+  const normalizedAutomationCount = normalizedCounts?.groupedAutomationIssueCount;
+  const normalizedFinanceReviewCount = normalizedCounts?.financeReviewItemCount;
+  const normalizedStaleFulfillmentCount = normalizedCounts?.staleFulfillmentGroupCount;
+  const hasNormalizedSupportCount = typeof normalizedSupportCount === 'number';
+  const hasNormalizedAutomationCount = typeof normalizedAutomationCount === 'number';
+  const hasNormalizedFinanceReviewCount = typeof normalizedFinanceReviewCount === 'number';
+  const hasNormalizedStaleFulfillmentCount = typeof normalizedStaleFulfillmentCount === 'number';
+  const supportQueueLabel = hasNormalizedSupportCount
+    ? 'Open support issues'
+    : supportActivityGroups.length > 0
+      ? 'Unread support notifications'
+      : 'Open support issues';
+  const supportQueueValue = hasNormalizedSupportCount
+    ? String(normalizedSupportCount)
+    : supportActivityGroups.length > 0
+      ? String(supportActivityGroups.length)
+      : 'Open';
+  const supportQueueDescription = hasNormalizedSupportCount
+    ? `${normalizedSupportCount} open support issue group${normalizedSupportCount === 1 ? '' : 's'} from current support tickets.`
+    : supportActivityGroups.length > 0
       ? `${supportActivityGroups.length} grouped unread support notification${supportActivityGroups.length === 1 ? '' : 's'}.`
       : 'Support workspace remains available; no unread support notification groups.';
-  const financeQueueValue = financeProjection?.value ?? (dashboardView.financeSnapshot ? 'Review pending' : 'Unknown');
+  const financeQueueValue = hasNormalizedFinanceReviewCount
+    ? String(normalizedFinanceReviewCount)
+    : normalizedCounts
+      ? 'Unknown'
+      : financeProjection?.value ?? (dashboardView.financeSnapshot ? 'Review pending' : 'Unknown');
+  const financeQueueDescription = hasNormalizedFinanceReviewCount
+    ? `${normalizedFinanceReviewCount} finance review item${normalizedFinanceReviewCount === 1 ? '' : 's'} from settlement records.`
+    : financeProjection
+      ? financeProjection.description
+      : 'Settlement review count is not modeled yet.';
+  const fulfillmentQueueLabel = hasNormalizedStaleFulfillmentCount ? 'Stale fulfillment groups' : 'Fulfillment queue';
+  const fulfillmentQueueValue = hasNormalizedStaleFulfillmentCount
+    ? String(normalizedStaleFulfillmentCount)
+    : fulfillmentProjection?.value ?? (staleFulfillmentGroups.length > 0 ? String(staleFulfillmentGroups.length) : '—');
+  const fulfillmentQueueDescription = hasNormalizedStaleFulfillmentCount
+    ? `${normalizedStaleFulfillmentCount} stale fulfillment group${normalizedStaleFulfillmentCount === 1 ? '' : 's'} from operational signals.`
+    : staleFulfillmentGroups.length > 0
+      ? `${staleFulfillmentGroups.length} stale fulfillment group${staleFulfillmentGroups.length === 1 ? '' : 's'} in recent activity.`
+      : 'Shipment work waiting for action.';
   const queueCards = [
     {
-      label: 'Fulfillment queue',
-      value: fulfillmentProjection?.value ?? (staleFulfillmentGroups.length > 0 ? String(staleFulfillmentGroups.length) : '—'),
-      description:
-        staleFulfillmentGroups.length > 0
-          ? `${staleFulfillmentGroups.length} stale fulfillment group${staleFulfillmentGroups.length === 1 ? '' : 's'} in recent activity.`
-          : 'Shipment work waiting for action.',
+      label: fulfillmentQueueLabel,
+      value: fulfillmentQueueValue,
+      description: fulfillmentQueueDescription,
       tone: 'fulfillment',
       to: '/orders',
       action: 'Open orders',
@@ -684,7 +717,7 @@ export function DashboardPage() {
     {
       label: 'Finance review queue',
       value: financeQueueValue,
-      description: financeProjection ? financeProjection.description : 'Settlement review count is not modeled yet.',
+      description: financeQueueDescription,
       tone: 'finance',
       to: '/finance',
       action: 'Open finance',
@@ -699,7 +732,7 @@ export function DashboardPage() {
     },
     {
       label: 'Automation issue groups',
-      value: automationProjection?.value ?? '—',
+      value: hasNormalizedAutomationCount ? String(normalizedAutomationCount) : automationProjection?.value ?? '—',
       description: automationProjection?.description ?? 'Grouped automation and rule issues.',
       tone: 'automation',
       to: '/automation',

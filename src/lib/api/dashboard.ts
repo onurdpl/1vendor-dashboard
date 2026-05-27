@@ -8,11 +8,14 @@ import type {
   AutomationAlert,
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
+  DashboardNormalizedOperationalCounts,
   DashboardNotificationSummary,
   DashboardOverview,
   DashboardObservabilitySummary,
   DashboardPriorityItem,
+  FinanceTransaction,
   OperationalSignal,
+  SupportTicket,
 } from './contracts';
 import { runtimeServices } from '../../services/runtime-services';
 import { ApiError } from './errors';
@@ -65,12 +68,23 @@ function getOperationalSignalEntityKey(signal: OperationalSignal) {
   return signal.allocationId ?? signal.financeLedgerEntryId ?? signal.payoutBatchId ?? signal.operationalJobId ?? signal.id;
 }
 
+function buildOperationalCountMetadata(input: {
+  label: string;
+  source: string;
+  rawCount: number | null;
+  groupedCount: number | null;
+}) {
+  return input;
+}
+
 function countAutomationIssueGroups(alerts: AutomationAlert[], signals: OperationalSignal[]) {
   const groups = new Set<string>();
+  let rawCount = 0;
 
   alerts
     .filter((alert) => alert.status !== 'Resolved')
     .forEach((alert) => {
+      rawCount += 1;
       groups.add(
         [
           'automation-alert',
@@ -84,6 +98,7 @@ function countAutomationIssueGroups(alerts: AutomationAlert[], signals: Operatio
   signals
     .filter((signal) => signal.status === 'active' || signal.status === 'acknowledged')
     .forEach((signal) => {
+      rawCount += 1;
       groups.add(
         [
           'operational-signal',
@@ -94,7 +109,102 @@ function countAutomationIssueGroups(alerts: AutomationAlert[], signals: Operatio
       );
     });
 
-  return groups.size;
+  return {
+    rawCount,
+    groupedCount: groups.size,
+  };
+}
+
+function getSupportIssueGroupKey(ticket: SupportTicket) {
+  const contextId = ticket.contextId?.trim() || ticket.id;
+  return [ticket.vendorId, ticket.contextType, contextId, ticket.category].map(normalizeIssueKeyPart).join('|');
+}
+
+function countOpenSupportIssues(tickets: SupportTicket[], vendorId: string) {
+  const openTickets = tickets.filter(
+    (ticket) => ticket.vendorId === vendorId && ['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR'].includes(ticket.status),
+  );
+  return {
+    rawCount: openTickets.length,
+    groupedCount: new Set(openTickets.map(getSupportIssueGroupKey)).size,
+  };
+}
+
+function isFinanceReviewItem(transaction: FinanceTransaction) {
+  if (transaction.status === 'Pending' || transaction.status === 'Failed') {
+    return true;
+  }
+  if (transaction.settlement?.payoutReady) {
+    return true;
+  }
+  return transaction.settlement?.status === 'held' || transaction.settlement?.status === 'disputed';
+}
+
+function countFinanceReviewItems(finance: { transactions?: FinanceTransaction[] } | null) {
+  if (!finance) {
+    return {
+      rawCount: null,
+      groupedCount: null,
+    };
+  }
+
+  const reviewItems = (finance.transactions ?? []).filter(isFinanceReviewItem);
+  return {
+    rawCount: reviewItems.length,
+    groupedCount: new Set(reviewItems.map((transaction) => transaction.id)).size,
+  };
+}
+
+function countStaleFulfillmentGroups(signals: OperationalSignal[] | null | undefined) {
+  const staleSignals = (signals ?? []).filter((signal) => {
+    const normalized = `${signal.sourceArea} ${signal.ruleKey} ${signal.title}`.toLowerCase();
+    return signal.status !== 'resolved' && normalized.includes('fulfillment') && normalized.includes('stale');
+  });
+
+  return {
+    rawCount: staleSignals.length,
+    groupedCount: new Set(staleSignals.map((signal) => signal.allocationId ?? signal.id)).size,
+  };
+}
+
+function buildNormalizedOperationalCounts(input: {
+  support: { rawCount: number | null; groupedCount: number | null };
+  automation: { rawCount: number | null; groupedCount: number | null };
+  finance: { rawCount: number | null; groupedCount: number | null };
+  staleFulfillment: { rawCount: number | null; groupedCount: number | null };
+}): DashboardNormalizedOperationalCounts {
+  return {
+    openSupportIssueCount: input.support.groupedCount,
+    groupedAutomationIssueCount: input.automation.groupedCount,
+    financeReviewItemCount: input.finance.groupedCount,
+    staleFulfillmentGroupCount: input.staleFulfillment.groupedCount,
+    metadata: {
+      openSupportIssueCount: buildOperationalCountMetadata({
+        label: 'Open support issues',
+        source: 'support.tickets.open_grouped_by_context',
+        rawCount: input.support.rawCount,
+        groupedCount: input.support.groupedCount,
+      }),
+      groupedAutomationIssueCount: buildOperationalCountMetadata({
+        label: 'Automation issue groups',
+        source: 'automation.alerts_and_operational_signals.grouped',
+        rawCount: input.automation.rawCount,
+        groupedCount: input.automation.groupedCount,
+      }),
+      financeReviewItemCount: buildOperationalCountMetadata({
+        label: 'Finance review items',
+        source: 'finance.records.pending_failed_or_held',
+        rawCount: input.finance.rawCount,
+        groupedCount: input.finance.groupedCount,
+      }),
+      staleFulfillmentGroupCount: buildOperationalCountMetadata({
+        label: 'Stale fulfillment groups',
+        source: 'operational_signals.fulfillment_stale_grouped_by_allocation',
+        rawCount: input.staleFulfillment.rawCount,
+        groupedCount: input.staleFulfillment.groupedCount,
+      }),
+    },
+  };
 }
 
 function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
@@ -109,7 +219,14 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
   ).length;
   const activeReturns = returns.filter((item) => ['Pending', 'In Review'].includes(item.status)).length;
   const pendingPayouts = finance.transactions.filter((transaction) => transaction.status === 'Pending').length;
-  const automationIssueGroupCount = countAutomationIssueGroups(automation.alerts, []);
+  const automationIssueGroups = countAutomationIssueGroups(automation.alerts, []);
+  const normalizedOperationalCounts = buildNormalizedOperationalCounts({
+    support: { rawCount: 0, groupedCount: 0 },
+    automation: automationIssueGroups,
+    finance: countFinanceReviewItems(finance),
+    staleFulfillment: countStaleFulfillmentGroups([]),
+  });
+  const automationIssueGroupCount = normalizedOperationalCounts.groupedAutomationIssueCount ?? 0;
 
   const recentActivity: string[] = [];
 
@@ -142,6 +259,7 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
       { label: 'Awaiting shipment', value: formatCount(activeOrders), tone: 'severity-attention' },
       { label: 'Refund attention', value: formatCount(activeReturns), tone: 'severity-normal' },
     ],
+    normalizedOperationalCounts,
     financeSnapshot: {
       grossSales: finance.summary.grossSales,
       refunds: finance.summary.refunds,
@@ -205,6 +323,9 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     currentUser?.role === 'admin' ? runtimeServices.operations.list({ signal: options.signal }) : Promise.resolve(null),
     runtimeServices.signals.list(currentVendorId, { signal: options.signal }),
     runtimeServices.notifications.list(notificationScopeVendorId, { signal: options.signal }),
+    currentUser?.role === 'admin'
+      ? runtimeServices.support.listAdmin({ signal: options.signal })
+      : runtimeServices.support.listVendor({ signal: options.signal }),
     currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation({ signal: options.signal }) : Promise.resolve(null),
     currentUser?.role === 'admin' ? runtimeServices.observability.summary({ signal: options.signal }) : Promise.resolve(null),
   ]);
@@ -219,6 +340,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     operationsResult,
     signalsResult,
     notificationsResult,
+    supportResult,
     diagnosticsResult,
     observabilityResult,
   ] = dashboardRequests;
@@ -258,6 +380,11 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     partialDataWarnings.push('In-app notifications are temporarily unavailable.');
   }
 
+  const supportTickets = supportResult.status === 'fulfilled' ? supportResult.value : null;
+  if (supportResult.status === 'rejected') {
+    partialDataWarnings.push('Support issue counts are temporarily unavailable.');
+  }
+
   const diagnostics = diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null;
   if (diagnosticsResult.status === 'rejected') {
     partialDataWarnings.push('Diagnostics summary is temporarily unavailable.');
@@ -273,7 +400,14 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     (order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked',
   ).length;
   const activeRefundCount = returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
-  const automationIssueGroupCount = countAutomationIssueGroups(automation?.alerts ?? [], signals?.signals ?? []);
+  const automationIssueGroups = countAutomationIssueGroups(automation?.alerts ?? [], signals?.signals ?? []);
+  const normalizedOperationalCounts = buildNormalizedOperationalCounts({
+    support: supportTickets ? countOpenSupportIssues(supportTickets, currentVendorId) : { rawCount: null, groupedCount: null },
+    automation: automationIssueGroups,
+    finance: countFinanceReviewItems(finance),
+    staleFulfillment: countStaleFulfillmentGroups(signals?.signals),
+  });
+  const automationIssueGroupCount = normalizedOperationalCounts.groupedAutomationIssueCount ?? 0;
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
   const refundAmount = returns.reduce((total, item) => total + toMoneyValue(item.amount), 0);
 
@@ -360,6 +494,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     recentActivity: recentActivity.length > 0 ? recentActivity : [`No recent backend activity for ${currentVendor.vendorName}.`],
     workspaceStatus,
     priorityWork,
+    normalizedOperationalCounts,
     financeSnapshot,
     diagnosticsSummary,
     observabilitySummary,

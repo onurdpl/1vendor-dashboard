@@ -63,6 +63,10 @@ function createRuntimeServices() {
         notifications: [],
       }),
     },
+    support: {
+      listAdmin: vi.fn().mockResolvedValue([]),
+      listVendor: vi.fn().mockResolvedValue([]),
+    },
     diagnostics: {
       reconciliation: vi.fn().mockResolvedValue(null),
     },
@@ -94,7 +98,7 @@ async function importDashboardWithServices(
       role,
     }),
     getCurrentVendorContext: () => ({
-      vendorId: 'stored-vendor',
+      vendorId: 'vendor-query-key',
       vendorName: 'Stored Vendor',
     }),
   }));
@@ -163,6 +167,7 @@ describe('getDashboardOverview real-mode aggregation', () => {
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.support.listVendor).toHaveBeenCalledWith(expect.any(Object));
   });
 
   it('uses explicit global admin notification scope for admin dashboard aggregation', async () => {
@@ -172,10 +177,59 @@ describe('getDashboardOverview real-mode aggregation', () => {
 
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
+    expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
   });
 
-  it('groups automation alerts and rule signals before exposing dashboard workload counts', async () => {
+  it('returns normalized dashboard operational counts from existing backend payloads', async () => {
     const { getDashboardOverview } = await importDashboardWithServices((runtimeServices) => {
+      runtimeServices.finance.dashboard.mockResolvedValue({
+        summary: {
+          grossSales: 'TRY 100.00',
+          refunds: 'TRY 25.00',
+          netRevenue: 'TRY 75.00',
+          payoutEstimate: 'TRY 67.50',
+        },
+        transactions: [
+          {
+            id: 'finance-1',
+            date: '2026-05-13T10:00:00.000Z',
+            description: 'Pending settlement',
+            counterparty: 'Platform ledger',
+            category: 'Invoice',
+            amount: 'TRY 100.00',
+            status: 'Pending',
+            settlement: {
+              status: 'pending',
+              payoutReady: false,
+              eligibleAt: null,
+              accruedAt: null,
+              payableAt: null,
+              settledAt: null,
+              holdReason: null,
+              note: 'Pending review',
+            },
+          },
+          {
+            id: 'finance-2',
+            date: '2026-05-13T11:00:00.000Z',
+            description: 'Completed settlement',
+            counterparty: 'Platform ledger',
+            category: 'Invoice',
+            amount: 'TRY 50.00',
+            status: 'Completed',
+            settlement: {
+              status: 'settled',
+              payoutReady: false,
+              eligibleAt: null,
+              accruedAt: null,
+              payableAt: null,
+              settledAt: '2026-05-13T11:30:00.000Z',
+              holdReason: null,
+              note: 'Settled',
+            },
+          },
+        ],
+      });
       runtimeServices.automation.dashboard.mockResolvedValue({
         alerts: [
           {
@@ -196,6 +250,98 @@ describe('getDashboardOverview real-mode aggregation', () => {
           },
         ],
       });
+      runtimeServices.support.listVendor.mockResolvedValue([
+        {
+          id: 'support-1',
+          createdAt: '2026-05-13T10:00:00.000Z',
+          updatedAt: '2026-05-13T10:00:00.000Z',
+          createdByUserId: 'vendor-user',
+          createdByRole: 'vendor',
+          vendorId: 'vendor-query-key',
+          vendorName: 'Stored Vendor',
+          subject: 'Help with order #1061',
+          message: 'Need help.',
+          priority: 'normal',
+          status: 'OPEN',
+          category: 'ORDER',
+          assigneeUserId: null,
+          assigneeName: null,
+          vendorUnreadCount: 0,
+          adminUnreadCount: 1,
+          lastReplyAt: null,
+          lastReplyByRole: null,
+          firstResponseDueAt: null,
+          nextResponseDueAt: null,
+          escalatedAt: null,
+          escalationReason: null,
+          sla: null,
+          contextType: 'order',
+          contextId: 'order-1061',
+          contextSummary: null,
+          resolvedAt: null,
+          closedAt: null,
+        },
+        {
+          id: 'support-2',
+          createdAt: '2026-05-13T10:05:00.000Z',
+          updatedAt: '2026-05-13T10:05:00.000Z',
+          createdByUserId: 'vendor-user',
+          createdByRole: 'vendor',
+          vendorId: 'vendor-query-key',
+          vendorName: 'Stored Vendor',
+          subject: 'Duplicate help with order #1061',
+          message: 'Need help again.',
+          priority: 'high',
+          status: 'IN_REVIEW',
+          category: 'ORDER',
+          assigneeUserId: null,
+          assigneeName: null,
+          vendorUnreadCount: 0,
+          adminUnreadCount: 1,
+          lastReplyAt: null,
+          lastReplyByRole: null,
+          firstResponseDueAt: null,
+          nextResponseDueAt: null,
+          escalatedAt: null,
+          escalationReason: null,
+          sla: null,
+          contextType: 'order',
+          contextId: 'order-1061',
+          contextSummary: null,
+          resolvedAt: null,
+          closedAt: null,
+        },
+        {
+          id: 'support-closed',
+          createdAt: '2026-05-13T09:00:00.000Z',
+          updatedAt: '2026-05-13T09:00:00.000Z',
+          createdByUserId: 'vendor-user',
+          createdByRole: 'vendor',
+          vendorId: 'vendor-query-key',
+          vendorName: 'Stored Vendor',
+          subject: 'Closed ticket',
+          message: 'Done.',
+          priority: 'normal',
+          status: 'CLOSED',
+          category: 'ORDER',
+          assigneeUserId: null,
+          assigneeName: null,
+          vendorUnreadCount: 0,
+          adminUnreadCount: 0,
+          lastReplyAt: null,
+          lastReplyByRole: null,
+          firstResponseDueAt: null,
+          nextResponseDueAt: null,
+          escalatedAt: null,
+          escalationReason: null,
+          sla: null,
+          contextType: 'order',
+          contextId: 'order-1062',
+          contextSummary: null,
+          resolvedAt: null,
+          closedAt: '2026-05-13T09:30:00.000Z',
+        },
+      ]);
       runtimeServices.signals.list.mockResolvedValue({
         summary: {
           total: 2,
@@ -250,6 +396,12 @@ describe('getDashboardOverview real-mode aggregation', () => {
     const automationWork = overview.priorityWork.find((item) => item.label === 'Automation issue groups');
     expect(automationWork?.value).toBe('2');
     expect(automationWork?.description).toContain('Grouped automation and rules issues');
+    expect(overview.normalizedOperationalCounts?.openSupportIssueCount).toBe(1);
+    expect(overview.normalizedOperationalCounts?.metadata.openSupportIssueCount.rawCount).toBe(2);
+    expect(overview.normalizedOperationalCounts?.groupedAutomationIssueCount).toBe(2);
+    expect(overview.normalizedOperationalCounts?.metadata.groupedAutomationIssueCount.rawCount).toBe(4);
+    expect(overview.normalizedOperationalCounts?.financeReviewItemCount).toBe(1);
+    expect(overview.normalizedOperationalCounts?.staleFulfillmentGroupCount).toBe(1);
     expect(overview.workspaceStatus).toContain('2 grouped automation/rules issues');
   });
 

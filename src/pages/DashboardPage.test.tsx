@@ -369,6 +369,55 @@ describe('DashboardPage command center', () => {
     expect(screen.queryByText('Support queue')).not.toBeInTheDocument();
   });
 
+  it('prefers backend-normalized operational counts when present', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      normalizedOperationalCounts: {
+        openSupportIssueCount: 5,
+        groupedAutomationIssueCount: 4,
+        financeReviewItemCount: 3,
+        staleFulfillmentGroupCount: 2,
+        metadata: {
+          openSupportIssueCount: {
+            label: 'Open support issues',
+            source: 'support.tickets.open_grouped_by_context',
+            rawCount: 7,
+            groupedCount: 5,
+          },
+          groupedAutomationIssueCount: {
+            label: 'Automation issue groups',
+            source: 'automation.alerts_and_operational_signals.grouped',
+            rawCount: 31,
+            groupedCount: 4,
+          },
+          financeReviewItemCount: {
+            label: 'Finance review items',
+            source: 'finance.records.pending_failed_or_held',
+            rawCount: 3,
+            groupedCount: 3,
+          },
+          staleFulfillmentGroupCount: {
+            label: 'Stale fulfillment groups',
+            source: 'operational_signals.fulfillment_stale_grouped_by_allocation',
+            rawCount: 4,
+            groupedCount: 2,
+          },
+        },
+      },
+    });
+
+    renderDashboardPage();
+
+    const staleLabel = await screen.findByText('Stale fulfillment groups');
+    expect(within(staleLabel.closest('article') as HTMLElement).getByText('2')).toBeInTheDocument();
+    const supportLabel = screen.getByText('Open support issues');
+    expect(within(supportLabel.closest('article') as HTMLElement).getByText('5')).toBeInTheDocument();
+    const financeLabel = screen.getByText('Finance review queue');
+    expect(within(financeLabel.closest('article') as HTMLElement).getByText('3')).toBeInTheDocument();
+    const automationLabel = screen.getAllByText('Automation issue groups')[0];
+    expect(within(automationLabel.closest('article') as HTMLElement).getByText('4')).toBeInTheDocument();
+  });
+
   it('projects raw automation counts as grouped issue semantics', async () => {
     getDashboardOverviewMock.mockResolvedValue({
       ...dashboardOverview,

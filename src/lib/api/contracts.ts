@@ -1371,6 +1371,26 @@ export type DashboardNotificationSummary = {
   }>;
 };
 
+export type DashboardOperationalCountMetadata = {
+  label: string;
+  source: string;
+  rawCount: number | null;
+  groupedCount: number | null;
+};
+
+export type DashboardNormalizedOperationalCounts = {
+  openSupportIssueCount: number | null;
+  groupedAutomationIssueCount: number | null;
+  financeReviewItemCount: number | null;
+  staleFulfillmentGroupCount: number | null;
+  metadata: {
+    openSupportIssueCount: DashboardOperationalCountMetadata;
+    groupedAutomationIssueCount: DashboardOperationalCountMetadata;
+    financeReviewItemCount: DashboardOperationalCountMetadata;
+    staleFulfillmentGroupCount: DashboardOperationalCountMetadata;
+  };
+};
+
 export type DashboardOverview = {
   vendorId: string;
   vendorName: string;
@@ -1384,6 +1404,7 @@ export type DashboardOverview = {
   diagnosticsSummary?: DashboardDiagnosticsSummary;
   observabilitySummary?: DashboardObservabilitySummary;
   notificationSummary?: DashboardNotificationSummary;
+  normalizedOperationalCounts?: DashboardNormalizedOperationalCounts;
   partialDataWarnings?: string[];
 };
 
