@@ -172,12 +172,34 @@ Use these classifications when deciding whether a section should be visible, pro
 | Section / Widget / Action | Classification | Vendor Fit | Admin Fit | Guidance |
 | --- | --- | --- | --- | --- |
 | Store identity/readiness | Vendor operational | Primary | Useful | Read-only vendor view. |
+| Operational readiness workspace | Shared operational | Primary | Useful | Checklist should answer whether the vendor is operationally ready using only real configuration/workflow visibility. |
 | Marketplace terms | Shared operational | Read-only | Admin-owned | Vendor sees terms, not editor unless supported. |
 | Shipping operations | Shared operational | Read-only summary | Admin-owned config | Keep IDs visible but not dominant. |
 | Warehouse/return destination | Shared operational | Read-only summary | Admin-owned config | Use readable location plus ID. |
 | Integration status | Shared operational | Visible | Visible | Vendor-safe status labels. |
 | Request profile correction | Vendor operational | Primary support CTA | Useful | Must reuse/open support workflow, avoid duplicates. |
 | Fields not modeled yet | Passive analytics / future | Collapsed/muted | Useful planning | Keep low visual weight. |
+
+## Vendor Operational Readiness
+
+Vendor Profile now acts as a lightweight readiness workspace. It is not an onboarding automation engine and does not create payout, accounting, provider, or Shopify behavior. Its job is narrower:
+
+```text
+Existing configuration and workflow visibility -> is this vendor operationally ready?
+```
+
+Readiness sections must use only currently available truth:
+
+- Shipping ready: shipping enabled, provider metadata present, and warehouse or sender address configured.
+- Returns ready: return destination configured and return workflow visible for the current vendor context.
+- Finance visibility ready: finance profile/settlement preview visible as estimates, with active marketplace terms when available.
+- Support channel active: support route and profile correction context available.
+- Workflow access ready: current user/vendor context is loaded and scoped before queues are trusted.
+- Automation visibility ready: conservative visibility only; vendor-specific automation alert readiness is `Not modeled yet` until modeled explicitly.
+
+Readiness labels must avoid fake certainty. Missing, failed, or unmodeled data should render `Unknown`, `Requires configuration review`, or `Not modeled yet`, not a green state.
+
+Readiness is role-aware but shared: vendors see a read-only operational checklist and correction/support actions; admins see the same truth with admin-owned configuration context preserved. Vendor isolation still applies to all linked queues and support records.
 
 ### Automation
 

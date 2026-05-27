@@ -161,3 +161,28 @@ Future work can make the guidance more precise without changing Phase A/B princi
 2. Share action guidance with Admin Operations queue recommendations.
 3. Persist operational issue group lifecycle before adding acknowledge/resolve/dismiss workflows.
 4. Add role-aware guidance tests for vendor/admin dashboard variants.
+
+## Vendor Readiness Distinction
+
+Vendor Profile readiness is adjacent to workflow guidance, but it is not the same thing.
+
+Workflow guidance answers:
+
+```text
+Given this active operational state, what should the user do next?
+```
+
+Vendor readiness answers:
+
+```text
+Given the current vendor configuration and visible workflows, can this vendor operate safely?
+```
+
+Readiness can point to existing workflows for review, but it must not duplicate dashboard queue counts or invent onboarding progress. It should stay conservative when data is incomplete:
+
+- `Ready` only when the current config truth satisfies the stated criteria.
+- `Requires configuration review` when loaded data is missing a required setup item.
+- `Unknown` when a section failed to load or cannot be confirmed.
+- `Not modeled yet` when the product has no data model for that readiness dimension.
+
+Future onboarding direction should build on these readiness criteria before adding automation. A later onboarding phase may attach tasks or ownership to missing criteria, but the current model remains a read-only operational readiness workspace.

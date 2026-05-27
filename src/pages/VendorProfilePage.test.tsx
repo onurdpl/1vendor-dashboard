@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -153,6 +153,11 @@ function renderVendorProfilePage(initialEntries = ['/vendor/profile']) {
       <MemoryRouter initialEntries={initialEntries}>
         <Routes>
           <Route path="/vendor/profile" element={<VendorProfilePage />} />
+          <Route path="/orders" element={<div>Orders queue route</div>} />
+          <Route path="/returns" element={<div>Returns queue route</div>} />
+          <Route path="/finance" element={<div>Finance route</div>} />
+          <Route path="/automation" element={<div>Automation route</div>} />
+          <Route path="/support" element={<div>Support workspace route</div>} />
           <Route path="/support/:ticketId" element={<div>Vendor support detail route</div>} />
           <Route path="/admin/support/:ticketId" element={<div>Admin support detail route</div>} />
         </Routes>
@@ -205,14 +210,81 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Forward warehouse')).toBeInTheDocument();
     expect(screen.getByText('Return destination')).toBeInTheDocument();
     expect(screen.getByLabelText('Vendor operational readiness')).toBeInTheDocument();
-    expect(screen.getByText('Shipping configured')).toBeInTheDocument();
-    expect(screen.getByText('Returns configured')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Shipping ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Returns ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Finance visibility ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Support channel active' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Workflow access ready' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Automation visibility ready' })).toBeInTheDocument();
+    expect(screen.getAllByText('Shipping enabled').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Provider configured').length).toBeGreaterThan(0);
+    expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
+    expect(screen.getByText('Finance readiness means estimate visibility only, not payout or accounting execution.')).toBeInTheDocument();
     expect(screen.getByText('Integration status')).toBeInTheDocument();
     expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
     expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
     expect(screen.getByText('Legal entity name, tax office, and tax identity')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+  });
+
+  it('renders readiness states from missing config truth without fake ready states', async () => {
+    getVendorShippingConfigMock.mockResolvedValue({
+      ...shippingConfig,
+      shippingEnabled: false,
+      preferredProvider: 'navlungo',
+      defaultWarehouseId: null,
+      warehouses: [],
+      providerMetadata: {},
+      source: 'default',
+    });
+    getFinanceDashboardMock.mockResolvedValue({
+      ...financeDashboard,
+      profile: {
+        ...financeDashboard.profile!,
+        active: false,
+        source: 'default',
+      },
+    });
+
+    renderVendorProfilePage();
+
+    const shippingHeading = await screen.findByRole('heading', { name: 'Shipping ready' });
+    const shippingCard = shippingHeading.closest('article');
+    expect(shippingCard).not.toBeNull();
+    await waitFor(() =>
+      expect(within(shippingCard!).getAllByText('Requires configuration review').length).toBeGreaterThan(0),
+    );
+    expect(within(shippingCard!).queryByText('Ready')).not.toBeInTheDocument();
+    expect(within(shippingCard!).getByText('Enable shipping before shipment workflows can rely on this vendor setup.')).toBeInTheDocument();
+    expect(within(shippingCard!).getByText('Review the provider metadata before treating shipping as ready.')).toBeInTheDocument();
+    expect(within(shippingCard!).getByText('Configure a warehouse or sender address for shipment work.')).toBeInTheDocument();
+
+    const returnsHeading = screen.getByRole('heading', { name: 'Returns ready' });
+    const returnsCard = returnsHeading.closest('article');
+    expect(returnsCard).not.toBeNull();
+    expect(within(returnsCard!).getByText('Review the return recipient destination before return workflows rely on it.')).toBeInTheDocument();
+
+    const financeHeading = screen.getByRole('heading', { name: 'Finance visibility ready' });
+    const financeCard = financeHeading.closest('article');
+    expect(financeCard).not.toBeNull();
+    expect(within(financeCard!).getByText('Marketplace terms require verification before treating finance visibility as ready.')).toBeInTheDocument();
+  });
+
+  it('renders readiness guidance links to existing workflow routes', async () => {
+    renderVendorProfilePage();
+
+    await screen.findByRole('heading', { name: 'Operational readiness' });
+    expect(screen.getByRole('button', { name: 'Open shipping workflow' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open returns review' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open settlement preview' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open support workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open orders queue' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open automation queue' })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Open settlement preview' }));
+
+    expect(await screen.findByText('Finance route')).toBeInTheDocument();
   });
 
   it('creates a vendor profile correction support ticket with safe context', async () => {

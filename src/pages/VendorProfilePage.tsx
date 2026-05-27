@@ -26,6 +26,20 @@ import { safeArray, safeStatusLabel } from '../services/real/formatting';
 const VENDOR_PROFILE_CONTEXT_ROUTE = 'vendor_profile_settings';
 const VENDOR_PROFILE_PATH = '/vendor/profile';
 const OPEN_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
+type ReadinessStatus = 'ready' | 'review' | 'unknown' | 'not_modeled';
+type ReadinessItem = {
+  label: string;
+  status: ReadinessStatus;
+  detail: string;
+};
+type ReadinessSection = {
+  title: string;
+  status: ReadinessStatus;
+  summary: string;
+  actionLabel: string;
+  actionPath: string;
+  items: ReadinessItem[];
+};
 
 function formatValue(value: string | null | undefined, fallback = 'Not configured') {
   return value && value.trim() ? value.trim() : fallback;
@@ -162,6 +176,82 @@ function getTicketHref(ticket: SupportTicket, isAdmin: boolean) {
   return isAdmin ? `/admin/support/${ticket.id}` : `/support/${ticket.id}`;
 }
 
+function getReadinessTone(status: ReadinessStatus) {
+  if (status === 'ready') {
+    return 'success';
+  }
+  if (status === 'review') {
+    return 'warning';
+  }
+  if (status === 'unknown') {
+    return 'attention';
+  }
+  return 'neutral';
+}
+
+function getReadinessLabel(status: ReadinessStatus) {
+  if (status === 'ready') {
+    return 'Ready';
+  }
+  if (status === 'review') {
+    return 'Requires configuration review';
+  }
+  if (status === 'unknown') {
+    return 'Unknown';
+  }
+  return 'Not modeled yet';
+}
+
+function combineReadinessStatus(items: ReadinessItem[]): ReadinessStatus {
+  if (items.some((item) => item.status === 'unknown')) {
+    return 'unknown';
+  }
+  if (items.some((item) => item.status === 'review')) {
+    return 'review';
+  }
+  if (items.every((item) => item.status === 'not_modeled')) {
+    return 'not_modeled';
+  }
+  if (items.some((item) => item.status === 'not_modeled')) {
+    return 'review';
+  }
+  return 'ready';
+}
+
+function ReadinessChecklistCard({
+  section,
+  onOpen,
+}: {
+  section: ReadinessSection;
+  onOpen: (path: string) => void;
+}) {
+  return (
+    <article className={`vendor-readiness-card readiness-${section.status}`}>
+      <div className="vendor-readiness-card-heading">
+        <div>
+          <h3>{section.title}</h3>
+          <p>{section.summary}</p>
+        </div>
+        <StatusBadge tone={getReadinessTone(section.status)}>{getReadinessLabel(section.status)}</StatusBadge>
+      </div>
+      <ul className="vendor-readiness-checklist">
+        {section.items.map((item) => (
+          <li key={item.label}>
+            <span>{item.label}</span>
+            <StatusBadge tone={getReadinessTone(item.status)}>{getReadinessLabel(item.status)}</StatusBadge>
+            <small>{item.detail}</small>
+          </li>
+        ))}
+      </ul>
+      <OperationalActionGroup>
+        <button type="button" className="button button-secondary" onClick={() => onOpen(section.actionPath)}>
+          {section.actionLabel}
+        </button>
+      </OperationalActionGroup>
+    </article>
+  );
+}
+
 export function VendorProfilePage() {
   const navigate = useNavigate();
   const appReadiness = useAppReadiness();
@@ -204,10 +294,164 @@ export function VendorProfilePage() {
   const navlungoSenderLocation = getNavlungoSenderLocation(shippingConfig);
   const forwardWarehouseLocation = navlungoSenderLocation || defaultWarehouse?.address || defaultWarehouse?.name || null;
   const returnDestinationLocation = navlungoReturnLocation || 'Return destination location not configured';
-  const shippingConfigured = Boolean(shippingConfig?.shippingEnabled && shippingConfig.preferredProvider);
+  const shippingDataLoaded = Boolean(!shippingQuery.isInitialLoading && shippingConfig);
+  const financeDataLoaded = Boolean(!financeQuery.isInitialLoading && financeQuery.data);
+  const supportDataLoaded = Boolean(!supportQuery.isInitialLoading && supportQuery.data);
+  const providerConfigured = Boolean(shippingConfig?.preferredProvider && metadataConfigured(shippingConfig));
+  const warehouseConfigured = Boolean(defaultWarehouse?.warehouseId || shippingConfig?.defaultWarehouseId || navlungoSenderAddressId);
+  const shippingConfigured = Boolean(shippingConfig?.shippingEnabled && providerConfigured && warehouseConfigured);
   const returnsConfigured = Boolean(navlungoReturnRecipientAddressId);
-  const supportWorkflowReady = appReadiness.ready && !supportQuery.isError;
+  const supportWorkflowReady = Boolean(appReadiness.ready && supportDataLoaded && !supportQuery.isError);
   const marketplaceTermsActive = financeProfile?.active === true;
+  const financePreviewAvailable = Boolean(financeDataLoaded && financeProfile);
+  const readinessSections = useMemo<ReadinessSection[]>(() => {
+    const shippingItems: ReadinessItem[] = [
+      {
+        label: 'Shipping enabled',
+        status: !shippingDataLoaded ? 'unknown' : shippingConfig?.shippingEnabled ? 'ready' : 'review',
+        detail: !shippingDataLoaded
+          ? 'Shipping configuration could not be confirmed from the current profile data.'
+          : shippingConfig?.shippingEnabled
+            ? 'Shipment creation can use this vendor configuration.'
+            : 'Enable shipping before shipment workflows can rely on this vendor setup.',
+      },
+      {
+        label: 'Provider configured',
+        status: !shippingDataLoaded ? 'unknown' : providerConfigured ? 'ready' : 'review',
+        detail: !shippingDataLoaded
+          ? 'Provider metadata is unavailable.'
+          : providerConfigured
+            ? `${formatShippingProviderName(shippingConfig?.preferredProvider)} metadata is present.`
+            : 'Review the provider metadata before treating shipping as ready.',
+      },
+      {
+        label: 'Warehouse configured',
+        status: !shippingDataLoaded ? 'unknown' : warehouseConfigured ? 'ready' : 'review',
+        detail: !shippingDataLoaded
+          ? 'Warehouse data is unavailable.'
+          : warehouseConfigured
+            ? 'A default warehouse or sender address is available.'
+            : 'Configure a warehouse or sender address for shipment work.',
+      },
+    ];
+    const returnsItems: ReadinessItem[] = [
+      {
+        label: 'Return destination configured',
+        status: !shippingDataLoaded ? 'unknown' : returnsConfigured ? 'ready' : 'review',
+        detail: !shippingDataLoaded
+          ? 'Return destination metadata is unavailable.'
+          : returnsConfigured
+            ? 'Return destination ID is present in provider metadata.'
+            : 'Review the return recipient destination before return workflows rely on it.',
+      },
+      {
+        label: 'Return workflow visible',
+        status: appReadiness.ready ? 'ready' : 'unknown',
+        detail: appReadiness.ready ? 'Return queues are available for this vendor context.' : 'Vendor route context is still loading.',
+      },
+    ];
+    const financeItems: ReadinessItem[] = [
+      {
+        label: 'Finance preview available',
+        status: financeQuery.isError ? 'unknown' : financePreviewAvailable ? 'ready' : 'unknown',
+        detail: financeQuery.isError
+          ? 'Finance profile data could not be loaded.'
+          : financePreviewAvailable
+            ? 'Settlement preview data is visible as estimates.'
+            : 'Finance preview has not returned a profile yet.',
+      },
+      {
+        label: 'Settlement visibility enabled',
+        status: financeQuery.isError ? 'unknown' : financePreviewAvailable ? (marketplaceTermsActive ? 'ready' : 'review') : 'unknown',
+        detail: financePreviewAvailable
+          ? marketplaceTermsActive
+            ? 'Marketplace terms are active for estimate visibility.'
+            : 'Marketplace terms require verification before treating finance visibility as ready.'
+          : 'Settlement visibility cannot be inferred without the finance profile.',
+      },
+    ];
+    const supportItems: ReadinessItem[] = [
+      {
+        label: 'Support route accessible',
+        status: appReadiness.ready ? 'ready' : 'unknown',
+        detail: appReadiness.ready ? 'Support routes are available in this workspace.' : 'Vendor access context is still loading.',
+      },
+      {
+        label: 'Support context available',
+        status: supportQuery.isError ? 'unknown' : supportWorkflowReady ? 'ready' : 'unknown',
+        detail: supportQuery.isError
+          ? 'Support context could not be loaded.'
+          : supportWorkflowReady
+            ? 'Profile correction tickets can reuse the support workflow.'
+            : 'Support tickets are still loading.',
+      },
+    ];
+    const workflowItems: ReadinessItem[] = [
+      {
+        label: 'Vendor access state',
+        status: appReadiness.ready && currentVendor.vendorId ? 'ready' : 'unknown',
+        detail: appReadiness.ready ? 'This workspace is scoped to the selected vendor.' : 'Vendor access is not ready yet.',
+      },
+      {
+        label: 'Workflow queues',
+        status: appReadiness.ready ? 'ready' : 'unknown',
+        detail: appReadiness.ready ? 'Orders, returns, finance, and support routes can open with this vendor scope.' : 'Workflow routes are waiting for vendor context.',
+      },
+    ];
+    const automationItems: ReadinessItem[] = [
+      {
+        label: 'Automation queue accessible',
+        status: appReadiness.ready ? 'review' : 'unknown',
+        detail: appReadiness.ready
+          ? 'Automation visibility exists, but this profile does not model vendor-specific automation readiness.'
+          : 'Automation queue access cannot be checked until vendor context is ready.',
+      },
+      {
+        label: 'Alerts visible',
+        status: 'not_modeled',
+        detail: 'Vendor-specific automation alert readiness is not modeled on the profile yet.',
+      },
+    ];
+
+    const buildSection = (
+      title: string,
+      summary: string,
+      actionLabel: string,
+      actionPath: string,
+      items: ReadinessItem[],
+    ): ReadinessSection => ({
+      title,
+      summary,
+      actionLabel,
+      actionPath,
+      items,
+      status: combineReadinessStatus(items),
+    });
+
+    return [
+      buildSection('Shipping ready', 'Shipment work can start only when shipping, provider, and warehouse truth are configured.', 'Open shipping workflow', '/orders?workflow=awaiting-shipment', shippingItems),
+      buildSection('Returns ready', 'Return workflows need a configured destination plus visible return queues.', 'Open returns review', '/returns?workflow=pending-review', returnsItems),
+      buildSection('Finance visibility ready', 'Finance readiness means estimate visibility only, not payout or accounting execution.', 'Open settlement preview', '/finance?workflow=settlement-review', financeItems),
+      buildSection('Support channel active', 'Profile corrections should flow through existing support context without duplicate tickets.', 'Open support workspace', existingProfileTicket ? getTicketHref(existingProfileTicket, isAdmin) : '/support', supportItems),
+      buildSection('Workflow access ready', 'The workspace must be safely scoped before operational queues are trusted.', 'Open orders queue', '/orders', workflowItems),
+      buildSection('Automation visibility ready', 'Automation readiness stays conservative until vendor-specific alert coverage is modeled.', 'Open automation queue', '/automation?workflow=active-issue-groups', automationItems),
+    ];
+  }, [
+    appReadiness.ready,
+    currentVendor.vendorId,
+    existingProfileTicket,
+    financePreviewAvailable,
+    financeQuery.isError,
+    isAdmin,
+    marketplaceTermsActive,
+    providerConfigured,
+    returnsConfigured,
+    shippingConfig,
+    shippingDataLoaded,
+    supportQuery.isError,
+    supportWorkflowReady,
+    warehouseConfigured,
+  ]);
 
   const supportMutation = useMutationAction(
     async () =>
@@ -255,6 +499,10 @@ export function VendorProfilePage() {
     void supportMutation.mutateAsync(undefined);
   }
 
+  function handleOpenReadinessAction(path: string) {
+    navigate(path);
+  }
+
   return (
     <section className="op-page vendor-profile-page">
       <div className="vendor-profile-hero operational-card">
@@ -290,30 +538,16 @@ export function VendorProfilePage() {
         </div>
       </div>
 
-      <div className="vendor-profile-readiness-strip operational-card" aria-label="Vendor operational readiness">
-        <div>
-          <span>Shipping configured</span>
-          <StatusBadge tone={shippingConfigured ? 'success' : 'warning'}>{shippingConfigured ? 'Ready' : 'Needs setup'}</StatusBadge>
+      <OperationalSection
+        title="Operational readiness"
+        description="A checklist view of whether this vendor is operationally ready, based only on currently loaded configuration and workflow visibility."
+      >
+        <div className="vendor-profile-readiness-grid" aria-label="Vendor operational readiness">
+          {readinessSections.map((section) => (
+            <ReadinessChecklistCard key={section.title} section={section} onOpen={handleOpenReadinessAction} />
+          ))}
         </div>
-        <div>
-          <span>Returns configured</span>
-          <StatusBadge tone={returnsConfigured ? 'success' : 'warning'}>{returnsConfigured ? 'Ready' : 'Needs destination'}</StatusBadge>
-        </div>
-        <div>
-          <span>Tracking data source</span>
-          <StatusBadge tone={shippingConfigured ? 'success' : 'neutral'}>{shippingConfigured ? 'Provider configured' : 'Not configured'}</StatusBadge>
-        </div>
-        <div>
-          <span>Support workflow</span>
-          <StatusBadge tone={supportWorkflowReady ? 'success' : 'warning'}>{supportWorkflowReady ? 'Active' : 'Loading'}</StatusBadge>
-        </div>
-        <div>
-          <span>Marketplace terms</span>
-          <StatusBadge tone={marketplaceTermsActive ? 'success' : 'attention'}>
-            {marketplaceTermsActive ? 'Active' : 'Awaiting verification'}
-          </StatusBadge>
-        </div>
-      </div>
+      </OperationalSection>
 
       <div className="vendor-profile-grid">
         <OperationalSection
