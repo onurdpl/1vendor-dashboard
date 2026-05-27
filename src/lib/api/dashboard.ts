@@ -5,12 +5,14 @@ import { getMockFinanceDashboard } from './mockFinance';
 import { listMockOrders } from './mockOrders';
 import { listMockReturns } from './mockReturns';
 import type {
+  AutomationAlert,
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
   DashboardNotificationSummary,
   DashboardOverview,
   DashboardObservabilitySummary,
   DashboardPriorityItem,
+  OperationalSignal,
 } from './contracts';
 import { runtimeServices } from '../../services/runtime-services';
 import { ApiError } from './errors';
@@ -55,6 +57,46 @@ function formatCount(value: number) {
   return value.toString();
 }
 
+function normalizeIssueKeyPart(value: string | null | undefined) {
+  return value?.trim().toLowerCase().replace(/\s+/g, ' ') || 'unknown';
+}
+
+function getOperationalSignalEntityKey(signal: OperationalSignal) {
+  return signal.allocationId ?? signal.financeLedgerEntryId ?? signal.payoutBatchId ?? signal.operationalJobId ?? signal.id;
+}
+
+function countAutomationIssueGroups(alerts: AutomationAlert[], signals: OperationalSignal[]) {
+  const groups = new Set<string>();
+
+  alerts
+    .filter((alert) => alert.status !== 'Resolved')
+    .forEach((alert) => {
+      groups.add(
+        [
+          'automation-alert',
+          normalizeIssueKeyPart(alert.source),
+          normalizeIssueKeyPart(alert.type),
+          normalizeIssueKeyPart(alert.message),
+        ].join('|'),
+      );
+    });
+
+  signals
+    .filter((signal) => signal.status === 'active' || signal.status === 'acknowledged')
+    .forEach((signal) => {
+      groups.add(
+        [
+          'operational-signal',
+          normalizeIssueKeyPart(signal.sourceArea),
+          normalizeIssueKeyPart(signal.ruleKey),
+          normalizeIssueKeyPart(getOperationalSignalEntityKey(signal)),
+        ].join('|'),
+      );
+    });
+
+  return groups.size;
+}
+
 function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
   const currentVendorId = resolveVendorId(vendorId);
   const currentVendor = getCurrentVendorContext();
@@ -67,7 +109,7 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
   ).length;
   const activeReturns = returns.filter((item) => ['Pending', 'In Review'].includes(item.status)).length;
   const pendingPayouts = finance.transactions.filter((transaction) => transaction.status === 'Pending').length;
-  const unresolvedAlerts = automation.alerts.filter((alert) => alert.status !== 'Resolved').length;
+  const automationIssueGroupCount = countAutomationIssueGroups(automation.alerts, []);
 
   const recentActivity: string[] = [];
 
@@ -89,14 +131,14 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
     title: `${currentVendor.vendorName} command center`,
     description: `Track ${currentVendor.vendorName} activity, support workload, and finance status from one place.`,
     stats: [
-      { label: 'Open tickets', value: formatCount(activeReturns + unresolvedAlerts) },
+      { label: 'Open tickets', value: formatCount(activeReturns + automationIssueGroupCount) },
       { label: 'Pending payouts', value: formatCount(pendingPayouts) },
       { label: 'Vendor checks', value: formatCount(activeOrders) },
     ],
     recentActivity: recentActivity.length > 0 ? recentActivity : [`No recent activity for ${currentVendor.vendorName}.`],
-    workspaceStatus: `${currentVendor.vendorName} has ${activeOrders} active orders, ${activeReturns} active returns, and ${unresolvedAlerts} automation alerts in flight.`,
+    workspaceStatus: `${currentVendor.vendorName} has ${activeOrders} active orders, ${activeReturns} active returns, and ${automationIssueGroupCount} automation issue groups in flight.`,
     priorityWork: [
-      { label: 'Blocked allocations', value: formatCount(unresolvedAlerts), tone: 'severity-warning' },
+      { label: 'Blocked allocations', value: formatCount(automationIssueGroupCount), tone: 'severity-warning' },
       { label: 'Awaiting shipment', value: formatCount(activeOrders), tone: 'severity-attention' },
       { label: 'Refund attention', value: formatCount(activeReturns), tone: 'severity-normal' },
     ],
@@ -118,7 +160,7 @@ function createPriorityWork(input: {
   blockedCount: number;
   awaitingShipmentCount: number;
   refundAttentionCount: number;
-  automationSignalCount: number;
+  automationIssueGroupCount: number;
 }): DashboardPriorityItem[] {
   return [
     {
@@ -140,10 +182,10 @@ function createPriorityWork(input: {
       description: input.refundAttentionCount > 0 ? 'Refund records still need review or reconciliation.' : 'No active refund attention items.',
     },
     {
-      label: 'Automation signals',
-      value: formatCount(input.automationSignalCount),
-      tone: input.automationSignalCount > 0 ? 'severity-attention' : 'severity-normal',
-      description: input.automationSignalCount > 0 ? 'Backend automation signals are active for this vendor scope.' : 'No unresolved automation alerts.',
+      label: 'Automation issue groups',
+      value: formatCount(input.automationIssueGroupCount),
+      tone: input.automationIssueGroupCount > 0 ? 'severity-attention' : 'severity-normal',
+      description: input.automationIssueGroupCount > 0 ? 'Grouped automation and rules issues are active for this vendor scope.' : 'No grouped automation issues.',
     },
   ];
 }
@@ -198,7 +240,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
 
   const automation = automationResult.status === 'fulfilled' ? automationResult.value : null;
   if (automationResult.status === 'rejected') {
-    partialDataWarnings.push('Automation signals are temporarily unavailable.');
+    partialDataWarnings.push('Automation issue groups are temporarily unavailable.');
   }
 
   const operations = operationsResult.status === 'fulfilled' ? operationsResult.value : null;
@@ -231,8 +273,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     (order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked',
   ).length;
   const activeRefundCount = returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
-  const unresolvedAlerts = (automation?.alerts ?? []).filter((alert) => alert.status !== 'Resolved').length;
-  const activeSignalCount = signals?.summary.total ?? 0;
+  const automationIssueGroupCount = countAutomationIssueGroups(automation?.alerts ?? [], signals?.signals ?? []);
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
   const refundAmount = returns.reduce((total, item) => total + toMoneyValue(item.amount), 0);
 
@@ -240,7 +281,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     blockedCount,
     awaitingShipmentCount,
     refundAttentionCount: activeRefundCount,
-    automationSignalCount: unresolvedAlerts + activeSignalCount,
+    automationIssueGroupCount,
   });
 
   const recentActivity = [
@@ -256,7 +297,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     )),
   ];
 
-  let workspaceStatus = `${currentVendor.vendorName} has ${orders.length} vendor-scoped orders, ${activeRefundCount} refunds needing attention, and ${unresolvedAlerts + activeSignalCount} active automation/rules signals.`;
+  let workspaceStatus = `${currentVendor.vendorName} has ${orders.length} vendor-scoped orders, ${activeRefundCount} refunds needing attention, and ${automationIssueGroupCount} grouped automation/rules issues.`;
   if (currentUser?.role === 'admin' && operations) {
     workspaceStatus = `${workspaceStatus} Admin queue currently tracks ${operations.length} operational items for the selected vendor scope.`;
   }

@@ -20,8 +20,22 @@ import { runtimeServices } from '../services/runtime-services';
 import type { NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 
-function getPriorityValue(items: { label: string; value: string }[] | null | undefined, label: string) {
-  return Number.parseInt(safeArray(items).find((item) => item.label === label)?.value ?? '0', 10) || 0;
+function parseDashboardCount(value: string | number | null | undefined) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || /[$€£₺]/.test(trimmed)) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(trimmed.replace(/,/g, ''), 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function getHealthTone(health: string): 'success' | 'warning' | 'danger' | 'attention' {
@@ -192,6 +206,13 @@ function groupRecentActivity(items: string[]) {
   return [...groups.values()];
 }
 
+function groupStaleFulfillmentSignals(items: string[]) {
+  return groupRecentActivity(items).filter((activity) => {
+    const normalized = normalizeGroupKey(activity.title);
+    return normalized.includes('fulfillment') && normalized.includes('stale');
+  });
+}
+
 function getNotificationSeverityRank(severity: NotificationIntent['severity']) {
   if (severity === 'critical') {
     return 4;
@@ -274,6 +295,153 @@ function groupNotifications(notifications: NotificationIntent[]) {
       return b.severityRank - a.severityRank;
     }
     return b.latestTime - a.latestTime;
+  });
+}
+
+function isUnreadNotification(notification: NotificationIntent) {
+  return notification.status !== 'read' && notification.status !== 'dismissed';
+}
+
+function isSupportNotification(notification: NotificationIntent) {
+  const source = formatNotificationSource(notification);
+  const category = readNotificationMetadata(notification, 'category') ?? '';
+  const linkedEntityType = readNotificationMetadata(notification, 'linkedEntityType') ?? '';
+  const normalized = normalizeGroupKey(
+    [notification.title, notification.message, source, category, linkedEntityType].filter(Boolean).join(' '),
+  );
+
+  return (
+    normalized.includes('support') ||
+    normalized.includes('ticket') ||
+    normalized.includes('reply') ||
+    normalized.includes('escalat')
+  );
+}
+
+function getSupportNotificationGroupKey(notification: NotificationIntent, index: number) {
+  const linkedEntityId =
+    readNotificationMetadata(notification, 'linkedEntityId') ??
+    readNotificationMetadata(notification, 'orderId') ??
+    readNotificationMetadata(notification, 'returnRequestId') ??
+    readNotificationMetadata(notification, 'supportTicketId') ??
+    notification.signalId ??
+    normalizeGroupKey(notification.title);
+
+  return [
+    notification.vendorId ?? 'global',
+    readNotificationMetadata(notification, 'linkedEntityType') ?? formatNotificationSource(notification),
+    linkedEntityId || `support-notification-${index}`,
+  ]
+    .map((part) => normalizeGroupKey(part))
+    .join('|');
+}
+
+function groupSupportActivity(notifications: NotificationIntent[]) {
+  const groups = new Map<
+    string,
+    {
+      key: string;
+      representative: NotificationIntent;
+      notifications: NotificationIntent[];
+      latestTime: number;
+      unread: number;
+    }
+  >();
+
+  notifications.forEach((notification, index) => {
+    if (!isUnreadNotification(notification) || !isSupportNotification(notification)) {
+      return;
+    }
+
+    const key = getSupportNotificationGroupKey(notification, index);
+    const time = getNotificationTime(notification);
+    const group = groups.get(key);
+
+    if (group) {
+      group.notifications.push(notification);
+      group.unread += 1;
+      if (time > group.latestTime) {
+        group.latestTime = time;
+        group.representative = notification;
+      }
+      return;
+    }
+
+    groups.set(key, {
+      key,
+      representative: notification,
+      notifications: [notification],
+      latestTime: time,
+      unread: 1,
+    });
+  });
+
+  return [...groups.values()].sort((a, b) => b.latestTime - a.latestTime);
+}
+
+type DashboardActionProjection = {
+  id: string;
+  label: string;
+  value: string;
+  count: number | null;
+  tone: string;
+  description: string;
+  sourceLabel: string;
+};
+
+function normalizePriorityWork(items: Array<{ label: string; value: string; tone: string; description?: string }>): DashboardActionProjection[] {
+  return items.map((item) => {
+    const normalized = normalizeGroupKey(item.label);
+    const count = parseDashboardCount(item.value);
+
+    if (normalized.includes('automation')) {
+      return {
+        id: 'automation-issue-groups',
+        label: 'Automation issue groups',
+        value: count === null ? 'Unknown' : item.value,
+        count,
+        tone: item.tone,
+        description:
+          count && count > 0
+            ? 'Grouped active automation and rules issues. Raw signals remain in automation history.'
+            : 'No grouped automation issues currently need action.',
+        sourceLabel: item.label,
+      };
+    }
+
+    if (normalized.includes('finance') || normalized.includes('payout') || normalized.includes('settlement')) {
+      return {
+        id: 'finance-review',
+        label: 'Finance review',
+        value: count === null ? 'Review pending' : item.value,
+        count,
+        tone: item.tone,
+        description: item.description ?? 'Settlement review workload.',
+        sourceLabel: item.label,
+      };
+    }
+
+    if (normalized.includes('support')) {
+      return {
+        id: 'open-support-issues',
+        label: 'Open support issues',
+        value: count === null ? item.value : String(count),
+        count,
+        tone: item.tone,
+        description: item.description ?? 'Grouped support issues that need follow-up.',
+        sourceLabel: item.label,
+      };
+    }
+
+    return {
+      id: normalized || item.label,
+      label: item.label,
+      value: item.value,
+      count,
+      tone: item.tone,
+      description: item.description ?? 'Operational workload item.',
+      sourceLabel: item.label,
+    };
   });
 }
 
@@ -472,25 +640,42 @@ export function DashboardPage() {
   const partialDataWarnings = safeArray(dashboardView.partialDataWarnings);
   const dashboardStats = safeArray(dashboardView.stats);
   const groupedRecentActivity = groupRecentActivity(recentActivity);
+  const staleFulfillmentGroups = groupStaleFulfillmentSignals(recentActivity);
   const groupedNotifications = groupNotifications(notificationView.notifications);
+  const supportActivityGroups = groupSupportActivity(notificationView.notifications);
+  const actionProjections = normalizePriorityWork(priorityWork);
   const visibleNotificationGroups = groupedNotifications.slice(0, 3);
   const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
-  const operationalActionTotal = priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0);
+  const operationalActionTotal = actionProjections.reduce((sum, item) => sum + (item.count ?? 0), 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
   const dashboardKpis = dashboardStats.slice(0, 5);
   const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !dashboard);
+  const fulfillmentProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('awaiting shipment'));
+  const returnsProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('refund attention'));
+  const automationProjection = actionProjections.find((item) => item.id === 'automation-issue-groups');
+  const financeProjection = actionProjections.find((item) => item.id === 'finance-review');
+  const supportQueueLabel = supportActivityGroups.length > 0 ? 'Unread support notifications' : 'Open support issues';
+  const supportQueueValue = supportActivityGroups.length > 0 ? String(supportActivityGroups.length) : 'Open';
+  const supportQueueDescription =
+    supportActivityGroups.length > 0
+      ? `${supportActivityGroups.length} grouped unread support notification${supportActivityGroups.length === 1 ? '' : 's'}.`
+      : 'Support workspace remains available; no unread support notification groups.';
+  const financeQueueValue = financeProjection?.value ?? (dashboardView.financeSnapshot ? 'Review pending' : 'Unknown');
   const queueCards = [
     {
       label: 'Fulfillment queue',
-      value: priorityWork.find((item) => item.label === 'Awaiting shipment')?.value ?? '—',
-      description: 'Shipment work waiting for action.',
+      value: fulfillmentProjection?.value ?? (staleFulfillmentGroups.length > 0 ? String(staleFulfillmentGroups.length) : '—'),
+      description:
+        staleFulfillmentGroups.length > 0
+          ? `${staleFulfillmentGroups.length} stale fulfillment group${staleFulfillmentGroups.length === 1 ? '' : 's'} in recent activity.`
+          : 'Shipment work waiting for action.',
       tone: 'fulfillment',
       to: '/orders',
       action: 'Open orders',
     },
     {
       label: 'Returns queue',
-      value: priorityWork.find((item) => item.label === 'Refund attention')?.value ?? '—',
+      value: returnsProjection?.value ?? '—',
       description: 'Return and refund review workload.',
       tone: 'returns',
       to: '/returns',
@@ -498,24 +683,24 @@ export function DashboardPage() {
     },
     {
       label: 'Finance review queue',
-      value: dashboardView.financeSnapshot?.payoutEstimate ?? dashboardStats.find((stat) => stat.label === 'Payout estimate')?.value ?? '—',
-      description: 'Settlement estimate visibility.',
+      value: financeQueueValue,
+      description: financeProjection ? financeProjection.description : 'Settlement review count is not modeled yet.',
       tone: 'finance',
       to: '/finance',
       action: 'Open finance',
     },
     {
-      label: 'Support queue',
-      value: notificationView.summary.unread > 0 ? String(notificationView.summary.unread) : 'Open',
-      description: notificationView.summary.unread > 0 ? 'Unread operational alerts need triage.' : 'Support workspace remains available.',
+      label: supportQueueLabel,
+      value: supportQueueValue,
+      description: supportQueueDescription,
       tone: 'support',
       to: '/support',
       action: 'Open support',
     },
     {
-      label: 'Automation queue',
-      value: priorityWork.find((item) => item.label === 'Automation signals')?.value ?? '—',
-      description: 'Automation and rule signals.',
+      label: 'Automation issue groups',
+      value: automationProjection?.value ?? '—',
+      description: automationProjection?.description ?? 'Grouped automation and rule issues.',
       tone: 'automation',
       to: '/automation',
       action: 'Open automation',
@@ -544,7 +729,7 @@ export function DashboardPage() {
         </div>
       </header>
 
-      <OperationalSection title="Needs attention" description={`${operationalActionTotal} immediate operational actions across fulfillment, returns, refunds, and automation.`}>
+      <OperationalSection title="Needs attention" description={`${operationalActionTotal} grouped actionable issues across fulfillment, returns, refunds, and automation.`}>
         {isError && !dashboard ? (
           <SectionErrorRetry
             title="Operational overview unavailable"
@@ -561,13 +746,12 @@ export function DashboardPage() {
               </article>
             ))}
           </div>
-        ) : priorityWork.length === 0 ? (
+        ) : actionProjections.length === 0 ? (
           <EmptyStatePanel title="No attention items" description="No active attention items." />
         ) : (
           <div className="dashboard-action-grid">
-            {priorityWork.map((item) => {
-              const value = getPriorityValue([item], item.label);
-              const isActive = value > 0;
+            {actionProjections.map((item) => {
+              const isActive = (item.count ?? 0) > 0;
 
               return (
                 <article key={item.label} className={`dashboard-action-card ${item.tone} ${isActive ? 'is-active' : 'is-quiet'}`}>
@@ -631,7 +815,7 @@ export function DashboardPage() {
               </article>
             ))}
           </div>
-        ) : priorityWork.length === 0 ? (
+        ) : actionProjections.length === 0 ? (
           <EmptyStatePanel title="No records available" description="No records available." />
         ) : (
           <div className="dashboard-priority-table">
@@ -643,7 +827,7 @@ export function DashboardPage() {
               <span>Status</span>
               <span>Action</span>
             </div>
-            {priorityWork.map((item) => (
+            {actionProjections.map((item) => (
               <article key={item.label} className="dashboard-priority-row">
                 <div className="dashboard-priority-cell">
                   <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
@@ -967,7 +1151,7 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Operational items</span>
-            <strong>{priorityWork.reduce((sum, item) => sum + getPriorityValue([item], item.label), 0)}</strong>
+            <strong>{operationalActionTotal}</strong>
           </div>
           <div>
             <span>Pending attention</span>
@@ -975,7 +1159,7 @@ export function DashboardPage() {
           </div>
           <div>
             <span>Queue items</span>
-            <strong>{priorityWork.length}</strong>
+            <strong>{actionProjections.length}</strong>
           </div>
         </div>
         <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>

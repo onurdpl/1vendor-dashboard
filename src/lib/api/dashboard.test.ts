@@ -174,6 +174,85 @@ describe('getDashboardOverview real-mode aggregation', () => {
     expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
   });
 
+  it('groups automation alerts and rule signals before exposing dashboard workload counts', async () => {
+    const { getDashboardOverview } = await importDashboardWithServices((runtimeServices) => {
+      runtimeServices.automation.dashboard.mockResolvedValue({
+        alerts: [
+          {
+            id: 'alert-1',
+            type: 'Warning',
+            message: 'Fulfillment is stale',
+            status: 'New',
+            timestamp: '2026-05-13T10:00:00.000Z',
+            source: 'fulfillment',
+          },
+          {
+            id: 'alert-2',
+            type: 'Warning',
+            message: 'Fulfillment is stale',
+            status: 'In Progress',
+            timestamp: '2026-05-13T10:05:00.000Z',
+            source: 'fulfillment',
+          },
+        ],
+      });
+      runtimeServices.signals.list.mockResolvedValue({
+        summary: {
+          total: 2,
+          critical: 0,
+          high: 2,
+          warning: 0,
+          info: 0,
+        },
+        signals: [
+          {
+            id: 'signal-1',
+            type: 'rule',
+            severity: 'high',
+            sourceArea: 'fulfillment',
+            vendorId: 'vendor-query-key',
+            allocationId: 'allocation-1',
+            financeLedgerEntryId: null,
+            payoutBatchId: null,
+            operationalJobId: null,
+            title: 'Fulfillment is stale',
+            description: 'Allocation is stale.',
+            suggestedAction: 'Review shipment',
+            status: 'active',
+            ruleKey: 'fulfillment.stale_awaiting_shipment',
+            triggeredAt: '2026-05-13T10:00:00.000Z',
+            resolvedAt: null,
+          },
+          {
+            id: 'signal-2',
+            type: 'rule',
+            severity: 'high',
+            sourceArea: 'fulfillment',
+            vendorId: 'vendor-query-key',
+            allocationId: 'allocation-1',
+            financeLedgerEntryId: null,
+            payoutBatchId: null,
+            operationalJobId: null,
+            title: 'Fulfillment is stale',
+            description: 'Duplicate stale evidence.',
+            suggestedAction: 'Review shipment',
+            status: 'active',
+            ruleKey: 'fulfillment.stale_awaiting_shipment',
+            triggeredAt: '2026-05-13T10:05:00.000Z',
+            resolvedAt: null,
+          },
+        ],
+      });
+    });
+
+    const overview = await getDashboardOverview('vendor-query-key');
+
+    const automationWork = overview.priorityWork.find((item) => item.label === 'Automation issue groups');
+    expect(automationWork?.value).toBe('2');
+    expect(automationWork?.description).toContain('Grouped automation and rules issues');
+    expect(overview.workspaceStatus).toContain('2 grouped automation/rules issues');
+  });
+
   it('keeps admin vendor switch dashboard query keys distinct', () => {
     expect(queryKeys.dashboard.overview('demo-vendor-a')).not.toEqual(queryKeys.dashboard.overview('demo-vendor-b'));
   });

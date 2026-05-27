@@ -220,8 +220,8 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Fulfillment queue')).toBeInTheDocument();
     expect(screen.getByText('Returns queue')).toBeInTheDocument();
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
-    expect(screen.getByText('Support queue')).toBeInTheDocument();
-    expect(screen.getByText('Automation queue')).toBeInTheDocument();
+    expect(screen.getByText('Open support issues')).toBeInTheDocument();
+    expect(screen.getByText('Automation issue groups')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Review allocations' })).toHaveAttribute('href', '/orders');
     expect(screen.getByRole('link', { name: 'Review shipments' })).toHaveAttribute('href', '/orders');
     expect(screen.getByRole('link', { name: 'Review returns' })).toHaveAttribute('href', '/returns');
@@ -317,6 +317,104 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByText('3 stale fulfillments')).toBeInTheDocument();
     expect(screen.getByText('Latest issue: 102h awaiting shipment')).toBeInTheDocument();
     expect(screen.getByText('Show 3 matching events')).toBeInTheDocument();
+  });
+
+  it('labels support workload as notification-based when only notification data is available', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+    listNotificationsMock.mockResolvedValue({
+      summary: {
+        total: 2,
+        unread: 2,
+        critical: 0,
+        high: 1,
+        warning: 1,
+      },
+      notifications: [
+        {
+          ...notification,
+          id: 'support-notif-1',
+          signalId: 'support-signal-1',
+          title: 'Support reply received',
+          message: 'A support ticket needs vendor review.',
+          severity: 'high',
+          metadata: {
+            signalSourceArea: 'SUPPORT',
+            linkedEntityType: 'order',
+            linkedEntityId: 'order-1061',
+          },
+        },
+        {
+          ...notification,
+          id: 'support-notif-2',
+          signalId: 'support-signal-2',
+          title: 'Support reply received',
+          message: 'A second support notification for the same order.',
+          severity: 'warning',
+          metadata: {
+            signalSourceArea: 'SUPPORT',
+            linkedEntityType: 'order',
+            linkedEntityId: 'order-1061',
+          },
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    const supportLabel = await screen.findByText('Unread support notifications');
+    const supportCard = supportLabel.closest('article');
+    expect(supportCard).not.toBeNull();
+    expect(within(supportCard as HTMLElement).getByText('1')).toBeInTheDocument();
+    expect(within(supportCard as HTMLElement).getByText('1 grouped unread support notification.')).toBeInTheDocument();
+    expect(screen.queryByText('Support queue')).not.toBeInTheDocument();
+  });
+
+  it('projects raw automation counts as grouped issue semantics', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      priorityWork: [
+        ...dashboardOverview.priorityWork,
+        {
+          label: 'Automation signals',
+          value: '31',
+          tone: 'severity-attention',
+          description: 'Raw backend automation signals are active.',
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    expect(screen.getAllByText('Automation issue groups').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Grouped active automation and rules issues. Raw signals remain in automation history.').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Automation signals')).not.toBeInTheDocument();
+    expect(screen.queryByText('Automation queue')).not.toBeInTheDocument();
+  });
+
+  it('keeps notification history passive while actionable support uses grouped projections', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
+    expect(screen.getByText('Grouped global admin alert history.')).toBeInTheDocument();
+    expect(screen.getByText('Open support issues')).toBeInTheDocument();
+    expect(screen.getByText('Support workspace remains available; no unread support notification groups.')).toBeInTheDocument();
+  });
+
+  it('does not use currency values as the finance review queue count', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
+
+    renderDashboardPage();
+
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    const financeLabel = screen.getByText('Finance review queue');
+    const financeCard = financeLabel.closest('article');
+    expect(financeCard).not.toBeNull();
+    expect(financeCard).toHaveTextContent('Review pending');
+    expect(financeCard).not.toHaveTextContent('$1,530.00');
+    expect(financeCard).not.toHaveTextContent('$1,200.00');
   });
 
   it('groups repeated notification alerts while preserving the latest action surface', async () => {
