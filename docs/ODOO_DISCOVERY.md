@@ -14,11 +14,12 @@ Allowed:
 - Inspect required fields for safe discovery models.
 - Read up to three safe sample ids/names per inspected model.
 - Print unknown when a model is unavailable.
+- Create one guarded test-only draft `sale.order` through the temporary admin probe endpoint after required field validation.
 
 Forbidden:
 
 - Partner creation.
-- Sales Order creation.
+- Sales Order confirmation or production order integration.
 - Customer invoice creation.
 - Vendor customer invoice creation.
 - Official accounting entries.
@@ -135,6 +136,57 @@ curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probe
 
 Remove or disable this endpoint after discovery is complete.
 
+## Temporary Draft Sales Order Probe Endpoint
+
+A temporary guarded endpoint exists for proving that one Sporgym vendor allocation fixture can be represented as an Odoo draft Sales Order:
+
+```text
+POST /admin/probes/odoo-draft-order
+```
+
+Safety behavior:
+
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- Internally forces:
+  - `ODOO_ENABLED=true`
+  - `ODOO_DRY_RUN=false`
+  - `ODOO_DISCOVERY_ONLY=false`
+- Uses one test fixture only.
+- Looks up an existing Odoo partner by exact fixture vendor name; it does not create a partner.
+- Does not set `product_id`; product mapping is intentionally not guessed.
+- Validates required writable `sale.order` and `sale.order.line` fields before create.
+- Creates only a draft `sale.order` when validation passes.
+- Does not confirm the order.
+- Does not create invoices, stock moves, accounting entries, payout records, settlement records, or Shopify flow changes.
+
+Default Render fixture values:
+
+```text
+ODOO_PROBE_VENDOR_NAME=Sporgym
+ODOO_PROBE_PRODUCT_NAME=Sporgym Vendor Allocation Probe Item
+ODOO_PROBE_SKU=SPORGYM-ODOO-PROBE
+ODOO_PROBE_QUANTITY=1
+ODOO_PROBE_UNIT_PRICE=1
+```
+
+Call the endpoint from a trusted shell only:
+
+```bash
+curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-draft-order" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN" \
+  -H "content-type: application/json"
+```
+
+Expected response includes:
+
+- Partner used.
+- Draft `sale.order` id/name/state.
+- Created line ids.
+- Validation errors if required fields are missing.
+
+Remove or disable this endpoint after the draft order probe is complete.
+
 ## Tested Endpoint Method
 
 Planned method:
@@ -204,7 +256,7 @@ The dry-run planner maps one internal fixture to:
 - `sale.order.note`: clearly marked test-only note.
 - `sale.order.order_line`: one test line with name, quantity, and unit price.
 
-Current live discovery mode does not create the Sales Order. No invoice is created.
+Current live discovery mode does not create the Sales Order. The temporary draft Sales Order endpoint creates one draft/test Sales Order only after field validation. No invoice is created.
 
 ## Known Risks
 
@@ -212,5 +264,5 @@ Current live discovery mode does not create the Sales Order. No invoice is creat
 - If those fields are required, the probe must stop and report missing field names rather than guessing.
 - Odoo custom modules may enforce additional required fields.
 - A live discovery run with `ODOO_DRY_RUN=false` and `ODOO_DISCOVERY_ONLY=true` authenticates and reads metadata/safe samples only.
-- Draft Sales Order creation remains blocked until discovery results are reviewed and a future task explicitly permits it.
+- Draft Sales Order creation is limited to the guarded temporary endpoint and must remain disconnected from Shopify/order/shipping/invoice/payout/settlement flows.
 - API key, password, token, and full credential values must never be logged.

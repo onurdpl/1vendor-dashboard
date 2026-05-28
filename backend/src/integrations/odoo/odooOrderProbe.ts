@@ -33,6 +33,29 @@ export type OdooDiscoveryResult = {
   unknowns: string[];
 };
 
+export type OdooDraftOrderCreateResult = {
+  mode: 'DRAFT_ORDER_CREATE';
+  auth: {
+    succeeded: boolean;
+    uidPresent: boolean;
+    error?: ReturnType<typeof describeOdooProbeError>;
+  };
+  versionInfo: unknown;
+  partnerUsed?: {
+    id: number;
+    name: string | null;
+  };
+  saleOrder?: {
+    id: number;
+    name: string | null;
+    state: string | null;
+  };
+  lineIds: number[];
+  validationErrors: string[];
+  unknowns: string[];
+  error?: ReturnType<typeof describeOdooProbeError>;
+};
+
 type OdooProbeConfig = {
   enabled: boolean;
   dryRun: boolean;
@@ -62,6 +85,8 @@ const SECRET_KEY_PATTERN = /api_key|password|token|secret|authorization/i;
 const PII_KEY_PATTERN = /email|tax|vat/i;
 const DISCOVERY_MODELS = ['sale.order', 'sale.order.line', 'res.partner', 'product.product', 'account.tax', 'res.company', 'res.currency'] as const;
 const SAFE_SAMPLE_FIELDS = ['id', 'display_name', 'name'];
+const DRAFT_ORDER_READ_FIELDS = ['id', 'name', 'state', 'partner_id', 'order_line'];
+const DRAFT_ORDER_LINE_READ_FIELDS = ['id', 'name', 'product_id', 'product_uom_qty', 'price_unit', 'state'];
 const USEFUL_FIELD_CANDIDATES = [
   'id',
   'name',
@@ -121,8 +146,21 @@ export function buildDefaultOdooAllocationFixture(env: OdooProbeEnv, now: Date =
   };
 }
 
-export function buildDraftSalesOrderValues(fixture: AllocationFixture, partnerId: number) {
+export function buildDraftSalesOrderValues(
+  fixture: AllocationFixture,
+  partnerId: number,
+  createContext?: { companyId: number; dateOrder: string; orderName: string },
+) {
   return {
+    ...(createContext
+      ? {
+          name: createContext.orderName,
+          company_id: createContext.companyId,
+          date_order: createContext.dateOrder,
+          partner_invoice_id: partnerId,
+          partner_shipping_id: partnerId,
+        }
+      : {}),
     partner_id: partnerId,
     client_order_ref: fixture.reference,
     origin: fixture.shopifyOrderName,
@@ -140,6 +178,7 @@ export function buildDraftSalesOrderValues(fixture: AllocationFixture, partnerId
         0,
         {
           name: `${fixture.productName} (${fixture.sku}) - TEST ONLY`,
+          customer_lead: 0,
           product_uom_qty: fixture.quantity,
           price_unit: fixture.unitPrice,
         },
@@ -258,6 +297,180 @@ export async function runOdooDiscovery(options: Pick<OdooOrderProbeOptions, 'env
   };
 }
 
+export async function runOdooDraftOrderCreateProbe(
+  options: Pick<OdooOrderProbeOptions, 'env' | 'fetchImpl' | 'now'>,
+): Promise<OdooDraftOrderCreateResult> {
+  const now = options.now ?? (() => new Date());
+  const config = parseOdooProbeConfig(options.env);
+  if (!config.enabled || config.dryRun) {
+    throw new Error('Odoo draft order creation requires ODOO_ENABLED=true and ODOO_DRY_RUN=false.');
+  }
+
+  const fixture = buildDefaultOdooAllocationFixture(options.env, now());
+  const client = new OdooClient(
+    {
+      url: config.url,
+      db: config.db,
+      username: config.username,
+      apiKey: config.apiKey,
+    },
+    options.fetchImpl,
+  );
+
+  let versionInfo: unknown = null;
+  try {
+    versionInfo = await client.version();
+  } catch (error) {
+    versionInfo = {
+      unavailable: true,
+      error: describeOdooProbeError(error),
+    };
+  }
+
+  let uid: number;
+  try {
+    uid = await client.authenticate();
+  } catch (error) {
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: false,
+        uidPresent: false,
+        error: describeOdooProbeError(error),
+      },
+      versionInfo,
+      lineIds: [],
+      validationErrors: ['Authentication failed; draft sale.order creation was not attempted.'],
+      unknowns: [],
+    };
+  }
+
+  const validationErrors: string[] = [];
+  const unknowns: string[] = [];
+
+  const partner = await findExistingProbePartner(client, uid, fixture.vendorName);
+  if (!partner) {
+    validationErrors.push(`res.partner not found for exact fixture vendor name: ${fixture.vendorName}`);
+  }
+
+  const company = await findProbeCompany(client, uid);
+  if (!company) {
+    validationErrors.push('res.company not found; company_id is required for the draft sale.order payload.');
+  }
+
+  let saleOrderFields: OdooFieldsGetResponse;
+  let saleOrderLineFields: OdooFieldsGetResponse;
+  try {
+    saleOrderFields = await client.fieldsGet(uid, 'sale.order');
+    saleOrderLineFields = await client.fieldsGet(uid, 'sale.order.line');
+  } catch (error) {
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: true,
+        uidPresent: Number.isInteger(uid) && uid > 0,
+      },
+      versionInfo,
+      partnerUsed: partner,
+      lineIds: [],
+      validationErrors: ['Could not inspect required sale.order or sale.order.line fields; draft sale.order creation was not attempted.'],
+      unknowns,
+      error: describeOdooProbeError(error),
+    };
+  }
+
+  if (!partner || !company) {
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: true,
+        uidPresent: Number.isInteger(uid) && uid > 0,
+      },
+      versionInfo,
+      partnerUsed: partner,
+      lineIds: [],
+      validationErrors,
+      unknowns,
+    };
+  }
+
+  const salesOrderValues = buildDraftSalesOrderValues(fixture, partner.id, {
+    companyId: company.id,
+    dateOrder: now().toISOString().slice(0, 19).replace('T', ' '),
+    orderName: fixture.reference,
+  });
+
+  validationErrors.push(...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), salesOrderValues));
+  validationErrors.push(
+    ...missingRequiredFields(
+      'sale.order.line',
+      requiredWritableFields(saleOrderLineFields),
+      extractSingleOrderLineValues(salesOrderValues),
+    ),
+  );
+
+  if (validationErrors.length) {
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: true,
+        uidPresent: Number.isInteger(uid) && uid > 0,
+      },
+      versionInfo,
+      partnerUsed: partner,
+      lineIds: [],
+      validationErrors,
+      unknowns,
+    };
+  }
+
+  try {
+    const saleOrderId = await client.modelCall<number>(uid, 'sale.order', 'create', [salesOrderValues]);
+    const saleOrders = await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'read', [[saleOrderId]], {
+      fields: DRAFT_ORDER_READ_FIELDS,
+    });
+    const saleOrder = saleOrders[0];
+    const lineIds = readNumberArray(saleOrder?.order_line);
+    const lines = lineIds.length
+      ? await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order.line', 'read', [lineIds], {
+          fields: DRAFT_ORDER_LINE_READ_FIELDS,
+        })
+      : [];
+
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: true,
+        uidPresent: Number.isInteger(uid) && uid > 0,
+      },
+      versionInfo,
+      partnerUsed: partner,
+      saleOrder: {
+        id: saleOrderId,
+        name: readStringOrNull(saleOrder?.name),
+        state: readStringOrNull(saleOrder?.state),
+      },
+      lineIds: lines.map((line) => Number(line.id)).filter((id) => Number.isInteger(id) && id > 0),
+      validationErrors: [],
+      unknowns,
+    };
+  } catch (error) {
+    return {
+      mode: 'DRAFT_ORDER_CREATE',
+      auth: {
+        succeeded: true,
+        uidPresent: Number.isInteger(uid) && uid > 0,
+      },
+      versionInfo,
+      partnerUsed: partner,
+      lineIds: [],
+      validationErrors: ['Odoo rejected the draft sale.order create/read request.'],
+      unknowns,
+      error: describeOdooProbeError(error),
+    };
+  }
+}
+
 async function inspectDiscoveryModel(client: OdooClient, uid: number, model: (typeof DISCOVERY_MODELS)[number]) {
   try {
     const fields = await client.fieldsGet(uid, model);
@@ -292,6 +505,30 @@ async function inspectDiscoveryModel(client: OdooClient, uid: number, model: (ty
   }
 }
 
+async function findExistingProbePartner(client: OdooClient, uid: number, vendorName: string) {
+  const records = await client.searchRead(uid, 'res.partner', [['name', '=', vendorName]], ['id', 'display_name', 'name'], 1);
+  const record = records[0];
+  if (!record?.id) {
+    return undefined;
+  }
+  return {
+    id: record.id,
+    name: record.display_name || record.name || null,
+  };
+}
+
+async function findProbeCompany(client: OdooClient, uid: number) {
+  const records = await client.searchRead(uid, 'res.company', [], ['id', 'display_name', 'name'], 1);
+  const record = records[0];
+  if (!record?.id) {
+    return undefined;
+  }
+  return {
+    id: record.id,
+    name: record.display_name || record.name || null,
+  };
+}
+
 function buildPartnerValues(fixture: AllocationFixture) {
   return {
     name: fixture.vendorName,
@@ -306,6 +543,42 @@ function requiredWritableFields(fields: OdooFieldsGetResponse) {
     .filter(([, definition]) => definition.required && !definition.readonly)
     .map(([field]) => field)
     .sort();
+}
+
+function missingRequiredFields(model: string, requiredFields: string[], values: Record<string, unknown>) {
+  return requiredFields
+    .filter((field) => !hasCreateValue(values[field]))
+    .map((field) => `${model}.${field} is required by Odoo but missing from the safe probe payload.`);
+}
+
+function extractSingleOrderLineValues(salesOrderValues: ReturnType<typeof buildDraftSalesOrderValues>) {
+  const lineCommand = salesOrderValues.order_line[0];
+  const values = Array.isArray(lineCommand) ? lineCommand[2] : undefined;
+  return isRecord(values) ? values : {};
+}
+
+function hasCreateValue(value: unknown) {
+  if (value === null || value === undefined) {
+    return false;
+  }
+  if (typeof value === 'string') {
+    return value.trim().length > 0;
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0;
+  }
+  return true;
+}
+
+function readNumberArray(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => Number(item)).filter((item) => Number.isInteger(item) && item > 0);
+}
+
+function readStringOrNull(value: unknown) {
+  return typeof value === 'string' ? value : null;
 }
 
 function usefulFieldsFound(fields: OdooFieldsGetResponse) {
