@@ -406,6 +406,7 @@ export async function runOdooDraftOrderCreateProbe(
       'sale.order.line',
       requiredWritableFields(saleOrderLineFields),
       extractSingleOrderLineValues(salesOrderValues),
+      new Set(['order_id']),
     ),
   );
 
@@ -545,9 +546,9 @@ function requiredWritableFields(fields: OdooFieldsGetResponse) {
     .sort();
 }
 
-function missingRequiredFields(model: string, requiredFields: string[], values: Record<string, unknown>) {
+function missingRequiredFields(model: string, requiredFields: string[], values: Record<string, unknown>, satisfiedByContext = new Set<string>()) {
   return requiredFields
-    .filter((field) => !hasCreateValue(values[field]))
+    .filter((field) => !satisfiedByContext.has(field) && !hasCreateValue(values[field]))
     .map((field) => `${model}.${field} is required by Odoo but missing from the safe probe payload.`);
 }
 
