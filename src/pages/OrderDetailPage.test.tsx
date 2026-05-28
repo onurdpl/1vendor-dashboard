@@ -6722,7 +6722,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     renderOrderDetail();
 
     const financeTimeline = await screen.findByLabelText('Finance timeline');
-    expect(financeTimeline).toHaveTextContent('Settlement preview generated');
+    await waitFor(() => expect(financeTimeline).toHaveTextContent('Settlement preview generated'));
     expect(financeTimeline).toHaveTextContent('Settlement awaiting review');
     expect(financeTimeline).not.toHaveTextContent('Payment evidence pending');
     expect(financeTimeline).not.toHaveTextContent('Evidence pending');
