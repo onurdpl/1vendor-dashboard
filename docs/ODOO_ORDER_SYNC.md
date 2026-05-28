@@ -165,6 +165,39 @@ The guarded Render verification completed successfully after the allocation sync
 
 Temporary admin probe endpoints should remain disabled by default after this successful verification.
 
+## Guarded Real Allocation One-Off Probe
+
+A guarded one-off endpoint exists for syncing exactly one real allocation from the deployed Render runtime without replaying Shopify webhooks:
+
+```text
+POST /admin/probes/odoo-real-allocation-sync-once
+```
+
+Safety behavior:
+
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- Selects the newest non-test `VendorAllocation` with:
+  - `odooSaleOrderId = null`
+  - at least one line item
+  - assigned vendor identifier present
+  - no synthetic/test/probe/verify id or order-number marker
+- Uses the existing allocation-to-Odoo sale.order sync service.
+- Runs the sync twice for the same allocation to confirm idempotency.
+- Counts Odoo `sale.order` records by the deterministic `client_order_ref`.
+- Does not replay Shopify webhooks, create invoices, confirm orders, create accounting entries, create payouts, create settlements, create shipping labels, or change product mapping.
+
+Call from a trusted shell only:
+
+```bash
+curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-real-allocation-sync-once" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN" \
+  -H "content-type: application/json"
+```
+
+Set `ADMIN_PROBES_ENABLED=false` immediately after the one-off diagnostic run.
+
 ## Failure Behavior
 
 Odoo sync runs after the Shopify allocation transaction commits. A sync failure does not roll back Shopify order ingestion or vendor allocation persistence.
