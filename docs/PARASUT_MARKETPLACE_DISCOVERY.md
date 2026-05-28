@@ -40,13 +40,8 @@ Important context:
   - `backend/prisma/schema.prisma`
   - `backend/src/modules/shopify/order-ingestion.service.ts`
   - `backend/src/modules/finance/sale-ledger.service.ts`
-- Paraşüt public e-document pages:
-  - https://www.parasut.com/e-belge
-  - https://www.parasut.com/kullanim-kilavuzu/elektronik-fatura-nasil-gonderilir
-- Paraşüt API docs:
-  - Primary URL: https://apidocs.parasut.com
-  - Local direct `curl` access was blocked by Cloudflare during this pass.
-  - Available indexed/cached API snippets from the same official docs were reviewed through search and Context7 mirror snippets. Anything not clear from those snippets is marked `unknown` or `requires credentials/testing`.
+- Provided Paraşüt API V4 notes in the task prompt.
+- No new external API facts are introduced here. If a behavior is not present in the provided notes, it is marked `unknown`.
 
 ## Current Marketplace Operational Model
 
@@ -146,33 +141,60 @@ Fit:
 
 Status meanings:
 
-- `supported`: Visible in available Paraşüt docs/snippets.
-- `unsupported`: Available docs clearly indicate the capability is not provided.
-- `unknown`: Not proven from available official docs.
-- `requires credentials/testing`: Endpoint or concept appears present, but behavior, permissions, activation, or lifecycle must be verified with a real/test company.
+- `supported`: Present in the provided Paraşüt API V4 facts.
+- `supported, async`: Present in the provided facts and explicitly asynchronous.
+- `partially supported`: Some required API surface is present in the provided facts, but lifecycle semantics are incomplete.
+- `unknown`: Not present in the provided facts.
 
 | Capability | Status | Evidence / Notes |
 | --- | --- | --- |
-| Customer/contact creation | supported | API docs describe contact/customer creation and `contacts` as the required customer/supplier resource before invoice creation. |
-| Sales invoice creation | supported | API docs show `POST /sales_invoices` / sales invoice creation requiring contact and product/line item relationships. |
-| e-invoice support | requires credentials/testing | Public Paraşüt docs confirm e-Fatura product support. API snippets show `POST /v4/e_invoices`, `GET /v4/e_invoices/{id}`, PDF retrieval, and e-invoice inbox lookup. Activation, permissions, and production constraints require testing. |
-| e-archive support | requires credentials/testing | Public Paraşüt docs confirm e-Arşiv product support. API snippets show `POST /v4/e_archives`, `GET /v4/e_archives/{id}`, PDF retrieval, and e-archive status fields. Activation and behavior require testing. |
-| Draft invoice support | unknown | Paraşüt UI flow creates a sales invoice before electronic formalization, but available API snippets do not prove a stable draft-only API lifecycle suitable for automation. |
-| Invoice status retrieval | supported | Sales invoice list/show includes invoice/payment fields; e-document show/PDF endpoints expose status-related data. |
-| Webhook support | supported | API docs snippets include webhook request shape, resource/action/event date, and SHA256 signature header. Registration/configuration details require credentials/testing. |
-| Payment status/payment recording | requires credentials/testing | Sales invoice fields include `payment_status`, relationships include `payments`/`payments.transaction`, and snippets show pay-sales-invoice request body. Exact payment recording flow needs testing. |
-| Expense/payout recording | requires credentials/testing | Purchase bills and payments exist in API snippets; vendor payout as marketplace settlement is not directly proven. Treat payout recording as unknown until accountant-approved mapping is tested. |
-| Tags/custom fields | tags supported; custom fields unknown | Tags API supports CRUD. No official custom-field support was proven from available docs. |
-| Line item support | supported | Sales invoice creation and response relationships include details/line items/products. |
-| Partial refund/cancel support | cancel supported; partial refund unknown | API snippets show sales invoice cancel endpoint and invoice item types including `refund`; partial refund/cancel semantics are not proven. |
+| Customer/contact creation | supported | Customer/supplier is modeled as `contact`; contact creation/listing exists. |
+| Sales invoice creation | supported | Sales invoice creation exists and requires a Paraşüt contact id. |
+| e-invoice support | supported, async | e-Fatura formalization exists; e-document creation is asynchronous. |
+| e-archive support | supported, async | e-Arşiv formalization exists; e-document creation is asynchronous. |
+| Draft invoice support | unknown | Draft invoice API behavior is not present in the provided facts. |
+| Invoice status retrieval | partially supported | Invoice show plus `include=active_e_document` is used after successful e-document creation; exact status lifecycle is unknown. |
+| Webhook support | unknown | Webhook support is not present in the provided facts. |
+| Payment status/payment recording | supported | Sales invoice payment collection can be added; sales invoice payments can be retrieved with `include=payments`; payment transaction can be retrieved with `include=payments.transaction`; payment transaction can be deleted. |
+| Expense/payout recording | unknown | Expense/payout APIs are not present in the provided facts. |
+| Tags/custom fields | partially supported | `custom_requirement_params` exists for special firm requirements; general tags/custom fields are unknown. |
+| Line item support | supported | Sales invoice line items require product id; invoice details use product relationships. |
+| Partial refund/cancel support | unknown | Partial refund/cancel support is not present in the provided facts. |
+| Product creation/listing | supported | Product creation/listing exists. |
+| Dispatch note/irsaliye | supported | Dispatch note / irsaliye creation exists and requires contact id and product ids. |
 
 Additional API observations:
 
-- Paraşüt API V4 uses OAuth2 access tokens.
-- Base API pattern is `https://api.parasut.com/v4/{company_id}`.
-- Available docs state a rate limit of 10 requests per 10 seconds.
-- E-document/PDF generation can involve asynchronous `trackable_jobs`; snippets show job statuses such as `pending`, `running`, `error`, and `done`.
-- Paraşüt public docs state e-Fatura/e-Arşiv sending depends on electronic invoice activation and customer tax-number detection.
+- API V4 base is `https://api.parasut.com/v4/{firma_no}`.
+- Auth is OAuth2.
+- `access_token` expires in 2 hours.
+- `refresh_token` returns a new `access_token` and a new `refresh_token`.
+- Rate limit is 10 requests per 10 seconds.
+- `Content-Type` is `application/json` or `application/vnd.api+json`.
+- API mostly follows JSONAPI.
+- Sales invoice supports `order_no` and `order_date` fields.
+- e-Fatura/e-Arşiv/e-SMM formalization exists.
+- e-Fatura user check uses e-Fatura inbox lookup by VKN.
+- e-document creation is asynchronous with statuses:
+  - `pending`
+  - `running`
+  - `error`
+  - `done`
+- Async operation id is valid for 15 minutes.
+- After successful e-document creation, invoice should be fetched with `include=active_e_document`.
+- e-Arşiv/e-Fatura PDFs may return `204` until ready.
+- PDF URL is valid for 1 hour and should be downloaded, not directly shared.
+- `custom_requirement_params` exists for special firm requirements.
+
+## Paraşüt Integration Constraints Confirmed So Far
+
+- Each vendor-specific Paraşüt account would require its own `firma_no` and OAuth credential flow.
+- A single Sporgym Paraşüt account can only operate within that company context unless proven otherwise.
+- Multi-vendor invoice automation cannot be assumed from one Paraşüt account.
+- Because invoice creation requires Paraşüt contact and product ids, mapping tables are required before any invoice automation.
+- E-document finalization must be treated as an async workflow with polling.
+- Rate limiting must be respected: max 10 requests per 10 seconds.
+- Token refresh must persist the latest `refresh_token`.
 
 ## Architecture Options
 
@@ -315,7 +337,7 @@ Discovery notes:
 - Candidate mapping: Paraşüt contact/customer may map to Shopify customer or another accountant-approved invoice recipient. This is not proven.
 - Sales invoice line items could map to Shopify line items or allocation line items depending on merchant-of-record decision.
 - Payment status/payment recording could map to Shopify payment evidence only after payment authority is confirmed.
-- E-Fatura/e-Arşiv choice appears tied to customer tax-number/e-document status and Paraşüt activation.
+- E-Fatura user check uses e-Fatura inbox lookup by VKN. E-Arşiv decision rules are unknown from the provided facts.
 
 Unknown:
 
@@ -358,9 +380,8 @@ Shopify return/refund
 
 Discovery notes:
 
-- Paraşüt API snippets show invoice cancellation endpoint.
-- Purchase/sales item types include `refund` in some list filters.
 - Current platform records Shopify refund rows and settlement impact, but does not create accounting documents.
+- Partial refund/cancel support is unknown from the provided Paraşüt facts.
 
 Unknown:
 
@@ -379,7 +400,8 @@ settlement preview
 
 Discovery notes:
 
-- Paraşüt purchase bills, payments, transactions, and tags appear in available API snippets.
+- Sales invoice payment collection/retrieval is supported by the provided facts.
+- Expense/payout recording is unknown from the provided facts.
 - Current payout batches are not payment execution.
 
 Unknown:
@@ -436,32 +458,40 @@ flowchart TD
 
 ## Recommended Direction
 
-Recommended incremental direction:
+Recommended technical direction:
 
-1. Phase 0: docs/API/credentials discovery
-   - Obtain official Paraşüt API docs/access.
-   - Confirm API scopes, OAuth app setup, company id model, test company availability, e-document activation requirements, webhook setup, and rate limits.
-   - Confirm merchant-of-record model with accountant/legal before any accounting data write.
+1. Phase 0: document only
+   - Request accountant/legal decision on seller-of-record.
+   - Request Paraşüt API credentials/test company.
+   - Request whether vendors will connect their own Paraşüt accounts.
+   - Do not add API calls, invoice creation, e-document formalization, schema, or finance calculation changes.
 
-2. Phase 1: read-only mapping/prototype
-   - Prototype mapping from Shopify order/allocation to hypothetical Paraşüt contact/invoice/payment concepts.
-   - Use fixtures or read-only API calls only.
-   - Produce diagnostics with ids/presence booleans, not raw payloads or secrets.
+2. Phase 1: read-only Paraşüt mapping design only
+   - No invoice creation.
+   - Model required mappings:
+     - `shopify_customer_id` -> `parasut_contact_id`
+     - `shopify_variant_id` / `sku` -> `parasut_product_id`
+     - `vendor_id` -> `parasut_company` / `firma_no` if vendor-owned accounts are used
+     - `allocation_id` -> invoice/settlement reference
+   - Include OAuth token ownership and refresh-token persistence design.
+   - Include rate-limit-aware read-only probe design.
 
-3. Phase 2: sandbox create draft invoices only, if supported
-   - Only if Paraşüt supports a safe draft/non-official invoice state through API.
-   - Use sandbox/test company credentials.
-   - Do not formalize e-Fatura/e-Arşiv in this phase.
+3. Phase 2: sandbox-only customer/product lookup and mapping probe
+   - Probe customer/contact lookup.
+   - Probe product lookup.
+   - Validate mapping completeness for Shopify customers, variants/SKUs, vendors, and allocations.
+   - No official e-document creation.
 
-4. Phase 3: controlled e-invoice/e-archive testing
-   - Test e-Fatura/e-Arşiv creation only after accountant approval and Paraşüt test-company readiness.
-   - Confirm asynchronous job behavior, status polling, PDF retrieval, cancellation rules, and webhook behavior.
+4. Phase 3: draft/sales invoice prototype only if accounting model is confirmed
+   - Prototype sales invoice creation only after seller-of-record and invoice ownership are approved.
+   - E-Fatura/e-Arşiv formalization remains disabled unless explicitly approved.
+   - Treat e-document finalization as async if later approved.
 
-5. Phase 4: production rollout behind feature flags
+5. Phase 4: production feature flags and audit logs
    - Feature flags must default off.
-   - Production rollout must start with narrowly scoped vendors/orders.
-   - Logs must be redacted.
-   - Recovery/replay and idempotency behavior must be explicit before any production write.
+   - Production rollout must start with narrow scope.
+   - Audit logs must capture safe ids/statuses without raw payloads or secrets.
+   - Token refresh, polling, retry, and rate-limit behavior must be explicit before production writes.
 
 Do not recommend production invoice automation yet.
 
@@ -471,21 +501,22 @@ Near-term preference:
 
 ## Explicit Unknowns
 
-- Seller-of-record decision.
+- Whether Sporgym or vendor is seller-of-record.
+- Whether Sporgym is allowed to issue customer invoice.
+- Whether vendors must invoice customers directly.
+- Whether vendors must invoice Sporgym for net payout.
+- Whether Sporgym invoices commission to vendors.
+- How refunds/cancellations must be represented legally.
+- Whether Paraşüt has usable sandbox/test company.
+- Whether draft invoices exist in API.
+- Whether webhook support exists.
+- Whether expense/payout APIs exist.
+- Whether tags/custom fields exist outside special requirements.
+- Whether vendor OAuth onboarding is acceptable operationally.
 - Legal/tax ownership.
-- Whether vendors need their own Paraşüt accounts.
-- Whether Sporgym may issue customer invoices.
-- Commission invoice ownership.
-- Refund/cancel document requirements.
 - E-Fatura/e-Arşiv implications.
-- API credential model.
-- Webhook availability and registration details.
-- Status lifecycle details.
-- Rate limits beyond the documented 10 requests per 10 seconds.
-- Sandbox/test environment availability.
-- Whether e-document creation is always asynchronous or only some document/PDF workflows are asynchronous.
-- Whether draft invoice creation is safe and non-official through API.
-- Whether partial refunds can be represented directly or require accountant-guided manual documents.
+- Status lifecycle details beyond the provided async statuses.
+- Rate limits beyond the provided 10 requests per 10 seconds.
 - How external invoice references should attach to allocation/finance records.
 
 ## Required External Inputs Before Implementation
