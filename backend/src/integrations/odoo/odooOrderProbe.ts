@@ -11,6 +11,28 @@ export type OdooOrderProbeOptions = {
   now?: () => Date;
 };
 
+export type OdooDiscoveryModelResult = {
+  model: string;
+  exists: boolean;
+  requiredFields: string[] | 'unknown';
+  usefulFields: string[];
+  samples: Array<{ id: number | undefined; name: string | null }>;
+  unknowns: string[];
+  error?: ReturnType<typeof describeOdooProbeError>;
+};
+
+export type OdooDiscoveryResult = {
+  mode: 'DISCOVERY_ONLY';
+  auth: {
+    succeeded: boolean;
+    uidPresent: boolean;
+    error?: ReturnType<typeof describeOdooProbeError>;
+  };
+  versionInfo: unknown;
+  models: OdooDiscoveryModelResult[];
+  unknowns: string[];
+};
+
 type OdooProbeConfig = {
   enabled: boolean;
   dryRun: boolean;
@@ -159,6 +181,28 @@ export async function runOdooOrderProbe(options: OdooOrderProbeOptions) {
     throw new Error('LIVE_CREATE_BLOCKED: set ODOO_DISCOVERY_ONLY=true for live-safe discovery. Record creation is blocked in this step.');
   }
 
+  const discovery = await runOdooDiscovery({ env: options.env, fetchImpl: options.fetchImpl });
+  logStep(logger, 'Odoo live discovery auth/info', {
+    mode: discovery.mode,
+    versionInfo: discovery.versionInfo,
+    authSucceeded: discovery.auth.succeeded,
+    uidPresent: discovery.auth.uidPresent,
+    error: discovery.auth.error,
+  });
+
+  for (const model of discovery.models) {
+    logStep(logger, `Odoo model discovery: ${model.model}`, model);
+  }
+
+  logger.log('DISCOVERY_ONLY complete. No Odoo records were created, updated, invoiced, posted, or confirmed.');
+}
+
+export async function runOdooDiscovery(options: Pick<OdooOrderProbeOptions, 'env' | 'fetchImpl'>): Promise<OdooDiscoveryResult> {
+  const config = parseOdooProbeConfig(options.env);
+  if (!config.enabled || config.dryRun || !config.discoveryOnly) {
+    throw new Error('Odoo discovery requires ODOO_ENABLED=true, ODOO_DRY_RUN=false, and ODOO_DISCOVERY_ONLY=true.');
+  }
+
   const client = new OdooClient(
     {
       url: config.url,
@@ -169,10 +213,6 @@ export async function runOdooOrderProbe(options: OdooOrderProbeOptions) {
     options.fetchImpl,
   );
 
-  await runOdooLiveDiscovery(client, config, logger);
-}
-
-async function runOdooLiveDiscovery(client: OdooClient, _config: OdooProbeConfig, logger: ProbeLogger) {
   let versionInfo: unknown = null;
   try {
     versionInfo = await client.version();
@@ -183,20 +223,39 @@ async function runOdooLiveDiscovery(client: OdooClient, _config: OdooProbeConfig
     };
   }
 
-  const uid = await client.authenticate();
-  logStep(logger, 'Odoo live discovery auth/info', {
-    mode: 'DISCOVERY_ONLY',
-    versionInfo,
-    authSucceeded: true,
-    uidPresent: Number.isInteger(uid) && uid > 0,
-  });
-
-  for (const model of DISCOVERY_MODELS) {
-    const result = await inspectDiscoveryModel(client, uid, model);
-    logStep(logger, `Odoo model discovery: ${model}`, result);
+  let uid: number;
+  try {
+    uid = await client.authenticate();
+  } catch (error) {
+    const authError = describeOdooProbeError(error);
+    return {
+      mode: 'DISCOVERY_ONLY',
+      auth: {
+        succeeded: false,
+        uidPresent: false,
+        error: authError,
+      },
+      versionInfo,
+      models: [],
+      unknowns: ['Authentication failed; model discovery was not attempted.'],
+    };
   }
 
-  logger.log('DISCOVERY_ONLY complete. No Odoo records were created, updated, invoiced, posted, or confirmed.');
+  const models: OdooDiscoveryModelResult[] = [];
+  for (const model of DISCOVERY_MODELS) {
+    models.push(await inspectDiscoveryModel(client, uid, model));
+  }
+
+  return {
+    mode: 'DISCOVERY_ONLY',
+    auth: {
+      succeeded: true,
+      uidPresent: Number.isInteger(uid) && uid > 0,
+    },
+    versionInfo,
+    models,
+    unknowns: models.flatMap((model) => model.unknowns),
+  };
 }
 
 async function inspectDiscoveryModel(client: OdooClient, uid: number, model: (typeof DISCOVERY_MODELS)[number]) {
@@ -224,7 +283,7 @@ async function inspectDiscoveryModel(client: OdooClient, uid: number, model: (ty
     return {
       model,
       exists: false,
-      requiredFields: 'unknown',
+      requiredFields: 'unknown' as const,
       usefulFields: [],
       samples: [],
       unknowns: [`${model} availability/fields are unknown until Odoo access confirms this model.`],

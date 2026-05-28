@@ -27,6 +27,7 @@ import { registerNotificationRoutes } from './modules/notifications/notification
 import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
+import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
 
 declare module 'fastify' {
@@ -228,6 +229,7 @@ export function createApp() {
       'X-Shopify-Shop-Domain',
       'X-Shopify-Webhook-Id',
       'X-Shopify-Topic',
+      'X-Admin-Probe-Token',
     ],
     exposedHeaders: ['X-Request-Id', 'X-Auth-Attempt-Id'],
   });
@@ -349,6 +351,7 @@ export function createApp() {
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
   registerReconciliationRoutes(app, env);
+  registerOdooDiscoveryProbeRoutes(app);
   registerShopifyWebhookRoutes(app, env);
   registerScheduledReconciliationScheduler(app, env);
 

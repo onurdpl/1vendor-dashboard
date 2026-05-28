@@ -98,6 +98,43 @@ Expected startup report:
 
 The startup report must not print credential values.
 
+## Temporary Render Endpoint
+
+A temporary guarded endpoint exists for running discovery through the deployed Render backend runtime:
+
+```text
+POST /admin/probes/odoo-discovery
+```
+
+Safety behavior:
+
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- If `ADMIN_PROBE_TOKEN` is missing, the endpoint refuses.
+- Internally forces:
+  - `ODOO_ENABLED=true`
+  - `ODOO_DRY_RUN=false`
+  - `ODOO_DISCOVERY_ONLY=true`
+- Runs discovery only.
+- Does not create or modify Odoo records.
+- Does not create partners, Sales Orders, invoices, vendor bills, accounting entries, or stock moves.
+- Returns sanitized JSON only.
+
+Render setup:
+
+1. Add `ADMIN_PROBE_TOKEN` in the Render backend service environment.
+2. Confirm Odoo env vars are configured in the same Render backend service.
+3. Deploy the backend.
+4. Call the endpoint:
+
+```bash
+curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-discovery" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN" \
+  -H "content-type: application/json"
+```
+
+Remove or disable this endpoint after discovery is complete.
+
 ## Tested Endpoint Method
 
 Planned method:
