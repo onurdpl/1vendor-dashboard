@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { syncOdooSaleOrdersForAllocations } from '../../integrations/odoo/odooAllocationOrderSync.service.js';
 import { upsertSaleLedgerForAllocation } from '../finance/sale-ledger.service.js';
 import type {
   ParsedShopifyOrderLineItem,
@@ -386,8 +387,11 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
       return {
         shopifyOrderId: parsedOrder.sourceShopifyOrderId,
         allocationCount: allocationIds.size,
+        allocationIds: Array.from(allocationIds),
       };
     });
+
+    await syncOdooSaleOrdersForAllocations(result.allocationIds);
 
     return {
       ok: true,

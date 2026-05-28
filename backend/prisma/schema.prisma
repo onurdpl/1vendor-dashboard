@@ -403,6 +403,9 @@ model VendorAllocation {
   shippingStatus           String                        @default("Awaiting Shipment")
   trackingNumber           String?
   carrier                  String?
+  odooSaleOrderId          String?
+  odooSaleOrderName        String?
+  odooSaleOrderSyncedAt    DateTime?
   createdAt                DateTime                      @default(now())
   updatedAt                DateTime                      @updatedAt
   order                    ShopifyOrder                  @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
@@ -419,6 +422,8 @@ model VendorAllocation {
   shipmentExecutions       ShipmentExecution[]
   operationalSignals       OperationalSignal[]
   automationActions        AutomationAction[]
+
+  @@index([odooSaleOrderId])
 }
 
 model VendorAllocationLineItem {
