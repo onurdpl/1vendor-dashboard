@@ -68,7 +68,7 @@ const USEFUL_FIELD_CANDIDATES = [
 export function parseOdooProbeConfig(env: OdooProbeEnv): OdooProbeConfig {
   const missing = REQUIRED_ENV_KEYS.filter((key) => env[key] === undefined);
   if (missing.length) {
-    throw new Error(`Missing Odoo env vars in backend/.env: ${missing.join(', ')}`);
+    throw new Error(`Missing Odoo env vars in process.env or backend/.env: ${missing.join(', ')}`);
   }
 
   return {
@@ -263,7 +263,7 @@ function summarizeSamples(samples: OdooSearchReadRecord[]) {
 function readRequired(env: OdooProbeEnv, key: keyof OdooProbeEnv & string) {
   const value = env[key];
   if (!value?.trim()) {
-    throw new Error(`${key} is required in backend/.env.`);
+    throw new Error(`${key} is required in process.env or backend/.env.`);
   }
   return value.trim();
 }

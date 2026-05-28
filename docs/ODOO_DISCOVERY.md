@@ -28,7 +28,9 @@ Forbidden:
 
 ## Required Credentials
 
-Credentials are read only from `backend/.env`.
+Credentials are read from runtime environment variables first. `backend/.env` is used only as a local fallback for keys that are not present in `process.env`.
+
+Render dashboard environment variables are not the same as local `backend/.env`; do not copy Render secrets into the repo or into chat.
 
 ```text
 ODOO_ENABLED=false
@@ -68,9 +70,33 @@ ODOO_DISCOVERY_ONLY=true
 NODE_ENV=development
 ```
 
-The command refuses to run unless `NODE_ENV` is `development` or `test`, and refuses to run if `ODOO_DRY_RUN` is not explicitly set in `backend/.env`.
+The command refuses to run unless `NODE_ENV` is `development` or `test`, and refuses to run if `ODOO_DRY_RUN` is not explicitly set in `process.env` or `backend/.env`.
 
 If `ODOO_DRY_RUN=false` and `ODOO_DISCOVERY_ONLY` is not `true`, the command reports `LIVE_CREATE_BLOCKED` and exits before any create/update call.
+
+## Render Execution Notes
+
+Run the probe from the Render backend service shell or a one-off job so it uses Render-managed environment variables.
+
+Exact Render Shell command:
+
+```bash
+ODOO_ENABLED=true ODOO_DRY_RUN=false ODOO_DISCOVERY_ONLY=true npm run probe:odoo:order
+```
+
+If Render service root is configured as `backend`, use the repository-root script through the parent directory:
+
+```bash
+ODOO_ENABLED=true ODOO_DRY_RUN=false ODOO_DISCOVERY_ONLY=true npm --prefix .. run probe:odoo:order
+```
+
+Expected startup report:
+
+- `envSource`: `process.env`, `backend/.env`, or `mixed`
+- Odoo gate values for `ODOO_ENABLED`, `ODOO_DRY_RUN`, and `ODOO_DISCOVERY_ONLY`
+- yes/no presence checks for `ODOO_URL`, `ODOO_DB`, `ODOO_USERNAME`, and `ODOO_API_KEY`
+
+The startup report must not print credential values.
 
 ## Tested Endpoint Method
 
