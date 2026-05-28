@@ -39,9 +39,33 @@ async function main() {
     throw new Error('ODOO_DRY_RUN must be explicitly set in backend/.env.');
   }
 
+  const dryRun = parseBoolean(backendEnv.ODOO_DRY_RUN, 'ODOO_DRY_RUN');
+  const discoveryOnly = parseBoolean(backendEnv.ODOO_DISCOVERY_ONLY, 'ODOO_DISCOVERY_ONLY', false);
+  const enabled = parseBoolean(backendEnv.ODOO_ENABLED, 'ODOO_ENABLED', false);
+  const mode = dryRun ? 'DRY_RUN' : enabled && discoveryOnly ? 'DISCOVERY_ONLY' : 'LIVE_CREATE_BLOCKED';
+  console.log(`Odoo probe mode: ${mode}`);
+
+  if (!dryRun && !discoveryOnly) {
+    throw new Error('LIVE_CREATE_BLOCKED: ODOO_DISCOVERY_ONLY=true is required for any non-dry-run Odoo probe. Record creation is blocked.');
+  }
+
   await runOdooOrderProbe({
     env: backendEnv,
   });
+}
+
+function parseBoolean(value: string | undefined, key: string, fallback?: boolean) {
+  const normalized = value?.trim().toLowerCase();
+  if (!normalized && fallback !== undefined) {
+    return fallback;
+  }
+  if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
+    return true;
+  }
+  if (normalized === 'false' || normalized === '0' || normalized === 'no') {
+    return false;
+  }
+  throw new Error(`${key} must be explicitly true or false in backend/.env.`);
 }
 
 main().catch((error) => {

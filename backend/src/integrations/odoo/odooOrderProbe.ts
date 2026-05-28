@@ -1,4 +1,4 @@
-import { OdooClient, OdooClientError, type OdooFieldsGetResponse } from './odooClient.js';
+import { OdooClient, OdooClientError, type OdooFieldsGetResponse, type OdooSearchReadRecord } from './odooClient.js';
 
 type ProbeLogger = Pick<Console, 'log' | 'error'>;
 
@@ -14,6 +14,7 @@ export type OdooOrderProbeOptions = {
 type OdooProbeConfig = {
   enabled: boolean;
   dryRun: boolean;
+  discoveryOnly: boolean;
   url: string;
   db: string;
   username: string;
@@ -37,6 +38,32 @@ type AllocationFixture = {
 const REQUIRED_ENV_KEYS = ['ODOO_ENABLED', 'ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_API_KEY', 'ODOO_DRY_RUN'] as const;
 const SECRET_KEY_PATTERN = /api_key|password|token|secret|authorization/i;
 const PII_KEY_PATTERN = /email|tax|vat/i;
+const DISCOVERY_MODELS = ['sale.order', 'sale.order.line', 'res.partner', 'product.product', 'account.tax', 'res.company', 'res.currency'] as const;
+const SAFE_SAMPLE_FIELDS = ['id', 'display_name', 'name'];
+const USEFUL_FIELD_CANDIDATES = [
+  'id',
+  'name',
+  'display_name',
+  'partner_id',
+  'order_line',
+  'client_order_ref',
+  'origin',
+  'note',
+  'product_id',
+  'product_uom_qty',
+  'price_unit',
+  'tax_id',
+  'currency_id',
+  'company_id',
+  'amount_total',
+  'state',
+  'vat',
+  'email',
+  'default_code',
+  'list_price',
+  'amount',
+  'active',
+];
 
 export function parseOdooProbeConfig(env: OdooProbeEnv): OdooProbeConfig {
   const missing = REQUIRED_ENV_KEYS.filter((key) => env[key] === undefined);
@@ -47,6 +74,7 @@ export function parseOdooProbeConfig(env: OdooProbeEnv): OdooProbeConfig {
   return {
     enabled: parseBoolean(env.ODOO_ENABLED, 'ODOO_ENABLED'),
     dryRun: parseBoolean(env.ODOO_DRY_RUN, 'ODOO_DRY_RUN'),
+    discoveryOnly: parseBoolean(env.ODOO_DISCOVERY_ONLY, 'ODOO_DISCOVERY_ONLY', false),
     url: readRequired(env, 'ODOO_URL'),
     db: readRequired(env, 'ODOO_DB'),
     username: readRequired(env, 'ODOO_USERNAME'),
@@ -105,7 +133,7 @@ export async function runOdooOrderProbe(options: OdooOrderProbeOptions) {
   const fixture = buildDefaultOdooAllocationFixture(options.env, now());
 
   logger.log('TEST ONLY: Odoo Shopify/vendor allocation order probe.');
-  logger.log('This probe creates at most one draft/test Sales Order and never creates invoices or accounting entries.');
+  logger.log('Dry-run prints a planned payload. Live discovery reads metadata only; record creation is blocked.');
 
   const plannedPartnerValues = buildPartnerValues(fixture);
   const plannedSalesOrderValues = buildDraftSalesOrderValues(fixture, 0);
@@ -127,6 +155,10 @@ export async function runOdooOrderProbe(options: OdooOrderProbeOptions) {
     throw new Error('ODOO_ENABLED=true is required when ODOO_DRY_RUN=false.');
   }
 
+  if (!config.discoveryOnly) {
+    throw new Error('LIVE_CREATE_BLOCKED: set ODOO_DISCOVERY_ONLY=true for live-safe discovery. Record creation is blocked in this step.');
+  }
+
   const client = new OdooClient(
     {
       url: config.url,
@@ -137,52 +169,68 @@ export async function runOdooOrderProbe(options: OdooOrderProbeOptions) {
     options.fetchImpl,
   );
 
-  const uid = await client.authenticate();
-  logStep(logger, 'Odoo auth', { succeeded: true, uidPresent: Number.isInteger(uid) && uid > 0 });
-
-  const saleOrderFields = await client.fieldsGet(uid, 'sale.order');
-  const saleOrderLineFields = await client.fieldsGet(uid, 'sale.order.line');
-  logStep(logger, 'Odoo models inspected', {
-    models: ['sale.order', 'sale.order.line', 'res.partner'],
-    saleOrderRequiredFields: requiredWritableFields(saleOrderFields),
-    saleOrderLineRequiredFields: requiredWritableFields(saleOrderLineFields),
-  });
-
-  const missing = findMissingRequiredFields(buildDraftSalesOrderValues(fixture, 1), saleOrderFields, saleOrderLineFields);
-  if (missing.length) {
-    throw new Error(`Missing required Odoo fields for safe Sales Order creation: ${missing.join(', ')}`);
-  }
-
-  const partnerId = await findOrCreateTestPartner(client, uid, fixture, logger);
-  const orderValues = buildDraftSalesOrderValues(fixture, partnerId);
-  logStep(logger, 'Draft Sales Order create payload summary', {
-    salesOrderValues: orderValues,
-  });
-
-  const orderId = await client.modelCall<number>(uid, 'sale.order', 'create', [orderValues]);
-  logStep(logger, 'Draft Sales Order create result', {
-    succeeded: Number.isInteger(orderId) && orderId > 0,
-    orderId,
-    reference: fixture.reference,
-  });
+  await runOdooLiveDiscovery(client, config, logger);
 }
 
-async function findOrCreateTestPartner(client: OdooClient, uid: number, fixture: AllocationFixture, logger: ProbeLogger) {
-  const domain = [['name', '=', fixture.vendorName]];
-  const existingIds = await client.modelCall<number[]>(uid, 'res.partner', 'search', [domain], { limit: 1 });
-  if (existingIds.length) {
-    logStep(logger, 'Test partner lookup', { found: true, partnerId: existingIds[0] });
-    return existingIds[0];
+async function runOdooLiveDiscovery(client: OdooClient, _config: OdooProbeConfig, logger: ProbeLogger) {
+  let versionInfo: unknown = null;
+  try {
+    versionInfo = await client.version();
+  } catch (error) {
+    versionInfo = {
+      unavailable: true,
+      error: describeOdooProbeError(error),
+    };
   }
 
-  const partnerValues = buildPartnerValues(fixture);
-  const partnerId = await client.modelCall<number>(uid, 'res.partner', 'create', [partnerValues]);
-  logStep(logger, 'Test partner create', {
-    created: Number.isInteger(partnerId) && partnerId > 0,
-    partnerId,
-    partnerValues,
+  const uid = await client.authenticate();
+  logStep(logger, 'Odoo live discovery auth/info', {
+    mode: 'DISCOVERY_ONLY',
+    versionInfo,
+    authSucceeded: true,
+    uidPresent: Number.isInteger(uid) && uid > 0,
   });
-  return partnerId;
+
+  for (const model of DISCOVERY_MODELS) {
+    const result = await inspectDiscoveryModel(client, uid, model);
+    logStep(logger, `Odoo model discovery: ${model}`, result);
+  }
+
+  logger.log('DISCOVERY_ONLY complete. No Odoo records were created, updated, invoiced, posted, or confirmed.');
+}
+
+async function inspectDiscoveryModel(client: OdooClient, uid: number, model: (typeof DISCOVERY_MODELS)[number]) {
+  try {
+    const fields = await client.fieldsGet(uid, model);
+    const usefulFields = usefulFieldsFound(fields);
+    const sampleFields = SAFE_SAMPLE_FIELDS.filter((field) => fields[field]);
+    let samples: OdooSearchReadRecord[] = [];
+
+    try {
+      samples = await client.searchRead(uid, model, [], sampleFields.length ? sampleFields : ['id'], 3);
+    } catch {
+      samples = [];
+    }
+
+    return {
+      model,
+      exists: true,
+      requiredFields: requiredWritableFields(fields),
+      usefulFields,
+      samples: summarizeSamples(samples),
+      unknowns: [],
+    };
+  } catch (error) {
+    return {
+      model,
+      exists: false,
+      requiredFields: 'unknown',
+      usefulFields: [],
+      samples: [],
+      unknowns: [`${model} availability/fields are unknown until Odoo access confirms this model.`],
+      error: describeOdooProbeError(error),
+    };
+  }
 }
 
 function buildPartnerValues(fixture: AllocationFixture) {
@@ -194,23 +242,6 @@ function buildPartnerValues(fixture: AllocationFixture) {
   };
 }
 
-function findMissingRequiredFields(orderValues: Record<string, unknown>, orderFields: OdooFieldsGetResponse, lineFields: OdooFieldsGetResponse) {
-  const missing = requiredWritableFields(orderFields).filter((field) => orderValues[field] === undefined || orderValues[field] === null || orderValues[field] === '');
-  const orderLines = Array.isArray(orderValues.order_line) ? orderValues.order_line : [];
-  const firstLineCommand = orderLines[0];
-  const firstLineValues = Array.isArray(firstLineCommand) && typeof firstLineCommand[2] === 'object' && firstLineCommand[2] !== null
-    ? (firstLineCommand[2] as Record<string, unknown>)
-    : {};
-
-  for (const field of requiredWritableFields(lineFields)) {
-    if (firstLineValues[field] === undefined || firstLineValues[field] === null || firstLineValues[field] === '') {
-      missing.push(`order_line.${field}`);
-    }
-  }
-
-  return missing.filter((field) => !isKnownServerComputedField(field));
-}
-
 function requiredWritableFields(fields: OdooFieldsGetResponse) {
   return Object.entries(fields)
     .filter(([, definition]) => definition.required && !definition.readonly)
@@ -218,18 +249,15 @@ function requiredWritableFields(fields: OdooFieldsGetResponse) {
     .sort();
 }
 
-function isKnownServerComputedField(field: string) {
-  return [
-    'company_id',
-    'currency_id',
-    'date_order',
-    'display_name',
-    'name',
-    'order_line.sequence',
-    'order_line.company_id',
-    'order_line.currency_id',
-    'order_line.order_id',
-  ].includes(field);
+function usefulFieldsFound(fields: OdooFieldsGetResponse) {
+  return USEFUL_FIELD_CANDIDATES.filter((field) => fields[field]);
+}
+
+function summarizeSamples(samples: OdooSearchReadRecord[]) {
+  return samples.slice(0, 3).map((sample) => ({
+    id: sample.id,
+    name: sample.display_name || sample.name || null,
+  }));
 }
 
 function readRequired(env: OdooProbeEnv, key: keyof OdooProbeEnv & string) {
@@ -258,8 +286,11 @@ function readNumber(env: OdooProbeEnv, key: string, fallback: number) {
   return parsed;
 }
 
-function parseBoolean(value: string | undefined, key: string) {
+function parseBoolean(value: string | undefined, key: string, fallback?: boolean) {
   const normalized = value?.trim().toLowerCase();
+  if (!normalized && fallback !== undefined) {
+    return fallback;
+  }
   if (normalized === 'true' || normalized === '1' || normalized === 'yes') {
     return true;
   }
@@ -308,6 +339,13 @@ export function describeOdooProbeError(error: unknown) {
   }
 
   return {
-    message: error instanceof Error ? error.message : 'Unknown Odoo probe error.',
+    message: error instanceof Error ? sanitizeText(error.message) : 'Unknown Odoo probe error.',
   };
+}
+
+function sanitizeText(value: string) {
+  return value
+    .replace(/api[_-]?key[^\s,;)]*/gi, 'api_key=[redacted]')
+    .replace(/password[^\s,;)]*/gi, 'password=[redacted]')
+    .replace(/token[^\s,;)]*/gi, 'token=[redacted]');
 }

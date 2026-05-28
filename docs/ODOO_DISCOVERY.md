@@ -11,15 +11,18 @@ The probe is not connected to Shopify webhooks or production order flow.
 Allowed:
 
 - Authenticate to Odoo from a CLI probe.
-- Inspect required fields for `sale.order` and `sale.order.line`.
-- Look up or create one clearly marked test vendor partner.
-- Create one draft/test Sales Order only when explicitly enabled.
+- Inspect required fields for safe discovery models.
+- Read up to three safe sample ids/names per inspected model.
+- Print unknown when a model is unavailable.
 
 Forbidden:
 
+- Partner creation.
+- Sales Order creation.
 - Customer invoice creation.
 - Vendor customer invoice creation.
 - Official accounting entries.
+- Stock moves.
 - Shipping, payout, settlement, invoice, or vendor billing logic changes.
 - Live Shopify webhook integration.
 
@@ -34,6 +37,7 @@ ODOO_DB=
 ODOO_USERNAME=
 ODOO_API_KEY=
 ODOO_DRY_RUN=true
+ODOO_DISCOVERY_ONLY=true
 ```
 
 Optional safe fixture defaults:
@@ -55,37 +59,71 @@ Dry-run mode:
 npm run probe:odoo:order
 ```
 
-Live test mode requires:
+Live discovery mode requires:
 
 ```text
 ODOO_ENABLED=true
 ODOO_DRY_RUN=false
+ODOO_DISCOVERY_ONLY=true
 NODE_ENV=development
 ```
 
 The command refuses to run unless `NODE_ENV` is `development` or `test`, and refuses to run if `ODOO_DRY_RUN` is not explicitly set in `backend/.env`.
+
+If `ODOO_DRY_RUN=false` and `ODOO_DISCOVERY_ONLY` is not `true`, the command reports `LIVE_CREATE_BLOCKED` and exits before any create/update call.
 
 ## Tested Endpoint Method
 
 Planned method:
 
 - JSON-RPC endpoint: `/jsonrpc`
+- Version/info service: `common.version`
 - Auth service: `common.authenticate`
 - Object service: `object.execute_kw`
+- Model field inspection: `fields_get`
+- Safe sample reads: `search_read`
 
 No XML-RPC dependency is added.
 
 ## Current Test Status
 
 - Auth worked: unknown, not yet live-tested.
-- Models inspected: planned `sale.order`, `sale.order.line`, `res.partner`.
+- Models inspected: planned `sale.order`, `sale.order.line`, `res.partner`, `product.product`, `account.tax`, `res.company`, `res.currency`.
 - Required fields observed: unknown until live probe runs `fields_get`.
-- Draft order creation succeeded: unknown until live probe runs with `ODOO_ENABLED=true` and `ODOO_DRY_RUN=false`.
+- Draft order creation succeeded: not attempted in discovery-only mode.
 - Validation errors from Odoo: unknown until live probe.
+
+## Live Discovery Results
+
+Fill this section after running with `ODOO_ENABLED=true`, `ODOO_DRY_RUN=false`, and `ODOO_DISCOVERY_ONLY=true`.
+
+- Auth result: unknown.
+- User/company result: unknown.
+- Available sales models:
+  - `sale.order`: unknown.
+  - `sale.order.line`: unknown.
+- Available accounting models:
+  - `account.tax`: unknown.
+- Available products/taxes/currencies:
+  - `product.product`: unknown.
+  - `account.tax`: unknown.
+  - `res.currency`: unknown.
+- Company model:
+  - `res.company`: unknown.
+- Partner model:
+  - `res.partner`: unknown.
+- Required fields: unknown.
+- Useful fields found: unknown.
+- First safe sample ids/names: unknown.
+- Odoo validation errors: unknown.
+- Unknowns:
+  - Whether custom modules require additional Sales Order fields.
+  - Whether product/tax/currency mappings are needed before any future create probe.
+  - Whether a draft Sales Order can be created without product records.
 
 ## Required Field Handling
 
-Before creating a draft Sales Order, the probe inspects:
+Before any future draft Sales Order creation is allowed, the probe must inspect:
 
 - `sale.order.fields_get`
 - `sale.order.line.fields_get`
@@ -94,7 +132,7 @@ If Odoo reports required writable fields that are not present in the safe test p
 
 ## Draft/Test Sales Order Mapping
 
-The probe maps one internal fixture to:
+The dry-run planner maps one internal fixture to:
 
 - `res.partner`: test vendor partner.
 - `sale.order.partner_id`: test vendor partner id.
@@ -103,12 +141,13 @@ The probe maps one internal fixture to:
 - `sale.order.note`: clearly marked test-only note.
 - `sale.order.order_line`: one test line with name, quantity, and unit price.
 
-No invoice is created from the Sales Order.
+Current live discovery mode does not create the Sales Order. No invoice is created.
 
 ## Known Risks
 
 - Some Odoo deployments require product, unit-of-measure, pricelist, company, fiscal position, or tax fields on sales order lines.
 - If those fields are required, the probe must stop and report missing field names rather than guessing.
 - Odoo custom modules may enforce additional required fields.
-- A live run with `ODOO_DRY_RUN=false` can create a test partner and draft Sales Order in the configured Odoo database.
+- A live discovery run with `ODOO_DRY_RUN=false` and `ODOO_DISCOVERY_ONLY=true` authenticates and reads metadata/safe samples only.
+- Draft Sales Order creation remains blocked until discovery results are reviewed and a future task explicitly permits it.
 - API key, password, token, and full credential values must never be logged.

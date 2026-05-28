@@ -27,6 +27,12 @@ export type OdooFieldDefinition = {
 
 export type OdooFieldsGetResponse = Record<string, OdooFieldDefinition>;
 
+export type OdooSearchReadRecord = {
+  id?: number;
+  name?: string;
+  display_name?: string;
+};
+
 export class OdooClientError extends Error {
   constructor(
     message: string,
@@ -69,6 +75,14 @@ export class OdooClient {
     return uid;
   }
 
+  async version(): Promise<unknown> {
+    return this.callRpc<unknown>({
+      service: 'common',
+      method: 'version',
+      args: [],
+    });
+  }
+
   async modelCall<T>(uid: number, model: string, method: string, args: unknown[] = [], kwargs: Record<string, unknown> = {}): Promise<T> {
     return this.callRpc<T>(
       {
@@ -89,6 +103,19 @@ export class OdooClient {
     }
 
     return this.modelCall<OdooFieldsGetResponse>(uid, model, 'fields_get', [], kwargs);
+  }
+
+  async searchRead(
+    uid: number,
+    model: string,
+    domain: unknown[] = [],
+    fields: string[] = ['id', 'display_name', 'name'],
+    limit = 3,
+  ): Promise<OdooSearchReadRecord[]> {
+    return this.modelCall<OdooSearchReadRecord[]>(uid, model, 'search_read', [domain], {
+      fields,
+      limit,
+    });
   }
 
   private async callRpc<T>(params: Record<string, unknown>, context: { model?: string; method?: string } = {}): Promise<T> {
@@ -113,7 +140,7 @@ export class OdooClient {
       throw new OdooClientError('Odoo request failed before receiving a response.', {
         model: context.model,
         method: context.method,
-        odooMessage: error instanceof Error ? error.message : undefined,
+        odooMessage: sanitizeOdooErrorMessage(error instanceof Error ? error.message : undefined),
       });
     }
 
@@ -131,7 +158,7 @@ export class OdooClient {
         status: response.status,
         model: context.model,
         method: context.method,
-        odooMessage: body.error.message,
+        odooMessage: sanitizeOdooErrorMessage(body.error.message),
       });
     }
 
@@ -145,6 +172,17 @@ export class OdooClient {
 
     return body.result;
   }
+}
+
+function sanitizeOdooErrorMessage(message: string | undefined) {
+  if (!message) {
+    return undefined;
+  }
+
+  return message
+    .replace(/api[_-]?key[^\s,;)]*/gi, 'api_key=[redacted]')
+    .replace(/password[^\s,;)]*/gi, 'password=[redacted]')
+    .replace(/token[^\s,;)]*/gi, 'token=[redacted]');
 }
 
 async function parseJsonRpcResponse<T>(response: Response): Promise<OdooJsonRpcResponse<T>> {
