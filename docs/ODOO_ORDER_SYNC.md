@@ -109,6 +109,46 @@ Before creating an Odoo order, sync checks:
 
 If either check finds an existing order, no duplicate Odoo order is created.
 
+## Guarded Render Verification Endpoint
+
+A temporary guarded endpoint exists for verifying the deployed Render database schema, synthetic allocation sync, and idempotency without replaying Shopify webhooks:
+
+```text
+POST /admin/probes/odoo-allocation-sync-verify
+```
+
+Safety behavior:
+
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- Creates or reuses a fixed synthetic test fixture only:
+  - reference: `SPORGYM-ODOO-SYNC-VERIFY`
+  - allocation id: `alloc-odoo-sync-verify`
+- Checks the `VendorAllocation` Odoo sync columns before running sync.
+- Runs the existing allocation-to-Odoo sync twice.
+- Reads back local Odoo sync fields.
+- Reads Odoo `sale.order` state for the stored id.
+- Confirms no duplicate by checking the fixed Odoo `client_order_ref`.
+- Does not create invoices, confirm orders, create accounting entries, create payouts, create settlements, create shipping labels, or replay Shopify webhooks.
+
+Call from a trusted shell only:
+
+```bash
+curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-allocation-sync-verify" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN" \
+  -H "content-type: application/json"
+```
+
+Expected response includes:
+
+- Schema field presence.
+- Masked Odoo env presence.
+- Test allocation id.
+- Odoo sale.order id/name/state.
+- Local `odooSaleOrderSyncedAt`.
+- Idempotency result.
+- Sanitized warnings/errors.
+
 ## Failure Behavior
 
 Odoo sync runs after the Shopify allocation transaction commits. A sync failure does not roll back Shopify order ingestion or vendor allocation persistence.
