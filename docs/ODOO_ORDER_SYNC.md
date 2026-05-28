@@ -119,6 +119,7 @@ POST /admin/probes/odoo-allocation-sync-verify
 
 Safety behavior:
 
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
 - Requires header `x-admin-probe-token`.
 - Header value must match Render env `ADMIN_PROBE_TOKEN`.
 - Creates or reuses a fixed synthetic test fixture only:
@@ -130,6 +131,8 @@ Safety behavior:
 - Reads Odoo `sale.order` state for the stored id.
 - Confirms no duplicate by checking the fixed Odoo `client_order_ref`.
 - Does not create invoices, confirm orders, create accounting entries, create payouts, create settlements, create shipping labels, or replay Shopify webhooks.
+
+Keep `ADMIN_PROBES_ENABLED=false` in normal operation. Enable it only for controlled diagnostics, then disable it again after the probe is complete.
 
 Call from a trusted shell only:
 
@@ -148,6 +151,19 @@ Expected response includes:
 - Local `odooSaleOrderSyncedAt`.
 - Idempotency result.
 - Sanitized warnings/errors.
+
+## Render Verification Result
+
+The guarded Render verification completed successfully after the allocation sync deploy:
+
+- Schema fields present: yes.
+- Test allocation id: `alloc-odoo-sync-verify`.
+- Odoo sale.order id/name/state: `2` / `SPORGYM-SPORGYMODOOSYNCVERIFY-alloc-odoo-sync-verify` / `draft`.
+- Local synced timestamp: `2026-05-28T22:32:00.085Z`.
+- Duplicate count for the fixed Odoo `client_order_ref`: `1`.
+- Idempotency result: passed; the second sync reused the existing local/Odoo order and did not create a duplicate.
+
+Temporary admin probe endpoints should remain disabled by default after this successful verification.
 
 ## Failure Behavior
 

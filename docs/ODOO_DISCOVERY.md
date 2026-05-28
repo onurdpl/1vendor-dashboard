@@ -109,6 +109,7 @@ POST /admin/probes/odoo-discovery
 
 Safety behavior:
 
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
 - Requires header `x-admin-probe-token`.
 - Header value must match Render env `ADMIN_PROBE_TOKEN`.
 - If `ADMIN_PROBE_TOKEN` is missing, the endpoint refuses.
@@ -123,7 +124,7 @@ Safety behavior:
 
 Render setup:
 
-1. Add `ADMIN_PROBE_TOKEN` in the Render backend service environment.
+1. Add `ADMIN_PROBES_ENABLED=true` and `ADMIN_PROBE_TOKEN` in the Render backend service environment.
 2. Confirm Odoo env vars are configured in the same Render backend service.
 3. Deploy the backend.
 4. Call the endpoint:
@@ -134,7 +135,7 @@ curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probe
   -H "content-type: application/json"
 ```
 
-Remove or disable this endpoint after discovery is complete.
+Set `ADMIN_PROBES_ENABLED=false` after discovery is complete.
 
 ## Temporary Draft Sales Order Probe Endpoint
 
@@ -146,6 +147,7 @@ POST /admin/probes/odoo-draft-order
 
 Safety behavior:
 
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
 - Requires header `x-admin-probe-token`.
 - Header value must match Render env `ADMIN_PROBE_TOKEN`.
 - Internally forces:
@@ -185,7 +187,7 @@ Expected response includes:
 - Created line ids.
 - Validation errors if required fields are missing.
 
-Remove or disable this endpoint after the draft order probe is complete.
+Set `ADMIN_PROBES_ENABLED=false` after the draft order probe is complete.
 
 ## Tested Endpoint Method
 
@@ -265,4 +267,5 @@ Current live discovery mode does not create the Sales Order. The temporary draft
 - Odoo custom modules may enforce additional required fields.
 - A live discovery run with `ODOO_DRY_RUN=false` and `ODOO_DISCOVERY_ONLY=true` authenticates and reads metadata/safe samples only.
 - Draft Sales Order creation is limited to the guarded temporary endpoint and must remain disconnected from Shopify/order/shipping/invoice/payout/settlement flows.
+- Temporary admin probe endpoints must remain disabled by default and should be enabled only for controlled diagnostics.
 - API key, password, token, and full credential values must never be logged.

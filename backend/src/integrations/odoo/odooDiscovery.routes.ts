@@ -56,7 +56,15 @@ function buildForcedDraftOrderEnv(): OdooProbeEnv {
   };
 }
 
+function adminProbesEnabled() {
+  return process.env.ADMIN_PROBES_ENABLED?.trim().toLowerCase() === 'true';
+}
+
 function assertAdminProbeAuthorized(headers: Record<string, string | string[] | undefined>) {
+  if (!adminProbesEnabled()) {
+    return { ok: false as const, statusCode: 403, message: 'Admin probe endpoints are disabled.' };
+  }
+
   const expectedToken = process.env.ADMIN_PROBE_TOKEN?.trim();
   if (!expectedToken) {
     return { ok: false as const, statusCode: 503, message: 'Admin probe token is not configured.' };
