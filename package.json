@@ -29,6 +29,7 @@
     "backend:kargonomi:probe": "npm --prefix backend run kargonomi:probe",
     "kargonomi:lookup-probe": "npm --prefix backend run kargonomi:lookup-probe",
     "navlungo:create-post-probe": "npm --prefix backend run navlungo:create-post-probe",
+    "parasut:commission-probe": "npm --prefix backend run parasut:commission-probe",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"
   },
   "dependencies": {

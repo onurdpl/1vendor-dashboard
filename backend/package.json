@@ -23,7 +23,8 @@
     "shopify:fulfillment-webhooks:register": "node scripts/shopify-register-fulfillment-webhooks.mjs",
     "kargonomi:probe": "npm run build && node scripts/kargonomi-forward-probe.mjs",
     "kargonomi:lookup-probe": "npm run build && node scripts/kargonomi-location-lookup-probe.mjs",
-    "navlungo:create-post-probe": "npm run build && node scripts/navlungo-create-post-probe.mjs"
+    "navlungo:create-post-probe": "npm run build && node scripts/navlungo-create-post-probe.mjs",
+    "parasut:commission-probe": "npm run build && node scripts/parasut-commission-invoice-probe.mjs"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
