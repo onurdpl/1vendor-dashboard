@@ -1,8 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useNavigate } from 'react-router-dom';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnsPage } from './ReturnsPage';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
 import { setCurrentUser, setToken } from '../lib/auth';
@@ -210,6 +210,11 @@ function renderReturnsNavigationHarness(target: string) {
 }
 
 describe('ReturnsPage control center', () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
   beforeEach(() => {
     cleanup();
     window.localStorage.clear();
@@ -230,7 +235,7 @@ describe('ReturnsPage control center', () => {
     getReturnMock.mockReset();
   });
 
-  it('renders filters and table frame before return data hydrates', () => {
+  it('renders filters and table frame before return data hydrates', async () => {
     const returnsResult = deferred<ReturnSummary[]>();
     listReturnsMock.mockReturnValue(returnsResult.promise);
 
@@ -242,6 +247,11 @@ describe('ReturnsPage control center', () => {
     expect(screen.getByRole('columnheader', { name: 'Return status' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.queryByText('Returns unavailable')).not.toBeInTheDocument();
+
+    await act(async () => {
+      returnsResult.resolve([]);
+      await returnsResult.promise;
+    });
   });
 
   it('renders pending return requests separately from processed refunds', async () => {
