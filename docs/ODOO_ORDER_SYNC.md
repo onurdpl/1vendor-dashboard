@@ -263,6 +263,36 @@ Expected response includes:
 - Duplicate count.
 - Sanitized warnings/unknowns/errors.
 
+## Guarded Read-Only Allocation Diagnosis Probe
+
+A guarded read-only endpoint exists for diagnosing why one allocation did not sync without creating anything:
+
+```text
+GET /admin/probes/odoo-allocation-sync-diagnosis?allocationId=<allocation-id>
+```
+
+Safety behavior:
+
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- Reads one `VendorAllocation` by id.
+- Reads runtime Odoo env gates as booleans only.
+- Checks whether the allocation vendor is present in `ODOO_VENDOR_PARTNER_MAP`.
+- Checks Odoo `sale.order.x_vendor_id` existence/type/writability.
+- Checks Odoo required writable fields for `sale.order` and `sale.order.line`.
+- Searches Odoo `product.product` by allocation SKU using `default_code`.
+- Counts Odoo `sale.order` records by deterministic `client_order_ref`.
+- Reports that order ingestion calls sync after allocation persistence, but failed sync results are logged and not persisted on the allocation.
+- Does not run sync, replay Shopify webhooks, create Odoo records, create invoices, confirm orders, create accounting entries, create payouts, create settlements, or create shipping labels.
+
+Call from a trusted shell only:
+
+```bash
+curl -sS "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-allocation-sync-diagnosis?allocationId=alloc-sporjinal-7684032495953" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN"
+```
+
 ## Failure Behavior
 
 Odoo sync runs after the Shopify allocation transaction commits. A sync failure does not roll back Shopify order ingestion or vendor allocation persistence.

@@ -189,6 +189,110 @@ export function registerOdooDiscoveryProbeRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  app.get<{ Querystring: { allocationId?: string } }>('/admin/probes/odoo-allocation-sync-diagnosis', async (request, reply) => {
+    const auth = assertAdminProbeAuthorized(request.headers);
+    if (!auth.ok) {
+      return reply.code(auth.statusCode).send({ ok: false, message: auth.message });
+    }
+
+    const allocationId = request.query.allocationId?.trim();
+    if (!allocationId) {
+      return reply.code(400).send({ ok: false, message: 'allocationId query parameter is required.' });
+    }
+
+    try {
+      const result = await runOdooAllocationSyncDiagnosis(allocationId);
+      return reply.code(result.ok ? 200 : 404).send(result);
+    } catch (error) {
+      return reply.code(502).send({
+        ok: false,
+        allocationId,
+        error: sanitizeProbeError(error),
+      });
+    }
+  });
+}
+
+async function runOdooAllocationSyncDiagnosis(allocationId: string) {
+  const warnings: string[] = [];
+  const unknowns: string[] = [];
+  const errors: string[] = [];
+  const allocation = await readOdooAllocationDiagnosisAllocation(allocationId);
+
+  if (!allocation) {
+    return {
+      ok: false,
+      allocation: null,
+      runtime: summarizeOdooAllocationSyncEnv(),
+      odoo: null,
+      codePath: summarizeOdooSyncCodePath(),
+      diagnosis: {
+        exactFailureReason: `VendorAllocation ${allocationId} was not found.`,
+        canSafelyRetry: false,
+        smallestFix: 'Confirm the allocation id before retrying.',
+      },
+      warnings,
+      unknowns,
+      errors: [`VendorAllocation ${allocationId} was not found.`],
+    };
+  }
+
+  const runtime = {
+    ...summarizeOdooAllocationSyncEnv(),
+    vendorMapping: summarizeVendorPartnerMapping(allocation.assignedVendorId),
+  };
+  const clientOrderRef = buildOdooAllocationClientOrderRef(allocation.id);
+  let odoo: Awaited<ReturnType<typeof inspectOdooAllocationSyncPrerequisites>> | null = null;
+
+  try {
+    odoo = await inspectOdooAllocationSyncPrerequisites(allocation, clientOrderRef);
+  } catch (error) {
+    errors.push(sanitizeProbeError(error).message);
+  }
+
+  if (allocation.lineItems.length === 0) {
+    errors.push('Allocation has no line items.');
+  }
+  if (!runtime.vendorMapping.mapped) {
+    errors.push(`No Odoo vendor portal partner mapping configured for vendor ${allocation.assignedVendorId}.`);
+  }
+  if (odoo?.saleOrderLineRequiredWritableFields.includes('product_id')) {
+    errors.push('Odoo requires sale.order.line.product_id, but the current sync still creates text-only order lines without product_id.');
+  }
+  if (odoo?.xVendorField.exists === false) {
+    errors.push('Odoo sale.order.x_vendor_id does not exist.');
+  }
+  if (odoo?.xVendorField.exists && !odoo.xVendorField.writable) {
+    errors.push('Odoo sale.order.x_vendor_id is not writable.');
+  }
+  if (odoo?.xVendorField.exists && !odoo.xVendorField.isMany2one) {
+    errors.push('Odoo sale.order.x_vendor_id is not a many2one field.');
+  }
+  if (odoo?.matchingOdooSaleOrderCount === 0) {
+    unknowns.push('No Odoo sale.order found by deterministic client_order_ref.');
+  }
+
+  const exactFailureReason = errors[0] ?? (unknowns.length ? unknowns[0] : null);
+  const canSafelyRetry = errors.length === 0;
+  const smallestFix = chooseOdooDiagnosisSmallestFix(errors, allocation.lineItems.length);
+
+  return {
+    ok: errors.length === 0,
+    allocation: summarizeAllocationDiagnosis(allocation),
+    clientOrderRef,
+    runtime,
+    odoo,
+    codePath: summarizeOdooSyncCodePath(),
+    diagnosis: {
+      exactFailureReason,
+      canSafelyRetry,
+      smallestFix,
+    },
+    warnings,
+    unknowns,
+    errors,
+  };
 }
 
 async function runOdooAllocationSyncStatus(allocationId: string) {
@@ -669,6 +773,112 @@ function readOdooAllocationStatusAllocation(allocationId: string) {
   });
 }
 
+function readOdooAllocationDiagnosisAllocation(allocationId: string) {
+  return prisma.vendorAllocation.findUnique({
+    where: { id: allocationId },
+    include: {
+      order: {
+        select: {
+          id: true,
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+      lineItems: {
+        select: {
+          id: true,
+          quantity: true,
+          shopifyOrderLineItem: {
+            select: {
+              sourceLineItemId: true,
+              sourceVariantId: true,
+              sku: true,
+              title: true,
+              unitPrice: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'asc',
+        },
+      },
+    },
+  });
+}
+
+async function inspectOdooAllocationSyncPrerequisites(
+  allocation: NonNullable<Awaited<ReturnType<typeof readOdooAllocationDiagnosisAllocation>>>,
+  clientOrderRef: string,
+) {
+  const client = buildOdooClientFromEnv();
+  const uid = await client.authenticate();
+  const skus = allocation.lineItems
+    .map((lineItem) => lineItem.shopifyOrderLineItem.sku?.trim())
+    .filter((sku): sku is string => Boolean(sku));
+  const [saleOrderFields, saleOrderLineFields, matchingCount, products] = await Promise.all([
+    client.fieldsGet(uid, 'sale.order'),
+    client.fieldsGet(uid, 'sale.order.line'),
+    client.modelCall<number>(uid, 'sale.order', 'search_count', [[[ 'client_order_ref', '=', clientOrderRef ]]]),
+    Promise.all(skus.map((sku) => searchOdooProductByDefaultCode(client, uid, sku))),
+  ]);
+
+  return {
+    authSucceeded: true,
+    xVendorField: summarizeOdooField(saleOrderFields.x_vendor_id),
+    saleOrderRequiredWritableFields: requiredWritableFieldNames(saleOrderFields),
+    saleOrderLineRequiredWritableFields: requiredWritableFieldNames(saleOrderLineFields),
+    products,
+    matchingOdooSaleOrderCount: matchingCount,
+  };
+}
+
+async function searchOdooProductByDefaultCode(client: OdooClient, uid: number, sku: string) {
+  const records = await client.modelCall<Array<Record<string, unknown>>>(uid, 'product.product', 'search_read', [[[ 'default_code', '=', sku ]]], {
+    fields: ['id', 'display_name', 'name', 'default_code'],
+    limit: 5,
+  });
+
+  return {
+    sku,
+    exists: records.length > 0,
+    count: records.length,
+    matches: records.map((record) => ({
+      id: Number(record.id),
+      name: readStringOrNull(record.display_name) ?? readStringOrNull(record.name),
+      defaultCode: readStringOrNull(record.default_code),
+    })),
+  };
+}
+
+function requiredWritableFieldNames(fields: Record<string, { required?: boolean; readonly?: boolean }>) {
+  return Object.entries(fields)
+    .filter(([, definition]) => definition.required && !definition.readonly)
+    .map(([field]) => field)
+    .sort();
+}
+
+function summarizeOdooField(definition: { type?: string; readonly?: boolean; required?: boolean; string?: string } | undefined) {
+  if (!definition) {
+    return {
+      exists: false,
+      writable: false,
+      isMany2one: false,
+      type: null,
+      required: null,
+      label: null,
+    };
+  }
+
+  return {
+    exists: true,
+    writable: definition.readonly !== true,
+    isMany2one: definition.type === 'many2one',
+    type: definition.type ?? null,
+    required: definition.required === true,
+    label: definition.string ?? null,
+  };
+}
+
 async function searchOdooSaleOrderByClientOrderRef(clientOrderRef: string) {
   const client = buildOdooClientFromEnv();
   const uid = await client.authenticate();
@@ -804,6 +1014,29 @@ function summarizeAllocationSyncStatus(allocation: NonNullable<Awaited<ReturnTyp
   };
 }
 
+function summarizeAllocationDiagnosis(allocation: NonNullable<Awaited<ReturnType<typeof readOdooAllocationDiagnosisAllocation>>>) {
+  return {
+    id: allocation.id,
+    shopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+    shopifyOrderId: allocation.order.sourceShopifyOrderId,
+    localOrderId: allocation.order.id,
+    vendorIdentifier: allocation.assignedVendorId,
+    lineItemCount: allocation.lineItems.length,
+    odooSaleOrderId: allocation.odooSaleOrderId,
+    odooSaleOrderName: allocation.odooSaleOrderName,
+    odooSaleOrderSyncedAt: allocation.odooSaleOrderSyncedAt?.toISOString() ?? null,
+    lineItems: allocation.lineItems.map((lineItem) => ({
+      id: lineItem.id,
+      sourceLineItemId: lineItem.shopifyOrderLineItem.sourceLineItemId,
+      sourceVariantId: lineItem.shopifyOrderLineItem.sourceVariantId,
+      sku: lineItem.shopifyOrderLineItem.sku,
+      title: lineItem.shopifyOrderLineItem.title,
+      quantity: lineItem.quantity,
+      unitPrice: lineItem.shopifyOrderLineItem.unitPrice?.toString() ?? null,
+    })),
+  };
+}
+
 function summarizeOdooSaleOrder(saleOrder: Record<string, unknown>) {
   return {
     id: typeof saleOrder.id === 'number' ? saleOrder.id : Number(saleOrder.id),
@@ -812,6 +1045,63 @@ function summarizeOdooSaleOrder(saleOrder: Record<string, unknown>) {
     clientOrderRef: readStringOrNull(saleOrder.client_order_ref),
     xVendorId: readOdooManyToOneRef(saleOrder.x_vendor_id),
   };
+}
+
+function summarizeVendorPartnerMapping(vendorIdentifier: string) {
+  const map = parseVendorPartnerMap(process.env.ODOO_VENDOR_PARTNER_MAP);
+  return {
+    vendorIdentifier,
+    configured: Boolean(process.env.ODOO_VENDOR_PARTNER_MAP?.trim()),
+    mapped: map[vendorIdentifier] !== undefined,
+    mappedPartnerId: map[vendorIdentifier] ?? null,
+  };
+}
+
+function parseVendorPartnerMap(value: string | undefined) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return {} as Record<string, number>;
+  }
+
+  return normalized.split(',').reduce<Record<string, number>>((map, entry) => {
+    const [rawVendorId, rawPartnerId] = entry.split(':');
+    const vendorId = rawVendorId?.trim();
+    const partnerId = Number(rawPartnerId?.trim());
+    if (vendorId && Number.isInteger(partnerId) && partnerId > 0) {
+      map[vendorId] = partnerId;
+    }
+    return map;
+  }, {});
+}
+
+function summarizeOdooSyncCodePath() {
+  return {
+    syncCalledAfterAllocationPersistence: true,
+    syncResultPersistedOnFailure: false,
+    syncFailureHandling: 'syncOdooSaleOrdersForAllocations returns failed results and logs errors, but order ingestion does not persist those results.',
+    createsOdooRecordsInThisDiagnosis: false,
+    currentLineStrategy: 'text_only_sale_order_lines',
+    requiresProductIdInCode: false,
+  };
+}
+
+function chooseOdooDiagnosisSmallestFix(errors: string[], lineItemCount: number) {
+  if (lineItemCount === 0) {
+    return 'Allocation must have line items before retry.';
+  }
+  if (errors.some((error) => error.includes('product_id'))) {
+    return 'Update Odoo sync to resolve SKU/default_code to product.product id and send product_id on sale.order.line, or relax the Odoo requirement for product_id.';
+  }
+  if (errors.some((error) => error.includes('vendor portal partner mapping'))) {
+    return 'Configure ODOO_VENDOR_PARTNER_MAP for the allocation vendor before retry.';
+  }
+  if (errors.some((error) => error.includes('x_vendor_id'))) {
+    return 'Create/fix writable sale.order.x_vendor_id as a many2one to res.partner before retry.';
+  }
+  if (errors.length) {
+    return 'Fix the reported Odoo/runtime prerequisite, then retry the allocation sync.';
+  }
+  return 'No current prerequisite failure detected; safe to retry with the guarded sync endpoint if operationally approved.';
 }
 
 function quietProbeLogger() {
