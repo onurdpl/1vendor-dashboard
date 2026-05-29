@@ -23,6 +23,7 @@ type OdooAllocationSyncConfig =
       apiKey: string;
       partnerId?: number;
       partnerName?: string;
+      vendorPartnerMap: Record<string, number>;
     };
 
 type LiveOdooAllocationSyncConfig = Extract<OdooAllocationSyncConfig, { enabled: true; dryRun: false }>;
@@ -49,6 +50,7 @@ type SyncResult =
 const REQUIRED_ODOO_ENV_KEYS = ['ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_API_KEY'] as const;
 const SALE_ORDER_READ_FIELDS = ['id', 'name', 'state'];
 const SALE_ORDER_REFERENCE_PREFIX = 'sporgym-allocation:';
+const ODOO_VENDOR_PORTAL_FIELD = 'x_vendor_id';
 
 export async function syncOdooSaleOrdersForAllocations(
   allocationIds: Iterable<string>,
@@ -103,6 +105,7 @@ export async function syncOdooSaleOrderForAllocation(
       };
     }
 
+    const vendorPortalPartnerId = resolveOdooVendorPortalPartnerId(allocation.assignedVendorId, config.vendorPartnerMap);
     const client = new OdooClient(
       {
         url: config.url,
@@ -128,7 +131,7 @@ export async function syncOdooSaleOrderForAllocation(
       };
     }
 
-    const saleOrderValues = buildOdooSaleOrderValues(allocation, partner, company);
+    const saleOrderValues = buildOdooSaleOrderValues(allocation, partner, company, vendorPortalPartnerId);
     await validateOdooSaleOrderPayload(client, uid, saleOrderValues);
 
     const saleOrderId = await client.modelCall<number>(uid, 'sale.order', 'create', [saleOrderValues]);
@@ -176,6 +179,7 @@ function parseOdooAllocationSyncConfig(env: OdooAllocationSyncEnv): OdooAllocati
   if (!partnerId && !partnerName) {
     throw new Error('ODOO_SALE_ORDER_PARTNER_ID or ODOO_SALE_ORDER_PARTNER_NAME is required for allocation sale.order sync.');
   }
+  const vendorPartnerMap = parseOdooVendorPartnerMap(env.ODOO_VENDOR_PARTNER_MAP);
 
   return {
     enabled: true,
@@ -186,6 +190,7 @@ function parseOdooAllocationSyncConfig(env: OdooAllocationSyncEnv): OdooAllocati
     apiKey: readRequired(env, 'ODOO_API_KEY'),
     partnerId,
     partnerName,
+    vendorPartnerMap,
   };
 }
 
@@ -250,7 +255,20 @@ async function findExistingOdooSaleOrder(client: OdooClient, uid: number, client
   return records[0];
 }
 
-function buildOdooSaleOrderValues(allocation: AllocationForOdooSync, partner: OdooPartnerRef, company: OdooCompanyRef) {
+function resolveOdooVendorPortalPartnerId(vendorIdentifier: string, vendorPartnerMap: Record<string, number>) {
+  const partnerId = vendorPartnerMap[vendorIdentifier];
+  if (!partnerId) {
+    throw new Error(`No Odoo vendor portal partner mapping configured for vendor ${vendorIdentifier}.`);
+  }
+  return partnerId;
+}
+
+function buildOdooSaleOrderValues(
+  allocation: AllocationForOdooSync,
+  partner: OdooPartnerRef,
+  company: OdooCompanyRef,
+  vendorPortalPartnerId: number,
+) {
   if (allocation.lineItems.length === 0) {
     throw new Error(`Vendor allocation ${allocation.id} has no line items for Odoo sale.order sync.`);
   }
@@ -263,6 +281,7 @@ function buildOdooSaleOrderValues(allocation: AllocationForOdooSync, partner: Od
     partner_id: partner.id,
     partner_invoice_id: partner.id,
     partner_shipping_id: partner.id,
+    [ODOO_VENDOR_PORTAL_FIELD]: vendorPortalPartnerId,
     client_order_ref: buildClientOrderRef(allocation.id),
     origin: allocation.sourceShopifyOrderNumber,
     note: [
@@ -293,6 +312,7 @@ async function validateOdooSaleOrderPayload(client: OdooClient, uid: number, val
     client.fieldsGet(uid, 'sale.order.line'),
   ]);
   const errors = [
+    ...missingOdooVendorPortalField(saleOrderFields),
     ...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), values),
     ...missingRequiredFields('sale.order.line', requiredWritableFields(saleOrderLineFields), extractFirstOrderLineValues(values), new Set(['order_id'])),
   ];
@@ -300,6 +320,20 @@ async function validateOdooSaleOrderPayload(client: OdooClient, uid: number, val
   if (errors.length) {
     throw new Error(errors.join(' '));
   }
+}
+
+function missingOdooVendorPortalField(fields: OdooFieldsGetResponse) {
+  const definition = fields[ODOO_VENDOR_PORTAL_FIELD];
+  if (!definition) {
+    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} does not exist in Odoo; vendor portal mapping was not written.`];
+  }
+  if (definition.type && definition.type !== 'many2one') {
+    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} must be a writable many2one field in Odoo; vendor portal mapping was not written.`];
+  }
+  if (definition.readonly) {
+    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} is readonly in Odoo; vendor portal mapping was not written.`];
+  }
+  return [];
 }
 
 async function markAllocationOdooSynced(allocationId: string, odooSaleOrderId: string, odooSaleOrderName: string | null) {
@@ -400,6 +434,24 @@ function readNumber(value: string | undefined) {
     throw new Error('ODOO_SALE_ORDER_PARTNER_ID must be a positive integer.');
   }
   return parsed;
+}
+
+function parseOdooVendorPartnerMap(value: string | undefined) {
+  const normalized = readOptional(value);
+  if (!normalized) {
+    throw new Error('ODOO_VENDOR_PARTNER_MAP is required for allocation sale.order sync.');
+  }
+
+  return normalized.split(',').reduce<Record<string, number>>((map, entry) => {
+    const [rawVendorId, rawPartnerId, ...extra] = entry.split(':');
+    const vendorId = rawVendorId?.trim();
+    const partnerId = Number(rawPartnerId?.trim());
+    if (!vendorId || extra.length > 0 || !Number.isInteger(partnerId) || partnerId <= 0) {
+      throw new Error('ODOO_VENDOR_PARTNER_MAP must use vendor_id:positive_partner_id pairs separated by commas.');
+    }
+    map[vendorId] = partnerId;
+    return map;
+  }, {});
 }
 
 function readStringOrNull(value: unknown) {

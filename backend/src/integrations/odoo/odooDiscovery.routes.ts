@@ -584,7 +584,7 @@ async function readOdooSaleOrderVerificationStateIfPossible(odooSaleOrderId: str
   }
 
   const saleOrders = await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'read', [[saleOrderId]], {
-    fields: ['id', 'name', 'state', 'client_order_ref'],
+    fields: ['id', 'name', 'state', 'client_order_ref', 'x_vendor_id'],
   });
   const saleOrder = saleOrders[0];
 
@@ -595,6 +595,7 @@ async function readOdooSaleOrderVerificationStateIfPossible(odooSaleOrderId: str
           name: readStringOrNull(saleOrder.name),
           state: readStringOrNull(saleOrder.state),
           clientOrderRef: readStringOrNull(saleOrder.client_order_ref),
+          xVendorId: readOdooManyToOneRef(saleOrder.x_vendor_id),
         }
       : null,
     matchingCount,
@@ -630,6 +631,7 @@ function summarizeOdooAllocationSyncEnv() {
     ODOO_API_KEY: exists(process.env.ODOO_API_KEY),
     ODOO_SALE_ORDER_PARTNER_ID: exists(process.env.ODOO_SALE_ORDER_PARTNER_ID),
     ODOO_SALE_ORDER_PARTNER_NAME: exists(process.env.ODOO_SALE_ORDER_PARTNER_NAME),
+    ODOO_VENDOR_PARTNER_MAP: exists(process.env.ODOO_VENDOR_PARTNER_MAP),
     saleOrderPartnerConfigured: exists(process.env.ODOO_SALE_ORDER_PARTNER_ID) || exists(process.env.ODOO_SALE_ORDER_PARTNER_NAME),
   };
 }
@@ -703,4 +705,20 @@ function sanitizeText(value: string) {
 
 function readStringOrNull(value: unknown) {
   return typeof value === 'string' ? value : null;
+}
+
+function readOdooManyToOneRef(value: unknown) {
+  if (Array.isArray(value) && typeof value[0] === 'number') {
+    return {
+      id: value[0],
+      name: readStringOrNull(value[1]),
+    };
+  }
+  if (typeof value === 'number') {
+    return {
+      id: value,
+      name: null,
+    };
+  }
+  return null;
 }

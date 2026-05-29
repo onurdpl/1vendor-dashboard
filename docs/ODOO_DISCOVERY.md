@@ -41,6 +41,7 @@ ODOO_USERNAME=
 ODOO_API_KEY=
 ODOO_DRY_RUN=true
 ODOO_DISCOVERY_ONLY=true
+ODOO_VENDOR_PARTNER_MAP=sporjinal:11,yalispor:12
 ```
 
 Optional safe fixture defaults:
