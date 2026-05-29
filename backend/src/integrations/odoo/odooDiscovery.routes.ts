@@ -166,6 +166,89 @@ export function registerOdooDiscoveryProbeRoutes(app: FastifyInstance) {
       });
     }
   });
+
+  app.get<{ Querystring: { allocationId?: string } }>('/admin/probes/odoo-allocation-sync-status', async (request, reply) => {
+    const auth = assertAdminProbeAuthorized(request.headers);
+    if (!auth.ok) {
+      return reply.code(auth.statusCode).send({ ok: false, message: auth.message });
+    }
+
+    const allocationId = request.query.allocationId?.trim();
+    if (!allocationId) {
+      return reply.code(400).send({ ok: false, message: 'allocationId query parameter is required.' });
+    }
+
+    try {
+      const result = await runOdooAllocationSyncStatus(allocationId);
+      return reply.code(result.ok ? 200 : 404).send(result);
+    } catch (error) {
+      return reply.code(502).send({
+        ok: false,
+        allocationId,
+        error: sanitizeProbeError(error),
+      });
+    }
+  });
+}
+
+async function runOdooAllocationSyncStatus(allocationId: string) {
+  const warnings: string[] = [];
+  const unknowns: string[] = [];
+  const errors: string[] = [];
+  const allocation = await readOdooAllocationStatusAllocation(allocationId);
+
+  if (!allocation) {
+    return {
+      ok: false,
+      allocation: null,
+      odooSaleOrder: null,
+      matchingOdooSaleOrderCount: null,
+      warnings,
+      unknowns,
+      errors: [`VendorAllocation ${allocationId} was not found.`],
+    };
+  }
+
+  const clientOrderRef = buildOdooAllocationClientOrderRef(allocation.id);
+  let odooSaleOrder = null;
+  let matchingOdooSaleOrderCount: number | null = null;
+
+  try {
+    const odooState = allocation.odooSaleOrderId
+      ? await readOdooSaleOrderVerificationState(allocation.odooSaleOrderId, clientOrderRef)
+      : await searchOdooSaleOrderByClientOrderRef(clientOrderRef);
+    odooSaleOrder = odooState.saleOrder;
+    matchingOdooSaleOrderCount = odooState.matchingCount;
+  } catch (error) {
+    errors.push(sanitizeProbeError(error).message);
+  }
+
+  if (!allocation.odooSaleOrderId) {
+    unknowns.push('Local allocation does not have odooSaleOrderId.');
+  }
+  if (!allocation.odooSaleOrderName) {
+    unknowns.push('Local allocation does not have odooSaleOrderName.');
+  }
+  if (!allocation.odooSaleOrderSyncedAt) {
+    unknowns.push('Local allocation does not have odooSaleOrderSyncedAt.');
+  }
+  if (matchingOdooSaleOrderCount === 0) {
+    unknowns.push('No Odoo sale.order found by deterministic client_order_ref.');
+  }
+  if (matchingOdooSaleOrderCount !== null && matchingOdooSaleOrderCount > 1) {
+    warnings.push('Multiple Odoo sale.orders were found for the deterministic client_order_ref.');
+  }
+
+  return {
+    ok: errors.length === 0,
+    allocation: summarizeAllocationSyncStatus(allocation),
+    clientOrderRef,
+    odooSaleOrder,
+    matchingOdooSaleOrderCount,
+    warnings,
+    unknowns,
+    errors,
+  };
 }
 
 async function runOdooRealAllocationSyncOnce() {
@@ -566,6 +649,44 @@ function readOdooRealAllocationSyncState(allocationId: string) {
   });
 }
 
+function readOdooAllocationStatusAllocation(allocationId: string) {
+  return prisma.vendorAllocation.findUnique({
+    where: { id: allocationId },
+    include: {
+      order: {
+        select: {
+          id: true,
+          sourceShopifyOrderId: true,
+          sourceShopifyOrderNumber: true,
+        },
+      },
+      lineItems: {
+        select: {
+          id: true,
+        },
+      },
+    },
+  });
+}
+
+async function searchOdooSaleOrderByClientOrderRef(clientOrderRef: string) {
+  const client = buildOdooClientFromEnv();
+  const uid = await client.authenticate();
+  const [saleOrders, matchingCount] = await Promise.all([
+    client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'search_read', [[[ 'client_order_ref', '=', clientOrderRef ]]], {
+      fields: ['id', 'name', 'state', 'client_order_ref', 'x_vendor_id'],
+      limit: 1,
+    }),
+    client.modelCall<number>(uid, 'sale.order', 'search_count', [[[ 'client_order_ref', '=', clientOrderRef ]]]),
+  ]);
+  const saleOrder = saleOrders[0];
+
+  return {
+    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder) : null,
+    matchingCount,
+  };
+}
+
 async function readOdooSaleOrderVerificationStateIfPossible(odooSaleOrderId: string | null, clientOrderRef: string) {
   const client = buildOdooClientFromEnv();
   const uid = await client.authenticate();
@@ -589,15 +710,7 @@ async function readOdooSaleOrderVerificationStateIfPossible(odooSaleOrderId: str
   const saleOrder = saleOrders[0];
 
   return {
-    saleOrder: saleOrder
-      ? {
-          id: Number(saleOrder.id),
-          name: readStringOrNull(saleOrder.name),
-          state: readStringOrNull(saleOrder.state),
-          clientOrderRef: readStringOrNull(saleOrder.client_order_ref),
-          xVendorId: readOdooManyToOneRef(saleOrder.x_vendor_id),
-        }
-      : null,
+    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder) : null,
     matchingCount,
   };
 }
@@ -674,6 +787,30 @@ function summarizeSelectedAllocation(allocation: NonNullable<Awaited<ReturnType<
       quantity: lineItem.quantity,
       unitPrice: lineItem.shopifyOrderLineItem.unitPrice?.toString() ?? null,
     })),
+  };
+}
+
+function summarizeAllocationSyncStatus(allocation: NonNullable<Awaited<ReturnType<typeof readOdooAllocationStatusAllocation>>>) {
+  return {
+    id: allocation.id,
+    shopifyOrderNumber: allocation.sourceShopifyOrderNumber,
+    shopifyOrderId: allocation.order.sourceShopifyOrderId,
+    localOrderId: allocation.order.id,
+    vendorIdentifier: allocation.assignedVendorId,
+    lineItemCount: allocation.lineItems.length,
+    odooSaleOrderId: allocation.odooSaleOrderId,
+    odooSaleOrderName: allocation.odooSaleOrderName,
+    odooSaleOrderSyncedAt: allocation.odooSaleOrderSyncedAt?.toISOString() ?? null,
+  };
+}
+
+function summarizeOdooSaleOrder(saleOrder: Record<string, unknown>) {
+  return {
+    id: typeof saleOrder.id === 'number' ? saleOrder.id : Number(saleOrder.id),
+    name: readStringOrNull(saleOrder.name),
+    state: readStringOrNull(saleOrder.state),
+    clientOrderRef: readStringOrNull(saleOrder.client_order_ref),
+    xVendorId: readOdooManyToOneRef(saleOrder.x_vendor_id),
   };
 }
 

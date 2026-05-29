@@ -222,6 +222,47 @@ curl -sS -X POST "https://vendor-dashboard-backend-398h.onrender.com/admin/probe
 
 Set `ADMIN_PROBES_ENABLED=false` immediately after the one-off diagnostic run.
 
+## Guarded Read-Only Allocation Status Probe
+
+A guarded read-only endpoint exists for checking whether a specific allocation is linked to Odoo without running sync:
+
+```text
+GET /admin/probes/odoo-allocation-sync-status?allocationId=<allocation-id>
+```
+
+Safety behavior:
+
+- Disabled by default unless `ADMIN_PROBES_ENABLED=true`.
+- Requires header `x-admin-probe-token`.
+- Header value must match Render env `ADMIN_PROBE_TOKEN`.
+- Reads one `VendorAllocation` by id.
+- Reads local Odoo sync fields only:
+  - `odooSaleOrderId`
+  - `odooSaleOrderName`
+  - `odooSaleOrderSyncedAt`
+- If local `odooSaleOrderId` exists, reads Odoo `sale.order` by that id.
+- If local `odooSaleOrderId` is missing, searches Odoo by deterministic `client_order_ref = sporgym-allocation:<allocation-id>`.
+- Returns duplicate count for the deterministic Odoo reference.
+- Does not run sync, replay Shopify webhooks, create Odoo records, create invoices, confirm orders, create accounting entries, create payouts, create settlements, or create shipping labels.
+
+Call from a trusted shell only:
+
+```bash
+curl -sS "https://vendor-dashboard-backend-398h.onrender.com/admin/probes/odoo-allocation-sync-status?allocationId=alloc-sporjinal-7684032495953" \
+  -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN"
+```
+
+Expected response includes:
+
+- Allocation id.
+- Shopify order number/id.
+- Vendor identifier.
+- Line item count.
+- Local Odoo sync metadata.
+- Odoo sale.order id/name/state and `x_vendor_id` when found.
+- Duplicate count.
+- Sanitized warnings/unknowns/errors.
+
 ## Failure Behavior
 
 Odoo sync runs after the Shopify allocation transaction commits. A sync failure does not roll back Shopify order ingestion or vendor allocation persistence.
