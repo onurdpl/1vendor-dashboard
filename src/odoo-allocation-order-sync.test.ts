@@ -110,6 +110,7 @@ describe('Odoo allocation sale.order sync', () => {
     });
     expect(fetchMock.createdSaleOrderValues).toMatchObject({
       x_vendor_id: 12,
+      picking_policy: 'direct',
       client_order_ref: 'sporgym-allocation:alloc-1',
     });
     expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith({
@@ -160,6 +161,31 @@ describe('Odoo allocation sale.order sync', () => {
     );
     expect(fetchMock.createdSaleOrderValues).toBeNull();
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('includes the standard Odoo picking_policy when Odoo requires delivery policy', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocation({ assignedVendorId: 'sporjinal' }));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce({});
+    const fetchMock = buildOdooFetchMock({
+      saleOrderFields: {
+        x_vendor_id: { type: 'many2one', readonly: false },
+        picking_policy: { type: 'selection', required: true, readonly: false },
+      },
+    });
+
+    const result = await syncOdooSaleOrderForAllocation('alloc-1', {
+      env: liveEnv(),
+      logger,
+      fetchImpl: fetchMock,
+    });
+
+    expect(result).toMatchObject({
+      status: 'synced',
+      allocationId: 'alloc-1',
+    });
+    expect(fetchMock.createdSaleOrderValues).toMatchObject({
+      picking_policy: 'direct',
+    });
   });
 });
 

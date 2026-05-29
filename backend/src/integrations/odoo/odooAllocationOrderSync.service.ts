@@ -51,6 +51,7 @@ const REQUIRED_ODOO_ENV_KEYS = ['ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_AP
 const SALE_ORDER_READ_FIELDS = ['id', 'name', 'state'];
 const SALE_ORDER_REFERENCE_PREFIX = 'sporgym-allocation:';
 const ODOO_VENDOR_PORTAL_FIELD = 'x_vendor_id';
+const ODOO_SALE_ORDER_PICKING_POLICY = 'direct';
 
 export async function syncOdooSaleOrdersForAllocations(
   allocationIds: Iterable<string>,
@@ -282,6 +283,7 @@ function buildOdooSaleOrderValues(
     partner_invoice_id: partner.id,
     partner_shipping_id: partner.id,
     [ODOO_VENDOR_PORTAL_FIELD]: vendorPortalPartnerId,
+    picking_policy: ODOO_SALE_ORDER_PICKING_POLICY,
     client_order_ref: buildClientOrderRef(allocation.id),
     origin: allocation.sourceShopifyOrderNumber,
     note: [

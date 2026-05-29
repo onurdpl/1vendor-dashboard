@@ -94,6 +94,7 @@ Odoo `sale.order` fields sent:
 - `partner_invoice_id`: configured Odoo partner.
 - `partner_shipping_id`: configured Odoo partner.
 - `x_vendor_id`: mapped Odoo vendor partner id from `ODOO_VENDOR_PARTNER_MAP`.
+- `picking_policy`: `direct`, Odoo's standard delivery policy value for delivering each product as soon as it is available.
 - `client_order_ref`: `sporgym-allocation:{allocationId}`.
 - `origin`: Shopify order number.
 - `note`: operational context.
