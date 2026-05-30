@@ -8,8 +8,9 @@ The sync is intentionally narrow:
 
 - It runs after a Sporgym `VendorAllocation` is persisted.
 - It creates one Odoo draft `sale.order` per vendor allocation.
-- It uses text-only `sale.order.line` rows.
-- It does not require Odoo products.
+- It matches Odoo products by Shopify SKU / `product.product.default_code`.
+- It can create a minimal Odoo product on demand when the SKU is missing in Odoo.
+- It does not run full Shopify-Odoo catalog sync or overwrite existing Odoo products.
 - It does not create invoices, confirm orders, create stock moves, create accounting entries, touch shipping, touch payouts, or touch settlements.
 
 ## Runtime Gates
@@ -98,7 +99,7 @@ Odoo `sale.order` fields sent:
 - `client_order_ref`: `sporgym-allocation:{allocationId}`.
 - `origin`: Shopify order number.
 - `note`: operational context.
-- `order_line`: one text-only line per allocation line item.
+- `order_line`: one product-backed line per allocation line item.
 
 The note stores:
 
@@ -113,10 +114,35 @@ Odoo `sale.order.line` fields sent:
 
 - `name`: product title, SKU, quantity, Shopify line item id, and allocation id.
 - `customer_lead`: `0`.
+- `product_id`: existing or newly created `product.product` matched by SKU.
 - `product_uom_qty`: allocation line item quantity.
 - `price_unit`: Shopify unit price.
 
-No `product_id` is sent. Product mapping remains intentionally unmodeled.
+## On-Demand Product Creation
+
+Shopify remains the source of truth for allocation line SKU, title, quantity, and price. The Odoo sync does not perform catalog reconciliation.
+
+For each allocation line:
+
+1. Read the Shopify SKU from the persisted Shopify order line item.
+2. Fail closed if SKU is missing or blank.
+3. Search Odoo `product.product` where `default_code = SKU`.
+4. If found, reuse that product and do not update it.
+5. If not found, create a minimal product for sale order representation only.
+
+Minimal product fields sent:
+
+- `name`: Shopify product/variant title, falling back to SKU.
+- `default_code`: Shopify SKU.
+- `list_price`: Shopify unit price.
+- `sale_ok`: `true`.
+- `type` or `detailed_type`: discovered consumable value when supported, otherwise discovered storable value.
+- `uom_id`: first active Odoo `uom.uom` record discoverable by the integration user.
+- `uom_po_id`: same unit when Odoo exposes the field as writable.
+- `taxes_id`: first active sale tax only when discoverable; otherwise omitted.
+- `description_sale`: operational reference with SKU, allocation id, and Shopify line item id.
+
+The sync validates required Odoo fields from `fields_get` before product/order creation. Existing Odoo products are never overwritten.
 
 ## Idempotency
 
@@ -314,4 +340,4 @@ Success is logged with:
 - Final customer/partner modeling in Odoo.
 - Whether a dedicated Sporgym holding partner or customer partner mapping should be used long-term.
 - Whether custom Odoo modules require additional fields beyond the discovered required fields.
-- Whether product mapping should be introduced later.
+- Whether a full catalog sync should be introduced later.

@@ -23,6 +23,8 @@ export type OdooFieldDefinition = {
   required?: boolean;
   readonly?: boolean;
   string?: string;
+  relation?: string;
+  selection?: unknown;
 };
 
 export type OdooFieldsGetResponse = Record<string, OdooFieldDefinition>;
@@ -31,6 +33,7 @@ export type OdooSearchReadRecord = {
   id?: number;
   name?: string;
   display_name?: string;
+  [key: string]: unknown;
 };
 
 export class OdooClientError extends Error {
@@ -96,7 +99,7 @@ export class OdooClient {
 
   async fieldsGet(uid: number, model: string, fields?: string[]): Promise<OdooFieldsGetResponse> {
     const kwargs: Record<string, unknown> = {
-      attributes: ['type', 'required', 'readonly', 'string'],
+      attributes: ['type', 'required', 'readonly', 'string', 'relation', 'selection'],
     };
     if (fields?.length) {
       kwargs.fields = fields;

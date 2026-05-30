@@ -40,6 +40,25 @@ type OdooCompanyRef = {
   name: string | null;
 };
 
+type OdooProductRef = {
+  id: number;
+  name: string | null;
+  defaultCode: string;
+};
+
+type OdooUnitRef = {
+  id: number;
+  name: string | null;
+};
+
+type OdooProductCreationContext = {
+  fields: OdooFieldsGetResponse;
+  typeField: 'type' | 'detailed_type';
+  typeValue: string;
+  unit: OdooUnitRef;
+  salesTaxId: number | null;
+};
+
 type SyncResult =
   | { status: 'disabled'; allocationId: string }
   | { status: 'dry_run'; allocationId: string }
@@ -52,6 +71,7 @@ const SALE_ORDER_READ_FIELDS = ['id', 'name', 'state'];
 const SALE_ORDER_REFERENCE_PREFIX = 'sporgym-allocation:';
 const ODOO_VENDOR_PORTAL_FIELD = 'x_vendor_id';
 const ODOO_SALE_ORDER_PICKING_POLICY = 'direct';
+const PRODUCT_TYPE_FIELDS = ['type', 'detailed_type'] as const;
 
 export async function syncOdooSaleOrdersForAllocations(
   allocationIds: Iterable<string>,
@@ -132,8 +152,13 @@ export async function syncOdooSaleOrderForAllocation(
       };
     }
 
-    const saleOrderValues = buildOdooSaleOrderValues(allocation, partner, company, vendorPortalPartnerId);
-    await validateOdooSaleOrderPayload(client, uid, saleOrderValues);
+    const saleOrderFields = await client.fieldsGet(uid, 'sale.order');
+    const saleOrderHeaderValues = buildOdooSaleOrderHeaderValues(allocation, partner, company, vendorPortalPartnerId);
+    validateOdooSaleOrderHeaderPayload(saleOrderFields, saleOrderHeaderValues);
+
+    const productsBySku = await resolveOdooProductsForAllocation(client, uid, allocation);
+    const saleOrderValues = buildOdooSaleOrderValues(allocation, saleOrderHeaderValues, productsBySku);
+    await validateOdooSaleOrderPayload(client, uid, saleOrderValues, saleOrderFields);
 
     const saleOrderId = await client.modelCall<number>(uid, 'sale.order', 'create', [saleOrderValues]);
     const saleOrders = await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'read', [[saleOrderId]], {
@@ -264,7 +289,189 @@ function resolveOdooVendorPortalPartnerId(vendorIdentifier: string, vendorPartne
   return partnerId;
 }
 
-function buildOdooSaleOrderValues(
+async function resolveOdooProductsForAllocation(
+  client: OdooClient,
+  uid: number,
+  allocation: AllocationForOdooSync,
+) {
+  const productsBySku = new Map<string, OdooProductRef>();
+  let creationContext: OdooProductCreationContext | null = null;
+
+  for (const lineItem of allocation.lineItems) {
+    const sku = readShopifySku(allocation, lineItem);
+    if (productsBySku.has(sku)) {
+      continue;
+    }
+
+    const existingProduct = await findOdooProductBySku(client, uid, sku);
+    if (existingProduct) {
+      productsBySku.set(sku, existingProduct);
+      continue;
+    }
+
+    creationContext ??= await loadOdooProductCreationContext(client, uid);
+    const createdProduct = await createOdooProductForLine(client, uid, allocation, lineItem, sku, creationContext);
+    productsBySku.set(sku, createdProduct);
+  }
+
+  return productsBySku;
+}
+
+async function findOdooProductBySku(client: OdooClient, uid: number, sku: string): Promise<OdooProductRef | null> {
+  const records = await client.searchRead(uid, 'product.product', [['default_code', '=', sku]], ['id', 'display_name', 'name', 'default_code'], 1);
+  const record = records[0];
+  if (!record?.id) {
+    return null;
+  }
+
+  return {
+    id: record.id,
+    name: record.display_name || record.name || null,
+    defaultCode: typeof record.default_code === 'string' ? record.default_code : sku,
+  };
+}
+
+async function loadOdooProductCreationContext(client: OdooClient, uid: number): Promise<OdooProductCreationContext> {
+  const [fields, unit, salesTaxId] = await Promise.all([
+    client.fieldsGet(uid, 'product.product'),
+    resolveDefaultOdooUnit(client, uid),
+    resolveDefaultSalesTaxId(client, uid),
+  ]);
+  const productType = resolveSupportedOdooProductType(fields);
+
+  return {
+    fields,
+    typeField: productType.field,
+    typeValue: productType.value,
+    unit,
+    salesTaxId,
+  };
+}
+
+async function resolveDefaultOdooUnit(client: OdooClient, uid: number): Promise<OdooUnitRef> {
+  const records = await client.searchRead(uid, 'uom.uom', [['active', '=', true]], ['id', 'display_name', 'name'], 1);
+  const record = records[0];
+  if (!record?.id) {
+    throw new Error('Could not discover a default Odoo uom.uom record for on-demand product creation.');
+  }
+
+  return {
+    id: record.id,
+    name: record.display_name || record.name || null,
+  };
+}
+
+async function resolveDefaultSalesTaxId(client: OdooClient, uid: number) {
+  try {
+    const records = await client.searchRead(uid, 'account.tax', [['type_tax_use', '=', 'sale'], ['active', '=', true]], ['id', 'display_name', 'name'], 1);
+    return records[0]?.id ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function createOdooProductForLine(
+  client: OdooClient,
+  uid: number,
+  allocation: AllocationForOdooSync,
+  lineItem: AllocationForOdooSync['lineItems'][number],
+  sku: string,
+  context: OdooProductCreationContext,
+): Promise<OdooProductRef> {
+  const productValues = buildOdooProductValues(allocation, lineItem, sku, context);
+  const errors = missingRequiredFields('product.product', requiredWritableFields(context.fields), productValues);
+  if (errors.length) {
+    throw new Error(errors.join(' '));
+  }
+
+  const productId = await client.modelCall<number>(uid, 'product.product', 'create', [productValues]);
+  return {
+    id: productId,
+    name: buildOdooProductName(lineItem, sku),
+    defaultCode: sku,
+  };
+}
+
+function buildOdooProductValues(
+  allocation: AllocationForOdooSync,
+  lineItem: AllocationForOdooSync['lineItems'][number],
+  sku: string,
+  context: OdooProductCreationContext,
+) {
+  const values: Record<string, unknown> = {
+    name: buildOdooProductName(lineItem, sku),
+    default_code: sku,
+    list_price: Number(lineItem.shopifyOrderLineItem.unitPrice ?? 0),
+    sale_ok: true,
+    [context.typeField]: context.typeValue,
+    uom_id: context.unit.id,
+  };
+
+  const purchaseUomField = context.fields.uom_po_id;
+  if (purchaseUomField && !purchaseUomField.readonly) {
+    values.uom_po_id = context.unit.id;
+  }
+
+  const taxesField = context.fields.taxes_id;
+  if (context.salesTaxId && taxesField && !taxesField.readonly) {
+    values.taxes_id = [[6, 0, [context.salesTaxId]]];
+  }
+
+  values.description_sale = [
+    `Sporgym allocation product created on demand.`,
+    `SKU: ${sku}`,
+    `Vendor allocation id: ${allocation.id}`,
+    `Shopify line item id: ${lineItem.shopifyOrderLineItem.sourceLineItemId}`,
+  ].join('\n');
+
+  return values;
+}
+
+function resolveSupportedOdooProductType(fields: OdooFieldsGetResponse) {
+  for (const field of PRODUCT_TYPE_FIELDS) {
+    const definition = fields[field];
+    if (!definition || definition.readonly) {
+      continue;
+    }
+
+    const selection = parseSelectionOptions(definition.selection);
+    const consumable = selection.find((option) => option.value === 'consu' || /consumable/i.test(option.label));
+    if (consumable) {
+      return { field, value: consumable.value };
+    }
+
+    const storable = selection.find((option) => option.value === 'product' || /storable|stockable/i.test(option.label));
+    if (storable) {
+      return { field, value: storable.value };
+    }
+  }
+
+  throw new Error('Could not determine a supported consumable/storable Odoo product type value for on-demand product creation.');
+}
+
+function parseSelectionOptions(selection: unknown): Array<{ value: string; label: string }> {
+  if (!Array.isArray(selection)) {
+    return [];
+  }
+
+  return selection
+    .map((option) => {
+      if (Array.isArray(option) && option.length >= 1) {
+        return {
+          value: String(option[0]),
+          label: String(option[1] ?? option[0]),
+        };
+      }
+      return null;
+    })
+    .filter((option): option is { value: string; label: string } => option !== null);
+}
+
+function buildOdooProductName(lineItem: AllocationForOdooSync['lineItems'][number], sku: string) {
+  return lineItem.shopifyOrderLineItem.title?.trim() || sku;
+}
+
+function buildOdooSaleOrderHeaderValues(
   allocation: AllocationForOdooSync,
   partner: OdooPartnerRef,
   company: OdooCompanyRef,
@@ -295,24 +502,61 @@ function buildOdooSaleOrderValues(
       `Vendor name: ${allocation.assignedVendor.name}`,
       `Customer display name: ${allocation.order.customerName ?? 'Unknown'}`,
     ].join('\n'),
-    order_line: allocation.lineItems.map((lineItem) => [
-      0,
-      0,
-      {
-        name: buildOdooLineName(allocation, lineItem),
-        customer_lead: 0,
-        product_uom_qty: lineItem.quantity,
-        price_unit: Number(lineItem.shopifyOrderLineItem.unitPrice ?? 0),
-      },
-    ]),
   };
 }
 
-async function validateOdooSaleOrderPayload(client: OdooClient, uid: number, values: ReturnType<typeof buildOdooSaleOrderValues>) {
-  const [saleOrderFields, saleOrderLineFields] = await Promise.all([
-    client.fieldsGet(uid, 'sale.order'),
-    client.fieldsGet(uid, 'sale.order.line'),
-  ]);
+function buildOdooSaleOrderValues(
+  allocation: AllocationForOdooSync,
+  headerValues: ReturnType<typeof buildOdooSaleOrderHeaderValues>,
+  productsBySku: Map<string, OdooProductRef>,
+) {
+  return {
+    ...headerValues,
+    order_line: allocation.lineItems.map((lineItem) => [0, 0, buildOdooSaleOrderLineValues(allocation, lineItem, productsBySku)]),
+  };
+}
+
+function buildOdooSaleOrderLineValues(
+  allocation: AllocationForOdooSync,
+  lineItem: AllocationForOdooSync['lineItems'][number],
+  productsBySku: Map<string, OdooProductRef>,
+) {
+  const sku = readShopifySku(allocation, lineItem);
+  const product = productsBySku.get(sku);
+  if (!product) {
+    throw new Error(`Odoo product id was not resolved for SKU ${sku}; allocation sale.order sync failed closed.`);
+  }
+
+  return {
+    name: buildOdooLineName(allocation, lineItem),
+    customer_lead: 0,
+    product_id: product.id,
+    product_uom_qty: lineItem.quantity,
+    price_unit: Number(lineItem.shopifyOrderLineItem.unitPrice ?? 0),
+  };
+}
+
+function validateOdooSaleOrderHeaderPayload(
+  saleOrderFields: OdooFieldsGetResponse,
+  values: ReturnType<typeof buildOdooSaleOrderHeaderValues>,
+) {
+  const errors = [
+    ...missingOdooVendorPortalField(saleOrderFields),
+    ...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), values),
+  ];
+
+  if (errors.length) {
+    throw new Error(errors.join(' '));
+  }
+}
+
+async function validateOdooSaleOrderPayload(
+  client: OdooClient,
+  uid: number,
+  values: ReturnType<typeof buildOdooSaleOrderValues>,
+  saleOrderFields: OdooFieldsGetResponse,
+) {
+  const saleOrderLineFields = await client.fieldsGet(uid, 'sale.order.line');
   const errors = [
     ...missingOdooVendorPortalField(saleOrderFields),
     ...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), values),
@@ -361,11 +605,21 @@ function buildOdooLineName(allocation: AllocationForOdooSync, lineItem: Allocati
   const source = lineItem.shopifyOrderLineItem;
   return [
     source.title || 'Shopify allocation line item',
-    `SKU: ${source.sku ?? 'Unknown'}`,
+    `SKU: ${source.sku?.trim() || 'Unknown'}`,
     `Qty: ${lineItem.quantity}`,
     `Shopify line item id: ${source.sourceLineItemId}`,
     `Vendor allocation id: ${allocation.id}`,
   ].join(' | ');
+}
+
+function readShopifySku(allocation: AllocationForOdooSync, lineItem: AllocationForOdooSync['lineItems'][number]) {
+  const sku = lineItem.shopifyOrderLineItem.sku?.trim();
+  if (!sku) {
+    throw new Error(
+      `Vendor allocation ${allocation.id} line item ${lineItem.id} is missing Shopify SKU; Odoo product sync failed closed.`,
+    );
+  }
+  return sku;
 }
 
 function requiredWritableFields(fields: OdooFieldsGetResponse) {
