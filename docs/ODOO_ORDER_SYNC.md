@@ -9,7 +9,7 @@ The sync is intentionally narrow:
 - It runs after a Sporgym `VendorAllocation` is persisted.
 - It creates one Odoo draft `sale.order` per vendor allocation.
 - It matches Odoo products by Shopify SKU / `product.product.default_code`.
-- It can create a minimal Odoo product on demand when the SKU is missing in Odoo.
+- It can create a minimal Odoo `product.template` on demand when the SKU is missing in Odoo, then use the template's `product_variant_id` on the sale order line.
 - It does not run full Shopify-Odoo catalog sync or overwrite existing Odoo products.
 - It does not create invoices, confirm orders, create stock moves, create accounting entries, touch shipping, touch payouts, or touch settlements.
 
@@ -128,21 +128,23 @@ For each allocation line:
 2. Fail closed if SKU is missing or blank.
 3. Search Odoo `product.product` where `default_code = SKU`.
 4. If found, reuse that product and do not update it.
-5. If not found, create a minimal product for sale order representation only.
+5. If not found, create a minimal `product.template` for sale order representation only.
+6. Read the created template's `product_variant_id`.
+7. Use that `product.product` id on the sale order line.
 
-Minimal product fields sent:
+Minimal `product.template` fields sent:
 
 - `name`: Shopify product/variant title, falling back to SKU.
 - `default_code`: Shopify SKU.
 - `list_price`: Shopify unit price.
 - `sale_ok`: `true`.
-- `type` or `detailed_type`: discovered consumable value when supported, otherwise discovered storable value.
-- `uom_id`: first active Odoo `uom.uom` record discoverable by the integration user.
-- `uom_po_id`: same unit when Odoo exposes the field as writable.
+- `purchase_ok`: `false` when Odoo exposes the field as writable.
+- `type`, `detailed_type`, or `is_storable`: discovered supported product type field/value.
+- `uom_id`: first active Odoo `uom.uom` record, only when safely discoverable and writable.
+- `uom_po_id`: same unit, only when safely discoverable and writable.
 - `taxes_id`: first active sale tax only when discoverable; otherwise omitted.
-- `description_sale`: operational reference with SKU, allocation id, and Shopify line item id.
 
-The sync validates required Odoo fields from `fields_get` before product/order creation. Existing Odoo products are never overwritten.
+The sync does not create `product.product` directly and does not send derived/readonly fields such as `product_tmpl_id`, `product_variant_ids`, `invoice_policy`, `service_tracking`, or `base_unit_count`. Existing Odoo products are never overwritten.
 
 ## Idempotency
 

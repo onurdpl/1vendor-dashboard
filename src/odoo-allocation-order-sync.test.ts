@@ -18,6 +18,8 @@ const logger = {
   error: vi.fn(),
 };
 
+type MockOdooField = { required?: boolean; readonly?: boolean; type?: string; string?: string; selection?: unknown };
+
 describe('Odoo allocation sale.order sync', () => {
   beforeEach(() => {
     prismaMock.vendorAllocation.findUnique.mockReset();
@@ -214,7 +216,7 @@ describe('Odoo allocation sale.order sync', () => {
       status: 'synced',
       allocationId: 'alloc-1',
     });
-    expect(fetchMock.createdProductValues).toEqual([]);
+    expect(fetchMock.createdTemplateValues).toEqual([]);
     expect(fetchMock.createdSaleOrderValues?.order_line).toEqual([
       [
         0,
@@ -242,12 +244,12 @@ describe('Odoo allocation sale.order sync', () => {
       allocationId: 'alloc-1',
       error: 'Vendor allocation alloc-1 line item line-1 is missing Shopify SKU; Odoo product sync failed closed.',
     });
-    expect(fetchMock.createdProductValues).toEqual([]);
+    expect(fetchMock.createdTemplateValues).toEqual([]);
     expect(fetchMock.createdSaleOrderValues).toBeNull();
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
-  it('creates a minimal Odoo product when SKU is missing from Odoo', async () => {
+  it('creates a minimal Odoo product.template when SKU is missing from Odoo and uses its variant on the line', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocation({ assignedVendorId: 'sporjinal' }));
     prismaMock.vendorAllocation.update.mockResolvedValueOnce({});
     const fetchMock = buildOdooFetchMock({ existingProducts: [] });
@@ -262,18 +264,25 @@ describe('Odoo allocation sale.order sync', () => {
       status: 'synced',
       allocationId: 'alloc-1',
     });
-    expect(fetchMock.createdProductValues).toEqual([
+    expect(fetchMock.createdTemplateValues).toEqual([
       expect.objectContaining({
         name: 'Mapped product',
         default_code: 'SKU-1',
         list_price: 10.5,
         sale_ok: true,
+        purchase_ok: false,
         type: 'consu',
         uom_id: 3,
         uom_po_id: 3,
         taxes_id: [[6, 0, [4]]],
       }),
     ]);
+    expect(fetchMock.createdTemplateValues[0]).not.toHaveProperty('product_tmpl_id');
+    expect(fetchMock.createdTemplateValues[0]).not.toHaveProperty('product_variant_ids');
+    expect(fetchMock.createdTemplateValues[0]).not.toHaveProperty('invoice_policy');
+    expect(fetchMock.createdTemplateValues[0]).not.toHaveProperty('service_tracking');
+    expect(fetchMock.createdTemplateValues[0]).not.toHaveProperty('base_unit_count');
+    expect(fetchMock.productProductCreateCalls).toBe(0);
     expect(fetchMock.createdSaleOrderValues?.order_line).toEqual([
       [
         0,
@@ -283,6 +292,42 @@ describe('Odoo allocation sale.order sync', () => {
         }),
       ],
     ]);
+  });
+
+  it('does not send readonly or derived product.template fields during on-demand creation', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocation({ assignedVendorId: 'sporjinal' }));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce({});
+    const fetchMock = buildOdooFetchMock({
+      existingProducts: [],
+      productTemplateFields: {
+        ...defaultProductTemplateFields(),
+        product_tmpl_id: { type: 'many2one', required: true, readonly: true },
+        product_variant_ids: { type: 'one2many', required: true, readonly: true },
+        invoice_policy: { type: 'selection', required: true, readonly: true },
+        service_tracking: { type: 'selection', required: true, readonly: true },
+        base_unit_count: { type: 'float', required: true, readonly: true },
+      },
+    });
+
+    await syncOdooSaleOrderForAllocation('alloc-1', {
+      env: liveEnv(),
+      logger,
+      fetchImpl: fetchMock,
+    });
+
+    expect(fetchMock.createdTemplateValues).toHaveLength(1);
+    expect(Object.keys(fetchMock.createdTemplateValues[0]).sort()).toEqual([
+      'default_code',
+      'list_price',
+      'name',
+      'purchase_ok',
+      'sale_ok',
+      'taxes_id',
+      'type',
+      'uom_id',
+      'uom_po_id',
+    ]);
+    expect(fetchMock.productProductCreateCalls).toBe(0);
   });
 
   it('does not overwrite an existing Odoo product', async () => {
@@ -298,8 +343,9 @@ describe('Odoo allocation sale.order sync', () => {
       fetchImpl: fetchMock,
     });
 
-    expect(fetchMock.createdProductValues).toEqual([]);
+    expect(fetchMock.createdTemplateValues).toEqual([]);
     expect(fetchMock.productWriteCalls).toBe(0);
+    expect(fetchMock.productProductCreateCalls).toBe(0);
     expect(fetchMock.createdSaleOrderValues?.order_line).toEqual([
       [
         0,
@@ -332,7 +378,7 @@ describe('Odoo allocation sale.order sync', () => {
       odooSaleOrderName: 'SO055',
     });
     expect(fetchMock.productSearchCalls).toBe(0);
-    expect(fetchMock.createdProductValues).toEqual([]);
+    expect(fetchMock.createdTemplateValues).toEqual([]);
     expect(fetchMock.createdSaleOrderValues).toBeNull();
   });
 });
@@ -386,9 +432,10 @@ function buildAllocation(overrides: { assignedVendorId?: string; odooSaleOrderId
 
 function buildOdooFetchMock(
   options: {
-    saleOrderFields?: Record<string, { required?: boolean; readonly?: boolean; type?: string; string?: string }>;
+    saleOrderFields?: Record<string, MockOdooField>;
     existingSaleOrders?: Array<Record<string, unknown>>;
     existingProducts?: Array<Record<string, unknown>>;
+    productTemplateFields?: Record<string, MockOdooField>;
   } = {},
 ) {
   const fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -435,17 +482,8 @@ function buildOdooFetchMock(
       return jsonRpcResponse(payload.id, options.existingProducts ?? [{ id: 21, name: 'Existing SKU product', default_code: 'SKU-1' }]);
     }
 
-    if (model === 'product.product' && method === 'fields_get') {
-      return jsonRpcResponse(payload.id, {
-        name: { type: 'char', required: true, readonly: false },
-        default_code: { type: 'char', readonly: false },
-        list_price: { type: 'float', readonly: false },
-        sale_ok: { type: 'boolean', readonly: false },
-        type: { type: 'selection', required: true, readonly: false, selection: [['consu', 'Consumable'], ['product', 'Storable Product']] },
-        uom_id: { type: 'many2one', required: true, readonly: false },
-        uom_po_id: { type: 'many2one', required: true, readonly: false },
-        taxes_id: { type: 'many2many', readonly: false },
-      });
+    if (model === 'product.template' && method === 'fields_get') {
+      return jsonRpcResponse(payload.id, options.productTemplateFields ?? defaultProductTemplateFields());
     }
 
     if (model === 'uom.uom' && method === 'search_read') {
@@ -457,8 +495,17 @@ function buildOdooFetchMock(
     }
 
     if (model === 'product.product' && method === 'create') {
-      fetchMock.createdProductValues.push((methodArgs ?? [])[0] as Record<string, unknown>);
-      return jsonRpcResponse(payload.id, 88);
+      fetchMock.productProductCreateCalls += 1;
+      return jsonRpcResponse(payload.id, 999);
+    }
+
+    if (model === 'product.template' && method === 'create') {
+      fetchMock.createdTemplateValues.push((methodArgs ?? [])[0] as Record<string, unknown>);
+      return jsonRpcResponse(payload.id, 66);
+    }
+
+    if (model === 'product.template' && method === 'read') {
+      return jsonRpcResponse(payload.id, [{ id: 66, name: 'Mapped product', default_code: 'SKU-1', product_variant_id: [88, 'Mapped product'] }]);
     }
 
     if (model === 'product.product' && method === 'write') {
@@ -478,16 +525,34 @@ function buildOdooFetchMock(
     throw new Error(`Unexpected Odoo call ${String(model)}.${String(method)}`);
   }) as ReturnType<typeof vi.fn> & {
     createdSaleOrderValues: Record<string, unknown> | null;
-    createdProductValues: Array<Record<string, unknown>>;
+    createdTemplateValues: Array<Record<string, unknown>>;
     productSearchCalls: number;
     productWriteCalls: number;
+    productProductCreateCalls: number;
   };
 
   fetchMock.createdSaleOrderValues = null;
-  fetchMock.createdProductValues = [];
+  fetchMock.createdTemplateValues = [];
   fetchMock.productSearchCalls = 0;
   fetchMock.productWriteCalls = 0;
+  fetchMock.productProductCreateCalls = 0;
   return fetchMock;
+}
+
+function defaultProductTemplateFields(): Record<string, MockOdooField> {
+  return {
+    name: { type: 'char', required: true, readonly: false },
+    default_code: { type: 'char', readonly: false },
+    list_price: { type: 'float', readonly: false },
+    sale_ok: { type: 'boolean', readonly: false },
+    purchase_ok: { type: 'boolean', readonly: false },
+    type: { type: 'selection', required: true, readonly: false, selection: [['consu', 'Consumable'], ['product', 'Storable Product']] },
+    uom_id: { type: 'many2one', required: true, readonly: false },
+    uom_po_id: { type: 'many2one', required: true, readonly: false },
+    taxes_id: { type: 'many2many', readonly: false },
+    product_variant_id: { type: 'many2one', readonly: true },
+    product_variant_ids: { type: 'one2many', readonly: true },
+  };
 }
 
 function jsonRpcResponse(id: number, result: unknown) {
