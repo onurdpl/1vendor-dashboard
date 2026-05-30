@@ -20,13 +20,14 @@ The sync only attempts live Odoo writes when:
 ```text
 ODOO_ENABLED=true
 ODOO_DRY_RUN=false
+ODOO_DB=spg_hub
 ```
 
 Required Odoo connection variables:
 
 ```text
 ODOO_URL=
-ODOO_DB=
+ODOO_DB=spg_hub
 ODOO_USERNAME=
 ODOO_API_KEY=
 ```
@@ -34,7 +35,7 @@ ODOO_API_KEY=
 Required sale order partner configuration:
 
 ```text
-ODOO_SALE_ORDER_PARTNER_ID=
+ODOO_SALE_ORDER_PARTNER_ID=11
 ```
 
 or:
@@ -48,23 +49,24 @@ The implementation does not create Odoo partners. If no configured partner is fo
 Required vendor portal mapping:
 
 ```text
-ODOO_VENDOR_PARTNER_MAP=sporjinal:11,yalispor:12
+ODOO_VENDOR_FIELD_NAME=x_studio_tedarikci
+ODOO_VENDOR_PARTNER_MAP=sporjinal:12,yalispor:13
 ```
 
-This maps Sporgym vendor identifiers to existing Odoo partner ids for `sale.order.x_vendor_id`. If the allocation vendor is not mapped, sync fails closed before creating an Odoo order. The sync does not guess partner ids or create Odoo partners.
+For the `spg_hub` Odoo database, `ODOO_SALE_ORDER_PARTNER_ID=11` is the Test Customer partner. `ODOO_VENDOR_FIELD_NAME=x_studio_tedarikci` points at the vendor partner field on `sale.order`, and `ODOO_VENDOR_PARTNER_MAP` maps Sporgym vendor identifiers to existing Odoo partner ids. If the allocation vendor is not mapped, sync fails closed before creating an Odoo order. The sync does not guess partner ids or create Odoo partners.
 
-Odoo must already expose writable custom field `sale.order.x_vendor_id`. If `x_vendor_id` is missing, readonly, or not a Many2one field, sync stops before create.
+Odoo must already expose the configured vendor field on `sale.order`. If the field is missing, readonly, not a Many2one field, or not related to `res.partner`, sync stops before create.
 
 Expected Odoo field definition:
 
 - Model: `sale.order`
 - Field label: `Vendor`
-- Technical name: `x_vendor_id`
+- Technical name: `x_studio_tedarikci`
 - Field type: `many2one`
 - Relation: `res.partner`
 - Required: no, unless every sale order in Odoo must be vendor-scoped
 - Writable by: the Sporgym Odoo integration user
-- Portal security rule: vendor portal users should only read sale orders whose `x_vendor_id` matches their allowed partner/commercial partner; this rule must be implemented and reviewed in Odoo, not inferred by Sporgym
+- Portal security rule: vendor portal users should only read sale orders whose configured vendor field matches their allowed partner/commercial partner; this rule must be implemented and reviewed in Odoo, not inferred by Sporgym
 - Admin/internal users: retain normal sales order access according to Odoo roles
 
 The database migration must be applied before deploying this sync because `VendorAllocation` now stores Odoo sync metadata:
@@ -91,10 +93,10 @@ Odoo `sale.order` fields sent:
 - `name`: generated Sporgym reference containing Shopify order number and allocation id.
 - `company_id`: first accessible Odoo company.
 - `date_order`: sync timestamp.
-- `partner_id`: configured Odoo partner.
+- `partner_id`: configured Odoo partner; `11` in `spg_hub` for Test Customer.
 - `partner_invoice_id`: configured Odoo partner.
 - `partner_shipping_id`: configured Odoo partner.
-- `x_vendor_id`: mapped Odoo vendor partner id from `ODOO_VENDOR_PARTNER_MAP`.
+- configured vendor field, currently `x_studio_tedarikci`: mapped Odoo vendor partner id from `ODOO_VENDOR_PARTNER_MAP`.
 - `picking_policy`: `direct`, Odoo's standard delivery policy value for delivering each product as soon as it is available.
 - `client_order_ref`: `sporgym-allocation:{allocationId}`.
 - `origin`: Shopify order number.
@@ -199,7 +201,7 @@ Expected response includes:
 - Schema field presence.
 - Masked Odoo env presence.
 - Test allocation id.
-- Odoo sale.order id/name/state and `x_vendor_id` when returned by Odoo.
+- Odoo sale.order id/name/state and configured vendor field when returned by Odoo.
 - Local `odooSaleOrderSyncedAt`.
 - Idempotency result.
 - Sanitized warnings/errors.
@@ -238,7 +240,7 @@ Safety behavior:
 - Uses the existing allocation-to-Odoo sale.order sync service.
 - Runs the sync twice for the same allocation to confirm idempotency.
 - Counts Odoo `sale.order` records by the deterministic `client_order_ref`.
-- Reports `x_vendor_id` when returned by Odoo.
+- Reports the configured vendor field when returned by Odoo.
 - Does not replay Shopify webhooks, create invoices, confirm orders, create accounting entries, create payouts, create settlements, create shipping labels, or change product mapping.
 
 Call from a trusted shell only:
@@ -288,7 +290,7 @@ Expected response includes:
 - Vendor identifier.
 - Line item count.
 - Local Odoo sync metadata.
-- Odoo sale.order id/name/state and `x_vendor_id` when found.
+- Odoo sale.order id/name/state and configured vendor field when found.
 - Duplicate count.
 - Sanitized warnings/unknowns/errors.
 
@@ -308,7 +310,7 @@ Safety behavior:
 - Reads one `VendorAllocation` by id.
 - Reads runtime Odoo env gates as booleans only.
 - Checks whether the allocation vendor is present in `ODOO_VENDOR_PARTNER_MAP`.
-- Checks Odoo `sale.order.x_vendor_id` existence/type/writability.
+- Checks configured Odoo vendor field existence/type/writability/relation.
 - Checks Odoo required writable fields for `sale.order` and `sale.order.line`.
 - Searches Odoo `product.product` by allocation SKU using `default_code`.
 - Counts Odoo `sale.order` records by deterministic `client_order_ref`.
@@ -335,7 +337,7 @@ Success is logged with:
 
 - allocation id
 - Odoo sale order id
-- mapped Odoo `x_vendor_id`
+- mapped Odoo vendor field
 
 ## Current Unknowns
 

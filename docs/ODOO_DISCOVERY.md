@@ -36,12 +36,14 @@ Render dashboard environment variables are not the same as local `backend/.env`;
 ```text
 ODOO_ENABLED=false
 ODOO_URL=
-ODOO_DB=
+ODOO_DB=spg_hub
 ODOO_USERNAME=
 ODOO_API_KEY=
 ODOO_DRY_RUN=true
 ODOO_DISCOVERY_ONLY=true
-ODOO_VENDOR_PARTNER_MAP=sporjinal:11,yalispor:12
+ODOO_SALE_ORDER_PARTNER_ID=11
+ODOO_VENDOR_FIELD_NAME=x_studio_tedarikci
+ODOO_VENDOR_PARTNER_MAP=sporjinal:12,yalispor:13
 ```
 
 Optional safe fixture defaults:

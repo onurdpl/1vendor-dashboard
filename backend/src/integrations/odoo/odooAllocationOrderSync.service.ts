@@ -23,6 +23,7 @@ type OdooAllocationSyncConfig =
       apiKey: string;
       partnerId?: number;
       partnerName?: string;
+      vendorFieldName: string;
       vendorPartnerMap: Record<string, number>;
     };
 
@@ -72,7 +73,6 @@ type SyncResult =
 const REQUIRED_ODOO_ENV_KEYS = ['ODOO_URL', 'ODOO_DB', 'ODOO_USERNAME', 'ODOO_API_KEY'] as const;
 const SALE_ORDER_READ_FIELDS = ['id', 'name', 'state'];
 const SALE_ORDER_REFERENCE_PREFIX = 'sporgym-allocation:';
-const ODOO_VENDOR_PORTAL_FIELD = 'x_vendor_id';
 const ODOO_SALE_ORDER_PICKING_POLICY = 'direct';
 const PRODUCT_TYPE_FIELDS = ['type', 'detailed_type'] as const;
 const PRODUCT_TEMPLATE_CORE_FIELDS = ['name', 'default_code'] as const;
@@ -157,12 +157,18 @@ export async function syncOdooSaleOrderForAllocation(
     }
 
     const saleOrderFields = await client.fieldsGet(uid, 'sale.order');
-    const saleOrderHeaderValues = buildOdooSaleOrderHeaderValues(allocation, partner, company, vendorPortalPartnerId);
-    validateOdooSaleOrderHeaderPayload(saleOrderFields, saleOrderHeaderValues);
+    const saleOrderHeaderValues = buildOdooSaleOrderHeaderValues(
+      allocation,
+      partner,
+      company,
+      vendorPortalPartnerId,
+      config.vendorFieldName,
+    );
+    validateOdooSaleOrderHeaderPayload(saleOrderFields, saleOrderHeaderValues, config.vendorFieldName);
 
     const productsBySku = await resolveOdooProductsForAllocation(client, uid, allocation);
     const saleOrderValues = buildOdooSaleOrderValues(allocation, saleOrderHeaderValues, productsBySku);
-    await validateOdooSaleOrderPayload(client, uid, saleOrderValues, saleOrderFields);
+    await validateOdooSaleOrderPayload(client, uid, saleOrderValues, saleOrderFields, config.vendorFieldName);
 
     const saleOrderId = await client.modelCall<number>(uid, 'sale.order', 'create', [saleOrderValues]);
     const saleOrders = await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'read', [[saleOrderId]], {
@@ -209,6 +215,7 @@ function parseOdooAllocationSyncConfig(env: OdooAllocationSyncEnv): OdooAllocati
   if (!partnerId && !partnerName) {
     throw new Error('ODOO_SALE_ORDER_PARTNER_ID or ODOO_SALE_ORDER_PARTNER_NAME is required for allocation sale.order sync.');
   }
+  const vendorFieldName = readRequired(env, 'ODOO_VENDOR_FIELD_NAME');
   const vendorPartnerMap = parseOdooVendorPartnerMap(env.ODOO_VENDOR_PARTNER_MAP);
 
   return {
@@ -220,6 +227,7 @@ function parseOdooAllocationSyncConfig(env: OdooAllocationSyncEnv): OdooAllocati
     apiKey: readRequired(env, 'ODOO_API_KEY'),
     partnerId,
     partnerName,
+    vendorFieldName,
     vendorPartnerMap,
   };
 }
@@ -524,6 +532,7 @@ function buildOdooSaleOrderHeaderValues(
   partner: OdooPartnerRef,
   company: OdooCompanyRef,
   vendorPortalPartnerId: number,
+  vendorFieldName: string,
 ) {
   if (allocation.lineItems.length === 0) {
     throw new Error(`Vendor allocation ${allocation.id} has no line items for Odoo sale.order sync.`);
@@ -537,7 +546,7 @@ function buildOdooSaleOrderHeaderValues(
     partner_id: partner.id,
     partner_invoice_id: partner.id,
     partner_shipping_id: partner.id,
-    [ODOO_VENDOR_PORTAL_FIELD]: vendorPortalPartnerId,
+    [vendorFieldName]: vendorPortalPartnerId,
     picking_policy: ODOO_SALE_ORDER_PICKING_POLICY,
     client_order_ref: buildClientOrderRef(allocation.id),
     origin: allocation.sourceShopifyOrderNumber,
@@ -587,9 +596,10 @@ function buildOdooSaleOrderLineValues(
 function validateOdooSaleOrderHeaderPayload(
   saleOrderFields: OdooFieldsGetResponse,
   values: ReturnType<typeof buildOdooSaleOrderHeaderValues>,
+  vendorFieldName: string,
 ) {
   const errors = [
-    ...missingOdooVendorPortalField(saleOrderFields),
+    ...missingOdooVendorPortalField(saleOrderFields, vendorFieldName),
     ...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), values),
   ];
 
@@ -603,10 +613,11 @@ async function validateOdooSaleOrderPayload(
   uid: number,
   values: ReturnType<typeof buildOdooSaleOrderValues>,
   saleOrderFields: OdooFieldsGetResponse,
+  vendorFieldName: string,
 ) {
   const saleOrderLineFields = await client.fieldsGet(uid, 'sale.order.line');
   const errors = [
-    ...missingOdooVendorPortalField(saleOrderFields),
+    ...missingOdooVendorPortalField(saleOrderFields, vendorFieldName),
     ...missingRequiredFields('sale.order', requiredWritableFields(saleOrderFields), values),
     ...missingRequiredFields('sale.order.line', requiredWritableFields(saleOrderLineFields), extractFirstOrderLineValues(values), new Set(['order_id'])),
   ];
@@ -616,16 +627,16 @@ async function validateOdooSaleOrderPayload(
   }
 }
 
-function missingOdooVendorPortalField(fields: OdooFieldsGetResponse) {
-  const definition = fields[ODOO_VENDOR_PORTAL_FIELD];
+function missingOdooVendorPortalField(fields: OdooFieldsGetResponse, vendorFieldName: string) {
+  const definition = fields[vendorFieldName];
   if (!definition) {
-    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} does not exist in Odoo; vendor portal mapping was not written.`];
+    return [`sale.order.${vendorFieldName} does not exist in Odoo; vendor portal mapping was not written.`];
   }
-  if (definition.type && definition.type !== 'many2one') {
-    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} must be a writable many2one field in Odoo; vendor portal mapping was not written.`];
+  if (definition.type !== 'many2one' || definition.relation !== 'res.partner') {
+    return [`sale.order.${vendorFieldName} must be a writable many2one field to res.partner in Odoo; vendor portal mapping was not written.`];
   }
   if (definition.readonly) {
-    return [`sale.order.${ODOO_VENDOR_PORTAL_FIELD} is readonly in Odoo; vendor portal mapping was not written.`];
+    return [`sale.order.${vendorFieldName} is readonly in Odoo; vendor portal mapping was not written.`];
   }
   return [];
 }

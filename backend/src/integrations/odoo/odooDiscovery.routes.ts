@@ -257,17 +257,15 @@ async function runOdooAllocationSyncDiagnosis(allocationId: string) {
   if (!runtime.vendorMapping.mapped) {
     errors.push(`No Odoo vendor portal partner mapping configured for vendor ${allocation.assignedVendorId}.`);
   }
-  if (odoo?.saleOrderLineRequiredWritableFields.includes('product_id')) {
-    errors.push('Odoo requires sale.order.line.product_id, but the current sync still creates text-only order lines without product_id.');
-  }
+  const vendorFieldName = readOdooVendorFieldName();
   if (odoo?.xVendorField.exists === false) {
-    errors.push('Odoo sale.order.x_vendor_id does not exist.');
+    errors.push(`Odoo sale.order.${vendorFieldName} does not exist.`);
   }
   if (odoo?.xVendorField.exists && !odoo.xVendorField.writable) {
-    errors.push('Odoo sale.order.x_vendor_id is not writable.');
+    errors.push(`Odoo sale.order.${vendorFieldName} is not writable.`);
   }
-  if (odoo?.xVendorField.exists && !odoo.xVendorField.isMany2one) {
-    errors.push('Odoo sale.order.x_vendor_id is not a many2one field.');
+  if (odoo?.xVendorField.exists && (!odoo.xVendorField.isMany2one || !odoo.xVendorField.isResPartnerRelation)) {
+    errors.push(`Odoo sale.order.${vendorFieldName} is not a many2one field to res.partner.`);
   }
   if (odoo?.matchingOdooSaleOrderCount === 0) {
     unknowns.push('No Odoo sale.order found by deterministic client_order_ref.');
@@ -824,7 +822,7 @@ async function inspectOdooAllocationSyncPrerequisites(
 
   return {
     authSucceeded: true,
-    xVendorField: summarizeOdooField(saleOrderFields.x_vendor_id),
+    xVendorField: summarizeOdooField(saleOrderFields[readOdooVendorFieldName()]),
     saleOrderRequiredWritableFields: requiredWritableFieldNames(saleOrderFields),
     saleOrderLineRequiredWritableFields: requiredWritableFieldNames(saleOrderLineFields),
     products,
@@ -857,13 +855,15 @@ function requiredWritableFieldNames(fields: Record<string, { required?: boolean;
     .sort();
 }
 
-function summarizeOdooField(definition: { type?: string; readonly?: boolean; required?: boolean; string?: string } | undefined) {
+function summarizeOdooField(definition: { type?: string; readonly?: boolean; required?: boolean; string?: string; relation?: string } | undefined) {
   if (!definition) {
     return {
       exists: false,
       writable: false,
       isMany2one: false,
+      isResPartnerRelation: false,
       type: null,
+      relation: null,
       required: null,
       label: null,
     };
@@ -873,18 +873,25 @@ function summarizeOdooField(definition: { type?: string; readonly?: boolean; req
     exists: true,
     writable: definition.readonly !== true,
     isMany2one: definition.type === 'many2one',
+    isResPartnerRelation: definition.relation === 'res.partner',
     type: definition.type ?? null,
+    relation: definition.relation ?? null,
     required: definition.required === true,
     label: definition.string ?? null,
   };
 }
 
+function readOdooVendorFieldName() {
+  return process.env.ODOO_VENDOR_FIELD_NAME?.trim() || 'ODOO_VENDOR_FIELD_NAME';
+}
+
 async function searchOdooSaleOrderByClientOrderRef(clientOrderRef: string) {
   const client = buildOdooClientFromEnv();
   const uid = await client.authenticate();
+  const vendorFieldName = readOdooVendorFieldName();
   const [saleOrders, matchingCount] = await Promise.all([
     client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'search_read', [[[ 'client_order_ref', '=', clientOrderRef ]]], {
-      fields: ['id', 'name', 'state', 'client_order_ref', 'x_vendor_id'],
+      fields: ['id', 'name', 'state', 'client_order_ref', vendorFieldName],
       limit: 1,
     }),
     client.modelCall<number>(uid, 'sale.order', 'search_count', [[[ 'client_order_ref', '=', clientOrderRef ]]]),
@@ -892,7 +899,7 @@ async function searchOdooSaleOrderByClientOrderRef(clientOrderRef: string) {
   const saleOrder = saleOrders[0];
 
   return {
-    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder) : null,
+    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder, vendorFieldName) : null,
     matchingCount,
   };
 }
@@ -914,13 +921,14 @@ async function readOdooSaleOrderVerificationStateIfPossible(odooSaleOrderId: str
     throw new Error('Stored Odoo sale.order id is not numeric.');
   }
 
+  const vendorFieldName = readOdooVendorFieldName();
   const saleOrders = await client.modelCall<Array<Record<string, unknown>>>(uid, 'sale.order', 'read', [[saleOrderId]], {
-    fields: ['id', 'name', 'state', 'client_order_ref', 'x_vendor_id'],
+    fields: ['id', 'name', 'state', 'client_order_ref', vendorFieldName],
   });
   const saleOrder = saleOrders[0];
 
   return {
-    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder) : null,
+    saleOrder: saleOrder ? summarizeOdooSaleOrder(saleOrder, vendorFieldName) : null,
     matchingCount,
   };
 }
@@ -954,6 +962,7 @@ function summarizeOdooAllocationSyncEnv() {
     ODOO_API_KEY: exists(process.env.ODOO_API_KEY),
     ODOO_SALE_ORDER_PARTNER_ID: exists(process.env.ODOO_SALE_ORDER_PARTNER_ID),
     ODOO_SALE_ORDER_PARTNER_NAME: exists(process.env.ODOO_SALE_ORDER_PARTNER_NAME),
+    ODOO_VENDOR_FIELD_NAME: exists(process.env.ODOO_VENDOR_FIELD_NAME),
     ODOO_VENDOR_PARTNER_MAP: exists(process.env.ODOO_VENDOR_PARTNER_MAP),
     saleOrderPartnerConfigured: exists(process.env.ODOO_SALE_ORDER_PARTNER_ID) || exists(process.env.ODOO_SALE_ORDER_PARTNER_NAME),
   };
@@ -1037,13 +1046,15 @@ function summarizeAllocationDiagnosis(allocation: NonNullable<Awaited<ReturnType
   };
 }
 
-function summarizeOdooSaleOrder(saleOrder: Record<string, unknown>) {
+function summarizeOdooSaleOrder(saleOrder: Record<string, unknown>, vendorFieldName = readOdooVendorFieldName()) {
   return {
     id: typeof saleOrder.id === 'number' ? saleOrder.id : Number(saleOrder.id),
     name: readStringOrNull(saleOrder.name),
     state: readStringOrNull(saleOrder.state),
     clientOrderRef: readStringOrNull(saleOrder.client_order_ref),
-    xVendorId: readOdooManyToOneRef(saleOrder.x_vendor_id),
+    vendorFieldName,
+    vendorFieldValue: readOdooManyToOneRef(saleOrder[vendorFieldName]),
+    xVendorId: readOdooManyToOneRef(saleOrder[vendorFieldName]),
   };
 }
 
@@ -1080,8 +1091,8 @@ function summarizeOdooSyncCodePath() {
     syncResultPersistedOnFailure: false,
     syncFailureHandling: 'syncOdooSaleOrdersForAllocations returns failed results and logs errors, but order ingestion does not persist those results.',
     createsOdooRecordsInThisDiagnosis: false,
-    currentLineStrategy: 'text_only_sale_order_lines',
-    requiresProductIdInCode: false,
+    currentLineStrategy: 'product_backed_sale_order_lines',
+    requiresProductIdInCode: true,
   };
 }
 
@@ -1090,13 +1101,13 @@ function chooseOdooDiagnosisSmallestFix(errors: string[], lineItemCount: number)
     return 'Allocation must have line items before retry.';
   }
   if (errors.some((error) => error.includes('product_id'))) {
-    return 'Update Odoo sync to resolve SKU/default_code to product.product id and send product_id on sale.order.line, or relax the Odoo requirement for product_id.';
+    return 'Fix the reported Odoo product lookup or product_id prerequisite before retry.';
   }
   if (errors.some((error) => error.includes('vendor portal partner mapping'))) {
     return 'Configure ODOO_VENDOR_PARTNER_MAP for the allocation vendor before retry.';
   }
-  if (errors.some((error) => error.includes('x_vendor_id'))) {
-    return 'Create/fix writable sale.order.x_vendor_id as a many2one to res.partner before retry.';
+  if (errors.some((error) => error.includes(readOdooVendorFieldName()) || error.includes('vendor field'))) {
+    return `Create/fix writable sale.order.${readOdooVendorFieldName()} as a many2one to res.partner before retry.`;
   }
   if (errors.length) {
     return 'Fix the reported Odoo/runtime prerequisite, then retry the allocation sync.';

@@ -18,7 +18,7 @@ const logger = {
   error: vi.fn(),
 };
 
-type MockOdooField = { required?: boolean; readonly?: boolean; type?: string; string?: string; selection?: unknown };
+type MockOdooField = { required?: boolean; readonly?: boolean; type?: string; string?: string; relation?: string; selection?: unknown };
 
 describe('Odoo allocation sale.order sync', () => {
   beforeEach(() => {
@@ -56,8 +56,9 @@ describe('Odoo allocation sale.order sync', () => {
         ODOO_DB: 'sporgym',
         ODOO_USERNAME: 'integration@example.test',
         ODOO_API_KEY: 'secret',
-        ODOO_SALE_ORDER_PARTNER_ID: '1',
-        ODOO_VENDOR_PARTNER_MAP: 'sporjinal:11,yalispor:12',
+        ODOO_SALE_ORDER_PARTNER_ID: '11',
+        ODOO_VENDOR_FIELD_NAME: 'x_studio_tedarikci',
+        ODOO_VENDOR_PARTNER_MAP: 'sporjinal:12,yalispor:13',
       },
       logger,
     });
@@ -92,7 +93,7 @@ describe('Odoo allocation sale.order sync', () => {
     expect(prismaMock.vendorAllocation.findUnique).not.toHaveBeenCalled();
   });
 
-  it('sets x_vendor_id from the configured vendor partner map', async () => {
+  it('sets the configured Odoo vendor field from the configured vendor partner map', async () => {
     const allocation = buildAllocation({ assignedVendorId: 'yalispor' });
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(allocation);
     prismaMock.vendorAllocation.update.mockResolvedValueOnce({});
@@ -111,7 +112,8 @@ describe('Odoo allocation sale.order sync', () => {
       odooSaleOrderName: 'SO043',
     });
     expect(fetchMock.createdSaleOrderValues).toMatchObject({
-      x_vendor_id: 12,
+      partner_id: 11,
+      x_studio_tedarikci: 13,
       picking_policy: 'direct',
       client_order_ref: 'sporgym-allocation:alloc-1',
     });
@@ -152,7 +154,7 @@ describe('Odoo allocation sale.order sync', () => {
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
   });
 
-  it('fails before create when x_vendor_id is missing in Odoo fields', async () => {
+  it('fails before create when the configured Odoo vendor field is missing', async () => {
     prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocation({ assignedVendorId: 'sporjinal' }));
     const fetchMock = buildOdooFetchMock({ saleOrderFields: {} });
 
@@ -168,7 +170,33 @@ describe('Odoo allocation sale.order sync', () => {
     });
     expect(result).toHaveProperty(
       'error',
-      'sale.order.x_vendor_id does not exist in Odoo; vendor portal mapping was not written.',
+      'sale.order.x_studio_tedarikci does not exist in Odoo; vendor portal mapping was not written.',
+    );
+    expect(fetchMock.createdSaleOrderValues).toBeNull();
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('fails before create when the configured Odoo vendor field is not a res.partner many2one', async () => {
+    prismaMock.vendorAllocation.findUnique.mockResolvedValueOnce(buildAllocation({ assignedVendorId: 'sporjinal' }));
+    const fetchMock = buildOdooFetchMock({
+      saleOrderFields: {
+        x_studio_tedarikci: { type: 'many2one', relation: 'product.product', readonly: false },
+      },
+    });
+
+    const result = await syncOdooSaleOrderForAllocation('alloc-1', {
+      env: liveEnv(),
+      logger,
+      fetchImpl: fetchMock,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      allocationId: 'alloc-1',
+    });
+    expect(result).toHaveProperty(
+      'error',
+      'sale.order.x_studio_tedarikci must be a writable many2one field to res.partner in Odoo; vendor portal mapping was not written.',
     );
     expect(fetchMock.createdSaleOrderValues).toBeNull();
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
@@ -179,7 +207,7 @@ describe('Odoo allocation sale.order sync', () => {
     prismaMock.vendorAllocation.update.mockResolvedValueOnce({});
     const fetchMock = buildOdooFetchMock({
       saleOrderFields: {
-        x_vendor_id: { type: 'many2one', readonly: false },
+        x_studio_tedarikci: { type: 'many2one', relation: 'res.partner', readonly: false },
         picking_policy: { type: 'selection', required: true, readonly: false },
       },
     });
@@ -391,8 +419,9 @@ function liveEnv(overrides: Record<string, string | undefined> = {}) {
     ODOO_DB: 'sporgym',
     ODOO_USERNAME: 'integration@example.test',
     ODOO_API_KEY: 'secret',
-    ODOO_SALE_ORDER_PARTNER_ID: '1',
-    ODOO_VENDOR_PARTNER_MAP: 'sporjinal:11,yalispor:12',
+    ODOO_SALE_ORDER_PARTNER_ID: '11',
+    ODOO_VENDOR_FIELD_NAME: 'x_studio_tedarikci',
+    ODOO_VENDOR_PARTNER_MAP: 'sporjinal:12,yalispor:13',
     ...overrides,
   };
 }
@@ -458,7 +487,7 @@ function buildOdooFetchMock(
     }
 
     if (model === 'res.partner' && method === 'read') {
-      return jsonRpcResponse(payload.id, [{ id: 1, name: 'Sporgym Partner' }]);
+      return jsonRpcResponse(payload.id, [{ id: 11, name: 'Test Customer' }]);
     }
 
     if (model === 'res.company' && method === 'search_read') {
@@ -470,7 +499,7 @@ function buildOdooFetchMock(
     }
 
     if (model === 'sale.order' && method === 'fields_get') {
-      return jsonRpcResponse(payload.id, options.saleOrderFields ?? { x_vendor_id: { type: 'many2one', readonly: false } });
+      return jsonRpcResponse(payload.id, options.saleOrderFields ?? { x_studio_tedarikci: { type: 'many2one', relation: 'res.partner', readonly: false } });
     }
 
     if (model === 'sale.order.line' && method === 'fields_get') {
