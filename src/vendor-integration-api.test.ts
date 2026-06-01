@@ -8,6 +8,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorIntegrationAuditLog: {
     create: vi.fn(),
+    findMany: vi.fn(),
   },
   vendorAllocation: {
     findMany: vi.fn(),
@@ -83,27 +84,31 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function createRegisteredRoute() {
+function createRegisteredRoutes() {
   const hooks = new Map<string, (request: Record<string, unknown>, reply: { statusCode: number }) => Promise<void>>();
-  const route: {
-    path?: string;
+  const gets = new Map<string, {
     options?: { preHandler: Array<(request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>> };
     handler?: (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>;
-  } = {};
+  }>();
+  const posts = new Map<string, {
+    options?: { preHandler: Array<(request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>> };
+    handler?: (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>;
+  }>();
   const app = {
     addHook: vi.fn((name: string, handler: (request: Record<string, unknown>, reply: { statusCode: number }) => Promise<void>) => {
       hooks.set(name, handler);
     }),
-    get: vi.fn((path: string, options: typeof route.options, handler: typeof route.handler) => {
-      route.path = path;
-      route.options = options;
-      route.handler = handler;
+    get: vi.fn((path: string, options: { preHandler?: Array<(request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>> } | ((request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>), handler?: (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>) => {
+      gets.set(path, typeof options === 'function' ? { handler: options } : { options: { preHandler: options.preHandler ?? [] }, handler });
+    }),
+    post: vi.fn((path: string, options: { preHandler?: Array<(request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>> } | ((request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>), handler?: (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>) => {
+      posts.set(path, typeof options === 'function' ? { handler: options } : { options: { preHandler: options.preHandler ?? [] }, handler });
     }),
   };
 
   registerVendorIntegrationRoutes(app as never);
 
-  return { route, hooks };
+  return { gets, posts, hooks };
 }
 
 function createReply() {
@@ -126,7 +131,8 @@ function createReply() {
 }
 
 async function injectVendorIntegrationOrders(headers: Record<string, string>, query: Record<string, string> = {}) {
-  const { route, hooks } = createRegisteredRoute();
+  const { gets, hooks } = createRegisteredRoutes();
+  const route = gets.get('/api/vendor-integration/orders');
   const reply = createReply();
   const request: Record<string, unknown> = {
     headers,
@@ -136,7 +142,7 @@ async function injectVendorIntegrationOrders(headers: Record<string, string>, qu
     query,
   };
 
-  for (const preHandler of route.options?.preHandler ?? []) {
+  for (const preHandler of route?.options?.preHandler ?? []) {
     await preHandler(request, reply);
     if (reply.sent) {
       await hooks.get('onResponse')?.(request, reply);
@@ -144,11 +150,41 @@ async function injectVendorIntegrationOrders(headers: Record<string, string>, qu
     }
   }
 
-  const result = await route.handler?.(request, reply);
+  const result = await route?.handler?.(request, reply);
   const payload = reply.sent ? reply.payload : result;
   await hooks.get('onResponse')?.(request, reply);
 
   return { statusCode: reply.statusCode, payload, request };
+}
+
+async function injectAdminRoute(
+  method: 'GET' | 'POST',
+  path: string,
+  options: {
+    headers?: Record<string, string>;
+    body?: unknown;
+    query?: Record<string, string>;
+    params?: Record<string, string>;
+  } = {},
+) {
+  const { gets, posts } = createRegisteredRoutes();
+  const route = method === 'GET' ? gets.get(path) : posts.get(path);
+  const reply = createReply();
+  const request: Record<string, unknown> = {
+    headers: options.headers ?? {},
+    method,
+    url: path,
+    id: 'admin-req-1',
+    body: options.body,
+    query: options.query ?? {},
+    params: options.params ?? {},
+  };
+
+  const result = await route?.handler?.(request, reply);
+  return {
+    statusCode: reply.statusCode,
+    payload: reply.sent ? reply.payload : result,
+  };
 }
 
 describe('vendor integration API foundation', () => {
@@ -156,7 +192,9 @@ describe('vendor integration API foundation', () => {
     vi.clearAllMocks();
     prismaMock.vendorIntegrationClient.update.mockResolvedValue({ id: 'client-1' });
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
+    prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
     prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation()]);
+    process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
   });
 
   it('rejects invalid tokens', async () => {
@@ -271,5 +309,146 @@ describe('vendor integration API foundation', () => {
       }),
     );
     expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).not.toHaveProperty('token');
+  });
+
+  it('admin token creation returns plaintext once and stores only the hash', async () => {
+    prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
+      id: 'client-created',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'ayensoftware-test',
+      scopes: ['orders:read'],
+    });
+
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        clientId: 'client-created',
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+        token: expect.stringMatching(/^spg_vi_/),
+        tokenWarning: expect.stringContaining('shown only once'),
+      }),
+    );
+    const token = (response.payload as { token: string }).token;
+    expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).toEqual(
+      expect.objectContaining({
+        tokenHash: hashVendorIntegrationToken(token),
+      }),
+    );
+    expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).not.toHaveProperty('token');
+  });
+
+  it('created admin token can call the vendor integration orders endpoint', async () => {
+    prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
+      id: 'client-created',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'ayensoftware-test',
+      scopes: ['orders:read'],
+    });
+
+    const created = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read'],
+      },
+    });
+    const token = (created.payload as { token: string }).token;
+    prismaMock.vendorIntegrationClient.findUnique.mockImplementationOnce(async (input: { where: { tokenHash: string } }) => {
+      return input.where.tokenHash === hashVendorIntegrationToken(token) ? buildClient({ id: 'client-created' }) : null;
+    });
+
+    const response = await injectVendorIntegrationOrders({ authorization: `Bearer ${token}` });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(expect.objectContaining({ data: [expect.objectContaining({ vendorIdentifier: 'sporjinal' })] }));
+  });
+
+  it('revokes admin-managed tokens and rejects the token after revocation', async () => {
+    prismaMock.vendorIntegrationClient.update.mockResolvedValueOnce({
+      id: 'client-1',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'Provider A',
+      enabled: false,
+      revokedAt: new Date('2026-06-01T12:00:00.000Z'),
+    });
+
+    const revokeResponse = await injectAdminRoute('POST', '/admin/vendor-integration/tokens/:id/revoke', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      params: { id: 'client-1' },
+    });
+
+    expect(revokeResponse.statusCode).toBe(200);
+    expect(revokeResponse.payload).toEqual(
+      expect.objectContaining({
+        clientId: 'client-1',
+        enabled: false,
+        revokedAt: '2026-06-01T12:00:00.000Z',
+      }),
+    );
+    expect(prismaMock.vendorIntegrationClient.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'client-1' },
+        data: expect.objectContaining({ enabled: false, revokedAt: expect.any(Date) }),
+      }),
+    );
+
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ enabled: false, revokedAt: new Date() }));
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer revoked-token' });
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('lists vendor integration audit logs without bodies', async () => {
+    prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValueOnce([
+      {
+        id: 'audit-1',
+        clientId: 'client-1',
+        vendorIdentifier: 'sporjinal',
+        method: 'GET',
+        path: '/api/vendor-integration/orders',
+        statusCode: 200,
+        requestId: 'req-1',
+        createdAt: new Date('2026-06-01T12:00:00.000Z'),
+      },
+    ]);
+
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/audit-logs', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      query: { vendorIdentifier: 'sporjinal' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorIntegrationAuditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { vendorIdentifier: 'sporjinal' },
+        take: 50,
+      }),
+    );
+    expect(response.payload).toEqual({
+      data: [
+        {
+          id: 'audit-1',
+          clientId: 'client-1',
+          vendorIdentifier: 'sporjinal',
+          method: 'GET',
+          path: '/api/vendor-integration/orders',
+          statusCode: 200,
+          requestId: 'req-1',
+          createdAt: '2026-06-01T12:00:00.000Z',
+        },
+      ],
+    });
+    expect(JSON.stringify(response.payload)).not.toContain('body');
   });
 });
