@@ -349,6 +349,38 @@ model UserVendorAccess {
   @@unique([userId, vendorId])
 }
 
+model VendorIntegrationClient {
+  id               String                      @id @default(cuid())
+  vendorIdentifier String
+  providerName     String
+  tokenHash        String                      @unique
+  enabled          Boolean                     @default(true)
+  scopes           String[]
+  lastUsedAt       DateTime?
+  revokedAt        DateTime?
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+  auditLogs        VendorIntegrationAuditLog[]
+
+  @@index([vendorIdentifier])
+  @@index([enabled, revokedAt])
+}
+
+model VendorIntegrationAuditLog {
+  id               String                  @id @default(cuid())
+  clientId         String
+  vendorIdentifier String
+  method           String
+  path             String
+  statusCode       Int
+  requestId        String?
+  createdAt        DateTime                @default(now())
+  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  @@index([clientId, createdAt])
+  @@index([vendorIdentifier, createdAt])
+}
+
 model ShopifyOrder {
   id                       String                 @id @default(cuid())
   sourceShopifyOrderId     String                 @unique

@@ -27,6 +27,7 @@ import { registerNotificationRoutes } from './modules/notifications/notification
 import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
+import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
 
@@ -350,6 +351,7 @@ export function createApp() {
   registerInvoiceExecutionRoutes(app, env);
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
+  registerVendorIntegrationRoutes(app);
   registerReconciliationRoutes(app, env);
   registerOdooDiscoveryProbeRoutes(app);
   registerShopifyWebhookRoutes(app, env);

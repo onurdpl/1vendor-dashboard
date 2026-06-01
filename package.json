@@ -31,6 +31,7 @@
     "navlungo:create-post-probe": "npm --prefix backend run navlungo:create-post-probe",
     "parasut:commission-probe": "npm --prefix backend run parasut:commission-probe",
     "probe:odoo:order": "tsx backend/scripts/probe-odoo-order.ts",
+    "vendor-integration:create-token": "npm --prefix backend run vendor-integration:create-token",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"
   },
   "dependencies": {
