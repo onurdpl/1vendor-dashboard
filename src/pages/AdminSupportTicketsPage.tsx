@@ -191,52 +191,70 @@ export function AdminSupportTicketsPage() {
         <div>
           <p className="eyebrow">Support operations</p>
           <h1>Support Operations Workspace</h1>
-          <p>Review vendor support requests, operational context, and internal investigation notes.</p>
+          <p className="support-ops-summary">Review vendor support requests, operational context, and internal investigation notes.</p>
         </div>
-        <Link to="/admin/support/analytics" className="button button-secondary button-link">
+        <Link to="/admin/support/analytics" className="button button-secondary button-link support-analytics-link">
           View analytics
         </Link>
       </div>
 
       <OperationalToolbar>
-        <SearchInput
-          placeholder="Search ticket, order, return, subject, or vendor..."
-          value={searchTerm}
-          onChange={(event) => setSearchTerm(event.target.value)}
-        />
+        <label className="support-search-field" htmlFor="support-ticket-search">
+          <span>Search</span>
+          <SearchInput
+            id="support-ticket-search"
+            placeholder="Search ticket, order, return, subject, or vendor..."
+            value={searchTerm}
+            onChange={(event) => setSearchTerm(event.target.value)}
+          />
+        </label>
         <FilterBar>
-          <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
-            {ALL_STATUSES.map((status) => (
-              <option key={status} value={status}>{status === 'all' ? 'All statuses' : formatSupportLabel(status)}</option>
-            ))}
-          </select>
-          <select value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as typeof categoryFilter)}>
-            {ALL_CATEGORIES.map((category) => (
-              <option key={category} value={category}>{category === 'all' ? 'All categories' : formatSupportLabel(category)}</option>
-            ))}
-          </select>
-          <select value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as typeof priorityFilter)}>
-            {ALL_PRIORITIES.map((priority) => (
-              <option key={priority} value={priority}>{priority === 'all' ? 'All priorities' : formatSupportLabel(priority)}</option>
-            ))}
-          </select>
-          <select value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value as typeof assigneeFilter)}>
-            <option value="all">All assignees</option>
-            <option value="unassigned">Unassigned</option>
-            {currentUser?.name ? <option value="me">Assigned to me</option> : null}
-          </select>
-          <label className="support-toggle">
-            <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
-            Unresolved only
+          <label className="support-filter-field" htmlFor="support-status-filter">
+            <span>Status</span>
+            <select id="support-status-filter" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}>
+              {ALL_STATUSES.map((status) => (
+                <option key={status} value={status}>{status === 'all' ? 'All statuses' : formatSupportLabel(status)}</option>
+              ))}
+            </select>
           </label>
-          <label className="support-toggle">
-            <input type="checkbox" checked={needsResponseOnly} onChange={(event) => setNeedsResponseOnly(event.target.checked)} />
-            Needs response
+          <label className="support-filter-field" htmlFor="support-category-filter">
+            <span>Category</span>
+            <select id="support-category-filter" value={categoryFilter} onChange={(event) => setCategoryFilter(event.target.value as typeof categoryFilter)}>
+              {ALL_CATEGORIES.map((category) => (
+                <option key={category} value={category}>{category === 'all' ? 'All categories' : formatSupportLabel(category)}</option>
+              ))}
+            </select>
           </label>
-          <label className="support-toggle">
-            <input type="checkbox" checked={escalatedOnly} onChange={(event) => setEscalatedOnly(event.target.checked)} />
-            Escalated
+          <label className="support-filter-field" htmlFor="support-priority-filter">
+            <span>Priority</span>
+            <select id="support-priority-filter" value={priorityFilter} onChange={(event) => setPriorityFilter(event.target.value as typeof priorityFilter)}>
+              {ALL_PRIORITIES.map((priority) => (
+                <option key={priority} value={priority}>{priority === 'all' ? 'All priorities' : formatSupportLabel(priority)}</option>
+              ))}
+            </select>
           </label>
+          <label className="support-filter-field" htmlFor="support-assignee-filter">
+            <span>Assignee</span>
+            <select id="support-assignee-filter" value={assigneeFilter} onChange={(event) => setAssigneeFilter(event.target.value as typeof assigneeFilter)}>
+              <option value="all">All assignees</option>
+              <option value="unassigned">Unassigned</option>
+              {currentUser?.name ? <option value="me">Assigned to me</option> : null}
+            </select>
+          </label>
+          <div className="support-toggle-group" aria-label="Support ticket quick filters">
+            <label className="support-toggle">
+              <input type="checkbox" checked={unresolvedOnly} onChange={(event) => setUnresolvedOnly(event.target.checked)} />
+              <span>Unresolved only</span>
+            </label>
+            <label className="support-toggle">
+              <input type="checkbox" checked={needsResponseOnly} onChange={(event) => setNeedsResponseOnly(event.target.checked)} />
+              <span>Needs response</span>
+            </label>
+            <label className="support-toggle">
+              <input type="checkbox" checked={escalatedOnly} onChange={(event) => setEscalatedOnly(event.target.checked)} />
+              <span>Escalated</span>
+            </label>
+          </div>
         </FilterBar>
       </OperationalToolbar>
 

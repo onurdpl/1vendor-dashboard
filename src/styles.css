@@ -9389,7 +9389,9 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .support-ops-header {
-  align-items: center;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
   margin-bottom: 0;
 }
 
@@ -9410,7 +9412,7 @@ summary.provider-response-heading::-webkit-details-marker {
   letter-spacing: 0;
 }
 
-.support-ops-header p:not(.eyebrow) {
+.support-ops-header .support-ops-summary {
   max-width: 560px;
   margin: 5px 0 0;
   color: #64748b;
@@ -9419,33 +9421,64 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .support-ops-header .button {
-  align-self: center;
+  align-self: flex-start;
   min-height: 34px;
   padding: 7px 11px;
   border-radius: 12px;
   font-size: 0.8rem;
 }
 
+.support-ops-header .support-analytics-link {
+  margin-top: 3px;
+  white-space: nowrap;
+}
+
 .support-ops-page .op-toolbar {
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 16px;
+  display: grid;
+  gap: 12px;
+  align-items: stretch;
+  padding: 14px;
+  border-color: #dbeafe;
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(239, 246, 255, 0.86), rgba(255, 255, 255, 0.95)),
+    #ffffff;
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.07);
+}
+
+.support-search-field,
+.support-filter-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.support-search-field > span,
+.support-filter-field > span {
+  color: #475569;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .support-ops-page .op-toolbar .op-search-input {
-  flex: 1 1 320px;
-  min-width: min(320px, 100%);
+  width: 100%;
+  min-width: 0;
   min-height: 36px;
-  border-radius: 12px;
-  background: #f8fafc;
-  font-size: 0.84rem;
+  padding: 8px 12px;
+  border-color: #bfdbfe;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.03);
+  font-size: 0.86rem;
 }
 
 .support-ops-page .op-filter-bar {
-  flex: 1 1 auto;
-  justify-content: flex-end;
-  gap: 7px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
 }
 
 .support-ops-page .op-toolbar > .op-filter-bar:only-child {
@@ -9453,32 +9486,95 @@ summary.provider-response-heading::-webkit-details-marker {
 }
 
 .support-ops-page .op-filter-bar select {
+  width: 100%;
+  min-width: 0;
   min-height: 36px;
+  padding: 7px 32px 7px 10px;
+  border-color: #cbd5e1;
   border-radius: 12px;
+  background-color: #ffffff;
+  color: #0f172a;
   font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.support-filter-field {
+  flex: 0 1 152px;
+}
+
+.support-toggle-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  min-width: 0;
+  padding-bottom: 1px;
 }
 
 .support-toggle {
   display: inline-flex;
   align-items: center;
-  min-height: 36px;
+  flex: 0 0 auto;
+  min-height: 34px;
+  width: auto;
+  max-width: 100%;
   gap: 7px;
-  padding: 0 10px;
-  border: 1px solid #e2e8f0;
-  border-radius: 12px;
+  padding: 7px 10px;
+  border: 1px solid #dbe3ef;
+  border-radius: 999px;
   background: #f8fafc;
-  color: #475569;
+  color: #334155;
+  cursor: pointer;
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1;
   white-space: nowrap;
 }
 
-.support-toggle input {
-  width: 14px;
-  height: 14px;
+.support-toggle:hover {
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+
+.support-ops-page .support-toggle input {
+  width: 15px;
+  min-width: 15px;
+  max-width: 15px;
+  height: 15px;
+  min-height: 15px;
+  flex: 0 0 15px;
   margin: 0;
+  padding: 0;
   accent-color: #2563eb;
+}
+
+.support-toggle span {
+  display: inline-block;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .support-ops-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .support-ops-header .support-analytics-link {
+    align-self: flex-start;
+  }
+
+  .support-ops-page .op-toolbar {
+    padding: 12px;
+  }
+
+  .support-filter-field {
+    flex: 1 1 132px;
+  }
+
+  .support-toggle-group {
+    width: 100%;
+    align-items: center;
+  }
 }
 
 .support-detail-header,
