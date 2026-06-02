@@ -116,6 +116,44 @@ function formatFinancePreviewValue(
   return formatCurrency(value, currency);
 }
 
+function getSnapshotCurrency(order: OrderDetail) {
+  return order.orderSnapshot?.currency || 'TRY';
+}
+
+function formatSnapshotAmount(value: string | null | undefined, currency: string) {
+  return value === null || value === undefined || value === '' ? '—' : formatCurrency(value, currency);
+}
+
+function formatSnapshotValue(value: string | null | undefined) {
+  return value?.trim() || '—';
+}
+
+function formatVatRate(value: string | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric.toLocaleString('en-US')}%` : value;
+}
+
+function formatBillingAddress(address: NonNullable<OrderDetail['orderSnapshot']>['billingAddress'] | null | undefined) {
+  if (!address) {
+    return '—';
+  }
+
+  return [
+    address.fullName,
+    address.company,
+    address.phone,
+    address.address1,
+    address.address2,
+    address.district,
+    address.city,
+    address.postcode,
+  ].filter((part) => part?.trim()).join(' · ') || '—';
+}
+
 function isPositiveFinanceValue(value: string | null | undefined) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0;
@@ -4229,6 +4267,7 @@ export function OrderDetailPage() {
   }
 
   const orderItems = safeArray(order.lineItems).length ? safeArray(order.lineItems) : safeArray(order.items);
+  const snapshotCurrency = getSnapshotCurrency(order);
   const customerLabel = getCompactCustomerLabel(order.customer);
   const trackingTitle = getTrackingTitle(order);
   const trackingHelper = getTrackingHelper(order);
@@ -5316,6 +5355,14 @@ export function OrderDetailPage() {
                       <div className="order-item-primary">
                         <strong>{item.name || 'Unknown item'}</strong>
                         <span>{[item.variantTitle, item.sku].filter(Boolean).join(' · ') || 'SKU pending'}</span>
+                        <small>
+                          {[
+                            `VAT ${formatVatRate(item.vatRate)}`,
+                            `VAT unit ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                            `VAT total ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                            item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
+                          ].filter(Boolean).join(' · ')}
+                        </small>
                       </div>
                       <div>
                         <span>Qty</span>
@@ -5331,6 +5378,59 @@ export function OrderDetailPage() {
               ) : (
                 <p className="order-empty-copy">No records available.</p>
               )}
+            </div>
+          </article>
+
+          <article className="order-detail-card-v2 order-workspace-panel" aria-label="Integration snapshot">
+            <div className="order-card-heading">
+              <div>
+                <h2>Integration Snapshot</h2>
+                <p>Read-only Shopify order fields persisted for vendor integration providers.</p>
+              </div>
+            </div>
+            <div className="order-financial-impact-grid order-finance-preview-grid">
+              <div>
+                <span>Financial status</span>
+                <strong>{formatSnapshotValue(order.orderSnapshot?.financialStatus)}</strong>
+              </div>
+              <div>
+                <span>Payment gateway</span>
+                <strong>{formatSnapshotValue(order.orderSnapshot?.paymentGatewayName)}</strong>
+              </div>
+              <div>
+                <span>Currency</span>
+                <strong>{formatSnapshotValue(order.orderSnapshot?.currency)}</strong>
+              </div>
+              <div>
+                <span>Shipping amount</span>
+                <strong>{formatSnapshotAmount(order.orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
+              </div>
+              <div>
+                <span>Discount amount</span>
+                <strong>{formatSnapshotAmount(order.orderSnapshot?.discountAmount, snapshotCurrency)}</strong>
+              </div>
+              <div>
+                <span>Shopify created</span>
+                <strong>{order.orderSnapshot?.shopifyCreatedAt ? formatOptionalDate(order.orderSnapshot.shopifyCreatedAt) : '—'}</strong>
+              </div>
+            </div>
+            <div className="orders-rail-summary-list">
+              <div>
+                <span>Billing address</span>
+                <strong>{formatBillingAddress(order.orderSnapshot?.billingAddress)}</strong>
+              </div>
+              {order.orderSnapshot?.orderNote ? (
+                <div>
+                  <span>Order note</span>
+                  <strong>{order.orderSnapshot.orderNote}</strong>
+                </div>
+              ) : null}
+              {order.orderSnapshot?.orderTags?.length ? (
+                <div>
+                  <span>Order tags</span>
+                  <strong>{order.orderSnapshot.orderTags.join(', ')}</strong>
+                </div>
+              ) : null}
             </div>
           </article>
 

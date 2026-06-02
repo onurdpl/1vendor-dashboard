@@ -665,6 +665,10 @@ export type OrderLineItem = {
   imageUrl?: string | null;
   quantity: number;
   price: string;
+  shopifyProductId?: string | null;
+  unitPriceVatIncluded?: string | null;
+  lineTotalVatIncluded?: string | null;
+  vatRate?: string | null;
   // Compatibility alias for current pages/hooks. Maps to assignedVendorId.
   vendorId: VendorId;
   fulfillmentStatus: FulfillmentStatus;
@@ -683,6 +687,27 @@ export type OrderLineItem = {
   carrier?: string;
   trackingUrl?: string;
   estimatedDelivery?: string;
+};
+
+export type OrderIntegrationSnapshot = {
+  shopifyCreatedAt: string | null;
+  currency: string | null;
+  financialStatus: string | null;
+  paymentGatewayName: string | null;
+  shippingAmount: string | null;
+  discountAmount: string | null;
+  orderNote: string | null;
+  orderTags: string[];
+  billingAddress: {
+    fullName: string | null;
+    company: string | null;
+    phone: string | null;
+    city: string | null;
+    district: string | null;
+    address1: string | null;
+    address2: string | null;
+    postcode: string | null;
+  };
 };
 
 export type FinanceLedgerPreviewEntry = {
@@ -749,6 +774,7 @@ export type OrderDetail = OrderSummary & {
   notes: string;
   lineItems: OrderLineItem[];
   items: OrderLineItem[];
+  orderSnapshot?: OrderIntegrationSnapshot | null;
   timeline: Array<{ label: string; at: string }>;
   shipmentExecution?: ShipmentExecution | null;
   shopifyFulfillmentSync?: {

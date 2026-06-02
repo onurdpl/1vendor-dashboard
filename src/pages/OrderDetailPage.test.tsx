@@ -149,6 +149,26 @@ const orderWithShipmentSummary: OrderDetail = {
   channel: 'Shopify',
   shippingAddress: 'Unknown',
   notes: '—',
+  orderSnapshot: {
+    shopifyCreatedAt: '2026-05-15T12:05:00.000Z',
+    currency: 'TRY',
+    financialStatus: 'paid',
+    paymentGatewayName: 'PayTR Marketplace',
+    shippingAmount: '49.90',
+    discountAmount: '125.00',
+    orderNote: 'Integration note',
+    orderTags: ['entegrasyon', 'priority'],
+    billingAddress: {
+      fullName: 'Billing Customer',
+      company: 'Billing Co',
+      phone: '+900000000001',
+      city: 'Istanbul',
+      district: 'Besiktas',
+      address1: 'Billing street 1',
+      address2: 'Floor 2',
+      postcode: '34330',
+    },
+  },
   lineItems: [
     {
       originalVendorId: 'sporjinal',
@@ -160,6 +180,10 @@ const orderWithShipmentSummary: OrderDetail = {
       name: 'Nike Air Max Alpha Trainer 6',
       quantity: 1,
       price: 'TRY 4,999.00',
+      shopifyProductId: 'gid://shopify/Product/1028',
+      unitPriceVatIncluded: '4999.00',
+      lineTotalVatIncluded: '4999.00',
+      vatRate: '10.00',
       fulfillmentStatus: 'Pending',
       allocationStatus: 'active',
       reassignmentRequired: false,
@@ -1083,6 +1107,83 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const image = container.querySelector<HTMLImageElement>('.order-item-thumb img');
     expect(image).toBeTruthy();
     expect(image?.src).toBe('https://cdn.shopify.com/s/files/line-item.jpg');
+  });
+
+  it('renders persisted integration snapshot fields without exposing raw Shopify payloads', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('paid')).toBeInTheDocument();
+    expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
+    expect(screen.getByText('TRY')).toBeInTheDocument();
+    expect(screen.getByText(/TRY\s*49\.90/)).toBeInTheDocument();
+    expect(screen.getByText(/TRY\s*125\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
+    expect(screen.getByText(/Billing street 1/)).toBeInTheDocument();
+    expect(screen.getByText('Integration note')).toBeInTheDocument();
+    expect(screen.getByText('entegrasyon, priority')).toBeInTheDocument();
+    expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT unit TRY\s*4,999\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT total TRY\s*4,999\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1028/)).toBeInTheDocument();
+    expect(screen.queryByText(/rawPayload/i)).not.toBeInTheDocument();
+  });
+
+  it('renders missing optional integration snapshot fields safely', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      orderSnapshot: {
+        shopifyCreatedAt: null,
+        currency: null,
+        financialStatus: null,
+        paymentGatewayName: null,
+        shippingAmount: null,
+        discountAmount: null,
+        orderNote: null,
+        orderTags: [],
+        billingAddress: {
+          fullName: null,
+          company: null,
+          phone: null,
+          city: null,
+          district: null,
+          address1: null,
+          address2: null,
+          postcode: null,
+        },
+      },
+      lineItems: orderWithShipmentSummary.lineItems.map((item) => ({
+        ...item,
+        unitPriceVatIncluded: null,
+        lineTotalVatIncluded: null,
+        vatRate: null,
+      })),
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Integration note')).not.toBeInTheDocument();
   });
 
   it('opens and closes a line item image preview modal from the thumbnail', async () => {

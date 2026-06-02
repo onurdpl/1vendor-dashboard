@@ -56,6 +56,31 @@ export type OrderDetailLineItemDto = {
   imageUrl: string | null;
   quantity: number;
   lineAmount: string;
+  shopifyProductId: string | null;
+  unitPriceVatIncluded: string | null;
+  lineTotalVatIncluded: string | null;
+  vatRate: string | null;
+};
+
+export type OrderSnapshotDto = {
+  shopifyCreatedAt: string | null;
+  currency: string | null;
+  financialStatus: string | null;
+  paymentGatewayName: string | null;
+  shippingAmount: string | null;
+  discountAmount: string | null;
+  orderNote: string | null;
+  orderTags: string[];
+  billingAddress: {
+    fullName: string | null;
+    company: string | null;
+    phone: string | null;
+    city: string | null;
+    district: string | null;
+    address1: string | null;
+    address2: string | null;
+    postcode: string | null;
+  };
 };
 
 export type OrderAssignmentHistoryDto = {
@@ -435,6 +460,7 @@ export type OrderDetailDto = OrderSummaryDto & {
   customerName: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
+  orderSnapshot: OrderSnapshotDto;
   shopifyFulfillmentSync: ShopifyFulfillmentSyncDto;
   shopifyReturnSignal: ShopifyReturnSignalDiscoveryDto | null;
   financeLedgerPreview?: FinanceLedgerPreviewDto | null;

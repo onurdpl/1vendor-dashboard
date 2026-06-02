@@ -34,7 +34,7 @@ import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { sameNormalizedIdentifier } from '../lib/shopifyIdentifiers';
 import { formatShippingProviderName, formatTrackingCarrierLabel } from '../lib/shippingDisplay';
 import { useMutationAction } from '../hooks/useMutationAction';
-import { formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
+import { formatCurrency, formatDateTime, getSafeTimestamp, safeArray, safeStatusLabel } from '../services/real/formatting';
 import { getOrderWorkflowAction } from '../lib/workflowActionGuidance';
 
 type OrderQuickFilter = 'all' | 'blocked' | 'awaiting' | 'tracking_missing' | 'high_value' | 'returns';
@@ -51,6 +51,37 @@ function formatDate(value?: string | null) {
     hour: '2-digit',
     minute: '2-digit',
   }, 'Not synced');
+}
+
+function getSnapshotCurrency(order: OrderSummary | OrderDetail) {
+  return (order as OrderDetail).orderSnapshot?.currency || 'TRY';
+}
+
+function formatSnapshotValue(value: string | null | undefined) {
+  return value?.trim() || '—';
+}
+
+function formatSnapshotAmount(value: string | null | undefined, currency: string) {
+  return value === null || value === undefined || value === '' ? '—' : formatCurrency(value, currency);
+}
+
+function formatVatRate(value: string | null | undefined) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${numeric.toLocaleString('en-US')}%` : value;
+}
+
+function formatBillingAddress(address: NonNullable<OrderDetail['orderSnapshot']>['billingAddress'] | null | undefined) {
+  if (!address) {
+    return '—';
+  }
+
+  return [address.fullName, address.company, address.phone, address.address1, address.address2, address.district, address.city, address.postcode]
+    .filter((part) => part?.trim())
+    .join(' · ') || '—';
 }
 
 function getStatusTone(status: string | null | undefined) {
@@ -841,6 +872,8 @@ export function OrdersPage() {
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
+              const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
+              const snapshotCurrency = getSnapshotCurrency(selectedOrder);
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
@@ -939,6 +972,36 @@ export function OrdersPage() {
                 </div>
               </section>
 
+              <section className="orders-detail-card" aria-label="Integration snapshot">
+                <h4>Integration Snapshot</h4>
+                <div className="orders-rail-summary-list">
+                  <div>
+                    <span>Financial status</span>
+                    <strong>{formatSnapshotValue(orderSnapshot?.financialStatus)}</strong>
+                  </div>
+                  <div>
+                    <span>Payment gateway</span>
+                    <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
+                  </div>
+                  <div>
+                    <span>Currency</span>
+                    <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
+                  </div>
+                  <div>
+                    <span>Shipping</span>
+                    <strong>{formatSnapshotAmount(orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
+                  </div>
+                  <div>
+                    <span>Discount</span>
+                    <strong>{formatSnapshotAmount(orderSnapshot?.discountAmount, snapshotCurrency)}</strong>
+                  </div>
+                  <div>
+                    <span>Billing</span>
+                    <strong>{formatBillingAddress(orderSnapshot?.billingAddress)}</strong>
+                  </div>
+                </div>
+              </section>
+
               <section className="orders-detail-card">
                 <h4>Line items</h4>
                 {(selectedOrder as OrderDetail).lineItems?.length ? (
@@ -956,6 +1019,14 @@ export function OrdersPage() {
                         <div className="order-detail-item-copy">
                           <strong>{item.name}</strong>
                           <small>{item.sku} · {item.variantTitle}</small>
+                          <small>
+                            {[
+                              `VAT ${formatVatRate(item.vatRate)}`,
+                              `VAT unit ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                              `VAT total ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                              item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          </small>
                         </div>
                         <div className="return-detail-item-meta">
                           <span>Qty {item.quantity}</span>

@@ -86,6 +86,7 @@ type OrderDetailDto = OrderSummaryDto & {
   customerName: string | null;
   reassignmentRequired: boolean;
   cancellationReason: string | null;
+  orderSnapshot?: OrderDetail['orderSnapshot'];
   shopifyFulfillmentSync?: {
     status: 'synced' | 'pending' | 'failed' | 'not_available';
     fulfillmentOrderIdPresent: boolean;
@@ -105,6 +106,10 @@ type OrderDetailDto = OrderSummaryDto & {
     imageUrl: string | null;
     quantity: number;
     lineAmount: string;
+    shopifyProductId?: string | null;
+    unitPriceVatIncluded?: string | null;
+    lineTotalVatIncluded?: string | null;
+    vatRate?: string | null;
   }>;
   assignmentHistory: Array<{
     id: string;
@@ -286,6 +291,10 @@ function mapOrderLineItems(
     imageUrl: item.imageUrl ?? null,
     quantity: item.quantity,
     price: formatCurrency(item.lineAmount),
+    shopifyProductId: item.shopifyProductId ?? null,
+    unitPriceVatIncluded: item.unitPriceVatIncluded ?? null,
+    lineTotalVatIncluded: item.lineTotalVatIncluded ?? null,
+    vatRate: item.vatRate ?? null,
     allocationStatus,
     reassignmentRequired: allocationStatus === 'pending_reassignment',
     fulfillmentActionState,
@@ -353,6 +362,7 @@ function mapOrderDetail(dto: OrderDetailDto): OrderDetail {
     shipmentExecution: dto.shipmentExecution ?? null,
     shopifyFulfillmentSync: dto.shopifyFulfillmentSync,
     shopifyReturnSignal: dto.shopifyReturnSignal ?? null,
+    orderSnapshot: dto.orderSnapshot ?? null,
     reassignmentRequired: dto.reassignmentRequired,
     cancellationReason: (dto.cancellationReason?.trim().toLowerCase() as OrderDetail['cancellationReason']) ?? undefined,
     assignmentHistory: history,

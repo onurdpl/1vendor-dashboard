@@ -18,6 +18,15 @@ function toAmountString(value: number) {
   return value.toFixed(2);
 }
 
+function toNullableAmountString(value: unknown) {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? toAmountString(numeric) : null;
+}
+
 function computeTotalAmount(lineItems: Array<{ lineAmount: unknown; quantity: number }>) {
   return lineItems.reduce((sum, item) => {
     const numeric = Number(item.lineAmount ?? 0);
@@ -1204,6 +1213,26 @@ export async function getVendorOrderById(
     shipmentExecution: mapShipmentExecution(allocation.shipmentExecutions?.[0]),
     reassignmentRequired: allocation.reassignmentRequired,
     cancellationReason: allocation.cancellationReason,
+    orderSnapshot: {
+      shopifyCreatedAt: toIsoString(allocation.order.shopifyCreatedAt),
+      currency: allocation.order.currency,
+      financialStatus: allocation.order.financialStatus,
+      paymentGatewayName: allocation.order.paymentGatewayName,
+      shippingAmount: toNullableAmountString(allocation.order.shippingAmount),
+      discountAmount: toNullableAmountString(allocation.order.discountAmount),
+      orderNote: allocation.order.orderNote,
+      orderTags: allocation.order.orderTags,
+      billingAddress: {
+        fullName: allocation.order.billingFullName,
+        company: allocation.order.billingCompany,
+        phone: allocation.order.billingPhone,
+        city: allocation.order.billingCity,
+        district: allocation.order.billingDistrict,
+        address1: allocation.order.billingAddress1,
+        address2: allocation.order.billingAddress2,
+        postcode: allocation.order.billingPostcode,
+      },
+    },
     lineItems: allocation.lineItems.map((item) => ({
       id: item.id,
       sourceLineItemId: item.shopifyOrderLineItem.sourceLineItemId,
@@ -1213,6 +1242,10 @@ export async function getVendorOrderById(
       imageUrl: lineItemImageOverrides.get(item.shopifyOrderLineItem.id) ?? item.shopifyOrderLineItem.imageUrl,
       quantity: item.quantity,
       lineAmount: toAmountString(Number(item.lineAmount ?? 0)),
+      shopifyProductId: item.shopifyOrderLineItem.shopifyProductId,
+      unitPriceVatIncluded: toNullableAmountString(item.shopifyOrderLineItem.unitPriceVatIncluded),
+      lineTotalVatIncluded: toNullableAmountString(item.shopifyOrderLineItem.lineTotalVatIncluded),
+      vatRate: toNullableAmountString(item.shopifyOrderLineItem.vatRate),
     })),
     assignmentHistory: allocation.assignmentHistory.map((entry) => ({
       id: entry.id,

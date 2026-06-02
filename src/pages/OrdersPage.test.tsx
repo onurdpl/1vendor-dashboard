@@ -55,6 +55,26 @@ const orderDetail: OrderDetail = {
   channel: 'Shopify',
   shippingAddress: '22 Harbor Ave, Dublin',
   notes: 'Delivered without exceptions.',
+  orderSnapshot: {
+    shopifyCreatedAt: '2026-05-08T09:15:00Z',
+    currency: 'TRY',
+    financialStatus: 'paid',
+    paymentGatewayName: 'PayTR Marketplace',
+    shippingAmount: '39.90',
+    discountAmount: '25.00',
+    orderNote: 'Rail integration note',
+    orderTags: ['entegrasyon'],
+    billingAddress: {
+      fullName: 'Acme Billing',
+      company: 'Acme Supply Co.',
+      phone: '+900000000002',
+      city: 'Istanbul',
+      district: 'Kadikoy',
+      address1: 'Rail billing street',
+      address2: 'Suite 4',
+      postcode: '34000',
+    },
+  },
   lineItems: [
     {
       originalVendorId: 'demo-vendor-a',
@@ -67,6 +87,10 @@ const orderDetail: OrderDetail = {
       imageUrl: 'https://cdn.example.com/barcode-license.png',
       quantity: 3,
       price: '$650.00',
+      shopifyProductId: 'gid://shopify/Product/1002',
+      unitPriceVatIncluded: '650.00',
+      lineTotalVatIncluded: '1950.00',
+      vatRate: '10.00',
       fulfillmentStatus: 'Fulfilled',
       allocationStatus: 'fulfilled',
       reassignmentRequired: false,
@@ -488,6 +512,13 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText(/TRK-A-1002/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Fulfilled').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
+    expect(screen.getByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
+    expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
+    expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT unit TRY\s*650\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT total TRY\s*1,950\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).toBeInTheDocument();
   });
 
   it('opens an existing shipment label without creating a duplicate shipment', async () => {
