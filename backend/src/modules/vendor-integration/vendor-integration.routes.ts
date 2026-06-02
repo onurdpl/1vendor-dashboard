@@ -1,6 +1,10 @@
 import type { FastifyInstance } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
+import type { AppEnv } from '../../config/env.js';
 import { prisma } from '../../db/prisma.js';
+import { createAuthMiddleware } from '../auth/auth.middleware.js';
+import { createAuthService } from '../auth/auth.service.js';
+import { listAdminVendorIntegrationProviders } from './vendor-integration.admin.service.js';
 import {
   authenticateVendorIntegrationRequest,
   requireVendorIntegrationScope,
@@ -94,8 +98,11 @@ function resolveAuditLogLimit(value: AuditLogsQuery['limit']) {
   return Math.min(parsed, 100);
 }
 
-export function registerVendorIntegrationRoutes(app: FastifyInstance) {
+export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppEnv) {
   app.addHook('onResponse', writeVendorIntegrationAuditLog);
+  const adminAuthPreHandlers = env
+    ? [createAuthMiddleware(createAuthService(env)).authenticateRequest]
+    : [];
 
   app.post<{ Body: TokenCreateBody }>('/admin/vendor-integration/tokens', async (request, reply) => {
     const auth = assertAdminTokenAuthorized(request.headers);
@@ -191,6 +198,20 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
       })),
     };
   });
+
+  app.get(
+    '/admin/vendor-integration/providers',
+    {
+      preHandler: adminAuthPreHandlers,
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return listAdminVendorIntegrationProviders();
+    },
+  );
 
   app.get<{ Querystring: VendorIntegrationOrdersQuery }>(
     '/api/vendor-integration/orders',

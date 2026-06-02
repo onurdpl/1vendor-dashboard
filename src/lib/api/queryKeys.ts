@@ -20,6 +20,9 @@ export const queryKeys = {
     runtime: {
       health: () => ['admin', 'runtime', 'health'] as const,
     },
+    vendorIntegration: {
+      providers: () => ['admin', 'vendor-integration', 'providers'] as const,
+    },
     orders: {
       breakdown: (shopifyOrderId: string) => ['admin', 'orders', 'breakdown', shopifyOrderId] as const,
     },

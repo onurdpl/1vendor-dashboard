@@ -499,6 +499,34 @@ Audit log responses include only:
 
 They do not include request bodies, response bodies, tokens, or credentials.
 
+### `GET /admin/vendor-integration/providers`
+
+Returns read-only admin visibility for configured vendor integration clients.
+
+This endpoint is used by Admin Provider Management v1. It requires a logged-in admin user and does not use the provider bearer token.
+
+Returned fields include:
+
+- client id
+- provider name
+- vendor identifier
+- scopes
+- enabled/revoked state
+- created, updated, last used, and last request timestamps
+- request counts for the last 24 hours
+- rate-limited request counts for the last 24 hours
+- recent audit log metadata
+
+The endpoint does not return:
+
+- plaintext token values
+- token hashes
+- request bodies
+- response bodies
+- bearer tokens or secrets
+
+Token values are shown only once when created and are not recoverable. Admin Provider Management v1 is read-only; token rotation and revoke UI actions are future work.
+
 ## Future Direction
 
 Future provider integration phases may add Shopify fulfillment updates after a separate security and operational review. Shopify fulfillment writes are not part of this foundation.

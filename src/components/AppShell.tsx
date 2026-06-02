@@ -26,6 +26,7 @@ const adminNavItems = [
   { to: '/admin/operations', label: 'Operations Queue', icon: 'Q' },
   { to: '/admin/support', label: 'Support Tickets', icon: 'S' },
   { to: '/admin/support/analytics', label: 'Support Analytics', icon: 'A' },
+  { to: '/admin/providers', label: 'Providers', icon: 'P' },
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
 ];
 

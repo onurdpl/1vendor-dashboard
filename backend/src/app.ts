@@ -351,7 +351,7 @@ export function createApp() {
   registerInvoiceExecutionRoutes(app, env);
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
-  registerVendorIntegrationRoutes(app);
+  registerVendorIntegrationRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerOdooDiscoveryProbeRoutes(app);
   registerShopifyWebhookRoutes(app, env);

@@ -22,6 +22,7 @@ import * as realSignals from './real/signals';
 import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
 import * as realRuntime from './real/runtime';
+import * as realVendorIntegration from './real/vendorIntegration';
 import type {
   CreateSupportTicketInput,
   SupportAnalytics,
@@ -32,6 +33,7 @@ import type {
   ShipmentCustomerOverrides,
   ShippingProvider,
   VendorShippingConfigUpdate,
+  VendorIntegrationProviderManagement,
 } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
 
@@ -42,6 +44,39 @@ function getCurrentVendorId() {
 type ReadRequestOptions = { signal?: AbortSignal };
 
 const mockSupportTickets: SupportTicket[] = [];
+
+function getMockVendorIntegrationProviderManagement(): VendorIntegrationProviderManagement {
+  const now = new Date().toISOString();
+  return {
+    generatedAt: now,
+    providers: [
+      {
+        clientId: 'mock-provider-sporjinal',
+        providerName: 'Mock Provider',
+        vendorIdentifier: 'sporjinal',
+        scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+        enabled: true,
+        revokedAt: null,
+        createdAt: now,
+        updatedAt: now,
+        lastUsedAt: now,
+        lastRequestAt: now,
+        requestsLast24h: 12,
+        rateLimitedLast24h: 0,
+        authFailuresLast24h: null,
+        recentAuditLogs: [
+          {
+            method: 'GET',
+            path: '/api/vendor-integration/orders',
+            statusCode: 200,
+            requestId: 'mock-req-1',
+            createdAt: now,
+          },
+        ],
+      },
+    ],
+  };
+}
 
 function calculateMockSupportDueAt(priority: SupportTicket['priority'], baseDate = new Date()) {
   const hours = priority === 'high' ? 4 : priority === 'low' ? 48 : 24;
@@ -1525,6 +1560,12 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realOperations.getAdminOperationsAttention({ signal: options.signal })
         : Promise.resolve(getMockAdminOperationsAttention()),
+  },
+  vendorIntegration: {
+    providers: (options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendorIntegration.getVendorIntegrationProviderManagement({ signal: options.signal })
+        : Promise.resolve(getMockVendorIntegrationProviderManagement()),
   },
   signals: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>

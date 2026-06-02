@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const prismaMock = vi.hoisted(() => ({
   vendorIntegrationClient: {
     create: vi.fn(),
+    findMany: vi.fn(),
     findUnique: vi.fn(),
     update: vi.fn(),
   },
@@ -317,6 +318,7 @@ async function injectAdminRoute(
     body?: unknown;
     query?: Record<string, string>;
     params?: Record<string, string>;
+    authUser?: Record<string, unknown>;
   } = {},
 ) {
   const { gets, posts } = createRegisteredRoutes();
@@ -330,6 +332,7 @@ async function injectAdminRoute(
     body: options.body,
     query: options.query ?? {},
     params: options.params ?? {},
+    authUser: options.authUser,
   };
 
   const result = await route?.handler?.(request, reply);
@@ -344,6 +347,7 @@ describe('vendor integration API foundation', () => {
     vi.clearAllMocks();
     resetVendorIntegrationRateLimitForTests();
     delete process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE;
+    prismaMock.vendorIntegrationClient.findMany.mockResolvedValue([]);
     prismaMock.vendorIntegrationClient.update.mockResolvedValue({ id: 'client-1' });
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
@@ -1360,5 +1364,96 @@ describe('vendor integration API foundation', () => {
       ],
     });
     expect(JSON.stringify(response.payload)).not.toContain('body');
+  });
+
+  it('returns read-only admin provider summaries without token material', async () => {
+    prismaMock.vendorIntegrationClient.findMany.mockResolvedValueOnce([
+      {
+        id: 'client-1',
+        providerName: 'Provider A',
+        vendorIdentifier: 'sporjinal',
+        scopes: ['orders:read', 'status:write'],
+        enabled: true,
+        revokedAt: null,
+        createdAt: new Date('2026-06-01T10:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T10:05:00.000Z'),
+        lastUsedAt: new Date('2026-06-01T11:00:00.000Z'),
+        auditLogs: [
+          {
+            method: 'GET',
+            path: '/api/vendor-integration/orders',
+            statusCode: 200,
+            requestId: 'req-1',
+            createdAt: new Date('2026-06-01T12:00:00.000Z'),
+          },
+        ],
+      },
+    ]);
+    prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValueOnce([
+      {
+        clientId: 'client-1',
+        statusCode: 200,
+        createdAt: new Date(),
+      },
+      {
+        clientId: 'client-1',
+        statusCode: 429,
+        createdAt: new Date(),
+      },
+    ]);
+
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/providers', {
+      authUser: { role: 'admin' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorIntegrationClient.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          tokenHash: true,
+        }),
+      }),
+    );
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        providers: [
+          expect.objectContaining({
+            clientId: 'client-1',
+            providerName: 'Provider A',
+            vendorIdentifier: 'sporjinal',
+            scopes: ['orders:read', 'status:write'],
+            enabled: true,
+            revokedAt: null,
+            lastUsedAt: '2026-06-01T11:00:00.000Z',
+            requestsLast24h: 2,
+            rateLimitedLast24h: 1,
+            authFailuresLast24h: null,
+            recentAuditLogs: [
+              {
+                method: 'GET',
+                path: '/api/vendor-integration/orders',
+                statusCode: 200,
+                requestId: 'req-1',
+                createdAt: '2026-06-01T12:00:00.000Z',
+              },
+            ],
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(response.payload)).not.toContain('tokenHash');
+    expect(JSON.stringify(response.payload)).not.toContain('spg_vi_');
+    expect(JSON.stringify(response.payload)).not.toContain('requestBody');
+    expect(JSON.stringify(response.payload)).not.toContain('responseBody');
+  });
+
+  it('rejects read-only admin provider summaries for non-admin users', async () => {
+    const response = await injectAdminRoute('GET', '/admin/vendor-integration/providers', {
+      authUser: { role: 'vendor' },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Forbidden' });
+    expect(prismaMock.vendorIntegrationClient.findMany).not.toHaveBeenCalled();
   });
 });

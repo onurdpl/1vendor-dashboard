@@ -31,6 +31,9 @@ const AdminSupportTicketsPage = lazy(() =>
 const AdminSupportAnalyticsPage = lazy(() =>
   import('./pages/AdminSupportAnalyticsPage').then((module) => ({ default: module.AdminSupportAnalyticsPage })),
 );
+const AdminProviderManagementPage = lazy(() =>
+  import('./pages/AdminProviderManagementPage').then((module) => ({ default: module.AdminProviderManagementPage })),
+);
 const VendorSupportTicketsPage = lazy(() =>
   import('./pages/VendorSupportTicketsPage').then((module) => ({ default: module.VendorSupportTicketsPage })),
 );
@@ -161,6 +164,14 @@ export default function App() {
             element={
               <RequirePermission permission="orders:write">
                 {resilientRoute('Shopify order', <AdminShopifyOrderPage />)}
+              </RequirePermission>
+            }
+          />
+          <Route
+            path="/admin/providers"
+            element={
+              <RequirePermission permission="orders:write">
+                {resilientRoute('Provider management', <AdminProviderManagementPage />)}
               </RequirePermission>
             }
           />

@@ -1586,3 +1586,33 @@ export type OperationsAttentionDashboard = {
   vendorRisks: OperationsVendorRisk[];
   recentActivity: OperationsActivity[];
 };
+
+export type VendorIntegrationProviderAuditLog = {
+  method: string;
+  path: string;
+  statusCode: number;
+  requestId: string | null;
+  createdAt: string;
+};
+
+export type VendorIntegrationProviderSummary = {
+  clientId: string;
+  providerName: string;
+  vendorIdentifier: string;
+  scopes: string[];
+  enabled: boolean;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt: string | null;
+  lastRequestAt: string | null;
+  requestsLast24h: number;
+  rateLimitedLast24h: number;
+  authFailuresLast24h: number | null;
+  recentAuditLogs: VendorIntegrationProviderAuditLog[];
+};
+
+export type VendorIntegrationProviderManagement = {
+  generatedAt: string;
+  providers: VendorIntegrationProviderSummary[];
+};
