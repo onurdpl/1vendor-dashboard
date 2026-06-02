@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { prisma } from '../../db/prisma.js';
+import { rateLimitInvalidVendorIntegrationAttempt } from './vendor-integration.rate-limit.js';
 import { hashVendorIntegrationToken } from './vendor-integration.tokens.js';
 import './vendor-integration.types.js';
 
@@ -19,6 +20,10 @@ function extractBearerToken(header: string | undefined) {
 export async function authenticateVendorIntegrationRequest(request: FastifyRequest, reply: FastifyReply) {
   const token = extractBearerToken(request.headers.authorization);
   if (!token) {
+    const rateLimited = rateLimitInvalidVendorIntegrationAttempt(request, reply);
+    if (rateLimited) {
+      return rateLimited;
+    }
     return reply.code(401).send({ message: 'Vendor integration token is required.' });
   }
 
@@ -36,6 +41,10 @@ export async function authenticateVendorIntegrationRequest(request: FastifyReque
   });
 
   if (!client) {
+    const rateLimited = rateLimitInvalidVendorIntegrationAttempt(request, reply);
+    if (rateLimited) {
+      return rateLimited;
+    }
     return reply.code(401).send({ message: 'Vendor integration token is invalid.' });
   }
 

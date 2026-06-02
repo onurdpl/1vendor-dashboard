@@ -44,7 +44,43 @@ Tokens can be revoked or rotated by Sporgym. After revocation, requests using th
 - Audit logs do not store full request bodies, full response bodies, bearer tokens, passwords, or provider secrets.
 - Raw Shopify webhook payloads are not exposed by this API.
 
-## 4. Endpoints
+## 4. Rate Limits
+
+Endpoints under `/api/vendor-integration/*` are rate limited.
+
+Default:
+
+- `120` requests per minute per integration client.
+
+The limit may be changed by Sporgym environment configuration:
+
+```text
+VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE=120
+```
+
+Valid tokens are rate limited by integration client. Invalid or missing token attempts are rate limited by IP address.
+
+When the limit is exceeded, Sporgym returns:
+
+```http
+HTTP/1.1 429 Too Many Requests
+```
+
+```json
+{
+  "message": "Rate limit exceeded."
+}
+```
+
+Provider guidance:
+
+- Cache the issued bearer token securely.
+- Do not request a new token per API call.
+- Avoid aggressive polling.
+- Use `limit` and `cursor` pagination for order pulls.
+- Back off and retry later after HTTP `429`.
+
+## 5. Endpoints
 
 Base path examples below use:
 
@@ -59,7 +95,7 @@ Implemented endpoints:
 - `POST /api/vendor-integration/orders/:allocationId/shipment`
 - `POST /api/vendor-integration/orders/:allocationId/invoice`
 
-## 5. GET Orders
+## 6. GET Orders
 
 ```http
 GET /api/vendor-integration/orders
@@ -193,7 +229,7 @@ Snapshot notes:
 - `orderTags` is an array and may be empty.
 - No raw Shopify payload is returned.
 
-## 6. POST Status
+## 7. POST Status
 
 ```http
 POST /api/vendor-integration/orders/:allocationId/status
@@ -252,7 +288,7 @@ Example response:
 
 This endpoint updates only the provider status snapshot on the allocation.
 
-## 7. POST Shipment
+## 8. POST Shipment
 
 ```http
 POST /api/vendor-integration/orders/:allocationId/shipment
@@ -321,7 +357,7 @@ Operational boundary:
 - It does not create a shipment label or carrier record.
 - It does not mutate invoices, accounting entries, settlements, or payouts.
 
-## 8. POST Invoice
+## 9. POST Invoice
 
 ```http
 POST /api/vendor-integration/orders/:allocationId/invoice
@@ -391,7 +427,7 @@ Operational boundary:
 - It does not create settlements or payouts.
 - It does not mutate shipment or status behavior.
 
-## 9. Idempotency
+## 10. Idempotency
 
 All write endpoints require `Idempotency-Key`.
 
@@ -414,7 +450,7 @@ Examples:
 - `entegra:shipment:alloc-sporjinal-1001:tracking-ABC123456`
 - `entegra:invoice:alloc-sporjinal-1001:ABC202600001`
 
-## 10. Error Responses
+## 11. Error Responses
 
 Common responses:
 
@@ -430,6 +466,7 @@ Status codes:
 - `401` - missing or invalid bearer token.
 - `403` - missing scope, disabled/revoked token, or forbidden access.
 - `404` - allocation not found for the authenticated vendor.
+- `429` - rate limit exceeded.
 
 Examples:
 
@@ -451,7 +488,7 @@ Examples:
 }
 ```
 
-## 11. Operational Notes
+## 12. Operational Notes
 
 - Timestamps are ISO 8601 strings.
 - Amounts are decimal strings, not floating point numbers.

@@ -64,6 +64,28 @@ Initial supported scope:
 - `shipment:write` - allows reporting provider shipment/tracking information for the authenticated vendor's allocations only.
 - `invoice:write` - allows reporting provider invoice reference information for the authenticated vendor's allocations only.
 
+## Rate Limits
+
+Vendor Integration API endpoints under `/api/vendor-integration/*` are rate limited per integration client.
+
+Default:
+
+- `120` requests per minute per `VendorIntegrationClient`.
+
+Configuration:
+
+- `VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE=120`
+
+Invalid or missing token attempts are rate limited by IP address. Rate limit responses return:
+
+```json
+{
+  "message": "Rate limit exceeded."
+}
+```
+
+Providers should cache tokens securely, avoid aggressive polling, use pagination, and back off when receiving HTTP `429`.
+
 ## Endpoint
 
 ### `GET /api/vendor-integration/orders`

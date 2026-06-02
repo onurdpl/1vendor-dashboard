@@ -11,6 +11,7 @@ import {
   updateVendorIntegrationOrderInvoice,
   validateVendorIntegrationInvoicePayload,
 } from './vendor-integration.invoice.service.js';
+import { rateLimitVendorIntegrationClient } from './vendor-integration.rate-limit.js';
 import {
   updateVendorIntegrationOrderShipment,
   validateVendorIntegrationShipmentPayload,
@@ -194,7 +195,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
   app.get<{ Querystring: VendorIntegrationOrdersQuery }>(
     '/api/vendor-integration/orders',
     {
-      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('orders:read')],
+      preHandler: [authenticateVendorIntegrationRequest, rateLimitVendorIntegrationClient, requireVendorIntegrationScope('orders:read')],
     },
     async (request, reply) => {
       const context = request.vendorIntegration;
@@ -217,7 +218,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
   app.post<{ Params: { allocationId: string }; Body: StatusUpdateBody }>(
     '/api/vendor-integration/orders/:allocationId/status',
     {
-      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('status:write')],
+      preHandler: [authenticateVendorIntegrationRequest, rateLimitVendorIntegrationClient, requireVendorIntegrationScope('status:write')],
     },
     async (request, reply) => {
       const context = request.vendorIntegration;
@@ -258,7 +259,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
   app.post<{ Params: { allocationId: string }; Body: ShipmentUpdateBody }>(
     '/api/vendor-integration/orders/:allocationId/shipment',
     {
-      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('shipment:write')],
+      preHandler: [authenticateVendorIntegrationRequest, rateLimitVendorIntegrationClient, requireVendorIntegrationScope('shipment:write')],
     },
     async (request, reply) => {
       const context = request.vendorIntegration;
@@ -301,7 +302,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
   app.post<{ Params: { allocationId: string }; Body: InvoiceUpdateBody }>(
     '/api/vendor-integration/orders/:allocationId/invoice',
     {
-      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('invoice:write')],
+      preHandler: [authenticateVendorIntegrationRequest, rateLimitVendorIntegrationClient, requireVendorIntegrationScope('invoice:write')],
     },
     async (request, reply) => {
       const context = request.vendorIntegration;

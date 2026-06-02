@@ -39,6 +39,9 @@ const { hashVendorIntegrationToken, createVendorIntegrationClientToken } = await
 const { registerVendorIntegrationRoutes } = await import(
   '../backend/src/modules/vendor-integration/vendor-integration.routes.js'
 );
+const { resetVendorIntegrationRateLimitForTests } = await import(
+  '../backend/src/modules/vendor-integration/vendor-integration.rate-limit.js'
+);
 
 function buildClient(overrides: Record<string, unknown> = {}) {
   return {
@@ -178,7 +181,11 @@ function createReply() {
   return reply;
 }
 
-async function injectVendorIntegrationOrders(headers: Record<string, string>, query: Record<string, string> = {}) {
+async function injectVendorIntegrationOrders(
+  headers: Record<string, string>,
+  query: Record<string, string> = {},
+  options: { ip?: string } = {},
+) {
   const { gets, hooks } = createRegisteredRoutes();
   const route = gets.get('/api/vendor-integration/orders');
   const reply = createReply();
@@ -188,6 +195,7 @@ async function injectVendorIntegrationOrders(headers: Record<string, string>, qu
     url: '/api/vendor-integration/orders',
     id: 'req-1',
     query,
+    ip: options.ip ?? '127.0.0.1',
   };
 
   for (const preHandler of route?.options?.preHandler ?? []) {
@@ -334,6 +342,8 @@ async function injectAdminRoute(
 describe('vendor integration API foundation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetVendorIntegrationRateLimitForTests();
+    delete process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE;
     prismaMock.vendorIntegrationClient.update.mockResolvedValue({ id: 'client-1' });
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
@@ -358,6 +368,71 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationInvoiceEvent.create.mockResolvedValue({ id: 'invoice-event-1' });
     prismaMock.vendorIntegrationInvoiceEvent.findUnique.mockResolvedValue(null);
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
+  });
+
+  it('allows requests under the configured vendor integration rate limit', async () => {
+    process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE = '2';
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(buildClient());
+
+    const first = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+    const second = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns 429 when a vendor integration client exceeds the configured rate limit', async () => {
+    process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE = '1';
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(buildClient());
+
+    const first = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+    const second = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(429);
+    expect(second.payload).toEqual({ message: 'Rate limit exceeded.' });
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps separate rate limit buckets for separate vendor integration clients', async () => {
+    process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE = '1';
+    prismaMock.vendorIntegrationClient.findUnique
+      .mockResolvedValueOnce(buildClient({ id: 'client-1' }))
+      .mockResolvedValueOnce(buildClient({ id: 'client-2', vendorIdentifier: 'yalispor' }));
+
+    const first = await injectVendorIntegrationOrders({ authorization: 'Bearer first-token' });
+    const second = await injectVendorIntegrationOrders({ authorization: 'Bearer second-token' });
+
+    expect(first.statusCode).toBe(200);
+    expect(second.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        where: { assignedVendorId: 'sporjinal' },
+      }),
+    );
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        where: { assignedVendorId: 'yalispor' },
+      }),
+    );
+  });
+
+  it('rate limits invalid token attempts by IP without logging bearer tokens', async () => {
+    process.env.VENDOR_INTEGRATION_RATE_LIMIT_PER_MINUTE = '1';
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(null);
+
+    const first = await injectVendorIntegrationOrders({ authorization: 'Bearer invalid-token-one' }, {}, { ip: '203.0.113.10' });
+    const second = await injectVendorIntegrationOrders({ authorization: 'Bearer invalid-token-two' }, {}, { ip: '203.0.113.10' });
+
+    expect(first.statusCode).toBe(401);
+    expect(first.payload).toEqual({ message: 'Vendor integration token is invalid.' });
+    expect(second.statusCode).toBe(429);
+    expect(second.payload).toEqual({ message: 'Rate limit exceeded.' });
+    expect(prismaMock.vendorIntegrationAuditLog.create).not.toHaveBeenCalled();
+    expect(JSON.stringify(prismaMock.vendorIntegrationAuditLog.create.mock.calls)).not.toContain('invalid-token');
   });
 
   it('rejects invalid tokens', async () => {
