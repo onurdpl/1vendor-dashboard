@@ -797,11 +797,23 @@ async function processWebhookEvent(
       },
     );
 
+    const taxSnapshot = await shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId).then(
+      (result) => result,
+      (error) => {
+        console.warn('[diagnostics] Shopify tax snapshot enrichment failed; continuing replay with VAT fallback.', {
+          sourceShopifyOrderId,
+          errorMessage: error instanceof Error ? error.message : 'Unknown Shopify tax snapshot enrichment error.',
+        });
+        return null;
+      },
+    );
+
     const ingestionResult = await ingestShopifyOrderWebhook({
       event,
       payload: typedPayload,
       sellerInfo: sellerInfoResult.sellerInfo,
       lineItemImages,
+      taxSnapshot,
     });
 
     return ingestionResult.ok

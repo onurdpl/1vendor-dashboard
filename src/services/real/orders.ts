@@ -109,6 +109,7 @@ type OrderDetailDto = OrderSummaryDto & {
     shopifyProductId?: string | null;
     unitPriceVatIncluded?: string | null;
     lineTotalVatIncluded?: string | null;
+    lineTaxAmount?: string | null;
     vatRate?: string | null;
   }>;
   assignmentHistory: Array<{
@@ -294,6 +295,7 @@ function mapOrderLineItems(
     shopifyProductId: item.shopifyProductId ?? null,
     unitPriceVatIncluded: item.unitPriceVatIncluded ?? null,
     lineTotalVatIncluded: item.lineTotalVatIncluded ?? null,
+    lineTaxAmount: item.lineTaxAmount ?? null,
     vatRate: item.vatRate ?? null,
     allocationStatus,
     reassignmentRequired: allocationStatus === 'pending_reassignment',

@@ -554,11 +554,26 @@ export function registerShopifyWebhookRoutes(app: FastifyInstance, env: AppEnv) 
         },
       );
 
+      const taxSnapshot = await shopifyAdminService.fetchOrderTaxSnapshot(sourceShopifyOrderId).then(
+        (result) => result,
+        (error) => {
+          app.log.warn(
+            {
+              sourceShopifyOrderId,
+              errorMessage: error instanceof Error ? error.message : 'Unknown Shopify tax snapshot enrichment error.',
+            },
+            'Shopify tax snapshot enrichment failed; continuing order ingestion with VAT fallback.',
+          );
+          return null;
+        },
+      );
+
       ingestionResult = await ingestShopifyOrderWebhook({
         event: idempotencyResult.event,
         payload,
         sellerInfo: sellerInfoResult.sellerInfo,
         lineItemImages,
+        taxSnapshot,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Shopify orders/create ingestion failed.';

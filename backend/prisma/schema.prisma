@@ -389,6 +389,8 @@ model ShopifyOrder {
   currency                 String?
   financialStatus          String?
   paymentGatewayName       String?
+  taxesIncluded            Boolean?
+  orderTaxAmount           Decimal?               @db.Decimal(10, 2)
   shippingAmount           Decimal?               @db.Decimal(10, 2)
   discountAmount           Decimal?               @db.Decimal(10, 2)
   orderNote                String?
@@ -431,6 +433,7 @@ model ShopifyOrderLineItem {
   unitPrice           Decimal?                   @db.Decimal(10, 2)
   unitPriceVatIncluded Decimal?                  @db.Decimal(10, 2)
   lineTotalVatIncluded Decimal?                  @db.Decimal(10, 2)
+  lineTaxAmount       Decimal?                   @db.Decimal(10, 2)
   vatRate             Decimal?                   @db.Decimal(5, 2)
   originalVendorId    String?
   createdAt           DateTime                   @default(now())

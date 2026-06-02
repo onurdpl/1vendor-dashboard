@@ -154,6 +154,8 @@ const orderWithShipmentSummary: OrderDetail = {
     currency: 'TRY',
     financialStatus: 'paid',
     paymentGatewayName: 'PayTR Marketplace',
+    taxesIncluded: true,
+    orderTaxAmount: '454.45',
     shippingAmount: '49.90',
     discountAmount: '125.00',
     orderNote: 'Integration note',
@@ -183,6 +185,7 @@ const orderWithShipmentSummary: OrderDetail = {
       shopifyProductId: 'gid://shopify/Product/1028',
       unitPriceVatIncluded: '4999.00',
       lineTotalVatIncluded: '4999.00',
+      lineTaxAmount: '454.45',
       vatRate: '10.00',
       fulfillmentStatus: 'Pending',
       allocationStatus: 'active',
@@ -1128,13 +1131,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('TRY')).toBeInTheDocument();
     expect(screen.getByText(/TRY\s*49\.90/)).toBeInTheDocument();
     expect(screen.getByText(/TRY\s*125\.00/)).toBeInTheDocument();
+    expect(screen.getAllByText(/TRY\s*454\.45/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
     expect(screen.getByText(/Billing street 1/)).toBeInTheDocument();
     expect(screen.getByText('Integration note')).toBeInTheDocument();
     expect(screen.getByText('entegrasyon, priority')).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
-    expect(screen.getByText(/VAT unit TRY\s*4,999\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/VAT total TRY\s*4,999\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT amount TRY\s*454\.45/)).toBeInTheDocument();
+    expect(screen.getByText(/Unit price incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Line total incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1028/)).toBeInTheDocument();
     expect(screen.queryByText(/rawPayload/i)).not.toBeInTheDocument();
   });
@@ -1156,6 +1161,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         currency: null,
         financialStatus: null,
         paymentGatewayName: null,
+        taxesIncluded: null,
+        orderTaxAmount: null,
         shippingAmount: null,
         discountAmount: null,
         orderNote: null,
@@ -1175,6 +1182,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         ...item,
         unitPriceVatIncluded: null,
         lineTotalVatIncluded: null,
+        lineTaxAmount: null,
         vatRate: null,
       })),
     });

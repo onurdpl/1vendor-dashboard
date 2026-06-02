@@ -41,6 +41,8 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
       currency: 'TRY',
       financialStatus: 'paid',
       paymentGatewayName: 'PayTR Marketplace',
+      taxesIncluded: true,
+      orderTaxAmount: '109.09',
       shippingAmount: '49.90',
       discountAmount: '10.00',
       orderNote: 'Leave at desk',
@@ -71,6 +73,7 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
           shopifyProductId: 'gid://shopify/Product/1',
           unitPriceVatIncluded: '600.00',
           lineTotalVatIncluded: '1200.00',
+          lineTaxAmount: '109.09',
           vatRate: '10.00',
         },
       },
@@ -96,6 +99,8 @@ describe('order detail snapshot API mapping', () => {
       currency: 'TRY',
       financialStatus: 'paid',
       paymentGatewayName: 'PayTR Marketplace',
+      taxesIncluded: true,
+      orderTaxAmount: '109.09',
       shippingAmount: '49.90',
       discountAmount: '10.00',
       orderNote: 'Leave at desk',
@@ -116,6 +121,7 @@ describe('order detail snapshot API mapping', () => {
         shopifyProductId: 'gid://shopify/Product/1',
         unitPriceVatIncluded: '600.00',
         lineTotalVatIncluded: '1200.00',
+        lineTaxAmount: '109.09',
         vatRate: '10.00',
       }),
     );
@@ -128,6 +134,8 @@ describe('order detail snapshot API mapping', () => {
         order: {
           ...buildAllocation().order,
           paymentGatewayName: null,
+          taxesIncluded: null,
+          orderTaxAmount: null,
           shippingAmount: null,
           discountAmount: null,
           orderNote: null,
@@ -141,6 +149,8 @@ describe('order detail snapshot API mapping', () => {
     const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
 
     expect(result?.orderSnapshot.paymentGatewayName).toBeNull();
+    expect(result?.orderSnapshot.taxesIncluded).toBeNull();
+    expect(result?.orderSnapshot.orderTaxAmount).toBeNull();
     expect(result?.orderSnapshot.shippingAmount).toBeNull();
     expect(result?.orderSnapshot.discountAmount).toBeNull();
     expect(result?.orderSnapshot.billingAddress.company).toBeNull();

@@ -104,6 +104,8 @@ Example response:
         "currency": "TRY",
         "financialStatus": "paid",
         "paymentGatewayName": "PayTR Marketplace",
+        "taxesIncluded": true,
+        "orderTaxAmount": "118.17",
         "shippingAmount": "29.90",
         "discountAmount": "15.50"
       },
@@ -156,6 +158,7 @@ Example response:
           "unitPrice": "1299.90",
           "unitPriceVatIncluded": "1299.90",
           "lineTotalVatIncluded": "1299.90",
+          "lineTaxAmount": "118.17",
           "vatRate": "10",
           "lineAmount": "1299.90"
         }
@@ -184,7 +187,7 @@ Example response:
 The order feed exposes normalized Shopify order snapshots that are safe for the authenticated vendor:
 
 - order timing and identifiers: `shopifyCreatedAt`, `shopifyOrderId`, `shopifyOrderNumber`, allocation `id`
-- financial visibility: `currency`, `financialStatus`, `paymentGatewayName`, `shippingAmount`, `discountAmount`
+- financial visibility: `currency`, `financialStatus`, `paymentGatewayName`, `taxesIncluded`, `orderTaxAmount`, `shippingAmount`, `discountAmount`
 - customer/shipping/billing address fields persisted from Shopify payloads
 - order note and tag snapshots
 - line item product/variant identifiers, SKU, title, quantity, VAT-included unit price, VAT-included line total, and VAT rate
@@ -193,9 +196,11 @@ Missing optional Shopify payload fields are returned as `null` or an empty `orde
 
 Current VAT snapshot rule:
 
-- Default `vatRate` is `10` for the current sports clothing, shoes, and bags product mix.
+- Shopify Admin GraphQL line tax data is the primary source for `vatRate` and `lineTaxAmount` when available.
+- `lineTotalVatIncluded` and `unitPriceVatIncluded` use Shopify discounted line totals when Shopify reports `taxesIncluded=true`.
+- Default `vatRate` remains `10` only when Shopify line tax rate is missing.
 - Accessories/equipment may need `20` in the future.
-- No category engine is implemented yet; if category signals are unavailable, the current business decision is to snapshot `10`.
+- No category engine is implemented yet; if Shopify tax signals are unavailable, the current business decision is to snapshot `10`.
 - This is not a tax engine and does not change finance, payout, settlement, or accounting calculations.
 
 ## Admin Token Management

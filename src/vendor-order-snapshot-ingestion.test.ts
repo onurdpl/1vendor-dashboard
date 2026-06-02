@@ -130,6 +130,8 @@ describe('vendor order snapshot ingestion', () => {
           currency: 'TRY',
           financialStatus: 'paid',
           paymentGatewayName: 'PayTR Marketplace',
+          taxesIncluded: null,
+          orderTaxAmount: null,
           shippingAmount: '29.90',
           discountAmount: '15.50',
           orderNote: 'Provider import note',
@@ -151,7 +153,108 @@ describe('vendor order snapshot ingestion', () => {
           shopifyProductId: '4001',
           unitPriceVatIncluded: '100.25',
           lineTotalVatIncluded: '200.50',
+          lineTaxAmount: null,
           vatRate: '10',
+        }),
+      }),
+    );
+  });
+
+  it('uses Shopify GraphQL tax snapshot data before the VAT fallback', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-1069' } as never,
+      sellerInfo: {
+        'JZ4960-L': 'sporjinal',
+      },
+      taxSnapshot: {
+        orderGid: 'gid://shopify/Order/7693738639697',
+        sourceShopifyOrderId: '7693738639697',
+        taxesIncluded: true,
+        orderTaxAmount: {
+          amount: '1172.36',
+          currencyCode: 'TRY',
+        },
+        currentTaxLines: [
+          {
+            title: 'KDV',
+            rate: 0.1,
+            ratePercentage: 10,
+            price: {
+              amount: '1172.36',
+              currencyCode: 'TRY',
+            },
+          },
+        ],
+        lineItems: [
+          {
+            lineItemGid: 'gid://shopify/LineItem/20477973659985',
+            sourceLineItemId: '20477973659985',
+            sku: 'JZ4960-L',
+            quantity: 1,
+            originalUnitPrice: {
+              amount: '2999.0',
+              currencyCode: 'TRY',
+            },
+            discountedTotal: {
+              amount: '2999.0',
+              currencyCode: 'TRY',
+            },
+            taxLines: [
+              {
+                title: 'KDV',
+                rate: 0.1,
+                ratePercentage: 10,
+                price: {
+                  amount: '272.64',
+                  currencyCode: 'TRY',
+                },
+              },
+            ],
+          },
+        ],
+        source: 'shopify_admin',
+      },
+      payload: {
+        id: 7693738639697,
+        name: '#1069',
+        currency: 'TRY',
+        line_items: [
+          {
+            id: 20477973659985,
+            sku: 'JZ4960-L',
+            title: 'Adidas All Me RIB LS Kadın Mor Büstiyer',
+            quantity: 1,
+            price: '2999.00',
+          },
+        ],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          taxesIncluded: true,
+          orderTaxAmount: '1172.36',
+        }),
+        update: expect.objectContaining({
+          taxesIncluded: true,
+          orderTaxAmount: '1172.36',
+        }),
+      }),
+    );
+    expect(prismaMock.shopifyOrderLineItem.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          unitPriceVatIncluded: '2999.00',
+          lineTotalVatIncluded: '2999.00',
+          lineTaxAmount: '272.64',
+          vatRate: '10.00',
+        }),
+        update: expect.objectContaining({
+          unitPriceVatIncluded: '2999.00',
+          lineTotalVatIncluded: '2999.00',
+          lineTaxAmount: '272.64',
+          vatRate: '10.00',
         }),
       }),
     );
@@ -183,6 +286,8 @@ describe('vendor order snapshot ingestion', () => {
           currency: null,
           financialStatus: null,
           paymentGatewayName: null,
+          taxesIncluded: null,
+          orderTaxAmount: null,
           shippingAmount: null,
           discountAmount: null,
           orderNote: null,
@@ -204,6 +309,7 @@ describe('vendor order snapshot ingestion', () => {
           shopifyProductId: null,
           unitPriceVatIncluded: null,
           lineTotalVatIncluded: null,
+          lineTaxAmount: null,
           vatRate: '10',
         }),
       }),

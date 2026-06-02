@@ -1,5 +1,18 @@
 import type { WebhookEvent } from '@prisma/client';
-import type { SellerInfoMap, ShopifyOrderLineItemImage } from './shopify-admin.types.js';
+import type { FetchOrderTaxSnapshotResult, SellerInfoMap, ShopifyOrderLineItemImage } from './shopify-admin.types.js';
+
+export type ShopifyRestTaxLinePayload = {
+  title?: string | null;
+  rate?: number | string | null;
+  rate_percentage?: number | string | null;
+  price?: string | number | null;
+  price_set?: {
+    shop_money?: {
+      amount?: string | number | null;
+      currency_code?: string | null;
+    } | null;
+  } | null;
+};
 
 export type ShopifyOrdersCreateLineItemPayload = {
   id: string | number;
@@ -11,6 +24,7 @@ export type ShopifyOrdersCreateLineItemPayload = {
   variant_title?: string | null;
   quantity?: number | null;
   price?: string | number | null;
+  tax_lines?: ShopifyRestTaxLinePayload[] | null;
 };
 
 export type ShopifyOrdersCreateWebhookPayload = {
@@ -22,6 +36,10 @@ export type ShopifyOrdersCreateWebhookPayload = {
   financial_status?: string | null;
   gateway?: string | null;
   payment_gateway_names?: string[] | null;
+  taxes_included?: boolean | null;
+  total_tax?: string | number | null;
+  current_total_tax?: string | number | null;
+  tax_lines?: ShopifyRestTaxLinePayload[] | null;
   total_price?: string | number | null;
   total_discounts?: string | number | null;
   total_shipping_price_set?: {
@@ -88,6 +106,7 @@ export type ParsedShopifyOrderLineItem = {
   unitPrice: string | null;
   unitPriceVatIncluded: string | null;
   lineTotalVatIncluded: string | null;
+  lineTaxAmount: string | null;
   vatRate: string;
   imageUrl: string | null;
 };
@@ -100,6 +119,8 @@ export type ParsedShopifyOrderPayload = {
   currency: string | null;
   financialStatus: string | null;
   paymentGatewayName: string | null;
+  taxesIncluded: boolean | null;
+  orderTaxAmount: string | null;
   totalPrice: string | null;
   shippingAmount: string | null;
   discountAmount: string | null;
@@ -146,4 +167,5 @@ export type OrderIngestionInput = {
   payload: ShopifyOrdersCreateWebhookPayload;
   sellerInfo: SellerInfoMap;
   lineItemImages?: ShopifyOrderLineItemImage[];
+  taxSnapshot?: FetchOrderTaxSnapshotResult | null;
 };

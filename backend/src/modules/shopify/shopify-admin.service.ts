@@ -3,6 +3,7 @@ import type {
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
   FetchOrderLineItemImagesResult,
+  FetchOrderTaxSnapshotResult,
   FetchShopifyReturnDetailsResult,
   FetchShopifyReturnReverseDeliveryInputsResult,
   FetchOrderSellerInfoResult,
@@ -12,8 +13,10 @@ import type {
   ShopifyFulfillmentOrder,
   ShopifyFulfillmentOrdersResponse,
   ShopifyGraphqlResponse,
+  ShopifyMoneySnapshot,
   ShopifyOrderFulfillmentState,
   ShopifyReturnLineItem,
+  ShopifyTaxLineSnapshot,
   ShopifyReturnTrackingInfo,
 } from './shopify-admin.types.js';
 
@@ -60,6 +63,41 @@ type OrderLineItemImagesQueryResponse = {
 };
 
 type OrderLineItemImageNode = NonNullable<OrderLineItemImagesQueryResponse['order']>['lineItems']['edges'][number]['node'];
+
+type ShopifyMoneySetNode = {
+  shopMoney?: {
+    amount?: string | null;
+    currencyCode?: string | null;
+  } | null;
+} | null;
+
+type ShopifyTaxLineNode = {
+  title?: string | null;
+  rate?: number | null;
+  ratePercentage?: number | null;
+  priceSet?: ShopifyMoneySetNode;
+};
+
+type OrderTaxSnapshotQueryResponse = {
+  order: {
+    id: string;
+    taxesIncluded?: boolean | null;
+    currentTotalTaxSet?: ShopifyMoneySetNode;
+    currentTaxLines?: ShopifyTaxLineNode[];
+    lineItems: {
+      edges: Array<{
+        node: {
+          id: string;
+          sku: string | null;
+          quantity: number;
+          originalUnitPriceSet?: ShopifyMoneySetNode;
+          discountedTotalSet?: ShopifyMoneySetNode;
+          taxLines?: ShopifyTaxLineNode[];
+        };
+      }>;
+    };
+  } | null;
+};
 
 type ShopifyReturnQueryResponse = {
   return: {
@@ -246,6 +284,22 @@ function toShopifyOrderGid(orderId: string) {
 function extractShopifyGidTail(gid: string) {
   const tail = gid.split('/').at(-1)?.trim() ?? '';
   return tail || null;
+}
+
+function mapShopifyMoney(value: ShopifyMoneySetNode): ShopifyMoneySnapshot {
+  return {
+    amount: value?.shopMoney?.amount ?? null,
+    currencyCode: value?.shopMoney?.currencyCode ?? null,
+  };
+}
+
+function mapShopifyTaxLine(value: ShopifyTaxLineNode): ShopifyTaxLineSnapshot {
+  return {
+    title: value.title ?? null,
+    rate: value.rate ?? null,
+    ratePercentage: value.ratePercentage ?? null,
+    price: mapShopifyMoney(value.priceSet ?? null),
+  };
 }
 
 export function resolveShopifyLineItemImageUrl(lineItem: OrderLineItemImageNode) {
@@ -770,6 +824,128 @@ export function createShopifyAdminService(env: AppEnv) {
           };
         })
         .filter((item) => item.sourceLineItemId || item.lineItemGid || item.sku),
+    };
+  }
+
+  async function fetchOrderTaxSnapshot(orderId: string): Promise<FetchOrderTaxSnapshotResult> {
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      return {
+        orderGid: toShopifyOrderGid(orderId),
+        sourceShopifyOrderId: orderId,
+        taxesIncluded: null,
+        orderTaxAmount: {
+          amount: null,
+          currencyCode: null,
+        },
+        currentTaxLines: [],
+        lineItems: [],
+        source: 'mock',
+      };
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            query OrderTaxSnapshot($orderId: ID!) {
+              order(id: $orderId) {
+                id
+                taxesIncluded
+                currentTotalTaxSet {
+                  shopMoney {
+                    amount
+                    currencyCode
+                  }
+                }
+                currentTaxLines {
+                  title
+                  rate
+                  ratePercentage
+                  priceSet {
+                    shopMoney {
+                      amount
+                      currencyCode
+                    }
+                  }
+                }
+                lineItems(first: 50) {
+                  edges {
+                    node {
+                      id
+                      sku
+                      quantity
+                      originalUnitPriceSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      discountedTotalSet {
+                        shopMoney {
+                          amount
+                          currencyCode
+                        }
+                      }
+                      taxLines {
+                        title
+                        rate
+                        ratePercentage
+                        priceSet {
+                          shopMoney {
+                            amount
+                            currencyCode
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          `,
+          variables: {
+            orderId: toShopifyOrderGid(orderId),
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify tax snapshot fetch failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<OrderTaxSnapshotQueryResponse>;
+    if (json.errors?.length) {
+      throw new Error(`Shopify tax snapshot fetch returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`);
+    }
+
+    const order = json.data?.order;
+    if (!order?.id) {
+      throw new Error(`Shopify tax snapshot fetch did not return order ${orderId}.`);
+    }
+
+    return {
+      orderGid: order.id,
+      sourceShopifyOrderId: extractShopifyGidTail(order.id) ?? orderId,
+      taxesIncluded: typeof order.taxesIncluded === 'boolean' ? order.taxesIncluded : null,
+      orderTaxAmount: mapShopifyMoney(order.currentTotalTaxSet ?? null),
+      currentTaxLines: (order.currentTaxLines ?? []).map(mapShopifyTaxLine),
+      lineItems: (order.lineItems.edges ?? []).map((edge) => ({
+        lineItemGid: edge.node.id,
+        sourceLineItemId: extractShopifyGidTail(edge.node.id) ?? edge.node.id,
+        sku: edge.node.sku ?? null,
+        quantity: edge.node.quantity,
+        originalUnitPrice: mapShopifyMoney(edge.node.originalUnitPriceSet ?? null),
+        discountedTotal: mapShopifyMoney(edge.node.discountedTotalSet ?? null),
+        taxLines: (edge.node.taxLines ?? []).map(mapShopifyTaxLine),
+      })),
+      source: 'shopify_admin',
     };
   }
 
@@ -1442,6 +1618,7 @@ export function createShopifyAdminService(env: AppEnv) {
   return {
     fetchOrderSellerInfo,
     fetchOrderLineItemImages,
+    fetchOrderTaxSnapshot,
     fetchReturnDetails,
     fetchReturnReverseDeliveryInputs,
     probeReturnLabelUpload,

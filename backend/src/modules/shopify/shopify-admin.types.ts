@@ -21,6 +21,38 @@ export type FetchOrderLineItemImagesResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type ShopifyMoneySnapshot = {
+  amount: string | null;
+  currencyCode: string | null;
+};
+
+export type ShopifyTaxLineSnapshot = {
+  title: string | null;
+  rate: number | null;
+  ratePercentage: number | null;
+  price: ShopifyMoneySnapshot;
+};
+
+export type ShopifyOrderLineItemTaxSnapshot = {
+  lineItemGid: string;
+  sourceLineItemId: string;
+  sku: string | null;
+  quantity: number;
+  originalUnitPrice: ShopifyMoneySnapshot;
+  discountedTotal: ShopifyMoneySnapshot;
+  taxLines: ShopifyTaxLineSnapshot[];
+};
+
+export type FetchOrderTaxSnapshotResult = {
+  orderGid: string;
+  sourceShopifyOrderId: string;
+  taxesIncluded: boolean | null;
+  orderTaxAmount: ShopifyMoneySnapshot;
+  currentTaxLines: ShopifyTaxLineSnapshot[];
+  lineItems: ShopifyOrderLineItemTaxSnapshot[];
+  source: 'mock' | 'shopify_admin';
+};
+
 export type ShopifyReturnLineItem = {
   returnLineItemGid: string;
   fulfillmentLineItemGid: string | null;

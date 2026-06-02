@@ -1218,6 +1218,8 @@ export async function getVendorOrderById(
       currency: allocation.order.currency,
       financialStatus: allocation.order.financialStatus,
       paymentGatewayName: allocation.order.paymentGatewayName,
+      taxesIncluded: allocation.order.taxesIncluded,
+      orderTaxAmount: toNullableAmountString(allocation.order.orderTaxAmount),
       shippingAmount: toNullableAmountString(allocation.order.shippingAmount),
       discountAmount: toNullableAmountString(allocation.order.discountAmount),
       orderNote: allocation.order.orderNote,
@@ -1245,6 +1247,7 @@ export async function getVendorOrderById(
       shopifyProductId: item.shopifyOrderLineItem.shopifyProductId,
       unitPriceVatIncluded: toNullableAmountString(item.shopifyOrderLineItem.unitPriceVatIncluded),
       lineTotalVatIncluded: toNullableAmountString(item.shopifyOrderLineItem.lineTotalVatIncluded),
+      lineTaxAmount: toNullableAmountString(item.shopifyOrderLineItem.lineTaxAmount),
       vatRate: toNullableAmountString(item.shopifyOrderLineItem.vatRate),
     })),
     assignmentHistory: allocation.assignmentHistory.map((entry) => ({

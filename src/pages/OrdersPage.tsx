@@ -987,6 +987,12 @@ export function OrdersPage() {
                     <span>Currency</span>
                     <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
                   </div>
+                  {orderSnapshot?.orderTaxAmount ? (
+                    <div>
+                      <span>Tax total</span>
+                      <strong>{formatSnapshotAmount(orderSnapshot.orderTaxAmount, snapshotCurrency)}</strong>
+                    </div>
+                  ) : null}
                   <div>
                     <span>Shipping</span>
                     <strong>{formatSnapshotAmount(orderSnapshot?.shippingAmount, snapshotCurrency)}</strong>
@@ -1022,8 +1028,9 @@ export function OrdersPage() {
                           <small>
                             {[
                               `VAT ${formatVatRate(item.vatRate)}`,
-                              `VAT unit ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
-                              `VAT total ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                              item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
+                              `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                              `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
                               item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
                             ].filter(Boolean).join(' · ')}
                           </small>

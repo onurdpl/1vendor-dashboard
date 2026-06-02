@@ -59,6 +59,7 @@ export type OrderDetailLineItemDto = {
   shopifyProductId: string | null;
   unitPriceVatIncluded: string | null;
   lineTotalVatIncluded: string | null;
+  lineTaxAmount: string | null;
   vatRate: string | null;
 };
 
@@ -67,6 +68,8 @@ export type OrderSnapshotDto = {
   currency: string | null;
   financialStatus: string | null;
   paymentGatewayName: string | null;
+  taxesIncluded: boolean | null;
+  orderTaxAmount: string | null;
   shippingAmount: string | null;
   discountAmount: string | null;
   orderNote: string | null;

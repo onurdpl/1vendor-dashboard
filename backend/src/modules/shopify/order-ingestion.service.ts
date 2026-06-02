@@ -10,7 +10,7 @@ import type {
   ShopifyOrdersCreateLineItemPayload,
   ShopifyOrdersCreateWebhookPayload,
 } from './order-ingestion.types.js';
-import type { ShopifyOrderLineItemImage } from './shopify-admin.types.js';
+import type { FetchOrderTaxSnapshotResult, ShopifyOrderLineItemImage, ShopifyTaxLineSnapshot } from './shopify-admin.types.js';
 
 const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
 
@@ -178,6 +178,53 @@ function resolveShippingAmount(payload: ShopifyOrdersCreateWebhookPayload) {
   return sumMoneyValues((payload.shipping_lines ?? []).map((line) => line.price));
 }
 
+function toNullableBoolean(value: boolean | null | undefined) {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function readRestTaxLineRatePercentage(taxLine: NonNullable<ShopifyOrdersCreateLineItemPayload['tax_lines']>[number] | undefined) {
+  if (!taxLine) {
+    return null;
+  }
+
+  const explicitPercentage = Number(taxLine.rate_percentage);
+  if (Number.isFinite(explicitPercentage)) {
+    return explicitPercentage.toFixed(2);
+  }
+
+  const rate = Number(taxLine.rate);
+  return Number.isFinite(rate) ? (rate * 100).toFixed(2) : null;
+}
+
+function readRestTaxLineAmount(taxLine: NonNullable<ShopifyOrdersCreateLineItemPayload['tax_lines']>[number] | undefined) {
+  return toMoneyString(taxLine?.price_set?.shop_money?.amount ?? taxLine?.price);
+}
+
+function readGraphqlTaxRatePercentage(taxLine: ShopifyTaxLineSnapshot | undefined) {
+  if (!taxLine) {
+    return null;
+  }
+
+  if (typeof taxLine.ratePercentage === 'number' && Number.isFinite(taxLine.ratePercentage)) {
+    return taxLine.ratePercentage.toFixed(2);
+  }
+
+  if (typeof taxLine.rate === 'number' && Number.isFinite(taxLine.rate)) {
+    return (taxLine.rate * 100).toFixed(2);
+  }
+
+  return null;
+}
+
+function calculateUnitPriceFromDiscountedTotal(discountedTotal: string | null, quantity: number) {
+  const total = Number(discountedTotal);
+  if (!Number.isFinite(total) || quantity <= 0) {
+    return null;
+  }
+
+  return (total / quantity).toFixed(2);
+}
+
 function toLineItemTitle(lineItem: ShopifyOrdersCreateLineItemPayload) {
   if (!lineItem) {
     return null;
@@ -192,7 +239,32 @@ function toLineItemTitle(lineItem: ShopifyOrdersCreateLineItemPayload) {
   return baseTitle;
 }
 
-function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedShopifyOrderPayload {
+function createLineItemTaxResolver(taxSnapshot: FetchOrderTaxSnapshotResult | null | undefined) {
+  const byLineItemId = new Map<string, FetchOrderTaxSnapshotResult['lineItems'][number]>();
+  const bySku = new Map<string, FetchOrderTaxSnapshotResult['lineItems'][number]>();
+
+  for (const item of taxSnapshot?.lineItems ?? []) {
+    byLineItemId.set(item.sourceLineItemId, item);
+    byLineItemId.set(item.lineItemGid, item);
+    const gidTail = item.lineItemGid.split('/').at(-1)?.trim();
+    if (gidTail) {
+      byLineItemId.set(gidTail, item);
+    }
+    if (item.sku) {
+      bySku.set(item.sku, item);
+    }
+  }
+
+  return (lineItem: ShopifyOrdersCreateLineItemPayload) => {
+    const sourceLineItemId = String(lineItem.id);
+    return byLineItemId.get(sourceLineItemId) ?? (lineItem.sku ? bySku.get(lineItem.sku) : undefined) ?? null;
+  };
+}
+
+function parseOrderPayload(
+  payload: ShopifyOrdersCreateWebhookPayload,
+  taxSnapshot?: FetchOrderTaxSnapshotResult | null,
+): ParsedShopifyOrderPayload {
   const lineItems = Array.isArray(payload.line_items) ? payload.line_items : [];
   const sourceShopifyOrderId = String(payload.id);
   const sourceShopifyOrderNumber =
@@ -204,6 +276,7 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
   const shippingAddress = mapShopifyShippingAddress(payload);
   const billingAddress = mapShopifyBillingAddress(payload);
   const shopifyCreatedAt = toOptionalDate(payload.created_at);
+  const resolveTaxSnapshot = createLineItemTaxResolver(taxSnapshot);
 
   return {
     sourceShopifyOrderId,
@@ -215,6 +288,8 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
       readPayloadString(payload.total_shipping_price_set?.shop_money?.currency_code),
     financialStatus: readPayloadString(payload.financial_status),
     paymentGatewayName: resolvePaymentGatewayName(payload),
+    taxesIncluded: toNullableBoolean(taxSnapshot?.taxesIncluded) ?? toNullableBoolean(payload.taxes_included),
+    orderTaxAmount: toMoneyString(taxSnapshot?.orderTaxAmount.amount ?? payload.current_total_tax ?? payload.total_tax),
     totalPrice: toMoneyString(payload.total_price),
     shippingAmount: resolveShippingAmount(payload),
     discountAmount: toMoneyString(payload.total_discounts),
@@ -232,6 +307,16 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
     lineItems: lineItems.map<ParsedShopifyOrderLineItem>((lineItem) => {
       const quantity = typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1;
       const unitPrice = toMoneyString(lineItem.price);
+      const graphqlTax = resolveTaxSnapshot(lineItem);
+      const graphqlTaxLine = graphqlTax?.taxLines[0];
+      const restTaxLine = lineItem.tax_lines?.[0];
+      const graphqlVatRate = readGraphqlTaxRatePercentage(graphqlTaxLine);
+      const restVatRate = readRestTaxLineRatePercentage(restTaxLine);
+      const graphqlDiscountedTotal = toMoneyString(graphqlTax?.discountedTotal.amount);
+      const taxesIncluded = toNullableBoolean(taxSnapshot?.taxesIncluded) ?? toNullableBoolean(payload.taxes_included);
+      const lineTotalVatIncluded = taxesIncluded === true
+        ? graphqlDiscountedTotal ?? toLineTotalVatIncluded(unitPrice, quantity)
+        : toLineTotalVatIncluded(unitPrice, quantity);
 
       return {
         sourceLineItemId: String(lineItem.id),
@@ -243,9 +328,12 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
         title: toLineItemTitle(lineItem),
         quantity,
         unitPrice,
-        unitPriceVatIncluded: unitPrice,
-        lineTotalVatIncluded: toLineTotalVatIncluded(unitPrice, quantity),
-        vatRate: DEFAULT_VENDOR_INTEGRATION_VAT_RATE,
+        unitPriceVatIncluded: taxesIncluded === true
+          ? calculateUnitPriceFromDiscountedTotal(lineTotalVatIncluded, quantity) ?? unitPrice
+          : unitPrice,
+        lineTotalVatIncluded,
+        lineTaxAmount: toMoneyString(graphqlTaxLine?.price.amount) ?? readRestTaxLineAmount(restTaxLine),
+        vatRate: graphqlVatRate ?? restVatRate ?? DEFAULT_VENDOR_INTEGRATION_VAT_RATE,
         imageUrl: null,
       };
     }),
@@ -310,7 +398,7 @@ function toLineTotalVatIncluded(unitPrice: string | null, quantity: number) {
 }
 
 export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Promise<OrderIngestionResult> {
-  const parsedOrder = parseOrderPayload(input.payload);
+  const parsedOrder = parseOrderPayload(input.payload, input.taxSnapshot);
   const resolveImageUrl = createLineItemImageResolver(input.lineItemImages);
 
   if (parsedOrder.lineItems.length === 0) {
@@ -374,6 +462,8 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           currency: parsedOrder.currency,
           financialStatus: parsedOrder.financialStatus,
           paymentGatewayName: parsedOrder.paymentGatewayName,
+          taxesIncluded: parsedOrder.taxesIncluded,
+          orderTaxAmount: parsedOrder.orderTaxAmount,
           shippingAmount: parsedOrder.shippingAmount,
           discountAmount: parsedOrder.discountAmount,
           orderNote: parsedOrder.orderNote,
@@ -404,6 +494,8 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
           currency: parsedOrder.currency,
           financialStatus: parsedOrder.financialStatus,
           paymentGatewayName: parsedOrder.paymentGatewayName,
+          taxesIncluded: parsedOrder.taxesIncluded,
+          orderTaxAmount: parsedOrder.orderTaxAmount,
           shippingAmount: parsedOrder.shippingAmount,
           discountAmount: parsedOrder.discountAmount,
           orderNote: parsedOrder.orderNote,
@@ -449,6 +541,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             unitPrice: lineItem.unitPrice,
             unitPriceVatIncluded: lineItem.unitPriceVatIncluded,
             lineTotalVatIncluded: lineItem.lineTotalVatIncluded,
+            lineTaxAmount: lineItem.lineTaxAmount,
             vatRate: lineItem.vatRate,
             originalVendorId: lineItem.vendorId,
           },
@@ -464,6 +557,7 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             unitPrice: lineItem.unitPrice,
             unitPriceVatIncluded: lineItem.unitPriceVatIncluded,
             lineTotalVatIncluded: lineItem.lineTotalVatIncluded,
+            lineTaxAmount: lineItem.lineTaxAmount,
             vatRate: lineItem.vatRate,
             originalVendorId: lineItem.vendorId,
           },

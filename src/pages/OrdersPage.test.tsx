@@ -60,6 +60,8 @@ const orderDetail: OrderDetail = {
     currency: 'TRY',
     financialStatus: 'paid',
     paymentGatewayName: 'PayTR Marketplace',
+    taxesIncluded: true,
+    orderTaxAmount: '177.27',
     shippingAmount: '39.90',
     discountAmount: '25.00',
     orderNote: 'Rail integration note',
@@ -90,6 +92,7 @@ const orderDetail: OrderDetail = {
       shopifyProductId: 'gid://shopify/Product/1002',
       unitPriceVatIncluded: '650.00',
       lineTotalVatIncluded: '1950.00',
+      lineTaxAmount: '177.27',
       vatRate: '10.00',
       fulfillmentStatus: 'Fulfilled',
       allocationStatus: 'fulfilled',
@@ -516,8 +519,9 @@ describe('OrdersPage control center', () => {
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
-    expect(screen.getByText(/VAT unit TRY\s*650\.00/)).toBeInTheDocument();
-    expect(screen.getByText(/VAT total TRY\s*1,950\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();
+    expect(screen.getByText(/Unit price incl\. VAT TRY\s*650\.00/)).toBeInTheDocument();
+    expect(screen.getByText(/Line total incl\. VAT TRY\s*1,950\.00/)).toBeInTheDocument();
     expect(screen.getByText(/Shopify product gid:\/\/shopify\/Product\/1002/)).toBeInTheDocument();
   });
 
