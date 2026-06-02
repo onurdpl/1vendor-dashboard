@@ -1009,6 +1009,22 @@ export function OrdersPage() {
                     <span>Billing</span>
                     <strong>{formatBillingAddress(orderSnapshot?.billingAddress)}</strong>
                   </div>
+                  {orderSnapshot?.vendorIntegrationTrackingUrl ? (
+                    <div>
+                      <span>External shipment</span>
+                      <strong>
+                        <a className="inline-link" href={orderSnapshot.vendorIntegrationTrackingUrl} target="_blank" rel="noreferrer">
+                          Open external tracking
+                        </a>
+                      </strong>
+                    </div>
+                  ) : null}
+                  {orderSnapshot?.vendorIntegrationShippedAt ? (
+                    <div>
+                      <span>External shipped at</span>
+                      <strong>{formatDate(orderSnapshot.vendorIntegrationShippedAt)}</strong>
+                    </div>
+                  ) : null}
                 </div>
               </section>
 

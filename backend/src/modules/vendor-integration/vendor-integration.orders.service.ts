@@ -75,6 +75,8 @@ const allocationSelect = {
   shippingStatus: true,
   trackingNumber: true,
   carrier: true,
+  vendorIntegrationTrackingUrl: true,
+  vendorIntegrationShippedAt: true,
   vendorIntegrationStatus: true,
   vendorIntegrationStatusMessage: true,
   vendorIntegrationStatusUpdatedAt: true,
@@ -204,10 +206,11 @@ function serializeAllocation(allocation: SelectedAllocation) {
     shipment: {
       carrier: allocation.carrier,
       trackingNumber: allocation.trackingNumber,
-      trackingUrl: allocation.fulfillment?.trackingUrl ?? null,
+      trackingUrl: allocation.fulfillment?.trackingUrl ?? allocation.vendorIntegrationTrackingUrl,
       fulfilledAt: toIsoDate(allocation.fulfillment?.fulfilledAt),
-      shipmentCreatedAt: toIsoDate(allocation.fulfillment?.shipmentCreatedAt),
+      shipmentCreatedAt: toIsoDate(allocation.fulfillment?.shipmentCreatedAt ?? allocation.vendorIntegrationShippedAt),
       shipmentUpdatedAt: toIsoDate(allocation.fulfillment?.shipmentUpdatedAt),
+      externalShippedAt: toIsoDate(allocation.vendorIntegrationShippedAt),
     },
     totals: {
       orderTotal: toDecimalString(allocation.order.totalPrice),

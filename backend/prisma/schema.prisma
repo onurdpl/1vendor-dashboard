@@ -362,6 +362,7 @@ model VendorIntegrationClient {
   updatedAt        DateTime                    @updatedAt
   auditLogs        VendorIntegrationAuditLog[]
   statusEvents     VendorIntegrationStatusEvent[]
+  shipmentEvents   VendorIntegrationShipmentEvent[]
 
   @@index([vendorIdentifier])
   @@index([enabled, revokedAt])
@@ -459,6 +460,8 @@ model VendorAllocation {
   shippingStatus           String                        @default("Awaiting Shipment")
   trackingNumber           String?
   carrier                  String?
+  vendorIntegrationTrackingUrl String?
+  vendorIntegrationShippedAt DateTime?
   odooSaleOrderId          String?
   odooSaleOrderName        String?
   odooSaleOrderSyncedAt    DateTime?
@@ -467,6 +470,7 @@ model VendorAllocation {
   vendorIntegrationStatusUpdatedAt DateTime?
   vendorIntegrationProvider String?
   lastVendorIntegrationRequestId String?
+  lastVendorIntegrationShipmentRequestId String?
   createdAt                DateTime                      @default(now())
   updatedAt                DateTime                      @updatedAt
   order                    ShopifyOrder                  @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
@@ -484,9 +488,31 @@ model VendorAllocation {
   operationalSignals       OperationalSignal[]
   automationActions        AutomationAction[]
   vendorIntegrationStatusEvents VendorIntegrationStatusEvent[]
+  vendorIntegrationShipmentEvents VendorIntegrationShipmentEvent[]
 
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
+}
+
+model VendorIntegrationShipmentEvent {
+  id               String                  @id @default(cuid())
+  clientId         String
+  vendorAllocationId String
+  vendorIdentifier String
+  providerName     String?
+  carrier          String
+  trackingNumber   String
+  trackingUrl      String?
+  shippedAt        DateTime?
+  idempotencyKey   String
+  requestId        String?
+  createdAt        DateTime                @default(now())
+  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vendorAllocation VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, vendorAllocationId, idempotencyKey])
+  @@index([vendorAllocationId, createdAt])
+  @@index([vendorIdentifier, createdAt])
 }
 
 model VendorIntegrationStatusEvent {

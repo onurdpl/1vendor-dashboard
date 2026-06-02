@@ -28,6 +28,8 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     shippingStatus: 'Awaiting Shipment',
     carrier: null,
     trackingNumber: null,
+    vendorIntegrationTrackingUrl: 'https://tracking.example/SKU-1001',
+    vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
     reassignmentRequired: false,
     cancellationReason: null,
     vendorIntegrationStatus: 'acknowledged',
@@ -98,6 +100,8 @@ describe('order detail snapshot API mapping', () => {
 
     const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
 
+    expect(result?.trackingUrl).toBe('https://tracking.example/SKU-1001');
+    expect(result?.shipmentCreatedAt).toBe('2026-06-02T12:00:00.000Z');
     expect(result?.orderSnapshot).toEqual({
       shopifyCreatedAt: '2026-06-01T09:55:00.000Z',
       currency: 'TRY',
@@ -113,6 +117,8 @@ describe('order detail snapshot API mapping', () => {
       vendorIntegrationStatusMessage: 'Order imported into Entegra',
       vendorIntegrationStatusUpdatedAt: '2026-06-01T10:06:00.000Z',
       vendorIntegrationProvider: 'Provider A',
+      vendorIntegrationTrackingUrl: 'https://tracking.example/SKU-1001',
+      vendorIntegrationShippedAt: '2026-06-02T12:00:00.000Z',
       billingAddress: {
         fullName: 'Billing Customer',
         company: 'Billing Co',

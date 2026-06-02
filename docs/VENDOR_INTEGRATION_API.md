@@ -61,6 +61,7 @@ Initial supported scope:
 
 - `orders:read` - allows reading allocated orders for the authenticated vendor only.
 - `status:write` - allows reporting provider import/processing status for the authenticated vendor's allocations only.
+- `shipment:write` - allows reporting provider shipment/tracking information for the authenticated vendor's allocations only.
 
 ## Endpoint
 
@@ -137,12 +138,13 @@ Example response:
         "address": "Address"
       },
       "shipment": {
-        "carrier": null,
-        "trackingNumber": null,
-        "trackingUrl": null,
+        "carrier": "Yurtiçi Kargo",
+        "trackingNumber": "ABC123456",
+        "trackingUrl": "https://tracking.example/ABC123456",
         "fulfilledAt": null,
-        "shipmentCreatedAt": null,
-        "shipmentUpdatedAt": null
+        "shipmentCreatedAt": "2026-06-02T12:00:00.000Z",
+        "shipmentUpdatedAt": null,
+        "externalShippedAt": "2026-06-02T12:00:00.000Z"
       },
       "totals": {
         "orderTotal": "1299.90",
@@ -242,6 +244,79 @@ Operational boundaries:
 - It does not create shipment labels, invoices, payout records, settlement records, accounting entries, returns, or refunds.
 - It does not accept a vendor identifier from the request body; vendor scope comes only from the bearer token.
 
+### `POST /api/vendor-integration/orders/:allocationId/shipment`
+
+Reports external provider shipment and tracking information for one allocated order.
+
+Required scope:
+
+- `shipment:write`
+
+Required headers:
+
+```http
+Authorization: Bearer spg_vi_...
+Idempotency-Key: provider-unique-key
+```
+
+Required body fields:
+
+- `carrier`
+- `trackingNumber`
+
+Optional body fields:
+
+- `trackingUrl`
+- `shippedAt`
+
+Example request:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer spg_vi_..." \
+  -H "Idempotency-Key: entegra-shipment-alloc-sporjinal-1001-1" \
+  -H "content-type: application/json" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/shipment" \
+  -d '{
+    "carrier": "Yurtiçi Kargo",
+    "trackingNumber": "ABC123456",
+    "trackingUrl": "https://tracking.example/ABC123456",
+    "shippedAt": "2026-06-02T12:00:00Z"
+  }'
+```
+
+Example response:
+
+```json
+{
+  "idempotent": false,
+  "allocation": {
+    "id": "alloc-sporjinal-1001",
+    "vendorIdentifier": "sporjinal",
+    "carrier": "Yurtiçi Kargo",
+    "trackingNumber": "ABC123456",
+    "trackingUrl": "https://tracking.example/ABC123456",
+    "shippedAt": "2026-06-02T12:00:00.000Z",
+    "shippingStatus": "In Transit",
+    "lastVendorIntegrationShipmentRequestId": "request-id"
+  }
+}
+```
+
+Idempotency behavior:
+
+- `Idempotency-Key` is required.
+- Repeating the same key for the same client and allocation returns the previous shipment result.
+- A repeated key does not create another shipment event and does not overwrite the allocation shipment snapshot.
+
+Operational boundaries:
+
+- This endpoint updates only Sporgym allocation-level shipment/tracking snapshot fields.
+- It sets the order's local shipping status to `In Transit`.
+- It does not create a Shopify fulfillment yet.
+- It does not create shipment labels, invoices, payout records, settlement records, accounting entries, returns, or refunds.
+- It does not accept a vendor identifier from the request body; vendor scope comes only from the bearer token.
+
 ## Security Rules
 
 - The API never accepts a vendor identifier from the request body or query string.
@@ -262,6 +337,7 @@ The order feed exposes normalized Shopify order snapshots that are safe for the 
 - order note and tag snapshots
 - line item product/variant identifiers, SKU, title, quantity, VAT-included unit price, VAT-included line total, and VAT rate
 - vendor integration status fields reported by the provider: `vendorIntegrationStatus`, `vendorIntegrationStatusMessage`, `vendorIntegrationStatusUpdatedAt`, `vendorIntegrationProvider`
+- external shipment fields reported by the provider: carrier, tracking number, tracking URL, and shipped timestamp
 
 Missing optional Shopify payload fields are returned as `null` or an empty `orderTags` array. The API does not read or return raw Shopify webhook payload bodies.
 
@@ -321,4 +397,4 @@ They do not include request bodies, response bodies, tokens, or credentials.
 
 ## Future Direction
 
-Future provider integration phases may add shipment references, invoice references, or fulfillment updates after a separate security and operational review. Those write endpoints are not part of this foundation.
+Future provider integration phases may add invoice references or Shopify fulfillment updates after a separate security and operational review. Those write endpoints are not part of this foundation.

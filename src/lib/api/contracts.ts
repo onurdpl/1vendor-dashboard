@@ -705,6 +705,8 @@ export type OrderIntegrationSnapshot = {
   vendorIntegrationStatusMessage: string | null;
   vendorIntegrationStatusUpdatedAt: string | null;
   vendorIntegrationProvider: string | null;
+  vendorIntegrationTrackingUrl: string | null;
+  vendorIntegrationShippedAt: string | null;
   billingAddress: {
     fullName: string | null;
     company: string | null;

@@ -8,6 +8,10 @@ import {
 } from './vendor-integration.auth.js';
 import { listVendorIntegrationOrders, type VendorIntegrationOrdersQuery } from './vendor-integration.orders.service.js';
 import {
+  updateVendorIntegrationOrderShipment,
+  validateVendorIntegrationShipmentPayload,
+} from './vendor-integration.shipment.service.js';
+import {
   isVendorIntegrationStatus,
   updateVendorIntegrationOrderStatus,
 } from './vendor-integration.status.service.js';
@@ -28,6 +32,13 @@ type AuditLogsQuery = {
 type StatusUpdateBody = {
   status?: string;
   message?: string | null;
+};
+
+type ShipmentUpdateBody = {
+  carrier?: string | null;
+  trackingNumber?: string | null;
+  trackingUrl?: string | null;
+  shippedAt?: string | null;
 };
 
 function readHeaderValue(value: string | string[] | undefined) {
@@ -219,6 +230,49 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
         idempotencyKey,
         status,
         message: request.body?.message ?? null,
+        requestId: request.requestId ?? request.id ?? null,
+      });
+
+      if (!result) {
+        return reply.code(404).send({ message: 'Vendor allocation not found.' });
+      }
+
+      return {
+        idempotent: result.idempotent,
+        allocation: result.allocation,
+      };
+    },
+  );
+
+  app.post<{ Params: { allocationId: string }; Body: ShipmentUpdateBody }>(
+    '/api/vendor-integration/orders/:allocationId/shipment',
+    {
+      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('shipment:write')],
+    },
+    async (request, reply) => {
+      const context = request.vendorIntegration;
+      if (!context) {
+        return reply.code(401).send({ message: 'Vendor integration token is required.' });
+      }
+
+      const idempotencyKey = readHeaderValue(request.headers['idempotency-key']).trim();
+      if (!idempotencyKey) {
+        return reply.code(400).send({ message: 'Idempotency-Key header is required.' });
+      }
+
+      const validation = validateVendorIntegrationShipmentPayload(request.body ?? {});
+      if (!validation.ok) {
+        return reply.code(400).send({ message: validation.message });
+      }
+
+      const result = await updateVendorIntegrationOrderShipment({
+        allocationId: request.params.allocationId,
+        context,
+        idempotencyKey,
+        carrier: validation.shipment.carrier,
+        trackingNumber: validation.shipment.trackingNumber,
+        trackingUrl: validation.shipment.trackingUrl,
+        shippedAt: validation.shipment.shippedAt?.toISOString() ?? null,
         requestId: request.requestId ?? request.id ?? null,
       });
 

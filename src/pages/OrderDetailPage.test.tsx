@@ -164,6 +164,8 @@ const orderWithShipmentSummary: OrderDetail = {
     vendorIntegrationStatusMessage: 'Order imported into Entegra',
     vendorIntegrationStatusUpdatedAt: '2026-05-15T12:10:00.000Z',
     vendorIntegrationProvider: 'Provider A',
+    vendorIntegrationTrackingUrl: 'https://tracking.example/FQ1833-200-41',
+    vendorIntegrationShippedAt: '2026-06-02T12:00:00.000Z',
     billingAddress: {
       fullName: 'Billing Customer',
       company: 'Billing Co',
@@ -1143,6 +1145,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('acknowledged')).toBeInTheDocument();
     expect(screen.getByText('Order imported into Entegra')).toBeInTheDocument();
     expect(screen.getByText('Provider A')).toBeInTheDocument();
+    expect(screen.getByText('External shipment')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Open external tracking' })).toHaveAttribute('href', 'https://tracking.example/FQ1833-200-41');
+    expect(screen.getByText('External shipped at')).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*454\.45/)).toBeInTheDocument();
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
@@ -1178,6 +1183,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         vendorIntegrationStatusMessage: null,
         vendorIntegrationStatusUpdatedAt: null,
         vendorIntegrationProvider: null,
+        vendorIntegrationTrackingUrl: null,
+        vendorIntegrationShippedAt: null,
         billingAddress: {
           fullName: null,
           company: null,

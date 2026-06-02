@@ -70,6 +70,8 @@ const orderDetail: OrderDetail = {
     vendorIntegrationStatusMessage: 'Provider processing',
     vendorIntegrationStatusUpdatedAt: '2026-05-08T09:25:00Z',
     vendorIntegrationProvider: 'Provider A',
+    vendorIntegrationTrackingUrl: 'https://tracking.example/provider/TRK-A-1002',
+    vendorIntegrationShippedAt: '2026-05-08T15:55:00Z',
     billingAddress: {
       fullName: 'Acme Billing',
       company: 'Acme Supply Co.',
@@ -522,6 +524,8 @@ describe('OrdersPage control center', () => {
     expect(screen.getByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
     expect(screen.getByText('processing')).toBeInTheDocument();
+    expect(screen.getByText('External shipment')).toBeInTheDocument();
+    expect(screen.getByText('External shipped at')).toBeInTheDocument();
     expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();

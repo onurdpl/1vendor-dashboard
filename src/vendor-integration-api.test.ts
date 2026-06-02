@@ -19,6 +19,10 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     findUnique: vi.fn(),
   },
+  vendorIntegrationShipmentEvent: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -55,6 +59,8 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     shippingStatus: 'Awaiting Shipment',
     trackingNumber: null,
     carrier: null,
+    vendorIntegrationTrackingUrl: null,
+    vendorIntegrationShippedAt: null,
     vendorIntegrationStatus: 'acknowledged',
     vendorIntegrationStatusMessage: 'Order imported into Entegra',
     vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:06:00.000Z'),
@@ -222,6 +228,38 @@ async function injectVendorIntegrationStatus(
   return { statusCode: reply.statusCode, payload, request };
 }
 
+async function injectVendorIntegrationShipment(
+  allocationId: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown> = {},
+) {
+  const { posts, hooks } = createRegisteredRoutes();
+  const route = posts.get('/api/vendor-integration/orders/:allocationId/shipment');
+  const reply = createReply();
+  const request: Record<string, unknown> = {
+    headers,
+    method: 'POST',
+    url: `/api/vendor-integration/orders/${allocationId}/shipment`,
+    id: 'shipment-req-1',
+    params: { allocationId },
+    body,
+  };
+
+  for (const preHandler of route?.options?.preHandler ?? []) {
+    await preHandler(request, reply);
+    if (reply.sent) {
+      await hooks.get('onResponse')?.(request, reply);
+      return { statusCode: reply.statusCode, payload: reply.payload, request };
+    }
+  }
+
+  const result = await route?.handler?.(request, reply);
+  const payload = reply.sent ? reply.payload : result;
+  await hooks.get('onResponse')?.(request, reply);
+
+  return { statusCode: reply.statusCode, payload, request };
+}
+
 async function injectAdminRoute(
   method: 'GET' | 'POST',
   path: string,
@@ -274,6 +312,8 @@ describe('vendor integration API foundation', () => {
     });
     prismaMock.vendorIntegrationStatusEvent.create.mockResolvedValue({ id: 'status-event-1' });
     prismaMock.vendorIntegrationStatusEvent.findUnique.mockResolvedValue(null);
+    prismaMock.vendorIntegrationShipmentEvent.create.mockResolvedValue({ id: 'shipment-event-1' });
+    prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValue(null);
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
   });
 
@@ -358,6 +398,12 @@ describe('vendor integration API foundation', () => {
             }),
             orderNote: 'Provider note',
             orderTags: ['entegrasyon'],
+            shipment: expect.objectContaining({
+              carrier: null,
+              trackingNumber: null,
+              trackingUrl: null,
+              externalShippedAt: null,
+            }),
             lineItems: [
               expect.objectContaining({
                 sku: 'SKU-1',
@@ -390,6 +436,39 @@ describe('vendor integration API foundation', () => {
       },
       select: { id: true },
     });
+  });
+
+  it('returns external shipment values in the vendor orders feed', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        shippingStatus: 'In Transit',
+        carrier: 'Yurtici Kargo',
+        trackingNumber: 'ABC123456',
+        vendorIntegrationTrackingUrl: 'https://tracking.example/ABC123456',
+        vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
+      }),
+    ]);
+
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            shippingStatus: 'In Transit',
+            shipment: expect.objectContaining({
+              carrier: 'Yurtici Kargo',
+              trackingNumber: 'ABC123456',
+              trackingUrl: 'https://tracking.example/ABC123456',
+              shipmentCreatedAt: '2026-06-02T12:00:00.000Z',
+              externalShippedAt: '2026-06-02T12:00:00.000Z',
+            }),
+          }),
+        ],
+      }),
+    );
   });
 
   it('rejects status writes without status write scope and writes an audit log', async () => {
@@ -559,6 +638,207 @@ describe('vendor integration API foundation', () => {
     );
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorIntegrationStatusEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects shipment writes without shipment write scope and writes an audit log', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['orders:read'] }));
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer read-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Missing required scope: shipment:write' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorIdentifier: 'sporjinal',
+          method: 'POST',
+          statusCode: 403,
+          requestId: 'shipment-req-1',
+        }),
+      }),
+    );
+  });
+
+  it('rejects shipment writes without an idempotency key', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      { authorization: 'Bearer write-token' },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects shipment writes for another vendor allocation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-yalispor-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { carrier: 'Yurtici Kargo', trackingNumber: 'ABC123456' },
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.payload).toEqual({ message: 'Vendor allocation not found.' });
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'alloc-yalispor-1',
+          assignedVendorId: 'sporjinal',
+        },
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects shipment writes without carrier or tracking number', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(buildClient({ scopes: ['shipment:write'] }));
+
+    const missingCarrier = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { trackingNumber: 'ABC123456' },
+    );
+    const missingTracking = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-2',
+      },
+      { carrier: 'Yurtici Kargo' },
+    );
+
+    expect(missingCarrier.statusCode).toBe(400);
+    expect(missingCarrier.payload).toEqual({ message: 'carrier is required.' });
+    expect(missingTracking.statusCode).toBe(400);
+    expect(missingTracking.payload).toEqual({ message: 'trackingNumber is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('updates shipment fields for the authenticated vendor allocation without Shopify fulfillment mutation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      carrier: 'Yurtici Kargo',
+      trackingNumber: 'ABC123456',
+      vendorIntegrationTrackingUrl: 'https://tracking.example/ABC123456',
+      vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
+      shippingStatus: 'In Transit',
+      lastVendorIntegrationShipmentRequestId: 'shipment-req-1',
+    });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      {
+        carrier: 'Yurtici Kargo',
+        trackingNumber: 'ABC123456',
+        trackingUrl: 'https://tracking.example/ABC123456',
+        shippedAt: '2026-06-02T12:00:00Z',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alloc-sporjinal-1' },
+        data: expect.objectContaining({
+          carrier: 'Yurtici Kargo',
+          trackingNumber: 'ABC123456',
+          vendorIntegrationTrackingUrl: 'https://tracking.example/ABC123456',
+          vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
+          shippingStatus: 'In Transit',
+          lastVendorIntegrationShipmentRequestId: 'shipment-req-1',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorAllocationId: 'alloc-sporjinal-1',
+          vendorIdentifier: 'sporjinal',
+          carrier: 'Yurtici Kargo',
+          trackingNumber: 'ABC123456',
+          idempotencyKey: 'shipment-key-1',
+        }),
+      }),
+    );
+    expect(JSON.stringify(prismaMock)).not.toContain('shopifyFulfillment');
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: false,
+        allocation: expect.objectContaining({
+          carrier: 'Yurtici Kargo',
+          trackingNumber: 'ABC123456',
+          trackingUrl: 'https://tracking.example/ABC123456',
+          shippedAt: '2026-06-02T12:00:00.000Z',
+          shippingStatus: 'In Transit',
+        }),
+      }),
+    );
+  });
+
+  it('returns the previous shipment result for repeated idempotency keys without duplicate events', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['shipment:write'] }));
+    prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValueOnce({
+      vendorAllocation: {
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        carrier: 'Yurtici Kargo',
+        trackingNumber: 'ABC123456',
+        vendorIntegrationTrackingUrl: 'https://tracking.example/ABC123456',
+        vendorIntegrationShippedAt: new Date('2026-06-02T12:00:00.000Z'),
+        shippingStatus: 'In Transit',
+        lastVendorIntegrationShipmentRequestId: 'shipment-req-1',
+      },
+    });
+
+    const response = await injectVendorIntegrationShipment(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'shipment-key-1',
+      },
+      { carrier: 'Different Carrier', trackingNumber: 'DIFFERENT' },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: true,
+        allocation: expect.objectContaining({
+          carrier: 'Yurtici Kargo',
+          trackingNumber: 'ABC123456',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
   });
 
   it('stores only the token hash when generating client credentials', async () => {

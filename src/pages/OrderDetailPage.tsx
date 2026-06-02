@@ -5452,6 +5452,22 @@ export function OrderDetailPage() {
                   <strong>{order.orderSnapshot.vendorIntegrationProvider}</strong>
                 </div>
               ) : null}
+              {order.orderSnapshot?.vendorIntegrationTrackingUrl ? (
+                <div>
+                  <span>External shipment</span>
+                  <strong>
+                    <a className="inline-link" href={order.orderSnapshot.vendorIntegrationTrackingUrl} target="_blank" rel="noreferrer">
+                      Open external tracking
+                    </a>
+                  </strong>
+                </div>
+              ) : null}
+              {order.orderSnapshot?.vendorIntegrationShippedAt ? (
+                <div>
+                  <span>External shipped at</span>
+                  <strong>{formatOptionalDate(order.orderSnapshot.vendorIntegrationShippedAt)}</strong>
+                </div>
+              ) : null}
             </div>
           </article>
 
