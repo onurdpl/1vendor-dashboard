@@ -12,6 +12,8 @@ import type {
 } from './order-ingestion.types.js';
 import type { ShopifyOrderLineItemImage } from './shopify-admin.types.js';
 
+const DEFAULT_VENDOR_INTEGRATION_VAT_RATE = '10';
+
 function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
   const firstName = payload.customer?.first_name?.trim();
   const lastName = payload.customer?.last_name?.trim();
@@ -22,6 +24,40 @@ function buildCustomerName(payload: ShopifyOrdersCreateWebhookPayload) {
 function readAddressString(value: string | null | undefined) {
   const normalized = typeof value === 'string' ? value.trim() : '';
   return normalized || null;
+}
+
+function readPayloadString(value: string | null | undefined) {
+  return readAddressString(value);
+}
+
+function toMoneyString(value: string | number | null | undefined) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return null;
+  }
+
+  return parsed.toFixed(2);
+}
+
+function sumMoneyValues(values: Array<string | number | null | undefined>) {
+  let sawValue = false;
+  let sum = 0;
+
+  for (const value of values) {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) {
+      continue;
+    }
+
+    sawValue = true;
+    sum += parsed;
+  }
+
+  return sawValue ? sum.toFixed(2) : null;
 }
 
 export function normalizeShopifyShipmentPhone(value: string | null | undefined) {
@@ -64,6 +100,37 @@ export function mapShopifyShippingAddress(payload: ShopifyOrdersCreateWebhookPay
   };
 }
 
+function buildBillingFullName(address: ShopifyOrdersCreateWebhookPayload['billing_address']) {
+  const directName = readAddressString(address?.name);
+  if (directName) {
+    return directName;
+  }
+
+  const firstName = readAddressString(address?.first_name);
+  const lastName = readAddressString(address?.last_name);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
+  return fullName || null;
+}
+
+export function mapShopifyBillingAddress(payload: ShopifyOrdersCreateWebhookPayload) {
+  const address = payload.billing_address;
+  return {
+    billingFullName: buildBillingFullName(address),
+    billingCompany: readAddressString(address?.company),
+    billingPhone: normalizeShopifyShipmentPhone(address?.phone),
+    billingCity: readAddressString(address?.city),
+    billingDistrict:
+      readAddressString(address?.district) ??
+      readAddressString(address?.district_name) ??
+      readAddressString(address?.city_area) ??
+      readAddressString(address?.county) ??
+      readAddressString(address?.province),
+    billingAddress1: readAddressString(address?.address1),
+    billingAddress2: readAddressString(address?.address2),
+    billingPostcode: readAddressString(address?.zip) ?? readAddressString(address?.postcode),
+  };
+}
+
 function toDate(value: string | null | undefined) {
   if (!value) {
     return new Date();
@@ -71,6 +138,44 @@ function toDate(value: string | null | undefined) {
 
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+function toOptionalDate(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function parseOrderTags(value: ShopifyOrdersCreateWebhookPayload['tags']) {
+  if (Array.isArray(value)) {
+    return value.map((entry) => entry.trim()).filter(Boolean);
+  }
+
+  if (typeof value !== 'string') {
+    return [];
+  }
+
+  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
+}
+
+function resolvePaymentGatewayName(payload: ShopifyOrdersCreateWebhookPayload) {
+  const firstGateway = Array.isArray(payload.payment_gateway_names)
+    ? payload.payment_gateway_names.find((entry) => typeof entry === 'string' && entry.trim())
+    : null;
+
+  return readPayloadString(firstGateway ?? null) ?? readPayloadString(payload.gateway);
+}
+
+function resolveShippingAmount(payload: ShopifyOrdersCreateWebhookPayload) {
+  const aggregateAmount = toMoneyString(payload.total_shipping_price_set?.shop_money?.amount);
+  if (aggregateAmount) {
+    return aggregateAmount;
+  }
+
+  return sumMoneyValues((payload.shipping_lines ?? []).map((line) => line.price));
 }
 
 function toLineItemTitle(lineItem: ShopifyOrdersCreateLineItemPayload) {
@@ -97,15 +202,24 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
         ? `#${String(payload.order_number)}`
         : `#${sourceShopifyOrderId}`;
   const shippingAddress = mapShopifyShippingAddress(payload);
+  const billingAddress = mapShopifyBillingAddress(payload);
+  const shopifyCreatedAt = toOptionalDate(payload.created_at);
 
   return {
     sourceShopifyOrderId,
     sourceShopifyOrderNumber,
-    createdAt: toDate(payload.created_at),
-    totalPrice:
-      payload.total_price !== undefined && payload.total_price !== null
-        ? String(payload.total_price)
-        : null,
+    createdAt: shopifyCreatedAt ?? toDate(payload.created_at),
+    shopifyCreatedAt,
+    currency:
+      readPayloadString(payload.currency) ??
+      readPayloadString(payload.total_shipping_price_set?.shop_money?.currency_code),
+    financialStatus: readPayloadString(payload.financial_status),
+    paymentGatewayName: resolvePaymentGatewayName(payload),
+    totalPrice: toMoneyString(payload.total_price),
+    shippingAmount: resolveShippingAmount(payload),
+    discountAmount: toMoneyString(payload.total_discounts),
+    orderNote: readPayloadString(payload.note),
+    orderTags: parseOrderTags(payload.tags),
     customerName: buildCustomerName(payload),
     customerEmail:
       typeof payload.customer?.email === 'string'
@@ -114,17 +228,27 @@ function parseOrderPayload(payload: ShopifyOrdersCreateWebhookPayload): ParsedSh
           ? payload.email
           : null,
     ...shippingAddress,
-    lineItems: lineItems.map<ParsedShopifyOrderLineItem>((lineItem) => ({
-      sourceLineItemId: String(lineItem.id),
-      sourceVariantId:
-        lineItem.variant_id !== undefined && lineItem.variant_id !== null ? String(lineItem.variant_id) : null,
-      sku: typeof lineItem.sku === 'string' && lineItem.sku.trim() ? lineItem.sku : null,
-      title: toLineItemTitle(lineItem),
-      quantity: typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1,
-      unitPrice:
-        lineItem.price !== undefined && lineItem.price !== null ? String(lineItem.price) : null,
-      imageUrl: null,
-    })),
+    ...billingAddress,
+    lineItems: lineItems.map<ParsedShopifyOrderLineItem>((lineItem) => {
+      const quantity = typeof lineItem.quantity === 'number' && lineItem.quantity > 0 ? lineItem.quantity : 1;
+      const unitPrice = toMoneyString(lineItem.price);
+
+      return {
+        sourceLineItemId: String(lineItem.id),
+        shopifyProductId:
+          lineItem.product_id !== undefined && lineItem.product_id !== null ? String(lineItem.product_id) : null,
+        sourceVariantId:
+          lineItem.variant_id !== undefined && lineItem.variant_id !== null ? String(lineItem.variant_id) : null,
+        sku: typeof lineItem.sku === 'string' && lineItem.sku.trim() ? lineItem.sku : null,
+        title: toLineItemTitle(lineItem),
+        quantity,
+        unitPrice,
+        unitPriceVatIncluded: unitPrice,
+        lineTotalVatIncluded: toLineTotalVatIncluded(unitPrice, quantity),
+        vatRate: DEFAULT_VENDOR_INTEGRATION_VAT_RATE,
+        imageUrl: null,
+      };
+    }),
   };
 }
 
@@ -175,6 +299,14 @@ function toLineAmount(unitPrice: string | null, quantity: number) {
   }
 
   return (unit * quantity).toFixed(2);
+}
+
+function toLineTotalVatIncluded(unitPrice: string | null, quantity: number) {
+  if (unitPrice === null) {
+    return null;
+  }
+
+  return toLineAmount(unitPrice, quantity);
 }
 
 export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Promise<OrderIngestionResult> {
@@ -238,9 +370,25 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
         },
         update: {
           sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
+          shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
+          currency: parsedOrder.currency,
+          financialStatus: parsedOrder.financialStatus,
+          paymentGatewayName: parsedOrder.paymentGatewayName,
+          shippingAmount: parsedOrder.shippingAmount,
+          discountAmount: parsedOrder.discountAmount,
+          orderNote: parsedOrder.orderNote,
+          orderTags: parsedOrder.orderTags,
           customerName: parsedOrder.customerName,
           customerEmail: parsedOrder.customerEmail,
           customerPhone: parsedOrder.customerPhone,
+          billingFullName: parsedOrder.billingFullName,
+          billingCompany: parsedOrder.billingCompany,
+          billingPhone: parsedOrder.billingPhone,
+          billingCity: parsedOrder.billingCity,
+          billingDistrict: parsedOrder.billingDistrict,
+          billingAddress1: parsedOrder.billingAddress1,
+          billingAddress2: parsedOrder.billingAddress2,
+          billingPostcode: parsedOrder.billingPostcode,
           shippingCountry: parsedOrder.shippingCountry,
           shippingPostcode: parsedOrder.shippingPostcode,
           shippingCity: parsedOrder.shippingCity,
@@ -252,9 +400,25 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
         create: {
           sourceShopifyOrderId: parsedOrder.sourceShopifyOrderId,
           sourceShopifyOrderNumber: parsedOrder.sourceShopifyOrderNumber,
+          shopifyCreatedAt: parsedOrder.shopifyCreatedAt,
+          currency: parsedOrder.currency,
+          financialStatus: parsedOrder.financialStatus,
+          paymentGatewayName: parsedOrder.paymentGatewayName,
+          shippingAmount: parsedOrder.shippingAmount,
+          discountAmount: parsedOrder.discountAmount,
+          orderNote: parsedOrder.orderNote,
+          orderTags: parsedOrder.orderTags,
           customerName: parsedOrder.customerName,
           customerEmail: parsedOrder.customerEmail,
           customerPhone: parsedOrder.customerPhone,
+          billingFullName: parsedOrder.billingFullName,
+          billingCompany: parsedOrder.billingCompany,
+          billingPhone: parsedOrder.billingPhone,
+          billingCity: parsedOrder.billingCity,
+          billingDistrict: parsedOrder.billingDistrict,
+          billingAddress1: parsedOrder.billingAddress1,
+          billingAddress2: parsedOrder.billingAddress2,
+          billingPostcode: parsedOrder.billingPostcode,
           shippingCountry: parsedOrder.shippingCountry,
           shippingPostcode: parsedOrder.shippingPostcode,
           shippingCity: parsedOrder.shippingCity,
@@ -276,23 +440,31 @@ export async function ingestShopifyOrderWebhook(input: OrderIngestionInput): Pro
             },
           },
           update: {
+            shopifyProductId: lineItem.shopifyProductId,
             sourceVariantId: lineItem.sourceVariantId,
             sku: lineItem.sku,
             title: lineItem.title,
             imageUrl: lineItem.imageUrl,
             quantity: lineItem.quantity,
             unitPrice: lineItem.unitPrice,
+            unitPriceVatIncluded: lineItem.unitPriceVatIncluded,
+            lineTotalVatIncluded: lineItem.lineTotalVatIncluded,
+            vatRate: lineItem.vatRate,
             originalVendorId: lineItem.vendorId,
           },
           create: {
             shopifyOrderId: shopifyOrder.id,
             sourceLineItemId: lineItem.sourceLineItemId,
+            shopifyProductId: lineItem.shopifyProductId,
             sourceVariantId: lineItem.sourceVariantId,
             sku: lineItem.sku,
             title: lineItem.title,
             imageUrl: lineItem.imageUrl,
             quantity: lineItem.quantity,
             unitPrice: lineItem.unitPrice,
+            unitPriceVatIncluded: lineItem.unitPriceVatIncluded,
+            lineTotalVatIncluded: lineItem.lineTotalVatIncluded,
+            vatRate: lineItem.vatRate,
             originalVendorId: lineItem.vendorId,
           },
         });

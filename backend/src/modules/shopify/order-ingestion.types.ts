@@ -3,6 +3,7 @@ import type { SellerInfoMap, ShopifyOrderLineItemImage } from './shopify-admin.t
 
 export type ShopifyOrdersCreateLineItemPayload = {
   id: string | number;
+  product_id?: string | number | null;
   variant_id?: string | number | null;
   sku?: string | null;
   title?: string | null;
@@ -17,7 +18,23 @@ export type ShopifyOrdersCreateWebhookPayload = {
   order_number?: string | number | null;
   name?: string | null;
   created_at?: string | null;
+  currency?: string | null;
+  financial_status?: string | null;
+  gateway?: string | null;
+  payment_gateway_names?: string[] | null;
   total_price?: string | number | null;
+  total_discounts?: string | number | null;
+  total_shipping_price_set?: {
+    shop_money?: {
+      amount?: string | number | null;
+      currency_code?: string | null;
+    } | null;
+  } | null;
+  shipping_lines?: Array<{
+    price?: string | number | null;
+  }> | null;
+  note?: string | null;
+  tags?: string | string[] | null;
   customer?: {
     email?: string | null;
     first_name?: string | null;
@@ -41,16 +58,37 @@ export type ShopifyOrdersCreateWebhookPayload = {
     address2?: string | null;
     address?: string | null;
   } | null;
+  billing_address?: {
+    name?: string | null;
+    first_name?: string | null;
+    last_name?: string | null;
+    company?: string | null;
+    phone?: string | null;
+    city?: string | null;
+    district?: string | null;
+    district_name?: string | null;
+    city_area?: string | null;
+    province?: string | null;
+    county?: string | null;
+    address1?: string | null;
+    address2?: string | null;
+    zip?: string | null;
+    postcode?: string | null;
+  } | null;
   line_items?: ShopifyOrdersCreateLineItemPayload[] | null;
 };
 
 export type ParsedShopifyOrderLineItem = {
   sourceLineItemId: string;
+  shopifyProductId: string | null;
   sourceVariantId: string | null;
   sku: string | null;
   title: string | null;
   quantity: number;
   unitPrice: string | null;
+  unitPriceVatIncluded: string | null;
+  lineTotalVatIncluded: string | null;
+  vatRate: string;
   imageUrl: string | null;
 };
 
@@ -58,10 +96,26 @@ export type ParsedShopifyOrderPayload = {
   sourceShopifyOrderId: string;
   sourceShopifyOrderNumber: string;
   createdAt: Date;
+  shopifyCreatedAt: Date | null;
+  currency: string | null;
+  financialStatus: string | null;
+  paymentGatewayName: string | null;
   totalPrice: string | null;
+  shippingAmount: string | null;
+  discountAmount: string | null;
+  orderNote: string | null;
+  orderTags: string[];
   customerName: string | null;
   customerEmail: string | null;
   customerPhone: string | null;
+  billingFullName: string | null;
+  billingCompany: string | null;
+  billingPhone: string | null;
+  billingCity: string | null;
+  billingDistrict: string | null;
+  billingAddress1: string | null;
+  billingAddress2: string | null;
+  billingPostcode: string | null;
   shippingCountry: string | null;
   shippingPostcode: string | null;
   shippingCity: string | null;
