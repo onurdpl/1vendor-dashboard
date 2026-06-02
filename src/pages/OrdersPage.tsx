@@ -984,6 +984,10 @@ export function OrdersPage() {
                     <strong>{formatSnapshotValue(orderSnapshot?.paymentGatewayName)}</strong>
                   </div>
                   <div>
+                    <span>Vendor integration</span>
+                    <strong>{formatSnapshotValue(orderSnapshot?.vendorIntegrationStatus)}</strong>
+                  </div>
+                  <div>
                     <span>Currency</span>
                     <strong>{formatSnapshotValue(orderSnapshot?.currency)}</strong>
                   </div>

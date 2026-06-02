@@ -66,6 +66,10 @@ const orderDetail: OrderDetail = {
     discountAmount: '25.00',
     orderNote: 'Rail integration note',
     orderTags: ['entegrasyon'],
+    vendorIntegrationStatus: 'processing',
+    vendorIntegrationStatusMessage: 'Provider processing',
+    vendorIntegrationStatusUpdatedAt: '2026-05-08T09:25:00Z',
+    vendorIntegrationProvider: 'Provider A',
     billingAddress: {
       fullName: 'Acme Billing',
       company: 'Acme Supply Co.',
@@ -517,6 +521,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByText('Delivered').length).toBeGreaterThan(0);
     expect(screen.getByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
     expect(screen.getByText('PayTR Marketplace')).toBeInTheDocument();
+    expect(screen.getByText('processing')).toBeInTheDocument();
     expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();

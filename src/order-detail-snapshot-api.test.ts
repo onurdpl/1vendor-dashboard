@@ -30,6 +30,10 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     trackingNumber: null,
     reassignmentRequired: false,
     cancellationReason: null,
+    vendorIntegrationStatus: 'acknowledged',
+    vendorIntegrationStatusMessage: 'Order imported into Entegra',
+    vendorIntegrationStatusUpdatedAt: new Date('2026-06-01T10:06:00.000Z'),
+    vendorIntegrationProvider: 'Provider A',
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     updatedAt: new Date('2026-06-01T10:05:00.000Z'),
     order: {
@@ -105,6 +109,10 @@ describe('order detail snapshot API mapping', () => {
       discountAmount: '10.00',
       orderNote: 'Leave at desk',
       orderTags: ['entegrasyon', 'priority'],
+      vendorIntegrationStatus: 'acknowledged',
+      vendorIntegrationStatusMessage: 'Order imported into Entegra',
+      vendorIntegrationStatusUpdatedAt: '2026-06-01T10:06:00.000Z',
+      vendorIntegrationProvider: 'Provider A',
       billingAddress: {
         fullName: 'Billing Customer',
         company: 'Billing Co',

@@ -160,6 +160,10 @@ const orderWithShipmentSummary: OrderDetail = {
     discountAmount: '125.00',
     orderNote: 'Integration note',
     orderTags: ['entegrasyon', 'priority'],
+    vendorIntegrationStatus: 'acknowledged',
+    vendorIntegrationStatusMessage: 'Order imported into Entegra',
+    vendorIntegrationStatusUpdatedAt: '2026-05-15T12:10:00.000Z',
+    vendorIntegrationProvider: 'Provider A',
     billingAddress: {
       fullName: 'Billing Customer',
       company: 'Billing Co',
@@ -1134,8 +1138,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getAllByText(/TRY\s*454\.45/).length).toBeGreaterThan(0);
     expect(screen.getByText(/Billing Customer/)).toBeInTheDocument();
     expect(screen.getByText(/Billing street 1/)).toBeInTheDocument();
-    expect(screen.getByText('Integration note')).toBeInTheDocument();
+    expect(screen.getAllByText('Integration note').length).toBeGreaterThan(0);
     expect(screen.getByText('entegrasyon, priority')).toBeInTheDocument();
+    expect(screen.getByText('acknowledged')).toBeInTheDocument();
+    expect(screen.getByText('Order imported into Entegra')).toBeInTheDocument();
+    expect(screen.getByText('Provider A')).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*454\.45/)).toBeInTheDocument();
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
@@ -1167,6 +1174,10 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         discountAmount: null,
         orderNote: null,
         orderTags: [],
+        vendorIntegrationStatus: null,
+        vendorIntegrationStatusMessage: null,
+        vendorIntegrationStatusUpdatedAt: null,
+        vendorIntegrationProvider: null,
         billingAddress: {
           fullName: null,
           company: null,

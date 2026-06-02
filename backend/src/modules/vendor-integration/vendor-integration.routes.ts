@@ -7,6 +7,10 @@ import {
   writeVendorIntegrationAuditLog,
 } from './vendor-integration.auth.js';
 import { listVendorIntegrationOrders, type VendorIntegrationOrdersQuery } from './vendor-integration.orders.service.js';
+import {
+  isVendorIntegrationStatus,
+  updateVendorIntegrationOrderStatus,
+} from './vendor-integration.status.service.js';
 import { createVendorIntegrationClientToken } from './vendor-integration.tokens.js';
 import './vendor-integration.types.js';
 
@@ -19,6 +23,11 @@ type TokenCreateBody = {
 type AuditLogsQuery = {
   vendorIdentifier?: string;
   limit?: string | number;
+};
+
+type StatusUpdateBody = {
+  status?: string;
+  message?: string | null;
 };
 
 function readHeaderValue(value: string | string[] | undefined) {
@@ -180,6 +189,47 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
 
         throw error;
       }
+    },
+  );
+
+  app.post<{ Params: { allocationId: string }; Body: StatusUpdateBody }>(
+    '/api/vendor-integration/orders/:allocationId/status',
+    {
+      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('status:write')],
+    },
+    async (request, reply) => {
+      const context = request.vendorIntegration;
+      if (!context) {
+        return reply.code(401).send({ message: 'Vendor integration token is required.' });
+      }
+
+      const idempotencyKey = readHeaderValue(request.headers['idempotency-key']).trim();
+      if (!idempotencyKey) {
+        return reply.code(400).send({ message: 'Idempotency-Key header is required.' });
+      }
+
+      const status = request.body?.status?.trim() ?? '';
+      if (!isVendorIntegrationStatus(status)) {
+        return reply.code(400).send({ message: 'Unsupported vendor integration status.' });
+      }
+
+      const result = await updateVendorIntegrationOrderStatus({
+        allocationId: request.params.allocationId,
+        context,
+        idempotencyKey,
+        status,
+        message: request.body?.message ?? null,
+        requestId: request.requestId ?? request.id ?? null,
+      });
+
+      if (!result) {
+        return reply.code(404).send({ message: 'Vendor allocation not found.' });
+      }
+
+      return {
+        idempotent: result.idempotent,
+        allocation: result.allocation,
+      };
     },
   );
 }

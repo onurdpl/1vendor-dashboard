@@ -701,6 +701,10 @@ export type OrderIntegrationSnapshot = {
   discountAmount: string | null;
   orderNote: string | null;
   orderTags: string[];
+  vendorIntegrationStatus: string | null;
+  vendorIntegrationStatusMessage: string | null;
+  vendorIntegrationStatusUpdatedAt: string | null;
+  vendorIntegrationProvider: string | null;
   billingAddress: {
     fullName: string | null;
     company: string | null;

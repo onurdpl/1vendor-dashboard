@@ -1224,6 +1224,10 @@ export async function getVendorOrderById(
       discountAmount: toNullableAmountString(allocation.order.discountAmount),
       orderNote: allocation.order.orderNote,
       orderTags: allocation.order.orderTags,
+      vendorIntegrationStatus: allocation.vendorIntegrationStatus,
+      vendorIntegrationStatusMessage: allocation.vendorIntegrationStatusMessage,
+      vendorIntegrationStatusUpdatedAt: toIsoString(allocation.vendorIntegrationStatusUpdatedAt),
+      vendorIntegrationProvider: allocation.vendorIntegrationProvider,
       billingAddress: {
         fullName: allocation.order.billingFullName,
         company: allocation.order.billingCompany,

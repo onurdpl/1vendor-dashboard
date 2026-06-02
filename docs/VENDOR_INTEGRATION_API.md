@@ -60,8 +60,7 @@ Operational rules:
 Initial supported scope:
 
 - `orders:read` - allows reading allocated orders for the authenticated vendor only.
-
-Write scopes are intentionally not modeled yet.
+- `status:write` - allows reporting provider import/processing status for the authenticated vendor's allocations only.
 
 ## Endpoint
 
@@ -97,6 +96,10 @@ Example response:
       "shippingStatus": "Awaiting Shipment",
       "vendorIdentifier": "sporjinal",
       "originalVendorIdentifier": "sporjinal",
+      "vendorIntegrationStatus": "acknowledged",
+      "vendorIntegrationStatusMessage": "Order imported into Entegra",
+      "vendorIntegrationStatusUpdatedAt": "2026-05-31T10:06:00.000Z",
+      "vendorIntegrationProvider": "ayensoftware-test",
       "shopifyCreatedAt": "2026-05-31T09:55:00.000Z",
       "createdAt": "2026-05-31T10:00:00.000Z",
       "updatedAt": "2026-05-31T10:05:00.000Z",
@@ -172,6 +175,73 @@ Example response:
 }
 ```
 
+### `POST /api/vendor-integration/orders/:allocationId/status`
+
+Reports the external provider's import or processing status for one allocated order.
+
+Required scope:
+
+- `status:write`
+
+Required headers:
+
+```http
+Authorization: Bearer spg_vi_...
+Idempotency-Key: provider-unique-key
+```
+
+Allowed statuses:
+
+- `acknowledged`
+- `processing`
+- `ready_to_ship`
+- `failed`
+- `cancelled`
+
+Example request:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer spg_vi_..." \
+  -H "Idempotency-Key: entegra-import-alloc-sporjinal-1001-1" \
+  -H "content-type: application/json" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/status" \
+  -d '{
+    "status": "acknowledged",
+    "message": "Order imported into Entegra"
+  }'
+```
+
+Example response:
+
+```json
+{
+  "idempotent": false,
+  "allocation": {
+    "id": "alloc-sporjinal-1001",
+    "vendorIdentifier": "sporjinal",
+    "vendorIntegrationStatus": "acknowledged",
+    "vendorIntegrationStatusMessage": "Order imported into Entegra",
+    "vendorIntegrationStatusUpdatedAt": "2026-06-02T14:30:00.000Z",
+    "vendorIntegrationProvider": "ayensoftware-test",
+    "lastVendorIntegrationRequestId": "request-id"
+  }
+}
+```
+
+Idempotency behavior:
+
+- `Idempotency-Key` is required.
+- Repeating the same key for the same client and allocation returns the previous status result.
+- A repeated key does not create another status event and does not overwrite the allocation status snapshot.
+
+Operational boundaries:
+
+- This endpoint updates only Sporgym's vendor integration status snapshot.
+- It does not create Shopify fulfillments.
+- It does not create shipment labels, invoices, payout records, settlement records, accounting entries, returns, or refunds.
+- It does not accept a vendor identifier from the request body; vendor scope comes only from the bearer token.
+
 ## Security Rules
 
 - The API never accepts a vendor identifier from the request body or query string.
@@ -191,6 +261,7 @@ The order feed exposes normalized Shopify order snapshots that are safe for the 
 - customer/shipping/billing address fields persisted from Shopify payloads
 - order note and tag snapshots
 - line item product/variant identifiers, SKU, title, quantity, VAT-included unit price, VAT-included line total, and VAT rate
+- vendor integration status fields reported by the provider: `vendorIntegrationStatus`, `vendorIntegrationStatusMessage`, `vendorIntegrationStatusUpdatedAt`, `vendorIntegrationProvider`
 
 Missing optional Shopify payload fields are returned as `null` or an empty `orderTags` array. The API does not read or return raw Shopify webhook payload bodies.
 
@@ -250,4 +321,4 @@ They do not include request bodies, response bodies, tokens, or credentials.
 
 ## Future Direction
 
-Future provider integration phases may add shipment status, invoice references, or fulfillment updates after a separate security and operational review. Those write endpoints are not part of this foundation.
+Future provider integration phases may add shipment references, invoice references, or fulfillment updates after a separate security and operational review. Those write endpoints are not part of this foundation.

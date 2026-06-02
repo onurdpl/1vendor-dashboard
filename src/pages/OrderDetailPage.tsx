@@ -5399,6 +5399,10 @@ export function OrderDetailPage() {
                 <strong>{formatSnapshotValue(order.orderSnapshot?.paymentGatewayName)}</strong>
               </div>
               <div>
+                <span>Vendor integration</span>
+                <strong>{formatSnapshotValue(order.orderSnapshot?.vendorIntegrationStatus)}</strong>
+              </div>
+              <div>
                 <span>Tax total</span>
                 <strong>{formatSnapshotAmount(order.orderSnapshot?.orderTaxAmount, snapshotCurrency)}</strong>
               </div>
@@ -5434,6 +5438,18 @@ export function OrderDetailPage() {
                 <div>
                   <span>Order tags</span>
                   <strong>{order.orderSnapshot.orderTags.join(', ')}</strong>
+                </div>
+              ) : null}
+              {order.orderSnapshot?.vendorIntegrationStatusMessage ? (
+                <div>
+                  <span>Integration note</span>
+                  <strong>{order.orderSnapshot.vendorIntegrationStatusMessage}</strong>
+                </div>
+              ) : null}
+              {order.orderSnapshot?.vendorIntegrationProvider ? (
+                <div>
+                  <span>Integration provider</span>
+                  <strong>{order.orderSnapshot.vendorIntegrationProvider}</strong>
                 </div>
               ) : null}
             </div>

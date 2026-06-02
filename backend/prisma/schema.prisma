@@ -361,6 +361,7 @@ model VendorIntegrationClient {
   createdAt        DateTime                    @default(now())
   updatedAt        DateTime                    @updatedAt
   auditLogs        VendorIntegrationAuditLog[]
+  statusEvents     VendorIntegrationStatusEvent[]
 
   @@index([vendorIdentifier])
   @@index([enabled, revokedAt])
@@ -461,6 +462,11 @@ model VendorAllocation {
   odooSaleOrderId          String?
   odooSaleOrderName        String?
   odooSaleOrderSyncedAt    DateTime?
+  vendorIntegrationStatus  String?
+  vendorIntegrationStatusMessage String?
+  vendorIntegrationStatusUpdatedAt DateTime?
+  vendorIntegrationProvider String?
+  lastVendorIntegrationRequestId String?
   createdAt                DateTime                      @default(now())
   updatedAt                DateTime                      @updatedAt
   order                    ShopifyOrder                  @relation(fields: [sourceShopifyOrderId], references: [id], onDelete: Cascade)
@@ -477,8 +483,29 @@ model VendorAllocation {
   shipmentExecutions       ShipmentExecution[]
   operationalSignals       OperationalSignal[]
   automationActions        AutomationAction[]
+  vendorIntegrationStatusEvents VendorIntegrationStatusEvent[]
 
   @@index([odooSaleOrderId])
+  @@index([vendorIntegrationStatus])
+}
+
+model VendorIntegrationStatusEvent {
+  id               String                  @id @default(cuid())
+  clientId         String
+  vendorAllocationId String
+  vendorIdentifier String
+  providerName     String?
+  status           String
+  message          String?
+  idempotencyKey   String
+  requestId        String?
+  createdAt        DateTime                @default(now())
+  client           VendorIntegrationClient @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  vendorAllocation VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
+
+  @@unique([clientId, vendorAllocationId, idempotencyKey])
+  @@index([vendorAllocationId, createdAt])
+  @@index([vendorIdentifier, createdAt])
 }
 
 model VendorAllocationLineItem {

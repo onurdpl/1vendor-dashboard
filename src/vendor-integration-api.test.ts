@@ -12,6 +12,12 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorAllocation: {
     findMany: vi.fn(),
+    findFirst: vi.fn(),
+    update: vi.fn(),
+  },
+  vendorIntegrationStatusEvent: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
   },
 }));
 
@@ -49,6 +55,10 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     shippingStatus: 'Awaiting Shipment',
     trackingNumber: null,
     carrier: null,
+    vendorIntegrationStatus: 'acknowledged',
+    vendorIntegrationStatusMessage: 'Order imported into Entegra',
+    vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:06:00.000Z'),
+    vendorIntegrationProvider: 'Provider A',
     createdAt: new Date('2026-05-31T10:00:00.000Z'),
     updatedAt: new Date('2026-05-31T10:05:00.000Z'),
     order: {
@@ -180,6 +190,38 @@ async function injectVendorIntegrationOrders(headers: Record<string, string>, qu
   return { statusCode: reply.statusCode, payload, request };
 }
 
+async function injectVendorIntegrationStatus(
+  allocationId: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown> = {},
+) {
+  const { posts, hooks } = createRegisteredRoutes();
+  const route = posts.get('/api/vendor-integration/orders/:allocationId/status');
+  const reply = createReply();
+  const request: Record<string, unknown> = {
+    headers,
+    method: 'POST',
+    url: `/api/vendor-integration/orders/${allocationId}/status`,
+    id: 'status-req-1',
+    params: { allocationId },
+    body,
+  };
+
+  for (const preHandler of route?.options?.preHandler ?? []) {
+    await preHandler(request, reply);
+    if (reply.sent) {
+      await hooks.get('onResponse')?.(request, reply);
+      return { statusCode: reply.statusCode, payload: reply.payload, request };
+    }
+  }
+
+  const result = await route?.handler?.(request, reply);
+  const payload = reply.sent ? reply.payload : result;
+  await hooks.get('onResponse')?.(request, reply);
+
+  return { statusCode: reply.statusCode, payload, request };
+}
+
 async function injectAdminRoute(
   method: 'GET' | 'POST',
   path: string,
@@ -217,6 +259,21 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationAuditLog.create.mockResolvedValue({ id: 'audit-1' });
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValue([]);
     prismaMock.vendorAllocation.findMany.mockResolvedValue([buildAllocation()]);
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+    });
+    prismaMock.vendorAllocation.update.mockResolvedValue({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      vendorIntegrationStatus: 'acknowledged',
+      vendorIntegrationStatusMessage: 'Order imported into Entegra',
+      vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:06:00.000Z'),
+      vendorIntegrationProvider: 'Provider A',
+      lastVendorIntegrationRequestId: 'status-req-1',
+    });
+    prismaMock.vendorIntegrationStatusEvent.create.mockResolvedValue({ id: 'status-event-1' });
+    prismaMock.vendorIntegrationStatusEvent.findUnique.mockResolvedValue(null);
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
   });
 
@@ -282,6 +339,10 @@ describe('vendor integration API foundation', () => {
             vendorIdentifier: 'sporjinal',
             shopifyOrderNumber: '#1001',
             shopifyCreatedAt: '2026-05-31T09:55:00.000Z',
+            vendorIntegrationStatus: 'acknowledged',
+            vendorIntegrationStatusMessage: 'Order imported into Entegra',
+            vendorIntegrationStatusUpdatedAt: '2026-05-31T10:06:00.000Z',
+            vendorIntegrationProvider: 'Provider A',
             financial: expect.objectContaining({
               currency: 'TRY',
               financialStatus: 'paid',
@@ -329,6 +390,175 @@ describe('vendor integration API foundation', () => {
       },
       select: { id: true },
     });
+  });
+
+  it('rejects status writes without status write scope and writes an audit log', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['orders:read'] }));
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer read-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'acknowledged', message: 'Order imported into Entegra' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Missing required scope: status:write' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorIdentifier: 'sporjinal',
+          method: 'POST',
+          statusCode: 403,
+          requestId: 'status-req-1',
+        }),
+      }),
+    );
+  });
+
+  it('rejects status writes without an idempotency key', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      { authorization: 'Bearer write-token' },
+      { status: 'acknowledged' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported vendor integration statuses', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'shipped' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Unsupported vendor integration status.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents vendors from updating another vendor allocation status', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-yalispor-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'processing' },
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.payload).toEqual({ message: 'Vendor allocation not found.' });
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'alloc-yalispor-1',
+          assignedVendorId: 'sporjinal',
+        },
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('updates vendor integration status for the authenticated vendor allocation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'acknowledged', message: 'Order imported into Entegra' },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alloc-sporjinal-1' },
+        data: expect.objectContaining({
+          vendorIntegrationStatus: 'acknowledged',
+          vendorIntegrationStatusMessage: 'Order imported into Entegra',
+          vendorIntegrationProvider: 'Provider A',
+          lastVendorIntegrationRequestId: 'status-req-1',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorIntegrationStatusEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorAllocationId: 'alloc-sporjinal-1',
+          vendorIdentifier: 'sporjinal',
+          status: 'acknowledged',
+          idempotencyKey: 'status-key-1',
+        }),
+      }),
+    );
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: false,
+        allocation: expect.objectContaining({
+          id: 'alloc-sporjinal-1',
+          vendorIntegrationStatus: 'acknowledged',
+          vendorIntegrationStatusMessage: 'Order imported into Entegra',
+        }),
+      }),
+    );
+  });
+
+  it('returns the previous status result for repeated idempotency keys without duplicate events', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['status:write'] }));
+    prismaMock.vendorIntegrationStatusEvent.findUnique.mockResolvedValueOnce({
+      vendorAllocation: {
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        vendorIntegrationStatus: 'processing',
+        vendorIntegrationStatusMessage: 'Already processing',
+        vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:07:00.000Z'),
+        vendorIntegrationProvider: 'Provider A',
+        lastVendorIntegrationRequestId: 'status-req-1',
+      },
+    });
+
+    const response = await injectVendorIntegrationStatus(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'status-key-1',
+      },
+      { status: 'failed', message: 'Should not overwrite' },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: true,
+        allocation: expect.objectContaining({
+          vendorIntegrationStatus: 'processing',
+          vendorIntegrationStatusMessage: 'Already processing',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationStatusEvent.create).not.toHaveBeenCalled();
   });
 
   it('stores only the token hash when generating client credentials', async () => {
