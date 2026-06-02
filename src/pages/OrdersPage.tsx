@@ -1028,6 +1028,40 @@ export function OrdersPage() {
                 </div>
               </section>
 
+              {orderSnapshot?.vendorInvoiceNumber ? (
+                <section className="orders-detail-card" aria-label="Vendor invoice">
+                  <h4>Vendor Invoice</h4>
+                  <div className="orders-rail-summary-list">
+                    <div>
+                      <span>Invoice Number</span>
+                      <strong>{orderSnapshot.vendorInvoiceNumber}</strong>
+                    </div>
+                    <div>
+                      <span>Invoice Date</span>
+                      <strong>{orderSnapshot.vendorInvoiceDate ?? '—'}</strong>
+                    </div>
+                    <div>
+                      <span>Invoice Amount</span>
+                      <strong>{formatSnapshotAmount(orderSnapshot.vendorInvoiceAmount, snapshotCurrency)}</strong>
+                    </div>
+                    <div>
+                      <span>Received At</span>
+                      <strong>{orderSnapshot.vendorInvoiceReceivedAt ? formatDate(orderSnapshot.vendorInvoiceReceivedAt) : '—'}</strong>
+                    </div>
+                    {orderSnapshot.vendorInvoiceUrl ? (
+                      <div>
+                        <span>Invoice URL</span>
+                        <strong>
+                          <a className="inline-link" href={orderSnapshot.vendorInvoiceUrl} target="_blank" rel="noreferrer">
+                            Open invoice
+                          </a>
+                        </strong>
+                      </div>
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
               <section className="orders-detail-card">
                 <h4>Line items</h4>
                 {(selectedOrder as OrderDetail).lineItems?.length ? (

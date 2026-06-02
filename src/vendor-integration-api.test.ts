@@ -23,6 +23,10 @@ const prismaMock = vi.hoisted(() => ({
     create: vi.fn(),
     findUnique: vi.fn(),
   },
+  vendorIntegrationInvoiceEvent: {
+    create: vi.fn(),
+    findUnique: vi.fn(),
+  },
 }));
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -65,6 +69,11 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     vendorIntegrationStatusMessage: 'Order imported into Entegra',
     vendorIntegrationStatusUpdatedAt: new Date('2026-05-31T10:06:00.000Z'),
     vendorIntegrationProvider: 'Provider A',
+    vendorInvoiceNumber: null,
+    vendorInvoiceDate: null,
+    vendorInvoiceUrl: null,
+    vendorInvoiceAmount: null,
+    vendorInvoiceReceivedAt: null,
     createdAt: new Date('2026-05-31T10:00:00.000Z'),
     updatedAt: new Date('2026-05-31T10:05:00.000Z'),
     order: {
@@ -260,6 +269,38 @@ async function injectVendorIntegrationShipment(
   return { statusCode: reply.statusCode, payload, request };
 }
 
+async function injectVendorIntegrationInvoice(
+  allocationId: string,
+  headers: Record<string, string>,
+  body: Record<string, unknown> = {},
+) {
+  const { posts, hooks } = createRegisteredRoutes();
+  const route = posts.get('/api/vendor-integration/orders/:allocationId/invoice');
+  const reply = createReply();
+  const request: Record<string, unknown> = {
+    headers,
+    method: 'POST',
+    url: `/api/vendor-integration/orders/${allocationId}/invoice`,
+    id: 'invoice-req-1',
+    params: { allocationId },
+    body,
+  };
+
+  for (const preHandler of route?.options?.preHandler ?? []) {
+    await preHandler(request, reply);
+    if (reply.sent) {
+      await hooks.get('onResponse')?.(request, reply);
+      return { statusCode: reply.statusCode, payload: reply.payload, request };
+    }
+  }
+
+  const result = await route?.handler?.(request, reply);
+  const payload = reply.sent ? reply.payload : result;
+  await hooks.get('onResponse')?.(request, reply);
+
+  return { statusCode: reply.statusCode, payload, request };
+}
+
 async function injectAdminRoute(
   method: 'GET' | 'POST',
   path: string,
@@ -314,6 +355,8 @@ describe('vendor integration API foundation', () => {
     prismaMock.vendorIntegrationStatusEvent.findUnique.mockResolvedValue(null);
     prismaMock.vendorIntegrationShipmentEvent.create.mockResolvedValue({ id: 'shipment-event-1' });
     prismaMock.vendorIntegrationShipmentEvent.findUnique.mockResolvedValue(null);
+    prismaMock.vendorIntegrationInvoiceEvent.create.mockResolvedValue({ id: 'invoice-event-1' });
+    prismaMock.vendorIntegrationInvoiceEvent.findUnique.mockResolvedValue(null);
     process.env.ADMIN_PROBE_TOKEN = 'admin-test-token';
   });
 
@@ -465,6 +508,38 @@ describe('vendor integration API foundation', () => {
               shipmentCreatedAt: '2026-06-02T12:00:00.000Z',
               externalShippedAt: '2026-06-02T12:00:00.000Z',
             }),
+          }),
+        ],
+      }),
+    );
+  });
+
+  it('returns vendor invoice snapshots in the vendor orders feed', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+    prismaMock.vendorAllocation.findMany.mockResolvedValueOnce([
+      buildAllocation({
+        vendorInvoiceNumber: 'ABC202600001',
+        vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+        vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+        vendorInvoiceAmount: '1299.90',
+        vendorInvoiceReceivedAt: new Date('2026-06-02T12:30:00.000Z'),
+      }),
+    ]);
+
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        data: [
+          expect.objectContaining({
+            vendorInvoice: {
+              invoiceNumber: 'ABC202600001',
+              invoiceDate: '2026-06-02',
+              invoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+              invoiceAmount: '1299.90',
+              receivedAt: '2026-06-02T12:30:00.000Z',
+            },
           }),
         ],
       }),
@@ -839,6 +914,208 @@ describe('vendor integration API foundation', () => {
     );
     expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
     expect(prismaMock.vendorIntegrationShipmentEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects invoice writes without invoice write scope and writes an audit log', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['orders:read'] }));
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer read-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(response.statusCode).toBe(403);
+    expect(response.payload).toEqual({ message: 'Missing required scope: invoice:write' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationAuditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorIdentifier: 'sporjinal',
+          method: 'POST',
+          statusCode: 403,
+          requestId: 'invoice-req-1',
+        }),
+      }),
+    );
+  });
+
+  it('rejects invoice writes without an idempotency key', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      { authorization: 'Bearer write-token' },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Idempotency-Key header is required.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects invoice writes for another vendor allocation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+    prismaMock.vendorAllocation.findFirst.mockResolvedValueOnce(null);
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-yalispor-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '1299.90' },
+    );
+
+    expect(response.statusCode).toBe(404);
+    expect(response.payload).toEqual({ message: 'Vendor allocation not found.' });
+    expect(prismaMock.vendorAllocation.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'alloc-yalispor-1',
+          assignedVendorId: 'sporjinal',
+        },
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid invoice amounts and dates', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValue(buildClient({ scopes: ['invoice:write'] }));
+
+    const invalidAmount = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-06-02', invoiceAmount: '-1.00' },
+    );
+    const invalidDate = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-2',
+      },
+      { invoiceNumber: 'ABC202600001', invoiceDate: '2026-02-31', invoiceAmount: '1299.90' },
+    );
+
+    expect(invalidAmount.statusCode).toBe(400);
+    expect(invalidAmount.payload).toEqual({ message: 'invoiceAmount must be a valid decimal amount.' });
+    expect(invalidDate.statusCode).toBe(400);
+    expect(invalidDate.payload).toEqual({ message: 'invoiceDate must be a valid YYYY-MM-DD date.' });
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+  });
+
+  it('updates invoice snapshot fields for the authenticated vendor allocation without accounting or Shopify mutation', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+    prismaMock.vendorAllocation.update.mockResolvedValueOnce({
+      id: 'alloc-sporjinal-1',
+      assignedVendorId: 'sporjinal',
+      vendorInvoiceNumber: 'ABC202600001',
+      vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+      vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+      vendorInvoiceAmount: '1299.90',
+      vendorInvoiceReceivedAt: new Date('2026-06-02T12:30:00.000Z'),
+      lastVendorIntegrationInvoiceRequestId: 'invoice-req-1',
+    });
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      {
+        invoiceNumber: 'ABC202600001',
+        invoiceDate: '2026-06-02',
+        invoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+        invoiceAmount: '1299.90',
+      },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alloc-sporjinal-1' },
+        data: expect.objectContaining({
+          vendorInvoiceNumber: 'ABC202600001',
+          vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+          vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+          lastVendorIntegrationInvoiceRequestId: 'invoice-req-1',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorIntegrationInvoiceEvent.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clientId: 'client-1',
+          vendorAllocationId: 'alloc-sporjinal-1',
+          vendorIdentifier: 'sporjinal',
+          invoiceNumber: 'ABC202600001',
+          invoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+          idempotencyKey: 'invoice-key-1',
+        }),
+      }),
+    );
+    expect(JSON.stringify(prismaMock)).not.toContain('shopifyFulfillment');
+    expect(JSON.stringify(prismaMock)).not.toContain('settlement');
+    expect(JSON.stringify(prismaMock)).not.toContain('payout');
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: false,
+        allocation: expect.objectContaining({
+          vendorInvoiceNumber: 'ABC202600001',
+          vendorInvoiceDate: '2026-06-02',
+          vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+          vendorInvoiceAmount: '1299.90',
+          vendorInvoiceReceivedAt: '2026-06-02T12:30:00.000Z',
+        }),
+      }),
+    );
+  });
+
+  it('returns the previous invoice result for repeated idempotency keys without duplicate events', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient({ scopes: ['invoice:write'] }));
+    prismaMock.vendorIntegrationInvoiceEvent.findUnique.mockResolvedValueOnce({
+      vendorAllocation: {
+        id: 'alloc-sporjinal-1',
+        assignedVendorId: 'sporjinal',
+        vendorInvoiceNumber: 'ABC202600001',
+        vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+        vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+        vendorInvoiceAmount: '1299.90',
+        vendorInvoiceReceivedAt: new Date('2026-06-02T12:30:00.000Z'),
+        lastVendorIntegrationInvoiceRequestId: 'invoice-req-1',
+      },
+    });
+
+    const response = await injectVendorIntegrationInvoice(
+      'alloc-sporjinal-1',
+      {
+        authorization: 'Bearer write-token',
+        'idempotency-key': 'invoice-key-1',
+      },
+      { invoiceNumber: 'DIFFERENT', invoiceDate: '2026-06-03', invoiceAmount: '1.00' },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        idempotent: true,
+        allocation: expect.objectContaining({
+          vendorInvoiceNumber: 'ABC202600001',
+          vendorInvoiceDate: '2026-06-02',
+          vendorInvoiceAmount: '1299.90',
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).not.toHaveBeenCalled();
+    expect(prismaMock.vendorIntegrationInvoiceEvent.create).not.toHaveBeenCalled();
   });
 
   it('stores only the token hash when generating client credentials', async () => {

@@ -707,6 +707,11 @@ export type OrderIntegrationSnapshot = {
   vendorIntegrationProvider: string | null;
   vendorIntegrationTrackingUrl: string | null;
   vendorIntegrationShippedAt: string | null;
+  vendorInvoiceNumber: string | null;
+  vendorInvoiceDate: string | null;
+  vendorInvoiceUrl: string | null;
+  vendorInvoiceAmount: string | null;
+  vendorInvoiceReceivedAt: string | null;
   billingAddress: {
     fullName: string | null;
     company: string | null;

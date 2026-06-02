@@ -5471,6 +5471,47 @@ export function OrderDetailPage() {
             </div>
           </article>
 
+          {order.orderSnapshot?.vendorInvoiceNumber ? (
+            <article className="order-detail-card-v2 order-workspace-panel" aria-label="Vendor invoice">
+              <div className="order-card-heading">
+                <div>
+                  <h2>Vendor Invoice</h2>
+                  <p>Provider-reported invoice reference. Informational only; no accounting posting is created here.</p>
+                </div>
+              </div>
+              <div className="order-financial-impact-grid order-finance-preview-grid">
+                <div>
+                  <span>Invoice Number</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceNumber}</strong>
+                </div>
+                <div>
+                  <span>Invoice Date</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceDate ?? '—'}</strong>
+                </div>
+                <div>
+                  <span>Invoice Amount</span>
+                  <strong>{formatSnapshotAmount(order.orderSnapshot.vendorInvoiceAmount, snapshotCurrency)}</strong>
+                </div>
+                <div>
+                  <span>Received At</span>
+                  <strong>{order.orderSnapshot.vendorInvoiceReceivedAt ? formatOptionalDate(order.orderSnapshot.vendorInvoiceReceivedAt) : '—'}</strong>
+                </div>
+              </div>
+              {order.orderSnapshot.vendorInvoiceUrl ? (
+                <div className="orders-rail-summary-list">
+                  <div>
+                    <span>Invoice URL</span>
+                    <strong>
+                      <a className="inline-link" href={order.orderSnapshot.vendorInvoiceUrl} target="_blank" rel="noreferrer">
+                        Open invoice
+                      </a>
+                    </strong>
+                  </div>
+                </div>
+              ) : null}
+            </article>
+          ) : null}
+
           <article
             id="settlement-preview"
             ref={settlementPreviewRef}

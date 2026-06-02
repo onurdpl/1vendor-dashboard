@@ -36,6 +36,11 @@ function buildAllocation(overrides: Record<string, unknown> = {}) {
     vendorIntegrationStatusMessage: 'Order imported into Entegra',
     vendorIntegrationStatusUpdatedAt: new Date('2026-06-01T10:06:00.000Z'),
     vendorIntegrationProvider: 'Provider A',
+    vendorInvoiceNumber: 'ABC202600001',
+    vendorInvoiceDate: new Date('2026-06-02T00:00:00.000Z'),
+    vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+    vendorInvoiceAmount: '1200.00',
+    vendorInvoiceReceivedAt: new Date('2026-06-02T12:30:00.000Z'),
     createdAt: new Date('2026-06-01T10:00:00.000Z'),
     updatedAt: new Date('2026-06-01T10:05:00.000Z'),
     order: {
@@ -119,6 +124,11 @@ describe('order detail snapshot API mapping', () => {
       vendorIntegrationProvider: 'Provider A',
       vendorIntegrationTrackingUrl: 'https://tracking.example/SKU-1001',
       vendorIntegrationShippedAt: '2026-06-02T12:00:00.000Z',
+      vendorInvoiceNumber: 'ABC202600001',
+      vendorInvoiceDate: '2026-06-02',
+      vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+      vendorInvoiceAmount: '1200.00',
+      vendorInvoiceReceivedAt: '2026-06-02T12:30:00.000Z',
       billingAddress: {
         fullName: 'Billing Customer',
         company: 'Billing Co',

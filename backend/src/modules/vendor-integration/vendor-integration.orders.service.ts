@@ -81,6 +81,11 @@ const allocationSelect = {
   vendorIntegrationStatusMessage: true,
   vendorIntegrationStatusUpdatedAt: true,
   vendorIntegrationProvider: true,
+  vendorInvoiceNumber: true,
+  vendorInvoiceDate: true,
+  vendorInvoiceUrl: true,
+  vendorInvoiceAmount: true,
+  vendorInvoiceReceivedAt: true,
   createdAt: true,
   updatedAt: true,
   order: {
@@ -211,6 +216,13 @@ function serializeAllocation(allocation: SelectedAllocation) {
       shipmentCreatedAt: toIsoDate(allocation.fulfillment?.shipmentCreatedAt ?? allocation.vendorIntegrationShippedAt),
       shipmentUpdatedAt: toIsoDate(allocation.fulfillment?.shipmentUpdatedAt),
       externalShippedAt: toIsoDate(allocation.vendorIntegrationShippedAt),
+    },
+    vendorInvoice: {
+      invoiceNumber: allocation.vendorInvoiceNumber,
+      invoiceDate: allocation.vendorInvoiceDate ? allocation.vendorInvoiceDate.toISOString().slice(0, 10) : null,
+      invoiceUrl: allocation.vendorInvoiceUrl,
+      invoiceAmount: toDecimalString(allocation.vendorInvoiceAmount),
+      receivedAt: toIsoDate(allocation.vendorInvoiceReceivedAt),
     },
     totals: {
       orderTotal: toDecimalString(allocation.order.totalPrice),

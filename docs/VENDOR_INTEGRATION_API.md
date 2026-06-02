@@ -2,9 +2,9 @@
 
 ## Purpose
 
-The Vendor Integration API is a controlled read-only foundation for external vendor integration providers. It allows a provider to pull only the orders allocated to the vendor attached to its token.
+The Vendor Integration API is a controlled foundation for external vendor integration providers. It allows a provider to pull only the orders allocated to the vendor attached to its token and report limited provider-side status, shipment, and invoice reference snapshots.
 
-This API does not create shipments, invoices, payout records, accounting entries, returns, refunds, or Shopify mutations.
+This API does not create Shopify invoices, accounting entries, payout records, settlement records, returns, refunds, or Shopify mutations.
 
 ## Authentication
 
@@ -62,6 +62,7 @@ Initial supported scope:
 - `orders:read` - allows reading allocated orders for the authenticated vendor only.
 - `status:write` - allows reporting provider import/processing status for the authenticated vendor's allocations only.
 - `shipment:write` - allows reporting provider shipment/tracking information for the authenticated vendor's allocations only.
+- `invoice:write` - allows reporting provider invoice reference information for the authenticated vendor's allocations only.
 
 ## Endpoint
 
@@ -145,6 +146,13 @@ Example response:
         "shipmentCreatedAt": "2026-06-02T12:00:00.000Z",
         "shipmentUpdatedAt": null,
         "externalShippedAt": "2026-06-02T12:00:00.000Z"
+      },
+      "vendorInvoice": {
+        "invoiceNumber": "ABC202600001",
+        "invoiceDate": "2026-06-02",
+        "invoiceUrl": "https://provider.example/invoices/ABC202600001.pdf",
+        "invoiceAmount": "1299.90",
+        "receivedAt": "2026-06-02T12:30:00.000Z"
       },
       "totals": {
         "orderTotal": "1299.90",
@@ -317,6 +325,79 @@ Operational boundaries:
 - It does not create shipment labels, invoices, payout records, settlement records, accounting entries, returns, or refunds.
 - It does not accept a vendor identifier from the request body; vendor scope comes only from the bearer token.
 
+### `POST /api/vendor-integration/orders/:allocationId/invoice`
+
+Reports external provider invoice reference information for one allocated order.
+
+Required scope:
+
+- `invoice:write`
+
+Required headers:
+
+```http
+Authorization: Bearer spg_vi_...
+Idempotency-Key: provider-unique-key
+```
+
+Required body fields:
+
+- `invoiceNumber`
+- `invoiceDate` as `YYYY-MM-DD`
+- `invoiceAmount` as a decimal string
+
+Optional body fields:
+
+- `invoiceUrl`
+
+Example request:
+
+```bash
+curl -sS -X POST \
+  -H "Authorization: Bearer spg_vi_..." \
+  -H "Idempotency-Key: entegra-invoice-alloc-sporjinal-1001-1" \
+  -H "content-type: application/json" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/invoice" \
+  -d '{
+    "invoiceNumber": "ABC202600001",
+    "invoiceDate": "2026-06-02",
+    "invoiceUrl": "https://provider.example/invoices/ABC202600001.pdf",
+    "invoiceAmount": "1299.90"
+  }'
+```
+
+Example response:
+
+```json
+{
+  "idempotent": false,
+  "allocation": {
+    "id": "alloc-sporjinal-1001",
+    "vendorIdentifier": "sporjinal",
+    "vendorInvoiceNumber": "ABC202600001",
+    "vendorInvoiceDate": "2026-06-02",
+    "vendorInvoiceUrl": "https://provider.example/invoices/ABC202600001.pdf",
+    "vendorInvoiceAmount": "1299.90",
+    "vendorInvoiceReceivedAt": "2026-06-02T12:30:00.000Z",
+    "lastVendorIntegrationInvoiceRequestId": "request-id"
+  }
+}
+```
+
+Idempotency behavior:
+
+- `Idempotency-Key` is required.
+- Repeating the same key for the same client and allocation returns the previous invoice result.
+- A repeated key does not create another invoice event and does not overwrite the allocation invoice snapshot.
+
+Operational boundaries:
+
+- This endpoint updates only Sporgym allocation-level vendor invoice reference snapshot fields.
+- Invoice data is informational only and does not create accounting records or financial postings.
+- It does not create Shopify invoices.
+- It does not create payout records, settlement records, accounting entries, returns, refunds, shipment labels, or Shopify fulfillments.
+- It does not accept a vendor identifier from the request body; vendor scope comes only from the bearer token.
+
 ## Security Rules
 
 - The API never accepts a vendor identifier from the request body or query string.
@@ -338,6 +419,7 @@ The order feed exposes normalized Shopify order snapshots that are safe for the 
 - line item product/variant identifiers, SKU, title, quantity, VAT-included unit price, VAT-included line total, and VAT rate
 - vendor integration status fields reported by the provider: `vendorIntegrationStatus`, `vendorIntegrationStatusMessage`, `vendorIntegrationStatusUpdatedAt`, `vendorIntegrationProvider`
 - external shipment fields reported by the provider: carrier, tracking number, tracking URL, and shipped timestamp
+- vendor invoice reference fields reported by the provider: invoice number, invoice date, invoice URL, invoice amount, and received timestamp
 
 Missing optional Shopify payload fields are returned as `null` or an empty `orderTags` array. The API does not read or return raw Shopify webhook payload bodies.
 
@@ -397,4 +479,4 @@ They do not include request bodies, response bodies, tokens, or credentials.
 
 ## Future Direction
 
-Future provider integration phases may add invoice references or Shopify fulfillment updates after a separate security and operational review. Those write endpoints are not part of this foundation.
+Future provider integration phases may add Shopify fulfillment updates after a separate security and operational review. Shopify fulfillment writes are not part of this foundation.

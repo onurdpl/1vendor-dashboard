@@ -8,6 +8,10 @@ import {
 } from './vendor-integration.auth.js';
 import { listVendorIntegrationOrders, type VendorIntegrationOrdersQuery } from './vendor-integration.orders.service.js';
 import {
+  updateVendorIntegrationOrderInvoice,
+  validateVendorIntegrationInvoicePayload,
+} from './vendor-integration.invoice.service.js';
+import {
   updateVendorIntegrationOrderShipment,
   validateVendorIntegrationShipmentPayload,
 } from './vendor-integration.shipment.service.js';
@@ -39,6 +43,13 @@ type ShipmentUpdateBody = {
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   shippedAt?: string | null;
+};
+
+type InvoiceUpdateBody = {
+  invoiceNumber?: string | null;
+  invoiceDate?: string | null;
+  invoiceUrl?: string | null;
+  invoiceAmount?: string | null;
 };
 
 function readHeaderValue(value: string | string[] | undefined) {
@@ -273,6 +284,49 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance) {
         trackingNumber: validation.shipment.trackingNumber,
         trackingUrl: validation.shipment.trackingUrl,
         shippedAt: validation.shipment.shippedAt?.toISOString() ?? null,
+        requestId: request.requestId ?? request.id ?? null,
+      });
+
+      if (!result) {
+        return reply.code(404).send({ message: 'Vendor allocation not found.' });
+      }
+
+      return {
+        idempotent: result.idempotent,
+        allocation: result.allocation,
+      };
+    },
+  );
+
+  app.post<{ Params: { allocationId: string }; Body: InvoiceUpdateBody }>(
+    '/api/vendor-integration/orders/:allocationId/invoice',
+    {
+      preHandler: [authenticateVendorIntegrationRequest, requireVendorIntegrationScope('invoice:write')],
+    },
+    async (request, reply) => {
+      const context = request.vendorIntegration;
+      if (!context) {
+        return reply.code(401).send({ message: 'Vendor integration token is required.' });
+      }
+
+      const idempotencyKey = readHeaderValue(request.headers['idempotency-key']).trim();
+      if (!idempotencyKey) {
+        return reply.code(400).send({ message: 'Idempotency-Key header is required.' });
+      }
+
+      const validation = validateVendorIntegrationInvoicePayload(request.body ?? {});
+      if (!validation.ok) {
+        return reply.code(400).send({ message: validation.message });
+      }
+
+      const result = await updateVendorIntegrationOrderInvoice({
+        allocationId: request.params.allocationId,
+        context,
+        idempotencyKey,
+        invoiceNumber: validation.invoice.invoiceNumber,
+        invoiceDate: validation.invoice.invoiceDate.toISOString().slice(0, 10),
+        invoiceUrl: validation.invoice.invoiceUrl,
+        invoiceAmount: validation.invoice.invoiceAmount,
         requestId: request.requestId ?? request.id ?? null,
       });
 

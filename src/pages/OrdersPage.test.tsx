@@ -72,6 +72,11 @@ const orderDetail: OrderDetail = {
     vendorIntegrationProvider: 'Provider A',
     vendorIntegrationTrackingUrl: 'https://tracking.example/provider/TRK-A-1002',
     vendorIntegrationShippedAt: '2026-05-08T15:55:00Z',
+    vendorInvoiceNumber: 'ABC202600001',
+    vendorInvoiceDate: '2026-06-02',
+    vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+    vendorInvoiceAmount: '1950.00',
+    vendorInvoiceReceivedAt: '2026-06-02T12:30:00Z',
     billingAddress: {
       fullName: 'Acme Billing',
       company: 'Acme Supply Co.',
@@ -526,6 +531,11 @@ describe('OrdersPage control center', () => {
     expect(screen.getByText('processing')).toBeInTheDocument();
     expect(screen.getByText('External shipment')).toBeInTheDocument();
     expect(screen.getByText('External shipped at')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Invoice' })).toBeInTheDocument();
+    expect(screen.getByText('ABC202600001')).toBeInTheDocument();
+    expect(screen.getByText('2026-06-02')).toBeInTheDocument();
+    expect(screen.getAllByText(/TRY\s*1,950\.00/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'Open invoice' })).toHaveAttribute('href', 'https://example.com/invoices/ABC202600001.pdf');
     expect(screen.getByText(/Rail billing street/)).toBeInTheDocument();
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*177\.27/)).toBeInTheDocument();

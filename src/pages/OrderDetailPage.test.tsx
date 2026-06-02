@@ -166,6 +166,11 @@ const orderWithShipmentSummary: OrderDetail = {
     vendorIntegrationProvider: 'Provider A',
     vendorIntegrationTrackingUrl: 'https://tracking.example/FQ1833-200-41',
     vendorIntegrationShippedAt: '2026-06-02T12:00:00.000Z',
+    vendorInvoiceNumber: 'ABC202600001',
+    vendorInvoiceDate: '2026-06-02',
+    vendorInvoiceUrl: 'https://example.com/invoices/ABC202600001.pdf',
+    vendorInvoiceAmount: '4999.00',
+    vendorInvoiceReceivedAt: '2026-06-02T12:30:00.000Z',
     billingAddress: {
       fullName: 'Billing Customer',
       company: 'Billing Co',
@@ -1148,6 +1153,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('External shipment')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Open external tracking' })).toHaveAttribute('href', 'https://tracking.example/FQ1833-200-41');
     expect(screen.getByText('External shipped at')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Vendor Invoice' })).toBeInTheDocument();
+    expect(screen.getByText('ABC202600001')).toBeInTheDocument();
+    expect(screen.getByText('2026-06-02')).toBeInTheDocument();
+    expect(screen.getAllByText(/TRY\s*4,999\.00/).length).toBeGreaterThan(0);
+    expect(screen.getByRole('link', { name: 'Open invoice' })).toHaveAttribute('href', 'https://example.com/invoices/ABC202600001.pdf');
     expect(screen.getByText(/VAT 10%/)).toBeInTheDocument();
     expect(screen.getByText(/VAT amount TRY\s*454\.45/)).toBeInTheDocument();
     expect(screen.getByText(/Unit price incl\. VAT TRY\s*4,999\.00/)).toBeInTheDocument();
@@ -1185,6 +1195,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         vendorIntegrationProvider: null,
         vendorIntegrationTrackingUrl: null,
         vendorIntegrationShippedAt: null,
+        vendorInvoiceNumber: null,
+        vendorInvoiceDate: null,
+        vendorInvoiceUrl: null,
+        vendorInvoiceAmount: null,
+        vendorInvoiceReceivedAt: null,
         billingAddress: {
           fullName: null,
           company: null,
@@ -1210,6 +1225,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByRole('heading', { name: 'Integration Snapshot' })).toBeInTheDocument();
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
     expect(screen.queryByText('Integration note')).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Vendor Invoice' })).not.toBeInTheDocument();
   });
 
   it('opens and closes a line item image preview modal from the thumbnail', async () => {

@@ -1232,6 +1232,11 @@ export async function getVendorOrderById(
       vendorIntegrationProvider: allocation.vendorIntegrationProvider,
       vendorIntegrationTrackingUrl: allocation.vendorIntegrationTrackingUrl,
       vendorIntegrationShippedAt: toIsoString(allocation.vendorIntegrationShippedAt),
+      vendorInvoiceNumber: allocation.vendorInvoiceNumber,
+      vendorInvoiceDate: allocation.vendorInvoiceDate ? allocation.vendorInvoiceDate.toISOString().slice(0, 10) : null,
+      vendorInvoiceUrl: allocation.vendorInvoiceUrl,
+      vendorInvoiceAmount: toNullableAmountString(allocation.vendorInvoiceAmount),
+      vendorInvoiceReceivedAt: toIsoString(allocation.vendorInvoiceReceivedAt),
       billingAddress: {
         fullName: allocation.order.billingFullName,
         company: allocation.order.billingCompany,
