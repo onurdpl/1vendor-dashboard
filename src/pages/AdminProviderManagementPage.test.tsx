@@ -49,6 +49,34 @@ const providerManagement: VendorIntegrationProviderManagement = {
           requestId: 'req-2',
           createdAt: '2026-06-02T11:10:00.000Z',
         },
+        {
+          method: 'POST',
+          path: '/api/vendor-integration/orders/alloc-1/shipment',
+          statusCode: 200,
+          requestId: 'req-3',
+          createdAt: '2026-06-02T11:05:00.000Z',
+        },
+        {
+          method: 'POST',
+          path: '/api/vendor-integration/orders/alloc-1/invoice',
+          statusCode: 200,
+          requestId: 'req-4',
+          createdAt: '2026-06-02T11:00:00.000Z',
+        },
+        {
+          method: 'GET',
+          path: '/api/vendor-integration/orders',
+          statusCode: 429,
+          requestId: 'req-5',
+          createdAt: '2026-06-02T10:55:00.000Z',
+        },
+        {
+          method: 'POST',
+          path: '/api/vendor-integration/orders/alloc-1/status',
+          statusCode: 403,
+          requestId: 'req-6',
+          createdAt: '2026-06-02T10:50:00.000Z',
+        },
       ],
     },
     {
@@ -115,6 +143,7 @@ describe('AdminProviderManagementPage', () => {
   });
 
   it('renders active and revoked providers with metadata-only audit logs', async () => {
+    const user = userEvent.setup();
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Provider Management' })).toBeInTheDocument();
@@ -135,15 +164,26 @@ describe('AdminProviderManagementPage', () => {
     expect(within(detail).getByRole('heading', { name: 'Provider Summary' })).toBeInTheDocument();
     expect(within(detail).getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
     expect(within(detail).getByRole('heading', { name: 'Activity Timeline' })).toBeInTheDocument();
-    expect(within(detail).getByText('Orders synced')).toBeInTheDocument();
-    expect(within(detail).getByText('Status updated')).toBeInTheDocument();
-    expect(within(detail).getByText('200 OK')).toBeInTheDocument();
-    expect(within(detail).getByText('202 OK')).toBeInTheDocument();
+    const timeline = within(detail).getByLabelText('Activity timeline');
+    expect(within(timeline).getByText('Orders synced')).toBeInTheDocument();
+    expect(within(timeline).getByText('Status updated')).toBeInTheDocument();
+    expect(within(timeline).getByText('Shipment received')).toBeInTheDocument();
+    expect(within(timeline).getByText('Invoice received')).toBeInTheDocument();
+    expect(within(timeline).getAllByText('Rate limited').length).toBeGreaterThan(0);
+    expect(within(timeline).getByText('Access rejected')).toBeInTheDocument();
+    expect(within(timeline).getAllByText('Success').length).toBeGreaterThan(0);
+    expect(within(timeline).getByText('Rejected')).toBeInTheDocument();
+    expect(within(timeline).getAllByText('Allocation alloc-1').length).toBeGreaterThan(0);
+    const rawShipmentPath = within(timeline).getByText('/api/vendor-integration/orders/alloc-1/shipment');
+    const shipmentDetails = rawShipmentPath.closest('details');
+    expect(rawShipmentPath).not.toBeVisible();
+    expect(within(shipmentDetails as HTMLElement).getByText('req-3')).not.toBeVisible();
+    await user.click(within(shipmentDetails as HTMLElement).getByText('Technical details'));
+    expect(rawShipmentPath).toBeVisible();
+    expect(within(shipmentDetails as HTMLElement).getByText('req-3')).toBeVisible();
     const technicalDetails = within(detail).getByText('Technical Details').closest('details');
     expect(technicalDetails).not.toHaveAttribute('open');
     expect(within(technicalDetails as HTMLElement).getByText('client-active')).not.toBeVisible();
-    expect(within(technicalDetails as HTMLElement).getByText('/api/vendor-integration/orders')).not.toBeVisible();
-    expect(within(technicalDetails as HTMLElement).getByText('req-1')).not.toBeVisible();
     expect(JSON.stringify(document.body.textContent)).not.toContain('tokenHash');
     expect(JSON.stringify(document.body.textContent)).not.toContain('spg_vi_');
     expect(JSON.stringify(document.body.textContent)).not.toContain('requestBody');
@@ -160,7 +200,7 @@ describe('AdminProviderManagementPage', () => {
     const detail = screen.getByLabelText('Provider detail');
     expect(within(detail).getByRole('heading', { name: 'Entegra' })).toBeInTheDocument();
     expect(detail).toHaveTextContent('yalispor');
-    expect(within(detail).getByText('No activity recorded yet.')).toBeInTheDocument();
+    expect(within(detail).getByText('No provider activity recorded yet.')).toBeInTheDocument();
   });
 
   it('renders an empty state safely', async () => {

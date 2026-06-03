@@ -4,8 +4,6 @@ import {
   KPIStatCard,
   MetadataGroup,
   MetadataRow,
-  OperationalTable,
-  OperationalTableRow,
   SectionErrorRetry,
   SectionSkeleton,
   StatusBadge,
@@ -63,51 +61,64 @@ function getLastActivity(provider: VendorIntegrationProviderSummary) {
 function getActivityAction(log: VendorIntegrationProviderSummary['recentAuditLogs'][number]) {
   const path = log.path.toLowerCase();
 
-  if (log.method === 'GET' && path.includes('/orders')) {
+  if (log.statusCode === 429) {
+    return 'Rate limited';
+  }
+
+  if (log.statusCode === 401 || log.statusCode === 403) {
+    return 'Access rejected';
+  }
+
+  if (log.method === 'GET' && path === '/api/vendor-integration/orders') {
     return 'Orders synced';
   }
 
-  if (path.includes('/status')) {
+  if (log.method === 'POST' && path.includes('/status')) {
     return 'Status updated';
   }
 
-  if (path.includes('/shipment')) {
+  if (log.method === 'POST' && path.includes('/shipment')) {
     return 'Shipment received';
   }
 
-  if (path.includes('/invoice')) {
+  if (log.method === 'POST' && path.includes('/invoice')) {
     return 'Invoice received';
   }
 
-  return 'Provider request recorded';
+  return 'API request';
 }
 
-function getHttpResult(statusCode: number) {
+function getActivityStatus(statusCode: number) {
   if (statusCode === 429) {
     return {
-      label: '429 Rate limited',
+      label: 'Rate limited',
       tone: 'warning' as const,
     };
   }
 
-  if (statusCode >= 500) {
+  if (statusCode === 401 || statusCode === 403) {
     return {
-      label: `${statusCode} Server error`,
+      label: 'Rejected',
       tone: 'danger' as const,
     };
   }
 
   if (statusCode >= 400) {
     return {
-      label: `${statusCode} Error`,
+      label: 'Error',
       tone: 'warning' as const,
     };
   }
 
   return {
-    label: `${statusCode} OK`,
+    label: 'Success',
     tone: 'success' as const,
   };
+}
+
+function getAllocationHint(path: string) {
+  const match = path.match(/\/orders\/([^/?#]+)\/(?:status|shipment|invoice)(?:[/?#]|$)/i);
+  return match?.[1] ? `Allocation ${match[1]}` : null;
 }
 
 function PermissionChips({ provider }: { provider: VendorIntegrationProviderSummary }) {
@@ -304,20 +315,45 @@ export function AdminProviderManagementPage() {
                   {selectedProvider.recentAuditLogs.length ? (
                     <div className="provider-activity-list">
                       {selectedProvider.recentAuditLogs.map((log) => {
-                        const result = getHttpResult(log.statusCode);
+                        const result = getActivityStatus(log.statusCode);
+                        const allocationHint = getAllocationHint(log.path);
                         return (
                           <div className="provider-activity-row" key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
-                            <div>
-                              <strong>{getActivityAction(log)}</strong>
-                              <span>{formatDate(log.createdAt)}</span>
+                            <div className="provider-activity-main">
+                              <div>
+                                <span>{formatDate(log.createdAt)}</span>
+                                <strong>{getActivityAction(log)}</strong>
+                                {allocationHint ? <small>{allocationHint}</small> : null}
+                              </div>
+                              <StatusBadge tone={result.tone}>{result.label}</StatusBadge>
                             </div>
-                            <StatusBadge tone={result.tone}>{result.label}</StatusBadge>
+                            <details className="provider-activity-technical">
+                              <summary>Technical details</summary>
+                              <dl>
+                                <div>
+                                  <dt>Method</dt>
+                                  <dd>{log.method}</dd>
+                                </div>
+                                <div>
+                                  <dt>Raw path</dt>
+                                  <dd>{log.path}</dd>
+                                </div>
+                                <div>
+                                  <dt>Status code</dt>
+                                  <dd>{log.statusCode}</dd>
+                                </div>
+                                <div>
+                                  <dt>Request id</dt>
+                                  <dd>{log.requestId ?? '—'}</dd>
+                                </div>
+                              </dl>
+                            </details>
                           </div>
                         );
                       })}
                     </div>
                   ) : (
-                    <EmptyStatePanel title="No activity recorded yet." description="Provider API requests will appear here after they are recorded." />
+                    <EmptyStatePanel title="No provider activity recorded yet." description="Provider API requests will appear here after they are recorded." />
                   )}
                 </section>
 
@@ -333,29 +369,6 @@ export function AdminProviderManagementPage() {
                     <MetadataRow label="Auth failures 24h" value={selectedProvider.authFailuresLast24h ?? 'Not derivable'} />
                     <MetadataRow label="Revoked at" value={formatDate(selectedProvider.revokedAt)} />
                   </MetadataGroup>
-
-                  <div className="attention-card-heading">
-                    <div>
-                      <p className="eyebrow">Technical audit</p>
-                      <h3>Raw request metadata</h3>
-                    </div>
-                  </div>
-
-                  {selectedProvider.recentAuditLogs.length ? (
-                    <OperationalTable columns={['Method', 'Path', 'Status', 'Request', 'Created']} stickyHeader={false}>
-                      {selectedProvider.recentAuditLogs.map((log) => (
-                        <OperationalTableRow key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
-                          <strong>{log.method}</strong>
-                          <span>{log.path}</span>
-                          <StatusBadge tone={log.statusCode >= 400 ? 'warning' : 'success'}>{log.statusCode}</StatusBadge>
-                          <span>{log.requestId ?? '—'}</span>
-                          <span>{formatDate(log.createdAt)}</span>
-                        </OperationalTableRow>
-                      ))}
-                    </OperationalTable>
-                  ) : (
-                    <EmptyStatePanel title="No technical audit logs" description="No raw request metadata is available for this client." />
-                  )}
                 </details>
               </article>
             ) : (
