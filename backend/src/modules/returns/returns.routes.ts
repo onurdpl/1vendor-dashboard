@@ -24,12 +24,12 @@ import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 
 type ReturnReasonBackfillBody = {
   dryRun?: boolean;
-  limit?: number;
+  limit?: unknown;
 };
 
 type DuplicateReturnCleanupBody = {
   dryRun?: boolean;
-  limit?: number;
+  limit?: unknown;
 };
 
 type ReturnReviewBody = {
@@ -67,6 +67,47 @@ function sendReviewError(error: unknown, reply: { code: (status: number) => { se
   }
 
   throw error;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readReturnAdminBody(value: unknown) {
+  return isRecord(value) ? value : {};
+}
+
+function validateReturnAdminLimit(body: Record<string, unknown>, max: number) {
+  if (!Object.prototype.hasOwnProperty.call(body, 'limit') || body.limit === undefined) {
+    return { ok: true as const };
+  }
+
+  if (
+    typeof body.limit !== 'number' ||
+    !Number.isFinite(body.limit) ||
+    !Number.isInteger(body.limit) ||
+    body.limit < 1 ||
+    body.limit > max
+  ) {
+    return {
+      ok: false as const,
+      message: `limit must be an integer between 1 and ${max}.`,
+    };
+  }
+
+  return { ok: true as const };
+}
+
+function buildReturnAdminOptions(body: Record<string, unknown>) {
+  const options: { dryRun?: boolean; limit?: number } = {};
+  if (typeof body.dryRun === 'boolean') {
+    options.dryRun = body.dryRun;
+  }
+  if (typeof body.limit === 'number') {
+    options.limit = body.limit;
+  }
+
+  return options;
 }
 
 export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
@@ -145,7 +186,13 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      return backfillShopifyReturnReasons(env, request.body ?? {});
+      const body = readReturnAdminBody(request.body);
+      const limitValidation = validateReturnAdminLimit(body, 200);
+      if (!limitValidation.ok) {
+        return reply.code(400).send({ message: limitValidation.message });
+      }
+
+      return backfillShopifyReturnReasons(env, buildReturnAdminOptions(body));
     },
   );
 
@@ -159,7 +206,13 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      return cleanupDuplicateReturnRecords(request.body ?? {});
+      const body = readReturnAdminBody(request.body);
+      const limitValidation = validateReturnAdminLimit(body, 500);
+      if (!limitValidation.ok) {
+        return reply.code(400).send({ message: limitValidation.message });
+      }
+
+      return cleanupDuplicateReturnRecords(buildReturnAdminOptions(body));
     },
   );
 

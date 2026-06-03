@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerReturnsRoutes } from '../backend/src/modules/returns/returns.routes.js';
 
 const listVendorReturnsMock = vi.hoisted(() => vi.fn());
@@ -56,7 +56,37 @@ vi.mock('../backend/src/modules/vendor-access/vendor-access.service.js', () => (
   })),
 }));
 
+type PostHandler = (
+  request: { authUser?: { role?: string }; body?: unknown; headers?: Record<string, string>; params?: Record<string, string> },
+  reply: ReturnType<typeof createReply>,
+) => unknown;
+
+function createReply() {
+  return {
+    code: vi.fn((status: number) => ({
+      send: vi.fn((body: unknown) => ({ status, body })),
+    })),
+  };
+}
+
+function createRegisteredPostRoutes() {
+  const posts = new Map<string, PostHandler>();
+  const app = {
+    get: vi.fn(),
+    post: vi.fn((path: string, _options: unknown, handler: PostHandler) => {
+      posts.set(path, handler);
+    }),
+  };
+
+  registerReturnsRoutes(app as never, {} as never);
+  return posts;
+}
+
 describe('backend returns list route contract', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('passes item title fields through the actual list route response', async () => {
     listVendorReturnsMock.mockResolvedValueOnce([
       {
@@ -164,6 +194,55 @@ describe('backend returns list route contract', () => {
     expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true });
   });
 
+  it('keeps the existing Shopify return reason backfill default when limit is missing', async () => {
+    backfillShopifyReturnReasonsMock.mockResolvedValueOnce({ dryRun: true, scanned: 0, results: [] });
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/reasons/backfill')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true },
+    }, createReply());
+
+    expect(response).toEqual({ dryRun: true, scanned: 0, results: [] });
+    expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true });
+  });
+
+  it('accepts a valid Shopify return reason backfill integer limit without changing the response shape', async () => {
+    backfillShopifyReturnReasonsMock.mockResolvedValueOnce({ dryRun: true, scanned: 2, results: [] });
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/reasons/backfill')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true, limit: 25 },
+    }, createReply());
+
+    expect(response).toEqual({ dryRun: true, scanned: 2, results: [] });
+    expect(backfillShopifyReturnReasonsMock).toHaveBeenCalledWith({}, { dryRun: true, limit: 25 });
+  });
+
+  it.each([
+    ['below min', 0],
+    ['negative', -1],
+    ['above max', 201],
+    ['string', '25'],
+    ['object', { value: 25 }],
+    ['array', [25]],
+    ['null', null],
+    ['decimal', 1.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('rejects %s Shopify return reason backfill limit values', async (_label, limit) => {
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/reasons/backfill')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true, limit },
+    }, createReply());
+
+    expect(response).toEqual({ status: 400, body: { message: 'limit must be an integer between 1 and 200.' } });
+    expect(backfillShopifyReturnReasonsMock).not.toHaveBeenCalled();
+  });
+
   it('registers an admin-only duplicate return cleanup dry-run route', async () => {
     cleanupDuplicateReturnRecordsMock.mockResolvedValueOnce({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
     const posts = new Map<string, (request: { authUser?: { role?: string }; body?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
@@ -192,6 +271,55 @@ describe('backend returns list route contract', () => {
     expect(blocked).toEqual({ status: 403, body: { message: 'Admin access required.' } });
     expect(allowed).toEqual({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
     expect(cleanupDuplicateReturnRecordsMock).toHaveBeenCalledWith({ dryRun: true });
+  });
+
+  it('keeps the existing duplicate return cleanup default when limit is missing', async () => {
+    cleanupDuplicateReturnRecordsMock.mockResolvedValueOnce({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/duplicates/cleanup')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true },
+    }, createReply());
+
+    expect(response).toEqual({ dryRun: true, scannedPairs: 1, duplicatePairs: [] });
+    expect(cleanupDuplicateReturnRecordsMock).toHaveBeenCalledWith({ dryRun: true });
+  });
+
+  it('accepts a valid duplicate return cleanup integer limit without changing the response shape', async () => {
+    cleanupDuplicateReturnRecordsMock.mockResolvedValueOnce({ dryRun: true, scannedPairs: 2, duplicatePairs: [] });
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/duplicates/cleanup')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true, limit: 25 },
+    }, createReply());
+
+    expect(response).toEqual({ dryRun: true, scannedPairs: 2, duplicatePairs: [] });
+    expect(cleanupDuplicateReturnRecordsMock).toHaveBeenCalledWith({ dryRun: true, limit: 25 });
+  });
+
+  it.each([
+    ['below min', 0],
+    ['negative', -1],
+    ['above max', 501],
+    ['string', '25'],
+    ['object', { value: 25 }],
+    ['array', [25]],
+    ['null', null],
+    ['decimal', 1.5],
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+  ])('rejects %s duplicate return cleanup limit values', async (_label, limit) => {
+    const posts = createRegisteredPostRoutes();
+
+    const response = await posts.get('/admin/returns/duplicates/cleanup')?.({
+      authUser: { role: 'admin' },
+      body: { dryRun: true, limit },
+    }, createReply());
+
+    expect(response).toEqual({ status: 400, body: { message: 'limit must be an integer between 1 and 500.' } });
+    expect(cleanupDuplicateReturnRecordsMock).not.toHaveBeenCalled();
   });
 
   it('registers vendor return review actions without Shopify refund execution', async () => {
