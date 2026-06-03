@@ -43,4 +43,39 @@ describe('runtime configuration diagnostics', () => {
     expect(runtimeConfig.startupIssues).toContain('Real API mode requires VITE_API_BASE_URL.');
     expect(runtimeConfig.startupIssues).toContain('Real API mode is pointing at a local backend URL.');
   });
+
+  it('fails closed in production when VITE_API_MODE is missing', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    vi.stubEnv('VITE_API_MODE', undefined);
+
+    await expect(loadRuntimeConfig()).rejects.toThrow('Production frontend requires VITE_API_MODE=real.');
+  });
+
+  it('fails closed in production when VITE_API_MODE is mock', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    vi.stubEnv('VITE_API_MODE', 'mock');
+
+    await expect(loadRuntimeConfig()).rejects.toThrow('Production frontend requires VITE_API_MODE=real.');
+  });
+
+  it('allows production startup when VITE_API_MODE is real', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', 'https://backend.example.com');
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig.apiMode).toBe('real');
+    expect(runtimeConfig.startupIssues).toEqual([]);
+  });
+
+  it('preserves development mock fallback when VITE_API_MODE is missing', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'development');
+    vi.stubEnv('VITE_API_MODE', undefined);
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig.apiMode).toBe('mock');
+    expect(runtimeConfig.apiBaseUrl).toBe('/api');
+  });
 });

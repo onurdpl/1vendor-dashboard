@@ -11,6 +11,17 @@ type RuntimeEnv = ImportMeta['env'] & {
 
 const env = import.meta.env as RuntimeEnv;
 
+function isProductionFrontend() {
+  return env.VITE_APP_ENV?.trim().toLowerCase() === 'production' || env.PROD === true;
+}
+
+function assertProductionApiMode() {
+  const normalized = env.VITE_API_MODE?.trim().toLowerCase();
+  if (isProductionFrontend() && normalized !== 'real') {
+    throw new Error('Production frontend requires VITE_API_MODE=real.');
+  }
+}
+
 function resolveApiMode(): ApiMode {
   const normalized = env.VITE_API_MODE?.trim().toLowerCase();
   return normalized === 'real' ? 'real' : 'mock';
@@ -48,6 +59,8 @@ function getStartupIssues(mode: ApiMode, apiBaseUrl: string) {
 
   return issues;
 }
+
+assertProductionApiMode();
 
 const apiMode = resolveApiMode();
 const apiBaseUrl = resolveApiBaseUrl(apiMode);

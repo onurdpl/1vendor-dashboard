@@ -28,6 +28,7 @@ This checklist is for Render production deploys of the VendorOps frontend and ba
   - `VITE_API_MODE=real`
   - `VITE_API_BASE_URL=<backend origin>`
   - optional visibility metadata: `VITE_APP_ENV`, `VITE_APP_VERSION`, `VITE_BUILD_TIMESTAMP`, `VITE_GIT_COMMIT`
+- Production frontend startup fails closed unless `VITE_API_MODE=real`; see `docs/FRONTEND_PRODUCTION_CONFIG.md`.
 
 ## Backend Deploy
 
