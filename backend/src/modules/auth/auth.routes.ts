@@ -4,6 +4,7 @@ import { normalizeAuthAttemptId } from '../../lib/request-timing.js';
 import { createAuthService } from './auth.service.js';
 import { createAuthMiddleware } from './auth.middleware.js';
 import type { AuthLoginRouteTiming, LoginBody } from './auth.types.js';
+import { checkLoginRateLimit } from './login-rate-limit.js';
 
 export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 
@@ -24,6 +25,20 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
 
     if (!email || !password) {
       return reply.code(400).send({ message: 'Email and password are required.' });
+    }
+
+    const loginRateLimit = checkLoginRateLimit(
+      {
+        ip: request.ip,
+        email,
+      },
+      {
+        maxAttempts: env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
+        windowSeconds: env.LOGIN_RATE_LIMIT_WINDOW_SECONDS,
+      },
+    );
+    if (loginRateLimit.limited) {
+      return reply.code(429).send({ message: 'Too many login attempts. Please try again later.' });
     }
 
     const serviceStartedAt = process.hrtime.bigint();

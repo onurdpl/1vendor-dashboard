@@ -7,6 +7,8 @@ export type AppEnv = {
   CORS_ORIGIN: string[];
   JWT_SECRET: string;
   JWT_EXPIRES_IN: string;
+  LOGIN_RATE_LIMIT_MAX_ATTEMPTS: number;
+  LOGIN_RATE_LIMIT_WINDOW_SECONDS: number;
   SHOPIFY_WEBHOOK_SECRET: string;
   SHOPIFY_RETURN_WEBHOOK_SECRET?: string;
   SHOPIFY_FULFILLMENT_WEBHOOK_SECRET?: string;
@@ -273,6 +275,8 @@ export function loadEnv(): AppEnv {
     CORS_ORIGIN: parseCorsOrigins(process.env.CORS_ORIGIN, nodeEnv),
     JWT_SECRET: jwtSecret,
     JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS: parsePositiveInteger(process.env.LOGIN_RATE_LIMIT_MAX_ATTEMPTS, 10),
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: parsePositiveInteger(process.env.LOGIN_RATE_LIMIT_WINDOW_SECONDS, 600),
     SHOPIFY_WEBHOOK_SECRET: shopifyWebhookSecret,
     SHOPIFY_RETURN_WEBHOOK_SECRET: shopifyReturnWebhookSecret,
     SHOPIFY_FULFILLMENT_WEBHOOK_SECRET: shopifyFulfillmentWebhookSecret,

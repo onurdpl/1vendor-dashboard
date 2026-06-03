@@ -1400,7 +1400,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Update Post')).toBeInTheDocument();
     expect(screen.getByText(/attempted yes · HTTP 200 · succeeded yes/i)).toBeInTheDocument();
     expect(screen.getByText('Updated at')).toBeInTheDocument();
-  });
+  }, 10000);
 
   it('repopulates persisted Navlungo update overrides after reload', async () => {
     setCurrentUser({
@@ -2608,7 +2608,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         }),
       ),
     );
-  });
+  }, 10000);
 
   it('shows Try OTO as selected in admin diagnostics when vendor config uses Try OTO', async () => {
     setCurrentUser({

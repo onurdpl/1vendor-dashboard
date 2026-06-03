@@ -84,6 +84,8 @@ function buildLookupProbeAppEnv(env: LookupProbeEnv): AppEnv {
     CORS_ORIGIN: [],
     JWT_SECRET: 'manual-lookup-probe-unused',
     JWT_EXPIRES_IN: '12h',
+    LOGIN_RATE_LIMIT_MAX_ATTEMPTS: 10,
+    LOGIN_RATE_LIMIT_WINDOW_SECONDS: 600,
     SHOPIFY_WEBHOOK_SECRET: 'manual-lookup-probe-unused',
     SHOPIFY_API_VERSION: '2026-01',
     SHOPIFY_SELLER_INFO_RETRY_DELAY_MS: 25,
