@@ -1,10 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from '../../db/prisma.js';
 
+export const ALLOWED_VENDOR_INTEGRATION_SCOPES = [
+  'orders:read',
+  'status:write',
+  'shipment:write',
+  'invoice:write',
+] as const;
+
+const allowedVendorIntegrationScopes = new Set<string>(ALLOWED_VENDOR_INTEGRATION_SCOPES);
+
 export type CreateVendorIntegrationClientInput = {
   vendorIdentifier: string;
   providerName: string;
-  scopes: string[];
+  scopes: unknown[];
 };
 
 export type CreatedVendorIntegrationClientToken = {
@@ -25,8 +34,21 @@ export function hashVendorIntegrationToken(token: string) {
   return createHash('sha256').update(token, 'utf8').digest('hex');
 }
 
-export function normalizeVendorIntegrationScopes(scopes: string[]) {
-  return [...new Set(scopes.map((scope) => scope.trim()).filter(Boolean))].sort();
+export function normalizeVendorIntegrationScopes(scopes: unknown[]) {
+  const normalized = scopes.map((scope) => {
+    if (typeof scope !== 'string') {
+      throw new Error('Invalid vendor integration scope.');
+    }
+
+    return scope.trim();
+  }).filter(Boolean);
+
+  const invalidScope = normalized.find((scope) => !allowedVendorIntegrationScopes.has(scope));
+  if (invalidScope) {
+    throw new Error(`Unsupported vendor integration scope: ${invalidScope}`);
+  }
+
+  return [...new Set(normalized)].sort();
 }
 
 export async function createVendorIntegrationClientToken(

@@ -1262,6 +1262,112 @@ describe('vendor integration API foundation', () => {
     expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).not.toHaveProperty('token');
   });
 
+  it('admin token creation accepts the implemented scope allowlist', async () => {
+    prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
+      id: 'client-created',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'ayensoftware-test',
+      scopes: ['invoice:write', 'orders:read', 'shipment:write', 'status:write'],
+    });
+
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read', 'status:write', 'shipment:write', 'invoice:write'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        scopes: ['invoice:write', 'orders:read', 'shipment:write', 'status:write'],
+        token: expect.stringMatching(/^spg_vi_/),
+      }),
+    );
+    expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).toEqual(
+      expect.objectContaining({
+        scopes: ['invoice:write', 'orders:read', 'shipment:write', 'status:write'],
+      }),
+    );
+  });
+
+  it('admin token creation rejects unknown scopes', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read', 'orders:delete'],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Unsupported vendor integration scope: orders:delete' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('admin token creation rejects empty scope lists', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: [],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'At least one scope is required.' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('admin token creation rejects non-string scopes', async () => {
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['orders:read', 123],
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Invalid vendor integration scope.' });
+    expect(prismaMock.vendorIntegrationClient.create).not.toHaveBeenCalled();
+  });
+
+  it('admin token creation normalizes duplicate scopes deterministically', async () => {
+    prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
+      id: 'client-created',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'ayensoftware-test',
+      scopes: ['orders:read', 'status:write'],
+    });
+
+    const response = await injectAdminRoute('POST', '/admin/vendor-integration/tokens', {
+      headers: { 'x-admin-probe-token': 'admin-test-token' },
+      body: {
+        vendorIdentifier: 'sporjinal',
+        providerName: 'ayensoftware-test',
+        scopes: ['status:write', ' orders:read ', 'orders:read'],
+      },
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        scopes: ['orders:read', 'status:write'],
+      }),
+    );
+    expect(prismaMock.vendorIntegrationClient.create.mock.calls[0]?.[0].data).toEqual(
+      expect.objectContaining({
+        scopes: ['orders:read', 'status:write'],
+      }),
+    );
+  });
+
   it('created admin token can call the vendor integration orders endpoint', async () => {
     prismaMock.vendorIntegrationClient.create.mockResolvedValueOnce({
       id: 'client-created',

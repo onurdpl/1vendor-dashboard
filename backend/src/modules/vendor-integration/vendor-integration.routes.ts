@@ -30,7 +30,7 @@ import './vendor-integration.types.js';
 type TokenCreateBody = {
   vendorIdentifier?: string;
   providerName?: string;
-  scopes?: string[];
+  scopes?: unknown[];
 };
 
 type AuditLogsQuery = {
