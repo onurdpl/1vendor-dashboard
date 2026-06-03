@@ -61,6 +61,20 @@ function readHeaderValue(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
 }
 
+function readBearerToken(value: string | string[] | undefined) {
+  const header = readHeaderValue(value).trim();
+  if (!header) {
+    return null;
+  }
+
+  const [scheme, token] = header.split(' ');
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    return null;
+  }
+
+  return token.trim();
+}
+
 function safeTokenMatches(providedToken: string, expectedToken: string) {
   const provided = Buffer.from(providedToken);
   const expected = Buffer.from(expectedToken);
@@ -85,6 +99,31 @@ function assertAdminTokenAuthorized(headers: Record<string, string | string[] | 
   return { ok: true as const };
 }
 
+async function assertAdminRevokeAuthorized(
+  request: { headers: Record<string, string | string[] | undefined>; authUser?: { role?: string } },
+  authService: ReturnType<typeof createAuthService> | null,
+) {
+  const providedAdminToken = readHeaderValue(request.headers['x-admin-probe-token']).trim();
+  if (providedAdminToken) {
+    return assertAdminTokenAuthorized(request.headers);
+  }
+
+  if (request.authUser?.role === 'admin') {
+    return { ok: true as const };
+  }
+
+  const bearerToken = readBearerToken(request.headers.authorization);
+  if (authService && bearerToken) {
+    const authUser = await authService.requestContextFromToken(bearerToken);
+    if (authUser?.role === 'admin') {
+      request.authUser = authUser;
+      return { ok: true as const };
+    }
+  }
+
+  return { ok: false as const, statusCode: 403, message: 'Forbidden' };
+}
+
 function resolveAuditLogLimit(value: AuditLogsQuery['limit']) {
   if (value === undefined || value === null || value === '') {
     return 50;
@@ -100,8 +139,9 @@ function resolveAuditLogLimit(value: AuditLogsQuery['limit']) {
 
 export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppEnv) {
   app.addHook('onResponse', writeVendorIntegrationAuditLog);
-  const adminAuthPreHandlers = env
-    ? [createAuthMiddleware(createAuthService(env)).authenticateRequest]
+  const authService = env ? createAuthService(env) : null;
+  const adminAuthPreHandlers = authService
+    ? [createAuthMiddleware(authService).authenticateRequest]
     : [];
 
   app.post<{ Body: TokenCreateBody }>('/admin/vendor-integration/tokens', async (request, reply) => {
@@ -137,7 +177,7 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
   });
 
   app.post<{ Params: { id: string } }>('/admin/vendor-integration/tokens/:id/revoke', async (request, reply) => {
-    const auth = assertAdminTokenAuthorized(request.headers);
+    const auth = await assertAdminRevokeAuthorized(request, authService);
     if (!auth.ok) {
       return reply.code(auth.statusCode).send({ message: auth.message });
     }

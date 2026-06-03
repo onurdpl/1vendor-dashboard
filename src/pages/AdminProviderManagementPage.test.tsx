@@ -8,11 +8,13 @@ import type { VendorIntegrationProviderManagement } from '../lib/api/contracts';
 import { AdminProviderManagementPage } from './AdminProviderManagementPage';
 
 const providersMock = vi.hoisted(() => vi.fn());
+const revokeProviderTokenMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     vendorIntegration: {
       providers: providersMock,
+      revokeProviderToken: revokeProviderTokenMock,
     },
   },
 }));
@@ -98,6 +100,19 @@ const providerManagement: VendorIntegrationProviderManagement = {
   ],
 };
 
+const revokedProviderManagement: VendorIntegrationProviderManagement = {
+  ...providerManagement,
+  providers: [
+    {
+      ...providerManagement.providers[0],
+      enabled: false,
+      revokedAt: '2026-06-02T12:00:00.000Z',
+      updatedAt: '2026-06-02T12:00:00.000Z',
+    },
+    providerManagement.providers[1],
+  ],
+};
+
 function renderPage() {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -140,6 +155,13 @@ describe('AdminProviderManagementPage', () => {
     });
     setCurrentVendorId('sporjinal');
     providersMock.mockResolvedValue(providerManagement);
+    revokeProviderTokenMock.mockResolvedValue({
+      clientId: 'client-active',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'Ayensoftware',
+      enabled: false,
+      revokedAt: '2026-06-02T12:00:00.000Z',
+    });
   });
 
   it('renders active and revoked providers with metadata-only audit logs', async () => {
@@ -164,6 +186,7 @@ describe('AdminProviderManagementPage', () => {
     expect(within(detail).getByRole('heading', { name: 'Provider Summary' })).toBeInTheDocument();
     expect(within(detail).getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
     expect(within(detail).getByRole('heading', { name: 'Activity Timeline' })).toBeInTheDocument();
+    expect(within(detail).getByRole('button', { name: 'Revoke token' })).toBeInTheDocument();
     const timeline = within(detail).getByLabelText('Activity timeline');
     expect(within(timeline).getByText('Orders synced')).toBeInTheDocument();
     expect(within(timeline).getByText('Status updated')).toBeInTheDocument();
@@ -201,6 +224,41 @@ describe('AdminProviderManagementPage', () => {
     expect(within(detail).getByRole('heading', { name: 'Entegra' })).toBeInTheDocument();
     expect(detail).toHaveTextContent('yalispor');
     expect(within(detail).getByText('No provider activity recorded yet.')).toBeInTheDocument();
+    expect(within(detail).queryByRole('button', { name: 'Revoke token' })).not.toBeInTheDocument();
+  });
+
+  it('confirms revoke, calls revoke endpoint service, and refreshes provider state', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    providersMock.mockReset();
+    providersMock.mockResolvedValueOnce(providerManagement).mockResolvedValueOnce(revokedProviderManagement);
+
+    renderPage();
+
+    const detail = await screen.findByLabelText('Provider detail');
+    await user.click(within(detail).getByRole('button', { name: 'Revoke token' }));
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'This will disable this provider token. Existing integrations using this token will stop working.',
+    );
+    expect(revokeProviderTokenMock).toHaveBeenCalledWith('client-active');
+    expect((await screen.findAllByText('Revoked')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Revoke token' })).not.toBeInTheDocument();
+  });
+
+  it('shows a safe error when revoke fails', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    revokeProviderTokenMock.mockRejectedValueOnce(new Error('tokenHash leaked internal detail'));
+
+    renderPage();
+
+    const detail = await screen.findByLabelText('Provider detail');
+    await user.click(within(detail).getByRole('button', { name: 'Revoke token' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Provider token could not be revoked. Please retry.');
+    expect(JSON.stringify(document.body.textContent)).not.toContain('tokenHash leaked internal detail');
+    expect(JSON.stringify(document.body.textContent)).not.toContain('spg_vi_');
   });
 
   it('renders an empty state safely', async () => {

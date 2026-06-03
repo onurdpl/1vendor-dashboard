@@ -10519,6 +10519,35 @@ summary.provider-response-heading::-webkit-details-marker {
   overflow-wrap: anywhere;
 }
 
+.provider-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.provider-revoke-button {
+  color: #b91c1c;
+  border-color: rgba(220, 38, 38, 0.24);
+  background: #fff;
+}
+
+.provider-revoke-button:hover {
+  border-color: rgba(220, 38, 38, 0.36);
+  background: rgba(254, 242, 242, 0.86);
+}
+
+.provider-action-error {
+  padding: 10px 12px;
+  border: 1px solid rgba(220, 38, 38, 0.22);
+  border-radius: var(--radius-sm);
+  color: #991b1b;
+  background: rgba(254, 242, 242, 0.92);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
 .provider-detail-section .provider-permission-chips {
   flex: 0 1 auto;
   justify-content: flex-start;

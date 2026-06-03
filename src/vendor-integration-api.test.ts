@@ -1323,6 +1323,32 @@ describe('vendor integration API foundation', () => {
     expect(response.statusCode).toBe(403);
   });
 
+  it('allows authenticated admin users to revoke provider tokens without exposing token material', async () => {
+    prismaMock.vendorIntegrationClient.update.mockResolvedValueOnce({
+      id: 'client-1',
+      vendorIdentifier: 'sporjinal',
+      providerName: 'Provider A',
+      enabled: false,
+      revokedAt: new Date('2026-06-01T12:00:00.000Z'),
+    });
+
+    const revokeResponse = await injectAdminRoute('POST', '/admin/vendor-integration/tokens/:id/revoke', {
+      authUser: { role: 'admin' },
+      params: { id: 'client-1' },
+    });
+
+    expect(revokeResponse.statusCode).toBe(200);
+    expect(revokeResponse.payload).toEqual(
+      expect.objectContaining({
+        clientId: 'client-1',
+        enabled: false,
+        revokedAt: '2026-06-01T12:00:00.000Z',
+      }),
+    );
+    expect(JSON.stringify(revokeResponse.payload)).not.toContain('tokenHash');
+    expect(JSON.stringify(revokeResponse.payload)).not.toContain('spg_vi_');
+  });
+
   it('lists vendor integration audit logs without bodies', async () => {
     prismaMock.vendorIntegrationAuditLog.findMany.mockResolvedValueOnce([
       {

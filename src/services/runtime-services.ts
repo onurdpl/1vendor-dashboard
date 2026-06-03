@@ -34,6 +34,7 @@ import type {
   ShippingProvider,
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
+  VendorIntegrationProviderRevokeResult,
 } from '../lib/api/contracts';
 import type { SubmitFulfillmentTrackingPayload, UpdateNavlungoShipmentPayload } from './real/orders';
 
@@ -75,6 +76,16 @@ function getMockVendorIntegrationProviderManagement(): VendorIntegrationProvider
         ],
       },
     ],
+  };
+}
+
+function getMockVendorIntegrationProviderRevokeResult(clientId: string): VendorIntegrationProviderRevokeResult {
+  return {
+    clientId,
+    vendorIdentifier: 'sporjinal',
+    providerName: 'Mock Provider',
+    enabled: false,
+    revokedAt: new Date().toISOString(),
   };
 }
 
@@ -1566,6 +1577,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realVendorIntegration.getVendorIntegrationProviderManagement({ signal: options.signal })
         : Promise.resolve(getMockVendorIntegrationProviderManagement()),
+    revokeProviderToken: (clientId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendorIntegration.revokeVendorIntegrationProviderToken(clientId)
+        : Promise.resolve(getMockVendorIntegrationProviderRevokeResult(clientId)),
   },
   signals: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>

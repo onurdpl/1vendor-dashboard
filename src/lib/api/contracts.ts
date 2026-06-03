@@ -1616,3 +1616,11 @@ export type VendorIntegrationProviderManagement = {
   generatedAt: string;
   providers: VendorIntegrationProviderSummary[];
 };
+
+export type VendorIntegrationProviderRevokeResult = {
+  clientId: string;
+  vendorIdentifier: string;
+  providerName: string;
+  enabled: boolean;
+  revokedAt: string | null;
+};

@@ -149,6 +149,8 @@ export function AdminProviderManagementPage() {
   );
   const providers = safeArray(data?.providers);
   const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [revokingClientId, setRevokingClientId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!providers.length) {
@@ -161,6 +163,10 @@ export function AdminProviderManagementPage() {
     }
   }, [providers, selectedClientId]);
 
+  useEffect(() => {
+    setRevokeError(null);
+  }, [selectedClientId]);
+
   const selectedProvider = useMemo(
     () => providers.find((provider) => provider.clientId === selectedClientId) ?? providers[0] ?? null,
     [providers, selectedClientId],
@@ -169,6 +175,27 @@ export function AdminProviderManagementPage() {
   const revokedCount = providers.filter((provider) => !provider.enabled || provider.revokedAt).length;
   const requestsLast24h = providers.reduce((total, provider) => total + provider.requestsLast24h, 0);
   const rateLimitedLast24h = providers.reduce((total, provider) => total + provider.rateLimitedLast24h, 0);
+
+  async function handleRevokeToken(provider: VendorIntegrationProviderSummary) {
+    setRevokeError(null);
+
+    const confirmed = window.confirm(
+      'This will disable this provider token. Existing integrations using this token will stop working.',
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setRevokingClientId(provider.clientId);
+    try {
+      await runtimeServices.vendorIntegration.revokeProviderToken(provider.clientId);
+      await refetch();
+    } catch {
+      setRevokeError('Provider token could not be revoked. Please retry.');
+    } finally {
+      setRevokingClientId(null);
+    }
+  }
 
   return (
     <section className="op-page provider-management-page">
@@ -267,8 +294,25 @@ export function AdminProviderManagementPage() {
                     <h3>{selectedProvider.providerName}</h3>
                     <span>{selectedProvider.vendorIdentifier}</span>
                   </div>
-                  <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
+                  <div className="provider-detail-actions">
+                    <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
+                    {selectedProvider.enabled && !selectedProvider.revokedAt ? (
+                      <button
+                        type="button"
+                        className="button button-secondary button-compact provider-revoke-button"
+                        disabled={revokingClientId === selectedProvider.clientId}
+                        onClick={() => void handleRevokeToken(selectedProvider)}
+                      >
+                        {revokingClientId === selectedProvider.clientId ? 'Revoking...' : 'Revoke token'}
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
+                {revokeError ? (
+                  <div className="provider-action-error" role="alert">
+                    {revokeError}
+                  </div>
+                ) : null}
 
                 <section className="provider-detail-section" aria-label="Provider summary">
                   <div className="provider-detail-section-heading">
