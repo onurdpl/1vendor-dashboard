@@ -132,12 +132,16 @@ export function setToken(token: string) {
   dispatchSessionReset();
 }
 
-export function setSession(token: string, user: CurrentUser) {
+export function setSession(token: string | null | undefined, user: CurrentUser) {
   if (typeof window === 'undefined') {
     return;
   }
 
-  window.localStorage.setItem(TOKEN_KEY, token);
+  if (token) {
+    window.localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    window.localStorage.removeItem(TOKEN_KEY);
+  }
   window.localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(user));
   dispatchSessionReset();
 }
@@ -299,7 +303,7 @@ export function clearCurrentUser() {
 }
 
 export function isAuthenticated() {
-  return Boolean(getToken() && getCurrentUser());
+  return Boolean(getCurrentUser());
 }
 
 export function createMockSession() {
@@ -327,5 +331,5 @@ export function getCurrentUserRoleOrNull(): UserRole | null {
 }
 
 export async function validateSession(): Promise<boolean> {
-  return Boolean(getToken() && getCurrentUser());
+  return Boolean(getCurrentUser());
 }

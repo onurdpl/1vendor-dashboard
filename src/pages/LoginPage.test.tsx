@@ -67,7 +67,7 @@ describe('LoginPage expired session flow', () => {
     window.localStorage.clear();
     loginMock.mockReset();
     loginMock.mockResolvedValue({
-      token: 'fresh-token',
+      token: null,
       user: testUser,
     });
   });
@@ -117,6 +117,7 @@ describe('LoginPage expired session flow', () => {
 
     expect(await screen.findByText('Orders workspace')).toBeInTheDocument();
     expect(screen.getByTestId('current-route')).toHaveTextContent('/orders?status=open');
+    expect(window.localStorage.getItem('vendor-dashboard.session-token')).toBeNull();
     expect(loginMock).toHaveBeenCalledWith(
       'vendor@example.com',
       'demo123',
@@ -195,7 +196,7 @@ describe('LoginPage expired session flow', () => {
     const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
     const clearTimeoutSpy = vi.spyOn(window, 'clearTimeout');
     loginMock.mockResolvedValueOnce({
-      token: 'fresh-token',
+      token: null,
       user: {
         ...testUser,
         name: BigInt(1) as unknown as string,

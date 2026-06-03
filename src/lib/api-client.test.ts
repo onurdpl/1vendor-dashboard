@@ -31,6 +31,7 @@ describe('apiClient vendor-scoped headers', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('sends the explicit selected vendor header with admin requests', async () => {
@@ -125,5 +126,56 @@ describe('apiClient vendor-scoped headers', () => {
     } satisfies Partial<ApiError>);
     expect(JSON.stringify((caught as ApiError).diagnostics)).not.toContain('test-token');
     expect(JSON.stringify((caught as ApiError).diagnostics)).not.toContain('demo-vendor-a');
+  });
+});
+
+describe('apiClient real-mode cookie auth', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('uses cookies and CSRF without attaching a localStorage bearer token in real mode', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', 'https://backend.example.com');
+    window.localStorage.clear();
+    setToken('stale-local-token');
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'demo-vendor-a',
+    });
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ csrfToken: 'csrf-from-cookie-session' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    await realApiClient.post('/returns/return-1/review', { decision: 'approved' });
+
+    const csrfInit = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const postInit = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    const headers = postInit.headers as Headers;
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://backend.example.com/auth/csrf');
+    expect(csrfInit.credentials).toBe('include');
+    expect(postInit.credentials).toBe('include');
+    expect(headers.get('Authorization')).toBeNull();
+    expect(headers.get('X-CSRF-Token')).toBe('csrf-from-cookie-session');
+    expect(window.localStorage.getItem('vendor-dashboard.session-token')).toBe('stale-local-token');
   });
 });

@@ -39,7 +39,7 @@ export function getAppReadinessSnapshot(): AppReadinessState {
   const token = getToken();
   const currentUser = getCurrentUser();
 
-  if (!token || !currentUser) {
+  if (!currentUser) {
     return {
       status: 'unauthorized',
       token,

@@ -4,6 +4,7 @@ import { getAppReadinessSnapshot } from './appReadiness';
 import { runtimeConfig } from '../config/runtime';
 
 type HttpMethod = 'GET' | 'POST' | 'PUT';
+const CSRF_HEADER_NAME = 'X-CSRF-Token';
 
 type ApiClientRequestOptions = {
   method?: HttpMethod;
@@ -14,6 +15,16 @@ type ApiClientRequestOptions = {
   headers?: HeadersInit;
   signal?: AbortSignal;
 };
+
+let csrfToken: string | null = null;
+
+export function setCsrfToken(token: string | null | undefined) {
+  csrfToken = token?.trim() || null;
+}
+
+export function clearCsrfToken() {
+  csrfToken = null;
+}
 
 function buildUrl(path: string) {
   if (/^https?:\/\//i.test(path)) {
@@ -39,7 +50,11 @@ function getCurrentRouteForAuthRedirect() {
 
 function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   const headers = new Headers(options.headers);
-  const token = options.token ?? getToken();
+  const token = options.token !== undefined
+    ? options.token
+    : runtimeConfig.apiMode === 'real'
+      ? null
+      : getToken();
   const vendorId = options.skipVendorContext ? null : options.vendorId ?? getCurrentVendorContext().vendorId;
 
   if (token) {
@@ -55,6 +70,79 @@ function createHeaders(options: ApiClientRequestOptions, hasBody: boolean) {
   }
 
   return headers;
+}
+
+function getRequestCredentials(): RequestCredentials {
+  return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
+}
+
+function requiresCsrf(method: HttpMethod, path: string) {
+  if (runtimeConfig.apiMode !== 'real' || method === 'GET') {
+    return false;
+  }
+
+  const endpoint = getDiagnosticEndpoint(path);
+  return endpoint !== '/auth/login' && endpoint !== '/auth/logout';
+}
+
+async function fetchCsrfToken(signal?: AbortSignal) {
+  const response = await fetch(buildUrl('/auth/csrf'), {
+    method: 'GET',
+    credentials: getRequestCredentials(),
+    signal,
+  });
+
+  if (!response.ok) {
+    clearCsrfToken();
+    throw new ApiError('Unauthorized request.', 'unauthorized', {
+      status: response.status,
+      diagnostics: {
+        endpoint: '/auth/csrf',
+        status: response.status,
+        requestId: response.headers.get('x-request-id'),
+        hasAuthHeader: false,
+        hasVendorHeader: false,
+        selectedVendorPresent: Boolean(getAppReadinessSnapshot().currentVendor.vendorId),
+        readinessState: getAppReadinessSnapshot().status,
+      },
+    });
+  }
+
+  const payload = await response.json() as { csrfToken?: unknown };
+  if (typeof payload.csrfToken !== 'string' || !payload.csrfToken.trim()) {
+    clearCsrfToken();
+    throw new ApiError('CSRF token is unavailable.', 'invalid-response', {
+      status: response.status,
+      diagnostics: {
+        endpoint: '/auth/csrf',
+        status: response.status,
+        requestId: response.headers.get('x-request-id'),
+        hasAuthHeader: false,
+        hasVendorHeader: false,
+        selectedVendorPresent: Boolean(getAppReadinessSnapshot().currentVendor.vendorId),
+        readinessState: getAppReadinessSnapshot().status,
+      },
+    });
+  }
+
+  setCsrfToken(payload.csrfToken);
+  return csrfToken;
+}
+
+async function attachCsrfHeaderIfNeeded(
+  method: HttpMethod,
+  path: string,
+  headers: Headers,
+  signal?: AbortSignal,
+) {
+  if (!requiresCsrf(method, path) || headers.has(CSRF_HEADER_NAME)) {
+    return;
+  }
+
+  const token = csrfToken ?? await fetchCsrfToken(signal);
+  if (token) {
+    headers.set(CSRF_HEADER_NAME, token);
+  }
 }
 
 function getDiagnosticEndpoint(path: string) {
@@ -129,14 +217,17 @@ async function parseResponse(response: Response, diagnostics?: ApiErrorDiagnosti
 
 async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
   const hasBody = options.body !== undefined;
+  const method = options.method ?? 'GET';
   const headers = createHeaders(options, hasBody);
 
   try {
+    await attachCsrfHeaderIfNeeded(method, path, headers, options.signal);
     const response = await fetch(buildUrl(path), {
-      method: options.method ?? 'GET',
+      method,
       headers,
       body: hasBody ? JSON.stringify(options.body) : undefined,
       signal: options.signal,
+      credentials: getRequestCredentials(),
     });
 
     const parseDiagnostics = createApiDiagnostics(path, headers, response);
@@ -146,6 +237,7 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
       const diagnostics = createApiDiagnostics(path, headers, response, payload);
 
       if (response.status === 401) {
+        clearCsrfToken();
         clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
       }
 
@@ -171,6 +263,10 @@ async function request<T>(path: string, options: ApiClientRequestOptions = {}) {
     return payload as T;
   } catch (error) {
     if (error instanceof ApiError) {
+      if (error.kind === 'unauthorized') {
+        clearCsrfToken();
+        clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
+      }
       throw error;
     }
 

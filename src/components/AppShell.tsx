@@ -6,6 +6,7 @@ import { getAvailableVendors, getCurrentVendorContext, setCurrentVendorId } from
 import { useAppReadiness } from '../lib/appReadiness';
 import { queryClient } from '../lib/api/queryClient';
 import { useActionFeedback } from '../lib/ui';
+import { runtimeServices } from '../services/runtime-services';
 import { ActionFeedback } from './ActionFeedback';
 
 const workspaceNavItems = [
@@ -65,6 +66,7 @@ export function AppShell() {
   }, [appReadiness.currentVendor.vendorId]);
 
   function handleLogout() {
+    void runtimeServices.auth.logout().catch(() => undefined);
     clearToken();
     showFeedback('Signed out successfully.', 'success');
     globalThis.setTimeout(() => {

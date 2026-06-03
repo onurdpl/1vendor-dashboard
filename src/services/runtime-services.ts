@@ -263,14 +263,14 @@ export const runtimeServices = {
       email: string,
       password: string,
       options: { authAttemptId?: string; signal?: AbortSignal } = {},
-    ): Promise<{ token: string; user: CurrentUser }> {
+    ): Promise<{ token: string | null; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
         const response = await backendAuth.login(email, password, {
           authAttemptId: options.authAttemptId,
           signal: options.signal,
         });
         return {
-          token: response.token,
+          token: null,
           user: createCurrentUserFromVendorAccess({
             email: response.user.email,
             name: response.user.name,
@@ -299,9 +299,9 @@ export const runtimeServices = {
         },
       };
     },
-    async me(token: string) {
+    async me(_token?: string | null) {
       if (runtimeConfig.apiMode === 'real') {
-        const user = await backendAuth.me(token);
+        const user = await backendAuth.me();
         return createCurrentUserFromVendorAccess({
           email: user.email,
           name: user.name,
@@ -312,6 +312,11 @@ export const runtimeServices = {
       }
 
       return null;
+    },
+    async logout() {
+      if (runtimeConfig.apiMode === 'real') {
+        await backendAuth.logout();
+      }
     },
   },
   orders: {

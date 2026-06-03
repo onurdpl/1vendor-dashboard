@@ -15,7 +15,10 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 const { registerAuthRoutes } = await import('../backend/src/modules/auth/auth.routes.js');
+const { createAuthMiddleware } = await import('../backend/src/modules/auth/auth.middleware.js');
+const { createAuthService } = await import('../backend/src/modules/auth/auth.service.js');
 const { resetLoginRateLimitForTests } = await import('../backend/src/modules/auth/login-rate-limit.js');
+const { SESSION_COOKIE_NAME } = await import('../backend/src/modules/auth/session-cookie.js');
 
 function makeDemoPasswordHash(password: string) {
   return `demo_sha256_v1:${createHash('sha256').update(`vendor-dashboard-demo:${password}`).digest('hex')}`;
@@ -80,7 +83,7 @@ function createReply() {
     statusCode: 200,
     payload: undefined as unknown,
     sent: false,
-    headers: {} as Record<string, string>,
+    headers: {} as Record<string, string | string[]>,
     code: vi.fn((status: number) => {
       reply.statusCode = status;
       return reply;
@@ -90,7 +93,7 @@ function createReply() {
       reply.sent = true;
       return payload;
     }),
-    header: vi.fn((key: string, value: string) => {
+    header: vi.fn((key: string, value: string | string[]) => {
       reply.headers[key] = value;
       return reply;
     }),
@@ -115,6 +118,17 @@ function createLoginRoute(env = buildEnv()) {
 
   registerAuthRoutes(app as never, env);
   return handler;
+}
+
+function readSetCookieHeader(headers: Record<string, string | string[]>) {
+  const value = headers['Set-Cookie'];
+  return Array.isArray(value) ? value.join('; ') : value ?? '';
+}
+
+function extractSessionCookie(setCookieHeader: string) {
+  const cookie = setCookieHeader.split(';')[0] ?? '';
+  expect(cookie).toMatch(new RegExp(`^${SESSION_COOKIE_NAME}=`));
+  return cookie;
 }
 
 async function injectLogin(
@@ -142,6 +156,7 @@ async function injectLogin(
   return {
     statusCode: reply.statusCode,
     payload: reply.sent ? reply.payload : result,
+    headers: reply.headers,
   };
 }
 
@@ -159,13 +174,101 @@ describe('auth login rate limiting', () => {
     expect(response.statusCode).toBe(200);
     expect(response.payload).toEqual(
       expect.objectContaining({
-        token: expect.any(String),
         user: expect.objectContaining({
           email: 'vendor@example.com',
           role: 'vendor',
         }),
+        csrfToken: expect.any(String),
       }),
     );
+    expect(JSON.stringify(response.payload)).not.toContain('eyJ');
+    expect(readSetCookieHeader(response.headers)).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(readSetCookieHeader(response.headers)).toContain('HttpOnly');
+    expect(readSetCookieHeader(response.headers)).toContain('SameSite=Lax');
+  });
+
+  it('sets Secure on the HttpOnly session cookie in production', async () => {
+    const response = await injectLogin({
+      env: buildEnv({
+        NODE_ENV: 'production',
+      }),
+    });
+
+    expect(readSetCookieHeader(response.headers)).toContain('Secure');
+  });
+
+  it('authenticates frontend users from the HttpOnly session cookie', async () => {
+    const login = await injectLogin();
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(login.headers));
+    const authService = createAuthService(buildEnv());
+    const authMiddleware = createAuthMiddleware(authService);
+    const reply = createReply();
+    const request = {
+      method: 'GET',
+      headers: { cookie: sessionCookie },
+    } as never;
+
+    await authMiddleware.authenticateRequest(request, reply);
+
+    expect(reply.sent).toBe(false);
+    expect(request).toMatchObject({
+      authSessionSource: 'cookie',
+      authUser: {
+        email: 'vendor@example.com',
+        role: 'vendor',
+      },
+    });
+  });
+
+  it('requires CSRF for unsafe frontend cookie-authenticated requests', async () => {
+    const login = await injectLogin();
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(login.headers));
+    const token = decodeURIComponent(sessionCookie.split('=').slice(1).join('='));
+    const authService = createAuthService(buildEnv());
+    const authMiddleware = createAuthMiddleware(authService);
+    const missingReply = createReply();
+
+    await authMiddleware.authenticateRequest({
+      method: 'POST',
+      headers: { cookie: sessionCookie },
+    } as never, missingReply);
+
+    expect(missingReply.statusCode).toBe(403);
+    expect(missingReply.payload).toEqual({ message: 'CSRF verification failed.' });
+
+    const validReply = createReply();
+    await authMiddleware.authenticateRequest({
+      method: 'POST',
+      headers: {
+        cookie: sessionCookie,
+        'x-csrf-token': authService.createCsrfToken(token),
+      },
+    } as never, validReply);
+
+    expect(validReply.sent).toBe(false);
+  });
+
+  it('clears the session cookie on logout', async () => {
+    let logoutHandler: ((request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>) | null = null;
+    const app = {
+      post: vi.fn((path: string, routeHandler: typeof logoutHandler) => {
+        if (path === '/auth/logout') {
+          logoutHandler = routeHandler;
+        }
+      }),
+      get: vi.fn(),
+      log: {
+        info: vi.fn(),
+      },
+    };
+    registerAuthRoutes(app as never, buildEnv());
+    const reply = createReply();
+
+    await logoutHandler?.({}, reply);
+
+    expect(readSetCookieHeader(reply.headers)).toContain(`${SESSION_COOKIE_NAME}=`);
+    expect(readSetCookieHeader(reply.headers)).toContain('Max-Age=0');
+    expect(readSetCookieHeader(reply.headers)).toContain('HttpOnly');
   });
 
   it('returns 429 when the IP and email bucket exceeds the limit', async () => {

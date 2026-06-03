@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { UserRole } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
@@ -68,6 +69,22 @@ export function createAuthService(env: AppEnv) {
 
   function verifyToken(token: string) {
     return jwt.verify(token, env.JWT_SECRET) as JwtPayload;
+  }
+
+  function createCsrfToken(sessionToken: string) {
+    return createHmac('sha256', env.JWT_SECRET)
+      .update(`csrf:${sessionToken}`)
+      .digest('base64url');
+  }
+
+  function verifyCsrfToken(sessionToken: string, providedToken: string | null | undefined) {
+    if (!providedToken) {
+      return false;
+    }
+
+    const expected = Buffer.from(createCsrfToken(sessionToken));
+    const provided = Buffer.from(providedToken);
+    return expected.length === provided.length && timingSafeEqual(expected, provided);
   }
 
   async function buildUserResponse(userId: string): Promise<AuthUserResponse | null> {
@@ -182,5 +199,7 @@ export function createAuthService(env: AppEnv) {
     login,
     currentUserFromToken,
     requestContextFromToken,
+    createCsrfToken,
+    verifyCsrfToken,
   };
 }

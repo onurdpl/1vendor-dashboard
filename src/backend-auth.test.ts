@@ -11,7 +11,6 @@ describe('backend auth client diagnostics', () => {
     fetchMock.mockResolvedValue(
       new Response(
         JSON.stringify({
-          token: 'token-redacted-in-test',
           user: {
             id: 'user-1',
             email: 'vendor@example.com',
@@ -20,6 +19,7 @@ describe('backend auth client diagnostics', () => {
             status: 'active',
             vendorAccess: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
           },
+          csrfToken: 'csrf-token',
         }),
         {
           status: 200,

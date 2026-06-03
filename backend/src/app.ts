@@ -221,9 +221,11 @@ export function createApp() {
       callback(null, env.CORS_ORIGIN.includes(origin));
     }) satisfies OriginFunction,
     methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
+    credentials: true,
     allowedHeaders: [
       'Authorization',
       'Content-Type',
+      'X-CSRF-Token',
       'X-Request-Id',
       'X-Auth-Attempt-Id',
       'X-Vendor-Id',

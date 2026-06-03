@@ -77,5 +77,7 @@ export function requireAuthUser(request: FastifyRequest): AuthUserContext {
 declare module 'fastify' {
   interface FastifyRequest {
     authUser?: AuthUserContext;
+    authSessionSource?: 'bearer' | 'cookie';
+    authSessionToken?: string;
   }
 }
