@@ -499,6 +499,11 @@ export type ShipmentExecution = {
       latestProviderStatusSource?: string | null;
       lastWebhookParseError?: string | null;
       webhookSignatureVerificationImplemented?: boolean | null;
+      webhookAuthenticityVerification?: {
+        mode: 'shared_secret' | 'disabled_dev_only';
+        providerNativeSignatureVerified: false;
+        note: string;
+      } | null;
       webhookWarning?: string | null;
     };
   };
@@ -539,6 +544,11 @@ export type ShippingProviderDiagnostics = {
   lastWebhookMappedLocalStatus?: string | null;
   lastWebhookParseError?: string | null;
   webhookSignatureVerificationImplemented?: boolean;
+  webhookAuthenticityVerification?: {
+    mode: 'shared_secret' | 'disabled_dev_only';
+    providerNativeSignatureVerified: false;
+    note: string;
+  };
   baseUrlConfigured: boolean;
   apiKeyConfigured: boolean;
   cargoIntegrationIdConfigured?: boolean;

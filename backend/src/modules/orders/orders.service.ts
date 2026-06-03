@@ -206,6 +206,22 @@ function readStringArray(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 }
 
+function readTryOtoWebhookAuthenticityVerification(value: unknown): {
+  mode: 'shared_secret' | 'disabled_dev_only';
+  providerNativeSignatureVerified: false;
+  note: string;
+} | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return {
+    mode: readString(value, ['mode']) === 'shared_secret' ? 'shared_secret' : 'disabled_dev_only',
+    providerNativeSignatureVerified: false,
+    note: readString(value, ['note']) ?? 'Provider-native Try OTO signature semantics remain unknown.',
+  };
+}
+
 const NAVLUNGO_UPDATE_RECIPIENT_OVERRIDE_FIELDS = [
   'name',
   'phone',
@@ -742,6 +758,7 @@ function buildShipmentProviderResponseSummary(
           typeof snapshot?.tryOtoWebhookSignatureVerificationImplemented === 'boolean'
             ? snapshot.tryOtoWebhookSignatureVerificationImplemented
             : null,
+        webhookAuthenticityVerification: readTryOtoWebhookAuthenticityVerification(snapshot?.tryOtoWebhookAuthenticityVerification),
         webhookWarning: readString(snapshot, ['tryOtoWebhookWarning']),
       }
     : undefined;

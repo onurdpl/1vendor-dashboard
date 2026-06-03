@@ -61,10 +61,28 @@ type TryOtoWebhookReceiveDiagnostics = {
   statusMapped: boolean | null;
   mappedLocalStatus: string | null;
   parseError: string | null;
-  signatureVerificationImplemented: false;
+  authenticityVerification: TryOtoWebhookAuthenticityVerification;
 };
 
-const TRY_OTO_WEBHOOK_SIGNATURE_WARNING = 'Try OTO webhook signature verification is unknown/not implemented.';
+type TryOtoWebhookAuthenticityVerification = {
+  mode: 'shared_secret' | 'disabled_dev_only';
+  providerNativeSignatureVerified: false;
+  note: string;
+};
+
+const TRY_OTO_WEBHOOK_AUTHENTICITY_NOTE = 'Provider-native Try OTO signature semantics remain unknown.';
+const TRY_OTO_WEBHOOK_SIGNATURE_WARNING =
+  'Try OTO provider-native signature semantics remain unknown; interim shared-secret verification may be used at the route boundary.';
+
+function buildTryOtoWebhookAuthenticityVerification(
+  mode: TryOtoWebhookAuthenticityVerification['mode'] = 'disabled_dev_only',
+): TryOtoWebhookAuthenticityVerification {
+  return {
+    mode,
+    providerNativeSignatureVerified: false,
+    note: TRY_OTO_WEBHOOK_AUTHENTICITY_NOTE,
+  };
+}
 
 let lastTryOtoWebhookReceiveDiagnostics: TryOtoWebhookReceiveDiagnostics = {
   received: false,
@@ -79,7 +97,7 @@ let lastTryOtoWebhookReceiveDiagnostics: TryOtoWebhookReceiveDiagnostics = {
   statusMapped: null,
   mappedLocalStatus: null,
   parseError: null,
-  signatureVerificationImplemented: false,
+  authenticityVerification: buildTryOtoWebhookAuthenticityVerification(),
 };
 
 function updateTryOtoWebhookReceiveDiagnostics(update: Partial<TryOtoWebhookReceiveDiagnostics>) {
@@ -2486,7 +2504,10 @@ export function getShippingProviderGateDiagnostics(
     lastWebhookStatusMapped: tryOtoWebhookDiagnostics?.statusMapped ?? null,
     lastWebhookMappedLocalStatus: tryOtoWebhookDiagnostics?.mappedLocalStatus ?? null,
     lastWebhookParseError: tryOtoWebhookDiagnostics?.parseError ?? null,
-    webhookSignatureVerificationImplemented: tryOtoWebhookDiagnostics?.signatureVerificationImplemented ?? false,
+    webhookSignatureVerificationImplemented:
+      tryOtoWebhookDiagnostics?.authenticityVerification.providerNativeSignatureVerified ?? false,
+    webhookAuthenticityVerification:
+      tryOtoWebhookDiagnostics?.authenticityVerification ?? buildTryOtoWebhookAuthenticityVerification(),
     baseUrlConfigured,
     apiKeyConfigured,
     cargoIntegrationIdConfigured,
@@ -3381,6 +3402,7 @@ export async function ingestTryOtoWebhook(
     env: AppEnv;
     httpMethod?: string | null;
     contentType?: string | null;
+    authenticityVerificationMode?: TryOtoWebhookAuthenticityVerification['mode'];
   },
 ): Promise<
   | {
@@ -3389,11 +3411,12 @@ export async function ingestTryOtoWebhook(
       matchStatus: 'matched' | 'unmatched';
       shipmentExecutionId: string | null;
       shipmentStatus: ShipmentExecutionDto['shipmentStatus'] | null;
-      signatureVerificationImplemented: false;
+      authenticityVerification: TryOtoWebhookAuthenticityVerification;
       warning: string;
     }
-  | { ok: false; code: number; message: string }
+  | { ok: false; code: number; message: string; authenticityVerification: TryOtoWebhookAuthenticityVerification }
 > {
+  const authenticityVerification = buildTryOtoWebhookAuthenticityVerification(options.authenticityVerificationMode);
   const data = getWebhookData(payload);
   const payloadKeys = getTryOtoWebhookPayloadKeys(payload, data);
   const parseError = getTryOtoWebhookParseError(payload, data);
@@ -3411,7 +3434,7 @@ export async function ingestTryOtoWebhook(
     statusMapped: null,
     mappedLocalStatus: null,
     parseError,
-    signatureVerificationImplemented: false,
+    authenticityVerification,
   });
 
   if (!options.env.TRY_OTO_ENABLED || !options.env.TRY_OTO_WEBHOOK_INGEST_ENABLED) {
@@ -3425,6 +3448,7 @@ export async function ingestTryOtoWebhook(
       ok: false,
       code: 501,
       message: 'Try OTO webhook ingestion is disabled.',
+      authenticityVerification,
     };
   }
 
@@ -3464,7 +3488,7 @@ export async function ingestTryOtoWebhook(
       matchStatus: 'unmatched',
       shipmentExecutionId: null,
       shipmentStatus: null,
-      signatureVerificationImplemented: false,
+      authenticityVerification,
       warning: signatureWarning,
     };
   }
@@ -3511,7 +3535,7 @@ export async function ingestTryOtoWebhook(
       matchStatus: 'unmatched',
       shipmentExecutionId: null,
       shipmentStatus: null,
-      signatureVerificationImplemented: false,
+      authenticityVerification,
       warning: signatureWarning,
     };
   }
@@ -3587,7 +3611,7 @@ export async function ingestTryOtoWebhook(
       lastTryOtoWebhookMappedShipmentStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
       latestProviderStatusSource: 'webhook',
       lastTryOtoWebhookParseError: parseError,
-      tryOtoWebhookSignatureVerificationImplemented: false,
+      tryOtoWebhookAuthenticityVerification: authenticityVerification,
       tryOtoWebhookWarning: signatureWarning,
       tryOtoWebhookResponseKeys: responseKeys,
       tryOtoWebhookReverseShipment: true,
@@ -3638,7 +3662,7 @@ export async function ingestTryOtoWebhook(
       matchStatus: 'matched',
       shipmentExecutionId: updated.id,
       shipmentStatus: mapStatus(updated.shipmentStatus),
-      signatureVerificationImplemented: false,
+      authenticityVerification,
       warning: signatureWarning,
     };
   }
@@ -3661,7 +3685,7 @@ export async function ingestTryOtoWebhook(
     lastTryOtoWebhookMappedShipmentStatus: normalizedStatus ? mapStatus(normalizedStatus) : null,
     latestProviderStatusSource: 'webhook',
     lastTryOtoWebhookParseError: parseError,
-    tryOtoWebhookSignatureVerificationImplemented: false,
+    tryOtoWebhookAuthenticityVerification: authenticityVerification,
     tryOtoWebhookWarning: signatureWarning,
     tryOtoWebhookResponseKeys: responseKeys,
     providerStatus: providerStatus ?? readString(existingSnapshot, ['providerStatus', 'statusField', 'shipmentStatus', 'cargoStatus']),
@@ -3717,7 +3741,7 @@ export async function ingestTryOtoWebhook(
     matchStatus: 'matched',
     shipmentExecutionId: updated.id,
     shipmentStatus: mapStatus(updated.shipmentStatus),
-    signatureVerificationImplemented: false,
+    authenticityVerification,
     warning: signatureWarning,
   };
 }

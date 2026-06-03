@@ -465,6 +465,11 @@ export type OrderShipmentExecutionDto = {
       latestProviderStatusSource?: string | null;
       lastWebhookParseError?: string | null;
       webhookSignatureVerificationImplemented?: boolean | null;
+      webhookAuthenticityVerification?: {
+        mode: 'shared_secret' | 'disabled_dev_only';
+        providerNativeSignatureVerified: false;
+        note: string;
+      } | null;
       webhookWarning?: string | null;
     };
   };

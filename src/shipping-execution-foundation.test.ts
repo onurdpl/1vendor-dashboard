@@ -8713,7 +8713,11 @@ describe('shipping execution foundation', () => {
       status: 501,
       body: {
         message: 'Try OTO webhook ingestion is disabled.',
-        signatureVerificationImplemented: false,
+        authenticityVerification: {
+          mode: 'disabled_dev_only',
+          providerNativeSignatureVerified: false,
+          note: 'Provider-native Try OTO signature semantics remain unknown.',
+        },
       },
     });
     const diagnostics = getShippingProviderGateDiagnostics(
@@ -8731,8 +8735,179 @@ describe('shipping execution foundation', () => {
       lastWebhookMatchStatus: 'disabled',
       lastWebhookMatchedShipment: false,
       webhookSignatureVerificationImplemented: false,
+      webhookAuthenticityVerification: {
+        mode: 'disabled_dev_only',
+        providerNativeSignatureVerified: false,
+        note: 'Provider-native Try OTO signature semantics remain unknown.',
+      },
     });
     expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+  });
+
+  it('rejects Try OTO webhooks when a configured shared secret header is missing', async () => {
+    const posts = new Map<
+      string,
+      (
+        request: { body?: unknown; method?: string; headers?: Record<string, string> },
+        reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      ) => unknown
+    >();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (
+          request: { body?: unknown; method?: string; headers?: Record<string, string> },
+          reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+        ) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(app as never, {
+      ...env,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345',
+    });
+    const result = await posts.get('/webhooks/try-oto')?.(
+      { body: { data: { orderId: 'OTO-ORDER-1' } }, method: 'POST', headers: { 'content-type': 'application/json' } },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 401,
+      body: {
+        message: 'Try OTO webhook authenticity verification failed.',
+        authenticityVerification: {
+          mode: 'shared_secret',
+          providerNativeSignatureVerified: false,
+          note: 'Provider-native Try OTO signature semantics remain unknown.',
+        },
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
+  });
+
+  it('rejects Try OTO webhooks when a configured shared secret header is invalid', async () => {
+    const posts = new Map<
+      string,
+      (
+        request: { body?: unknown; method?: string; headers?: Record<string, string> },
+        reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      ) => unknown
+    >();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (
+          request: { body?: unknown; method?: string; headers?: Record<string, string> },
+          reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+        ) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(app as never, {
+      ...env,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345',
+    });
+    const result = await posts.get('/webhooks/try-oto')?.(
+      {
+        body: { data: { orderId: 'OTO-ORDER-1' } },
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-try-oto-webhook-secret': 'invalid-secret-value',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 401,
+      body: {
+        message: 'Try OTO webhook authenticity verification failed.',
+        authenticityVerification: {
+          mode: 'shared_secret',
+          providerNativeSignatureVerified: false,
+          note: 'Provider-native Try OTO signature semantics remain unknown.',
+        },
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('invalid-secret-value');
+    expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
+  });
+
+  it('allows Try OTO webhook ingestion when the configured shared secret header is valid', async () => {
+    const posts = new Map<
+      string,
+      (
+        request: { body?: unknown; method?: string; headers?: Record<string, string> },
+        reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+      ) => unknown
+    >();
+    const app = {
+      get: vi.fn(),
+      put: vi.fn(),
+      post: vi.fn((path: string, ...args: unknown[]) => {
+        const handler = args.at(-1) as (
+          request: { body?: unknown; method?: string; headers?: Record<string, string> },
+          reply: { code: (status: number) => { send: (body: unknown) => unknown } },
+        ) => unknown;
+        posts.set(path, handler);
+      }),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerShippingExecutionRoutes(app as never, {
+      ...env,
+      TRY_OTO_ENABLED: true,
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: true,
+      TRY_OTO_WEBHOOK_SHARED_SECRET: 'try-oto-webhook-shared-secret-12345',
+    });
+    const result = await posts.get('/webhooks/try-oto')?.(
+      {
+        body: { data: { unknown: true } },
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-try-oto-webhook-secret': 'try-oto-webhook-shared-secret-12345',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      matched: false,
+      authenticityVerification: {
+        mode: 'shared_secret',
+        providerNativeSignatureVerified: false,
+        note: 'Provider-native Try OTO signature semantics remain unknown.',
+      },
+    });
+    expect(prismaMock.shipmentExecution.update).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('try-oto-webhook-shared-secret-12345');
   });
 
   it('handles unknown Try OTO webhook payloads without crashing or mutating data', async () => {
@@ -8752,7 +8927,11 @@ describe('shipping execution foundation', () => {
       matched: false,
       matchStatus: 'unmatched',
       shipmentExecutionId: null,
-      signatureVerificationImplemented: false,
+      authenticityVerification: {
+        mode: 'disabled_dev_only',
+        providerNativeSignatureVerified: false,
+        note: 'Provider-native Try OTO signature semantics remain unknown.',
+      },
     });
     const diagnostics = getShippingProviderGateDiagnostics(
       {
@@ -8863,7 +9042,11 @@ describe('shipping execution foundation', () => {
             lastTryOtoWebhookContentType: null,
             lastTryOtoWebhookStatusField: 'in_transit',
             lastTryOtoWebhookParseError: null,
-            tryOtoWebhookSignatureVerificationImplemented: false,
+            tryOtoWebhookAuthenticityVerification: {
+              mode: 'disabled_dev_only',
+              providerNativeSignatureVerified: false,
+              note: 'Provider-native Try OTO signature semantics remain unknown.',
+            },
             tryOtoWebhookResponseKeys: expect.arrayContaining(['orderId', 'printLabelURL', 'status', 'trackingNumber', 'trackingUrl']),
             timeline: expect.arrayContaining([
               expect.objectContaining({ label: 'Try OTO webhook received', status: 'in_transit' }),

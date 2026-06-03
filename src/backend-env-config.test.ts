@@ -123,6 +123,36 @@ describe('backend env shipping provider gates', () => {
     expect(env.TRY_OTO_WEBHOOK_INGEST_ENABLED).toBe(true);
   });
 
+  it('rejects production Try OTO webhook ingestion when shared secret is missing', () => {
+    resetEnv({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      TRY_OTO_ENABLED: 'true',
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
+      TRY_OTO_WEBHOOK_SHARED_SECRET: undefined,
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'TRY_OTO_WEBHOOK_SHARED_SECRET is required in production when TRY_OTO_WEBHOOK_INGEST_ENABLED=true.',
+    );
+  });
+
+  it('rejects production Try OTO webhook ingestion when shared secret is too short', () => {
+    resetEnv({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      TRY_OTO_ENABLED: 'true',
+      TRY_OTO_WEBHOOK_INGEST_ENABLED: 'true',
+      TRY_OTO_WEBHOOK_SHARED_SECRET: 'short-secret',
+    });
+
+    expect(() => loadEnv()).toThrow('TRY_OTO_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
+  });
+
   it('parses Kargonomi env values without requiring X-App-Key', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'kargonomi',

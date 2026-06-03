@@ -50,6 +50,7 @@ export type AppEnv = {
   TRY_OTO_REFRESH_TOKEN?: string;
   TRY_OTO_SANDBOX_MODE: boolean;
   TRY_OTO_WEBHOOK_INGEST_ENABLED: boolean;
+  TRY_OTO_WEBHOOK_SHARED_SECRET?: string;
   KARGONOMI_BASE_URL?: string;
   KARGONOMI_API_TOKEN?: string;
   KARGONOMI_APP_KEY?: string;
@@ -232,6 +233,18 @@ export function loadEnv(): AppEnv {
   const navlungoDefaultBarcodeFormat = process.env.NAVLUNGO_DEFAULT_BARCODE_FORMAT || undefined;
   const navlungoDefaultCarrierId = process.env.NAVLUNGO_DEFAULT_CARRIER_ID || undefined;
   const navlungoCreatePostProbeConfirm = process.env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM || undefined;
+  const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
+  const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
+
+  if (nodeEnv === 'production' && tryOtoWebhookIngestEnabled) {
+    if (!tryOtoWebhookSharedSecret) {
+      throw new Error('TRY_OTO_WEBHOOK_SHARED_SECRET is required in production when TRY_OTO_WEBHOOK_INGEST_ENABLED=true.');
+    }
+
+    if (tryOtoWebhookSharedSecret.length < 32) {
+      throw new Error('TRY_OTO_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
+    }
+  }
 
   if (shippingProvider === 'kargonomi') {
     if (!kargonomiBaseUrl) {
@@ -315,7 +328,8 @@ export function loadEnv(): AppEnv {
     TRY_OTO_BASE_URL: process.env.TRY_OTO_BASE_URL || undefined,
     TRY_OTO_REFRESH_TOKEN: process.env.TRY_OTO_REFRESH_TOKEN || undefined,
     TRY_OTO_SANDBOX_MODE: parseBoolean(process.env.TRY_OTO_SANDBOX_MODE, false),
-    TRY_OTO_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false),
+    TRY_OTO_WEBHOOK_INGEST_ENABLED: tryOtoWebhookIngestEnabled,
+    TRY_OTO_WEBHOOK_SHARED_SECRET: tryOtoWebhookSharedSecret,
     KARGONOMI_BASE_URL: kargonomiBaseUrl,
     KARGONOMI_API_TOKEN: kargonomiApiToken,
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
