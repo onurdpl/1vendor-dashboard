@@ -133,21 +133,27 @@ function extractSessionCookie(setCookieHeader: string) {
 
 async function injectLogin(
   input: {
-    email?: string;
-    password?: string;
+    email?: unknown;
+    password?: unknown;
     ip?: string;
     env?: AppEnv;
+    omitEmail?: boolean;
+    omitPassword?: boolean;
   } = {},
 ) {
   const handler = createLoginRoute(input.env);
   const reply = createReply();
+  const body: Record<string, unknown> = {};
+  if (!input.omitEmail) {
+    body.email = 'email' in input ? input.email : 'vendor@example.com';
+  }
+  if (!input.omitPassword) {
+    body.password = 'password' in input ? input.password : 'demo123';
+  }
   const result = await handler?.(
     {
       headers: {},
-      body: {
-        email: input.email ?? 'vendor@example.com',
-        password: input.password ?? 'demo123',
-      },
+      body,
       ip: input.ip ?? '127.0.0.1',
     },
     reply,
@@ -185,6 +191,47 @@ describe('auth login rate limiting', () => {
     expect(readSetCookieHeader(response.headers)).toContain(`${SESSION_COOKIE_NAME}=`);
     expect(readSetCookieHeader(response.headers)).toContain('HttpOnly');
     expect(readSetCookieHeader(response.headers)).toContain('SameSite=Lax');
+  });
+
+  it('rejects missing email or password with the existing generic response', async () => {
+    const missingEmail = await injectLogin({ omitEmail: true });
+    const missingPassword = await injectLogin({ omitPassword: true });
+
+    expect(missingEmail.statusCode).toBe(400);
+    expect(missingEmail.payload).toEqual({ message: 'Email and password are required.' });
+    expect(missingPassword.statusCode).toBe(400);
+    expect(missingPassword.payload).toEqual({ message: 'Email and password are required.' });
+    expect(findUniqueMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null],
+    ['object', { value: 'vendor@example.com' }],
+    ['array', ['vendor@example.com']],
+    ['number', 123],
+    ['boolean', true],
+  ])('rejects %s email values before authentication', async (_label, email) => {
+    const response = await injectLogin({ email });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Email and password are required.' });
+    expect(JSON.stringify(response.payload)).not.toContain('exists');
+    expect(findUniqueMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['null', null],
+    ['object', { value: 'demo123' }],
+    ['array', ['demo123']],
+    ['number', 123],
+    ['boolean', true],
+  ])('rejects %s password values before authentication', async (_label, password) => {
+    const response = await injectLogin({ password });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Email and password are required.' });
+    expect(JSON.stringify(response.payload)).not.toContain('exists');
+    expect(findUniqueMock).not.toHaveBeenCalled();
   });
 
   it('sets Secure on the HttpOnly session cookie in production', async () => {

@@ -22,9 +22,17 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
 
-    const email = request.body?.email;
-    const password = request.body?.password;
+    const body = request.body as Partial<Record<keyof LoginBody, unknown>> | undefined;
+    const rawEmail = body?.email;
+    const rawPassword = body?.password;
     const routeEntryToBodyValidationMs = elapsedMs(routeStartedAt);
+
+    if (typeof rawEmail !== 'string' || typeof rawPassword !== 'string') {
+      return reply.code(400).send({ message: 'Email and password are required.' });
+    }
+
+    const email = rawEmail.trim().toLowerCase();
+    const password = rawPassword;
 
     if (!email || !password) {
       return reply.code(400).send({ message: 'Email and password are required.' });
