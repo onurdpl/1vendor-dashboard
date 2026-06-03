@@ -34,7 +34,7 @@ export type AuthLoginServiceTiming = {
   vendorAccessLookupMode: 'separate_query' | 'included_in_user_lookup';
   tokenSignMs: number;
   serviceTotalMs: number;
-  passwordHashMode: 'demo_sha256_v1' | 'unsupported';
+  passwordHashMode: 'argon2id' | 'demo_sha256_v1' | 'bcrypt' | 'other';
 };
 
 export type AuthLoginRouteTiming = AuthLoginServiceTiming & {

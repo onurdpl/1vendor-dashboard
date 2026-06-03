@@ -1,12 +1,5 @@
-import { createHash } from 'node:crypto';
 import { prisma } from '../src/db/prisma.js';
-
-type SeedUserInput = {
-  email: string;
-  name: string;
-  role: 'ADMIN' | 'VENDOR';
-  vendorIds: string[];
-};
+import { upsertSeedUser, type SeedUserInput } from './seed-user-utils.js';
 
 type SeedVendorInput = {
   id: string;
@@ -79,11 +72,6 @@ const shopifyLineItemsSeed = [
   },
 ] as const;
 
-function makeDemoPasswordHash(password: string) {
-  // Demo-only deterministic hash. Not suitable for production auth storage.
-  return `demo_sha256_v1:${createHash('sha256').update(`vendor-dashboard-demo:${password}`).digest('hex')}`;
-}
-
 async function runSeed() {
   for (const vendor of vendors) {
     await prisma.vendor.upsert({
@@ -139,33 +127,8 @@ async function runSeed() {
     },
   });
 
-  const demoPasswordHash = makeDemoPasswordHash('demo123');
-
   for (const user of users) {
-    const createdOrUpdatedUser = await prisma.user.upsert({
-      where: { email: user.email },
-      update: {
-        name: user.name,
-        role: user.role,
-        status: 'active',
-        passwordHash: demoPasswordHash,
-      },
-      create: {
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        status: 'active',
-        passwordHash: demoPasswordHash,
-      },
-    });
-
-    await prisma.userVendorAccess.createMany({
-      data: user.vendorIds.map((vendorId) => ({
-        userId: createdOrUpdatedUser.id,
-        vendorId,
-      })),
-      skipDuplicates: true,
-    });
+    await upsertSeedUser(prisma, user);
   }
 
   await prisma.shopifyOrder.upsert({

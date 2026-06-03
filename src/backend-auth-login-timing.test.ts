@@ -3,12 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
+const updateMock = vi.hoisted(() => vi.fn());
 const queryRawMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: {
     user: {
       findUnique: findUniqueMock,
+      update: updateMock,
     },
     $queryRaw: queryRawMock,
   },
@@ -26,6 +28,8 @@ const authEnv = {
 describe('backend auth login timing', () => {
   beforeEach(() => {
     findUniqueMock.mockReset();
+    updateMock.mockReset();
+    updateMock.mockResolvedValue({});
     queryRawMock.mockReset();
   });
 

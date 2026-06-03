@@ -32,6 +32,7 @@
     "parasut:commission-probe": "npm --prefix backend run parasut:commission-probe",
     "probe:odoo:order": "tsx backend/scripts/probe-odoo-order.ts",
     "vendor-integration:create-token": "npm --prefix backend run vendor-integration:create-token",
+    "auth:hash-report": "npm --prefix backend run auth:hash-report",
     "real-api:dry-run": "node scripts/real-api-dry-run.mjs"
   },
   "dependencies": {

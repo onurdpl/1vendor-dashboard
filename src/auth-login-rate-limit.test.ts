@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 
 const findUniqueMock = vi.hoisted(() => vi.fn());
+const updateMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: {
     user: {
       findUnique: findUniqueMock,
+      update: updateMock,
     },
   },
 }));
@@ -148,6 +150,7 @@ describe('auth login rate limiting', () => {
     vi.clearAllMocks();
     resetLoginRateLimitForTests();
     findUniqueMock.mockResolvedValue(buildUser());
+    updateMock.mockResolvedValue({});
   });
 
   it('keeps login behavior unchanged under the configured limit', async () => {

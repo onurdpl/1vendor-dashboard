@@ -1,12 +1,11 @@
-import { createHash } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import type { UserRole } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
 import type { AuthLoginServiceTiming, AuthUserContext, AuthUserResponse, JwtPayload, LoginBody } from './auth.types.js';
 import { mapRole } from './auth.types.js';
+import { classifyPasswordHashScheme, hashPasswordArgon2id, verifyPasswordHash } from './password-hashing.js';
 
-const DEMO_HASH_PREFIX = 'demo_sha256_v1:';
 const AUTH_LOGIN_DB_PROBE_ENABLED = process.env.AUTH_LOGIN_DB_PROBE_ENABLED === 'true';
 
 type UserRecordWithVendorLinks = {
@@ -42,24 +41,8 @@ function createInitialLoginTiming(): AuthLoginServiceTiming {
     vendorAccessLookupMode: 'included_in_user_lookup',
     tokenSignMs: 0,
     serviceTotalMs: 0,
-    passwordHashMode: 'unsupported',
+    passwordHashMode: 'other',
   };
-}
-
-function makeDemoPasswordHash(password: string) {
-  return `${DEMO_HASH_PREFIX}${createHash('sha256').update(`vendor-dashboard-demo:${password}`).digest('hex')}`;
-}
-
-function verifyDemoPassword(storedPasswordHash: string, rawPassword: string) {
-  if (!storedPasswordHash.startsWith(DEMO_HASH_PREFIX)) {
-    return false;
-  }
-
-  return storedPasswordHash === makeDemoPasswordHash(rawPassword);
-}
-
-function getPasswordHashMode(storedPasswordHash: string): AuthLoginServiceTiming['passwordHashMode'] {
-  return storedPasswordHash.startsWith(DEMO_HASH_PREFIX) ? 'demo_sha256_v1' : 'unsupported';
 }
 
 function mapUserRecordToAuthResponse(user: UserRecordWithVendorLinks): AuthUserResponse {
@@ -134,14 +117,24 @@ export function createAuthService(env: AppEnv) {
       return null;
     }
 
-    timing.passwordHashMode = getPasswordHashMode(user.passwordHash);
+    timing.passwordHashMode = classifyPasswordHashScheme(user.passwordHash);
     const passwordVerificationStartedAt = startTimer();
-    const passwordValid = verifyDemoPassword(user.passwordHash, credentials.password);
+    const passwordVerification = await verifyPasswordHash(user.passwordHash, credentials.password);
     timing.passwordVerificationMs = elapsedMs(passwordVerificationStartedAt);
 
-    if (!passwordValid) {
+    if (!passwordVerification.valid) {
       timing.serviceTotalMs = elapsedMs(serviceStartedAt);
       return null;
+    }
+
+    if (passwordVerification.needsMigration) {
+      const migratedPasswordHash = await hashPasswordArgon2id(credentials.password);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: {
+          passwordHash: migratedPasswordHash,
+        },
+      });
     }
 
     const authUser = mapUserRecordToAuthResponse(user);
