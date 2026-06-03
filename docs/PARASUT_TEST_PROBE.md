@@ -56,6 +56,26 @@ Dry-run, default and safe:
 npm run parasut:commission-probe
 ```
 
+## Temporary Render Runtime Auth Diagnostic
+
+The deployed backend includes a temporary read-only diagnostic endpoint for checking Paraşüt runtime env, OAuth, and `/v4/me` from the Render backend runtime:
+
+```text
+GET /admin/probes/parasut/auth-me
+```
+
+This endpoint:
+
+- requires a logged-in admin session;
+- requires `ADMIN_PROBES_ENABLED=true`;
+- requires `PARASUT_TEST_MODE=true`;
+- requires `PARASUT_BASE_URL=https://api.heroku-staging.parasut.com`;
+- performs only an OAuth token request and `GET /v4/me`;
+- does not create contacts, products, invoices, payments, e-documents, or lifecycle actions;
+- does not return access tokens, refresh tokens, passwords, client secrets, or full upstream response bodies.
+
+Keep `ADMIN_PROBES_ENABLED=false` unless actively diagnosing Paraşüt runtime configuration. Disable the endpoint again after the runtime check is complete.
+
 Live test probe with creation enabled:
 
 ```bash

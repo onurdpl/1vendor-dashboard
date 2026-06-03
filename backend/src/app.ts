@@ -28,6 +28,7 @@ import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execu
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
+import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
 
@@ -352,6 +353,7 @@ export function createApp() {
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
   registerVendorIntegrationRoutes(app, env);
+  registerParasutProbeRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerOdooDiscoveryProbeRoutes(app);
   registerShopifyWebhookRoutes(app, env);
