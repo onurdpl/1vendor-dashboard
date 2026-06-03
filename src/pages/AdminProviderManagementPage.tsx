@@ -60,6 +60,75 @@ function getLastActivity(provider: VendorIntegrationProviderSummary) {
   return provider.lastRequestAt ?? provider.lastUsedAt;
 }
 
+function getActivityAction(log: VendorIntegrationProviderSummary['recentAuditLogs'][number]) {
+  const path = log.path.toLowerCase();
+
+  if (log.method === 'GET' && path.includes('/orders')) {
+    return 'Orders synced';
+  }
+
+  if (path.includes('/status')) {
+    return 'Status updated';
+  }
+
+  if (path.includes('/shipment')) {
+    return 'Shipment received';
+  }
+
+  if (path.includes('/invoice')) {
+    return 'Invoice received';
+  }
+
+  return 'Provider request recorded';
+}
+
+function getHttpResult(statusCode: number) {
+  if (statusCode === 429) {
+    return {
+      label: '429 Rate limited',
+      tone: 'warning' as const,
+    };
+  }
+
+  if (statusCode >= 500) {
+    return {
+      label: `${statusCode} Server error`,
+      tone: 'danger' as const,
+    };
+  }
+
+  if (statusCode >= 400) {
+    return {
+      label: `${statusCode} Error`,
+      tone: 'warning' as const,
+    };
+  }
+
+  return {
+    label: `${statusCode} OK`,
+    tone: 'success' as const,
+  };
+}
+
+function PermissionChips({ provider }: { provider: VendorIntegrationProviderSummary }) {
+  return (
+    <div className="provider-permission-chips" aria-label={`${provider.providerName} permissions`}>
+      {PROVIDER_PERMISSION_CHIPS.map((permission) => {
+        const isGranted = provider.scopes.includes(permission.scope);
+        return (
+          <span
+            key={permission.scope}
+            className={`provider-permission-chip ${isGranted ? 'is-granted' : 'is-muted'}`}
+            aria-label={`${permission.label} permission ${isGranted ? 'granted' : 'not granted'}`}
+          >
+            {permission.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function AdminProviderManagementPage() {
   const appReadiness = useAppReadiness();
   const { data, isLoading, isError, error, refetch } = useQueryResource(
@@ -159,20 +228,7 @@ export function AdminProviderManagementPage() {
                           <span>Vendor</span>
                           <strong>{provider.vendorIdentifier}</strong>
                         </div>
-                        <div className="provider-permission-chips" aria-label={`${provider.providerName} permissions`}>
-                          {PROVIDER_PERMISSION_CHIPS.map((permission) => {
-                            const isGranted = provider.scopes.includes(permission.scope);
-                            return (
-                              <span
-                                key={permission.scope}
-                                className={`provider-permission-chip ${isGranted ? 'is-granted' : 'is-muted'}`}
-                                aria-label={`${permission.label} permission ${isGranted ? 'granted' : 'not granted'}`}
-                              >
-                                {permission.label}
-                              </span>
-                            );
-                          })}
-                        </div>
+                        <PermissionChips provider={provider} />
                       </div>
                       <div className="provider-card-metrics">
                         <div>
@@ -202,40 +258,109 @@ export function AdminProviderManagementPage() {
                   </div>
                   <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
                 </div>
-                <MetadataGroup>
-                  <MetadataRow label="Client id" value={selectedProvider.clientId} />
-                  <MetadataRow label="Scopes" value={formatScopes(selectedProvider.scopes)} />
-                  <MetadataRow label="Created" value={formatDate(selectedProvider.createdAt)} />
-                  <MetadataRow label="Updated" value={formatDate(selectedProvider.updatedAt)} />
-                  <MetadataRow label="Last used" value={formatDate(selectedProvider.lastUsedAt)} />
-                  <MetadataRow label="Last request" value={formatDate(selectedProvider.lastRequestAt)} />
-                  <MetadataRow label="Auth failures 24h" value={selectedProvider.authFailuresLast24h ?? 'Not derivable'} />
-                  <MetadataRow label="Revoked at" value={formatDate(selectedProvider.revokedAt)} />
-                </MetadataGroup>
 
-                <div className="attention-card-heading">
-                  <div>
-                    <p className="eyebrow">Audit logs</p>
-                    <h3>Recent requests</h3>
+                <section className="provider-detail-section" aria-label="Provider summary">
+                  <div className="provider-detail-section-heading">
+                    <p className="eyebrow">Summary</p>
+                    <h4>Provider Summary</h4>
                   </div>
-                </div>
-                {selectedProvider.recentAuditLogs.length ? (
-                  <OperationalTable columns={['Method', 'Path', 'Status', 'Request', 'Created']} stickyHeader={false}>
-                    {selectedProvider.recentAuditLogs.map((log) => (
-                      <OperationalTableRow key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
-                        <strong>{log.method}</strong>
-                        <span>{log.path}</span>
-                        <StatusBadge tone={log.statusCode >= 400 ? 'warning' : 'success'}>{log.statusCode}</StatusBadge>
-                        <span>{log.requestId ?? '—'}</span>
-                        <span>{formatDate(log.createdAt)}</span>
-                      </OperationalTableRow>
-                    ))}
-                  </OperationalTable>
-                ) : (
-                  <EmptyStatePanel title="No audit logs" description="No recent provider API requests were recorded for this client." />
-                )}
+                  <div className="provider-summary-grid">
+                    <div>
+                      <span>Provider Name</span>
+                      <strong>{selectedProvider.providerName}</strong>
+                    </div>
+                    <div>
+                      <span>Vendor</span>
+                      <strong>{selectedProvider.vendorIdentifier}</strong>
+                    </div>
+                    <div>
+                      <span>Status</span>
+                      <StatusBadge tone={getProviderState(selectedProvider).tone}>{getProviderState(selectedProvider).label}</StatusBadge>
+                    </div>
+                    <div>
+                      <span>Last Activity</span>
+                      <strong>{formatDate(getLastActivity(selectedProvider))}</strong>
+                    </div>
+                    <div>
+                      <span>Requests 24h</span>
+                      <strong>{selectedProvider.requestsLast24h}</strong>
+                    </div>
+                  </div>
+                </section>
+
+                <section className="provider-detail-section" aria-label="Provider permissions">
+                  <div className="provider-detail-section-heading">
+                    <p className="eyebrow">Access</p>
+                    <h4>Permissions</h4>
+                  </div>
+                  <PermissionChips provider={selectedProvider} />
+                </section>
+
+                <section className="provider-detail-section" aria-label="Activity timeline">
+                  <div className="provider-detail-section-heading">
+                    <p className="eyebrow">Activity</p>
+                    <h4>Activity Timeline</h4>
+                  </div>
+                  {selectedProvider.recentAuditLogs.length ? (
+                    <div className="provider-activity-list">
+                      {selectedProvider.recentAuditLogs.map((log) => {
+                        const result = getHttpResult(log.statusCode);
+                        return (
+                          <div className="provider-activity-row" key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
+                            <div>
+                              <strong>{getActivityAction(log)}</strong>
+                              <span>{formatDate(log.createdAt)}</span>
+                            </div>
+                            <StatusBadge tone={result.tone}>{result.label}</StatusBadge>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <EmptyStatePanel title="No activity recorded yet." description="Provider API requests will appear here after they are recorded." />
+                  )}
+                </section>
+
+                <details className="provider-technical-details">
+                  <summary>Technical Details</summary>
+                  <MetadataGroup>
+                    <MetadataRow label="Client id" value={selectedProvider.clientId} />
+                    <MetadataRow label="Raw scopes" value={formatScopes(selectedProvider.scopes)} />
+                    <MetadataRow label="Created" value={formatDate(selectedProvider.createdAt)} />
+                    <MetadataRow label="Updated" value={formatDate(selectedProvider.updatedAt)} />
+                    <MetadataRow label="Last used" value={formatDate(selectedProvider.lastUsedAt)} />
+                    <MetadataRow label="Last request" value={formatDate(selectedProvider.lastRequestAt)} />
+                    <MetadataRow label="Auth failures 24h" value={selectedProvider.authFailuresLast24h ?? 'Not derivable'} />
+                    <MetadataRow label="Revoked at" value={formatDate(selectedProvider.revokedAt)} />
+                  </MetadataGroup>
+
+                  <div className="attention-card-heading">
+                    <div>
+                      <p className="eyebrow">Technical audit</p>
+                      <h3>Raw request metadata</h3>
+                    </div>
+                  </div>
+
+                  {selectedProvider.recentAuditLogs.length ? (
+                    <OperationalTable columns={['Method', 'Path', 'Status', 'Request', 'Created']} stickyHeader={false}>
+                      {selectedProvider.recentAuditLogs.map((log) => (
+                        <OperationalTableRow key={`${log.createdAt}-${log.requestId ?? log.path}-${log.statusCode}`}>
+                          <strong>{log.method}</strong>
+                          <span>{log.path}</span>
+                          <StatusBadge tone={log.statusCode >= 400 ? 'warning' : 'success'}>{log.statusCode}</StatusBadge>
+                          <span>{log.requestId ?? '—'}</span>
+                          <span>{formatDate(log.createdAt)}</span>
+                        </OperationalTableRow>
+                      ))}
+                    </OperationalTable>
+                  ) : (
+                    <EmptyStatePanel title="No technical audit logs" description="No raw request metadata is available for this client." />
+                  )}
+                </details>
               </article>
-            ) : null}
+            ) : (
+              <EmptyStatePanel title="Select a provider to view details." description="Provider summary and activity appear after a provider is selected." />
+            )}
           </aside>
         </div>
       ) : null}

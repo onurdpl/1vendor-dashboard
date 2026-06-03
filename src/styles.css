@@ -10461,6 +10461,119 @@ summary.provider-response-heading::-webkit-details-marker {
   min-width: 130px;
 }
 
+.provider-detail-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  background: #f8fafc;
+}
+
+.provider-detail-section-heading {
+  display: grid;
+  gap: 2px;
+}
+
+.provider-detail-section-heading h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 0.95rem;
+  line-height: 1.2;
+}
+
+.provider-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.provider-summary-grid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.provider-summary-grid span,
+.provider-activity-row span {
+  color: #64748b;
+  font-size: 0.7rem;
+}
+
+.provider-summary-grid span {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provider-summary-grid strong,
+.provider-activity-row strong {
+  min-width: 0;
+  color: #0f172a;
+  font-size: 0.86rem;
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+
+.provider-detail-section .provider-permission-chips {
+  flex: 0 1 auto;
+  justify-content: flex-start;
+}
+
+.provider-activity-list {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-activity-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.provider-activity-row div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.provider-technical-details {
+  display: grid;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-sm);
+  background: #fff;
+}
+
+.provider-technical-details summary {
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.provider-technical-details[open] {
+  background: #f8fafc;
+}
+
+.provider-technical-details[open] summary {
+  margin-bottom: 12px;
+}
+
+.provider-technical-details .op-table {
+  box-shadow: none;
+}
+
 .attention-op-table {
   --op-table-min-width: 920px;
 }

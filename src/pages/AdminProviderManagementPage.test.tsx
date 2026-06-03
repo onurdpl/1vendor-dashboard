@@ -42,6 +42,13 @@ const providerManagement: VendorIntegrationProviderManagement = {
           requestId: 'req-1',
           createdAt: '2026-06-02T11:15:00.000Z',
         },
+        {
+          method: 'POST',
+          path: '/api/vendor-integration/orders/alloc-1/status',
+          statusCode: 202,
+          requestId: 'req-2',
+          createdAt: '2026-06-02T11:10:00.000Z',
+        },
       ],
     },
     {
@@ -124,10 +131,19 @@ describe('AdminProviderManagementPage', () => {
     expect(within(providerList).getAllByText('Last Activity').length).toBeGreaterThan(0);
     expect(within(providerList).queryByText('client-active')).not.toBeInTheDocument();
     expect(within(providerList).queryByText('429 24h')).not.toBeInTheDocument();
-    expect(screen.getAllByText('orders:read, status:write').length).toBeGreaterThan(0);
-    expect(screen.getByText('/api/vendor-integration/orders')).toBeInTheDocument();
-    expect(screen.getByText('req-1')).toBeInTheDocument();
-    expect(screen.getByText('Not derivable')).toBeInTheDocument();
+    const detail = await screen.findByLabelText('Provider detail');
+    expect(within(detail).getByRole('heading', { name: 'Provider Summary' })).toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Permissions' })).toBeInTheDocument();
+    expect(within(detail).getByRole('heading', { name: 'Activity Timeline' })).toBeInTheDocument();
+    expect(within(detail).getByText('Orders synced')).toBeInTheDocument();
+    expect(within(detail).getByText('Status updated')).toBeInTheDocument();
+    expect(within(detail).getByText('200 OK')).toBeInTheDocument();
+    expect(within(detail).getByText('202 OK')).toBeInTheDocument();
+    const technicalDetails = within(detail).getByText('Technical Details').closest('details');
+    expect(technicalDetails).not.toHaveAttribute('open');
+    expect(within(technicalDetails as HTMLElement).getByText('client-active')).not.toBeVisible();
+    expect(within(technicalDetails as HTMLElement).getByText('/api/vendor-integration/orders')).not.toBeVisible();
+    expect(within(technicalDetails as HTMLElement).getByText('req-1')).not.toBeVisible();
     expect(JSON.stringify(document.body.textContent)).not.toContain('tokenHash');
     expect(JSON.stringify(document.body.textContent)).not.toContain('spg_vi_');
     expect(JSON.stringify(document.body.textContent)).not.toContain('requestBody');
@@ -144,7 +160,7 @@ describe('AdminProviderManagementPage', () => {
     const detail = screen.getByLabelText('Provider detail');
     expect(within(detail).getByRole('heading', { name: 'Entegra' })).toBeInTheDocument();
     expect(detail).toHaveTextContent('yalispor');
-    expect(within(detail).getByText('No audit logs')).toBeInTheDocument();
+    expect(within(detail).getByText('No activity recorded yet.')).toBeInTheDocument();
   });
 
   it('renders an empty state safely', async () => {
