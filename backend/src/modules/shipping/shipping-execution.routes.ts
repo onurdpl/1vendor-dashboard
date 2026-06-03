@@ -56,6 +56,48 @@ function buildTryOtoWebhookAuthenticityVerification(mode: 'shared_secret' | 'dis
   };
 }
 
+function buildKargoWebhookAuthenticityVerification(mode: 'shared_secret' | 'disabled_dev_only') {
+  return {
+    mode,
+    providerNativeSignatureVerified: false,
+    note: 'Provider-native Kargo Entegratör signature semantics remain unknown.',
+  };
+}
+
+function verifyKargoWebhookAuthenticity(headers: Record<string, string | string[] | undefined>, env: AppEnv) {
+  const configuredSecret = env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?.trim();
+  if (!configuredSecret) {
+    if (env.NODE_ENV === 'production' && env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED) {
+      return {
+        ok: false as const,
+        code: 401,
+        message: 'Kargo Entegratör webhook authenticity is not configured.',
+        authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
+      };
+    }
+
+    return {
+      ok: true as const,
+      authenticityVerification: buildKargoWebhookAuthenticityVerification('disabled_dev_only'),
+    };
+  }
+
+  const providedSecret = readHeaderValue(headers['x-kargo-entegrator-webhook-secret']).trim();
+  if (!providedSecret || !safeSharedSecretMatches(providedSecret, configuredSecret)) {
+    return {
+      ok: false as const,
+      code: 401,
+      message: 'Kargo Entegratör webhook authenticity verification failed.',
+      authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
+    };
+  }
+
+  return {
+    ok: true as const,
+    authenticityVerification: buildKargoWebhookAuthenticityVerification('shared_secret'),
+  };
+}
+
 function verifyTryOtoWebhookAuthenticity(headers: Record<string, string | string[] | undefined>, env: AppEnv) {
   const configuredSecret = env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim();
   if (!configuredSecret) {
@@ -95,6 +137,14 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
   const authMiddleware = createAuthMiddleware(authService);
 
   app.post('/webhooks/shipping/kargo-entegrator', async (request, reply) => {
+    const authenticity = verifyKargoWebhookAuthenticity(request.headers, env);
+    if (!authenticity.ok) {
+      return reply.code(authenticity.code).send({
+        message: authenticity.message,
+        authenticityVerification: authenticity.authenticityVerification,
+      });
+    }
+
     const result = await ingestKargoEntegratorWebhook(request.body, { env });
     if (!result.ok) {
       return reply.code(501).send({

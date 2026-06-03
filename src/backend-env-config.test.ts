@@ -93,12 +93,42 @@ describe('backend env shipping provider gates', () => {
     resetEnv({
       SHIPPING_SANDBOX_MODE: 'true',
       KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: 'true',
+      KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET: 'configured-kargo-webhook-secret-12345',
     });
 
     const env = loadEnv();
 
     expect(env.SHIPPING_SANDBOX_MODE).toBe(true);
     expect(env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED).toBe(true);
+    expect(env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET).toBe('configured-kargo-webhook-secret-12345');
+  });
+
+  it('rejects production Kargo webhook ingestion when shared secret is missing', () => {
+    resetEnv({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: 'true',
+      KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET: undefined,
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET is required in production when KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true.',
+    );
+  });
+
+  it('rejects production Kargo webhook ingestion when shared secret is too short', () => {
+    resetEnv({
+      NODE_ENV: 'production',
+      CORS_ORIGIN: 'https://onevendor-dashboard.onrender.com',
+      SHOPIFY_SHOP_DOMAIN: 'sporgym-test.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'configured-admin-token',
+      KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: 'true',
+      KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET: 'short-secret',
+    });
+
+    expect(() => loadEnv()).toThrow('KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
   });
 
   it('parses Try OTO sandbox provider gates without enabling production rollout', () => {

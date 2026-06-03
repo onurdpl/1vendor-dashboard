@@ -39,7 +39,8 @@ When execution is disabled, the adapter returns a dry-run pending response and d
 Dummy Kargo execution is explicit sandbox/test behavior:
 
 - `SHIPPING_SANDBOX_MODE=true` enables Dummy Kargo payload construction.
-- `KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true` allows sandbox webhook ingestion.
+- `KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true` allows sandbox webhook ingestion only when authenticity checks pass.
+- `KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET` enables interim shared-secret verification with `x-kargo-entegrator-webhook-secret`; this is not provider-native signature verification.
 - Dummy creation uses the documented Kargo Entegratör shipment endpoint (`POST /api/shipments`) through the existing adapter base URL.
 - Dummy payloads include `cargo_company.id = "dummy"` plus the documented customer, warehouse, package, payment, desi, platform, notification, and line fields.
 - Required receiver fields (`name`, `surname`, `phone`, `email`, `country`, `postcode`, `city`, `district`, `address`) are validated before the provider is called. Missing fields block shipment creation with an actionable error.

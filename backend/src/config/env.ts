@@ -43,6 +43,7 @@ export type AppEnv = {
   SHIPPING_PROVIDER: 'hepsijet' | 'kargo_entegrator' | 'try_oto' | 'kargonomi' | 'navlungo';
   KARGO_ENTEGRATOR_ENABLED: boolean;
   KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: boolean;
+  KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?: string;
   KARGO_ENTEGRATOR_BASE_URL?: string;
   KARGO_ENTEGRATOR_API_KEY?: string;
   KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID?: string;
@@ -224,6 +225,8 @@ export function loadEnv(): AppEnv {
 
   const kargoCargoIntegration = parseKargoCargoIntegrationEnv();
   const shippingProvider = parseShippingProvider(process.env.SHIPPING_PROVIDER);
+  const kargoWebhookIngestEnabled = parseBoolean(process.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED, false);
+  const kargoWebhookSharedSecret = process.env.KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET?.trim() || undefined;
   const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
   const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
@@ -237,6 +240,16 @@ export function loadEnv(): AppEnv {
   const navlungoCreatePostProbeConfirm = process.env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM || undefined;
   const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
+
+  if (nodeEnv === 'production' && kargoWebhookIngestEnabled) {
+    if (!kargoWebhookSharedSecret) {
+      throw new Error('KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET is required in production when KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED=true.');
+    }
+
+    if (kargoWebhookSharedSecret.length < 32) {
+      throw new Error('KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET must be at least 32 characters in production.');
+    }
+  }
 
   if (nodeEnv === 'production' && tryOtoWebhookIngestEnabled) {
     if (!tryOtoWebhookSharedSecret) {
@@ -323,7 +336,8 @@ export function loadEnv(): AppEnv {
     SHIPPING_SANDBOX_MODE: parseBoolean(process.env.SHIPPING_SANDBOX_MODE, false),
     SHIPPING_PROVIDER: shippingProvider,
     KARGO_ENTEGRATOR_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_ENABLED, false),
-    KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: parseBoolean(process.env.KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED, false),
+    KARGO_ENTEGRATOR_WEBHOOK_INGEST_ENABLED: kargoWebhookIngestEnabled,
+    KARGO_ENTEGRATOR_WEBHOOK_SHARED_SECRET: kargoWebhookSharedSecret,
     KARGO_ENTEGRATOR_BASE_URL: process.env.KARGO_ENTEGRATOR_BASE_URL || undefined,
     KARGO_ENTEGRATOR_API_KEY: process.env.KARGO_ENTEGRATOR_API_KEY || undefined,
     KARGO_ENTEGRATOR_CARGO_INTEGRATION_ID: kargoCargoIntegration.value,
