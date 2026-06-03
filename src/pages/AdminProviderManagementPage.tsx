@@ -49,6 +49,17 @@ function getProviderState(provider: VendorIntegrationProviderSummary) {
   };
 }
 
+const PROVIDER_PERMISSION_CHIPS = [
+  { scope: 'orders:read', label: 'Orders' },
+  { scope: 'status:write', label: 'Status' },
+  { scope: 'shipment:write', label: 'Shipment' },
+  { scope: 'invoice:write', label: 'Invoice' },
+];
+
+function getLastActivity(provider: VendorIntegrationProviderSummary) {
+  return provider.lastRequestAt ?? provider.lastUsedAt;
+}
+
 export function AdminProviderManagementPage() {
   const appReadiness = useAppReadiness();
   const { data, isLoading, isError, error, refetch } = useQueryResource(
@@ -127,32 +138,56 @@ export function AdminProviderManagementPage() {
                   <span>Token values are not recoverable and are never shown.</span>
                 </div>
               </div>
-              <OperationalTable
-                columns={['State', 'Provider', 'Vendor', 'Scopes', 'Last used', 'Requests 24h', '429 24h']}
-                className="provider-management-table"
-              >
+              <div className="provider-card-list" aria-label="Provider list">
                 {providers.map((provider) => {
                   const state = getProviderState(provider);
+                  const isSelected = provider.clientId === selectedProvider?.clientId;
                   return (
-                    <OperationalTableRow
+                    <button
                       key={provider.clientId}
-                      selected={provider.clientId === selectedProvider?.clientId}
-                      onSelect={() => setSelectedClientId(provider.clientId)}
+                      type="button"
+                      className={`provider-card ${isSelected ? 'is-selected' : ''}`}
+                      aria-pressed={isSelected}
+                      onClick={() => setSelectedClientId(provider.clientId)}
                     >
-                      <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
-                      <span>
-                        <strong>{provider.providerName}</strong>
-                        <small>{provider.clientId}</small>
-                      </span>
-                      <strong>{provider.vendorIdentifier}</strong>
-                      <span>{formatScopes(provider.scopes)}</span>
-                      <span>{formatDate(provider.lastUsedAt)}</span>
-                      <strong>{provider.requestsLast24h}</strong>
-                      <strong>{provider.rateLimitedLast24h}</strong>
-                    </OperationalTableRow>
+                      <div className="provider-card-header">
+                        <h4>{provider.providerName}</h4>
+                        <StatusBadge tone={state.tone}>{state.label}</StatusBadge>
+                      </div>
+                      <div className="provider-card-body">
+                        <div className="provider-card-field">
+                          <span>Vendor</span>
+                          <strong>{provider.vendorIdentifier}</strong>
+                        </div>
+                        <div className="provider-permission-chips" aria-label={`${provider.providerName} permissions`}>
+                          {PROVIDER_PERMISSION_CHIPS.map((permission) => {
+                            const isGranted = provider.scopes.includes(permission.scope);
+                            return (
+                              <span
+                                key={permission.scope}
+                                className={`provider-permission-chip ${isGranted ? 'is-granted' : 'is-muted'}`}
+                                aria-label={`${permission.label} permission ${isGranted ? 'granted' : 'not granted'}`}
+                              >
+                                {permission.label}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                      <div className="provider-card-metrics">
+                        <div>
+                          <span>Requests 24h</span>
+                          <strong>{provider.requestsLast24h}</strong>
+                        </div>
+                        <div>
+                          <span>Last Activity</span>
+                          <strong>{formatDate(getLastActivity(provider))}</strong>
+                        </div>
+                      </div>
+                    </button>
                   );
                 })}
-              </OperationalTable>
+              </div>
             </article>
           </main>
 

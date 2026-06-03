@@ -10341,6 +10341,126 @@ summary.provider-response-heading::-webkit-details-marker {
   font-size: 0.82rem;
 }
 
+.provider-card-list {
+  display: grid;
+  gap: 10px;
+}
+
+.provider-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #dbe4ef;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.05);
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.provider-card:hover,
+.provider-card.is-selected {
+  border-color: rgba(37, 99, 235, 0.34);
+  box-shadow: 0 12px 24px rgba(37, 99, 235, 0.1);
+}
+
+.provider-card:hover {
+  transform: translateY(-1px);
+}
+
+.provider-card:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.45);
+  outline-offset: 2px;
+}
+
+.provider-card-header,
+.provider-card-body,
+.provider-card-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-card-header h4 {
+  margin: 0;
+  color: #0f172a;
+  font-size: 1rem;
+  line-height: 1.2;
+}
+
+.provider-card-field {
+  display: grid;
+  gap: 2px;
+  min-width: 120px;
+}
+
+.provider-card-field span,
+.provider-card-metrics span {
+  color: #64748b;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.provider-card-field strong,
+.provider-card-metrics strong {
+  color: #0f172a;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.provider-permission-chips {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.provider-permission-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.provider-permission-chip.is-granted {
+  color: #1d4ed8;
+  background: rgba(59, 130, 246, 0.11);
+  border-color: rgba(59, 130, 246, 0.22);
+}
+
+.provider-permission-chip.is-muted {
+  color: #64748b;
+  background: #f1f5f9;
+  border-color: #e2e8f0;
+}
+
+.provider-card-metrics {
+  justify-content: flex-start;
+  padding-top: 10px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.provider-card-metrics div {
+  display: grid;
+  gap: 2px;
+  min-width: 130px;
+}
+
 .attention-op-table {
   --op-table-min-width: 920px;
 }

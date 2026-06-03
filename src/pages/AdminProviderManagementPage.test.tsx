@@ -111,10 +111,19 @@ describe('AdminProviderManagementPage', () => {
     renderPage();
 
     expect(await screen.findByRole('heading', { name: 'Provider Management' })).toBeInTheDocument();
-    expect((await screen.findAllByText('Ayensoftware')).length).toBeGreaterThan(0);
-    expect(screen.getByText('Entegra')).toBeInTheDocument();
+    const providerList = await screen.findByLabelText('Provider list');
+    expect(within(providerList).getByRole('button', { name: /Ayensoftware/ })).toBeInTheDocument();
+    expect(within(providerList).getByRole('button', { name: /Entegra/ })).toBeInTheDocument();
     expect(screen.getAllByText('Active').length).toBeGreaterThan(0);
     expect(screen.getAllByText('Revoked').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Orders').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Status').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Shipment').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Invoice').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Requests 24h').length).toBeGreaterThan(0);
+    expect(within(providerList).getAllByText('Last Activity').length).toBeGreaterThan(0);
+    expect(within(providerList).queryByText('client-active')).not.toBeInTheDocument();
+    expect(within(providerList).queryByText('429 24h')).not.toBeInTheDocument();
     expect(screen.getAllByText('orders:read, status:write').length).toBeGreaterThan(0);
     expect(screen.getByText('/api/vendor-integration/orders')).toBeInTheDocument();
     expect(screen.getByText('req-1')).toBeInTheDocument();
