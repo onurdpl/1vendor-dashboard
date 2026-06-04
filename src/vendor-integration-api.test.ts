@@ -184,7 +184,7 @@ function createReply() {
 
 async function injectVendorIntegrationOrders(
   headers: Record<string, string>,
-  query: Record<string, string> = {},
+  query: Record<string, unknown> = {},
   options: { ip?: string } = {},
 ) {
   const { gets, hooks } = createRegisteredRoutes();
@@ -540,6 +540,82 @@ describe('vendor integration API foundation', () => {
         ],
       }),
     );
+  });
+
+  it('keeps the existing first-page response when cursor is missing', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+
+    const response = await injectVendorIntegrationOrders({ authorization: 'Bearer valid-token' }, { limit: '25' });
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { assignedVendorId: 'sporjinal' },
+        take: 26,
+      }),
+    );
+    expect(prismaMock.vendorAllocation.findMany.mock.calls[0]?.[0]).not.toHaveProperty('cursor');
+    expect(response.payload).toEqual(
+      expect.objectContaining({
+        pagination: expect.objectContaining({ limit: 25 }),
+      }),
+    );
+  });
+
+  it('passes a valid cursor through to Prisma pagination unchanged', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+
+    const response = await injectVendorIntegrationOrders(
+      { authorization: 'Bearer valid-token' },
+      { limit: '25', cursor: 'alloc-sporjinal-1' },
+    );
+
+    expect(response.statusCode).toBe(200);
+    expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cursor: { id: 'alloc-sporjinal-1' },
+        skip: 1,
+        take: 26,
+      }),
+    );
+  });
+
+  it.each([
+    ['empty', ''],
+    ['whitespace', '   '],
+    ['null', null],
+    ['array', ['alloc-sporjinal-1']],
+    ['object', { id: 'alloc-sporjinal-1' }],
+    ['overlong', 'a'.repeat(129)],
+  ])('rejects %s vendor integration orders cursor values', async (_label, cursor) => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+
+    const response = await injectVendorIntegrationOrders(
+      { authorization: 'Bearer valid-token' },
+      { cursor },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Invalid pagination cursor.' });
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+  });
+
+  it('returns a safe 400 when Prisma rejects an otherwise valid cursor lookup', async () => {
+    prismaMock.vendorIntegrationClient.findUnique.mockResolvedValueOnce(buildClient());
+    prismaMock.vendorAllocation.findMany.mockRejectedValueOnce({
+      code: 'P2025',
+      message: 'Record for cursor does not exist.',
+    });
+
+    const response = await injectVendorIntegrationOrders(
+      { authorization: 'Bearer valid-token' },
+      { cursor: 'alloc-missing' },
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(response.payload).toEqual({ message: 'Invalid pagination cursor.' });
+    expect(JSON.stringify(response.payload)).not.toContain('P2025');
+    expect(JSON.stringify(response.payload)).not.toContain('Record for cursor does not exist');
   });
 
   it('writes audit logs without request or response bodies', async () => {

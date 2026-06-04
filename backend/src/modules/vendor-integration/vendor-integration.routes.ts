@@ -137,6 +137,15 @@ function resolveAuditLogLimit(value: AuditLogsQuery['limit']) {
   return Math.min(parsed, 100);
 }
 
+function isInvalidVendorIntegrationCursorLookupError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const errorRecord = error as { code?: unknown; message?: unknown };
+  return errorRecord.code === 'P2025' || (typeof errorRecord.message === 'string' && errorRecord.message.toLowerCase().includes('cursor'));
+}
+
 export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppEnv) {
   app.addHook('onResponse', writeVendorIntegrationAuditLog);
   const authService = env ? createAuthService(env) : null;
@@ -269,6 +278,12 @@ export function registerVendorIntegrationRoutes(app: FastifyInstance, env?: AppE
       } catch (error) {
         if (error instanceof Error && error.message.startsWith('Unsupported allocation status filter:')) {
           return reply.code(400).send({ message: error.message });
+        }
+        if (error instanceof Error && error.message === 'Invalid pagination cursor.') {
+          return reply.code(400).send({ message: 'Invalid pagination cursor.' });
+        }
+        if (isInvalidVendorIntegrationCursorLookupError(error)) {
+          return reply.code(400).send({ message: 'Invalid pagination cursor.' });
         }
 
         throw error;

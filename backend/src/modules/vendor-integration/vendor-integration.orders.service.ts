@@ -4,12 +4,13 @@ import { prisma } from '../../db/prisma.js';
 
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
+const MAX_CURSOR_LENGTH = 128;
 const ALLOCATION_STATUSES = new Set<string>(Object.values(AllocationStatus));
 
 export type VendorIntegrationOrdersQuery = {
   status?: string;
   limit?: string | number;
-  cursor?: string;
+  cursor?: unknown;
 };
 
 export type VendorIntegrationOrdersResult = {
@@ -63,6 +64,23 @@ function normalizeStatus(value: string | undefined) {
   }
 
   return normalized as AllocationStatus;
+}
+
+function normalizeCursor(value: VendorIntegrationOrdersQuery['cursor']) {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (typeof value !== 'string') {
+    throw new Error('Invalid pagination cursor.');
+  }
+
+  const cursor = value.trim();
+  if (!cursor || cursor.length > MAX_CURSOR_LENGTH) {
+    throw new Error('Invalid pagination cursor.');
+  }
+
+  return cursor;
 }
 
 const allocationSelect = {
@@ -253,6 +271,7 @@ export async function listVendorIntegrationOrders(
 ): Promise<VendorIntegrationOrdersResult> {
   const limit = resolveLimit(query.limit);
   const status = normalizeStatus(query.status);
+  const cursor = normalizeCursor(query.cursor);
   const where: Prisma.VendorAllocationWhereInput = {
     assignedVendorId: vendorIdentifier,
     ...(status ? { allocationStatus: status } : {}),
@@ -262,7 +281,7 @@ export async function listVendorIntegrationOrders(
     select: allocationSelect,
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     take: limit + 1,
-    ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+    ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
   });
   const page = allocations.slice(0, limit);
 
