@@ -25,6 +25,7 @@
     "kargonomi:lookup-probe": "npm run build && node scripts/kargonomi-location-lookup-probe.mjs",
     "navlungo:create-post-probe": "npm run build && node scripts/navlungo-create-post-probe.mjs",
     "parasut:commission-probe": "npm run build && node scripts/parasut-commission-invoice-probe.mjs",
+    "lidio:sandbox-probe": "npm run build && node scripts/lidio-sandbox-probe.mjs",
     "vendor-integration:create-token": "npm run build && node scripts/create-vendor-integration-token.mjs",
     "auth:hash-report": "npm run build && node scripts/auth-hash-report.mjs"
   },

@@ -11,6 +11,7 @@
 Use placeholders for all secrets. Do not commit real tokens, keys, passwords, or credentials.
 
 ```bash
+LIDIO_ENABLED=true
 LIDIO_BASE_URL=https://test.lidio.com/api
 LIDIO_MERCHANT_CODE=SPORGYM
 LIDIO_AUTHORIZATION_SCHEME=MxS2S
@@ -21,7 +22,8 @@ LIDIO_SUBSELLER_PROFILE_ID=3
 ```
 
 Notes:
-- `LIDIO_BASE_URL=https://test.lidio.com/api` should be treated as the support-provided test base URL only if confirmed from the Lidio email. If that email is not the source, keep the exact API base URL path as unresolved.
+- `LIDIO_ENABLED=true` is required for the executable read-only probe.
+- `LIDIO_BASE_URL=https://test.lidio.com/api` is the support-provided test base URL.
 - `developer.lidio.com` and `lab.lidio.com` are documentation URLs, not API base URLs, unless Lidio explicitly confirms otherwise.
 - `LIDIO_MERCHANT_CODE=SPORGYM` is support-confirmed.
 - `LIDIO_AUTHORIZATION_SCHEME=MxS2S` is support-confirmed.
@@ -41,6 +43,7 @@ Notes:
    - Header `Authorization: MxS2S <token>`
    - Request model `GetSubsellerListRequest`
    - Purpose: confirm read-only authentication and marketplace API availability.
+   - Command: `npm run lidio:sandbox-probe`
 3. Optionally call `/PayoutAccountInquiry` only if `payoutSourceAccount` is known.
    - This is read-only by schema description.
    - Do not invent or guess `payoutSourceAccount`.
@@ -62,8 +65,7 @@ Notes:
 - Any route, database, checkout, shipping, payout, or finance-ledger implementation
 
 ## Unresolved Questions
-- What is the exact API base URL path?
-- What is the exact `/GetSubsellerList` method/path/body expected by the active sandbox environment?
+- Does the active sandbox accept `POST /GetSubsellerList` with an empty `GetSubsellerListRequest` body exactly as the OpenAPI schema indicates?
 - What is the paymentNotification `parameterhash` formula?
 - What is the ReturnURL hash formula for Sporgym's configured flow?
 - Are sandbox marketplace APIs active for `SPORGYM`?

@@ -69,6 +69,14 @@ export type AppEnv = {
   IYZICO_SANDBOX_API_KEY?: string;
   IYZICO_SANDBOX_SECRET_KEY?: string;
   IYZICO_SANDBOX_BASE_URL?: string;
+  LIDIO_ENABLED?: boolean;
+  LIDIO_BASE_URL?: string;
+  LIDIO_MERCHANT_CODE?: string;
+  LIDIO_AUTHORIZATION_SCHEME?: string;
+  LIDIO_AUTHORIZATION_TOKEN?: string;
+  LIDIO_MERCHANT_KEY?: string;
+  LIDIO_API_PASSWORD?: string;
+  LIDIO_SUBSELLER_PROFILE_ID?: number;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -244,6 +252,16 @@ export function loadEnv(): AppEnv {
   const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
   const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
   const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
+  const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
+  const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
+  const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
+  const lidioAuthorizationScheme = process.env.LIDIO_AUTHORIZATION_SCHEME?.trim() || undefined;
+  const lidioAuthorizationToken = process.env.LIDIO_AUTHORIZATION_TOKEN?.trim() || undefined;
+  const lidioMerchantKey = process.env.LIDIO_MERCHANT_KEY?.trim() || undefined;
+  const lidioApiPassword = process.env.LIDIO_API_PASSWORD?.trim() || undefined;
+  const lidioSubsellerProfileId = process.env.LIDIO_SUBSELLER_PROFILE_ID?.trim()
+    ? parsePositiveInteger(process.env.LIDIO_SUBSELLER_PROFILE_ID, 3)
+    : undefined;
   const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
 
@@ -284,6 +302,21 @@ export function loadEnv(): AppEnv {
     }
     if (!navlungoApiPassword) {
       throw new Error('NAVLUNGO_API_PASSWORD is required when SHIPPING_PROVIDER=navlungo.');
+    }
+  }
+  if (lidioEnabled) {
+    const missingLidioKeys = [
+      lidioBaseUrl ? null : 'LIDIO_BASE_URL',
+      lidioMerchantCode ? null : 'LIDIO_MERCHANT_CODE',
+      lidioAuthorizationScheme ? null : 'LIDIO_AUTHORIZATION_SCHEME',
+      lidioAuthorizationToken ? null : 'LIDIO_AUTHORIZATION_TOKEN',
+      lidioMerchantKey ? null : 'LIDIO_MERCHANT_KEY',
+      lidioApiPassword ? null : 'LIDIO_API_PASSWORD',
+      lidioSubsellerProfileId ? null : 'LIDIO_SUBSELLER_PROFILE_ID',
+    ].filter((key): key is string => Boolean(key));
+
+    if (missingLidioKeys.length) {
+      throw new Error(`Missing required Lidio env vars when LIDIO_ENABLED=true: ${missingLidioKeys.join(', ')}.`);
     }
   }
 
@@ -369,5 +402,13 @@ export function loadEnv(): AppEnv {
     IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
     IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
     IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,
+    LIDIO_ENABLED: lidioEnabled,
+    LIDIO_BASE_URL: lidioBaseUrl,
+    LIDIO_MERCHANT_CODE: lidioMerchantCode,
+    LIDIO_AUTHORIZATION_SCHEME: lidioAuthorizationScheme,
+    LIDIO_AUTHORIZATION_TOKEN: lidioAuthorizationToken,
+    LIDIO_MERCHANT_KEY: lidioMerchantKey,
+    LIDIO_API_PASSWORD: lidioApiPassword,
+    LIDIO_SUBSELLER_PROFILE_ID: lidioSubsellerProfileId,
   };
 }
