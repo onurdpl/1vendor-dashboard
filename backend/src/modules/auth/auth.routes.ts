@@ -13,7 +13,6 @@ export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
-  const useSecureCookie = env.NODE_ENV === 'production';
 
   app.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
     const routeStartedAt = process.hrtime.bigint();
@@ -68,7 +67,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     reply.header('Set-Cookie', createSessionCookie(
       loginResult.token,
       getJwtMaxAgeSeconds(loginResult.token),
-      useSecureCookie,
+      shouldUseSecureSessionCookie(request, env),
     ));
     const responseBody = {
       user: loginResult.user,
@@ -104,15 +103,15 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     return responseBody;
   });
 
-  app.post('/auth/logout', async (_request, reply) => {
-    reply.header('Set-Cookie', createClearSessionCookie(useSecureCookie));
+  app.post('/auth/logout', async (request, reply) => {
+    reply.header('Set-Cookie', createClearSessionCookie(shouldUseSecureSessionCookie(request, env)));
     return { ok: true };
   });
 
   app.get('/auth/csrf', { preHandler: authMiddleware.authenticateRequest }, async (request, reply) => {
     const token = request.authSessionToken ?? getSessionCookieToken(request);
     if (!token) {
-      return reply.code(401).send({ message: 'Unauthorized' });
+      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
     }
 
     return {
@@ -125,12 +124,12 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     const token = request.authSessionToken ?? authHeader.split(' ')[1];
 
     if (!token) {
-      return reply.code(401).send({ message: 'Unauthorized' });
+      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
     }
 
     const user = await authService.currentUserFromToken(token);
     if (!user) {
-      return reply.code(401).send({ message: 'Unauthorized' });
+      return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
     }
 
     return {
@@ -138,6 +137,22 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       csrfToken: request.authSessionSource === 'cookie' ? authService.createCsrfToken(token) : null,
     };
   });
+}
+
+function readHeaderValue(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function shouldUseSecureSessionCookie(request: { headers?: Record<string, string | string[] | undefined>; protocol?: string }, env: AppEnv) {
+  if (env.NODE_ENV === 'production') {
+    return true;
+  }
+
+  const forwardedProto = readHeaderValue(request.headers?.['x-forwarded-proto'])
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase());
+
+  return forwardedProto.includes('https') || request.protocol === 'https';
 }
 
 function elapsedMs(startedAt: bigint, endedAt: bigint = process.hrtime.bigint()) {

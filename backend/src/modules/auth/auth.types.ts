@@ -25,6 +25,18 @@ export type AuthUserResponse = AuthUserContext & {
   vendorAccess: AuthVendorAccess[];
 };
 
+export type AuthFailureStage = 'missing_token' | 'jwt_verify' | 'user_lookup' | null;
+
+export type AuthRestoreDiagnostics = {
+  cookiePresent: boolean;
+  authorizationBearerPresent: boolean;
+  jwtVerifySuccess: boolean;
+  userLookupSuccess: boolean;
+  authFailureStage: AuthFailureStage;
+  selectedSessionSource: 'bearer' | 'cookie' | null;
+  attemptedSessionSources: Array<'bearer' | 'cookie'>;
+};
+
 export type AuthLoginServiceTiming = {
   dbConnectionAcquisitionMs: number | null;
   dbConnectionAcquisitionMode: 'probed' | 'not_probed';
@@ -79,5 +91,6 @@ declare module 'fastify' {
     authUser?: AuthUserContext;
     authSessionSource?: 'bearer' | 'cookie';
     authSessionToken?: string;
+    authDiagnostics?: AuthRestoreDiagnostics;
   }
 }

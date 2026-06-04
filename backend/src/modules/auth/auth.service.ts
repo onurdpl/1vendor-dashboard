@@ -3,7 +3,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { UserRole } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
-import type { AuthLoginServiceTiming, AuthUserContext, AuthUserResponse, JwtPayload, LoginBody } from './auth.types.js';
+import type { AuthFailureStage, AuthLoginServiceTiming, AuthUserContext, AuthUserResponse, JwtPayload, LoginBody } from './auth.types.js';
 import { mapRole } from './auth.types.js';
 import { classifyPasswordHashScheme, hashPasswordArgon2id, verifyPasswordHash } from './password-hashing.js';
 
@@ -171,13 +171,35 @@ export function createAuthService(env: AppEnv) {
     };
   }
 
-  async function currentUserFromToken(token: string): Promise<AuthUserResponse | null> {
+  async function inspectToken(token: string): Promise<{
+    jwtVerifySuccess: boolean;
+    userLookupSuccess: boolean;
+    authFailureStage: AuthFailureStage;
+    user: AuthUserResponse | null;
+  }> {
+    let payload: JwtPayload;
     try {
-      const payload = verifyToken(token);
-      return buildUserResponse(payload.sub);
+      payload = verifyToken(token);
     } catch {
-      return null;
+      return {
+        jwtVerifySuccess: false,
+        userLookupSuccess: false,
+        authFailureStage: 'jwt_verify',
+        user: null,
+      };
     }
+
+    const user = await buildUserResponse(payload.sub);
+    return {
+      jwtVerifySuccess: true,
+      userLookupSuccess: Boolean(user),
+      authFailureStage: user ? null : 'user_lookup',
+      user,
+    };
+  }
+
+  async function currentUserFromToken(token: string): Promise<AuthUserResponse | null> {
+    return (await inspectToken(token)).user;
   }
 
   async function requestContextFromToken(token: string): Promise<AuthUserContext | null> {
@@ -199,6 +221,7 @@ export function createAuthService(env: AppEnv) {
     login,
     currentUserFromToken,
     requestContextFromToken,
+    inspectToken,
     createCsrfToken,
     verifyCsrfToken,
   };

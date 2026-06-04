@@ -165,13 +165,13 @@ function base64Url(input: string) {
   return Buffer.from(input).toString('base64url');
 }
 
-function signExpiredJwt(secret: string) {
+function signJwt(secret: string, expiresAtSeconds: number) {
   const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
   const payload = base64Url(JSON.stringify({
     sub: 'user-1',
     email: 'vendor@example.com',
     role: 'vendor',
-    exp: Math.floor(Date.now() / 1000) - 60,
+    exp: expiresAtSeconds,
   }));
   const signature = createHmac('sha256', secret)
     .update(`${header}.${payload}`)
@@ -179,11 +179,16 @@ function signExpiredJwt(secret: string) {
   return `${header}.${payload}.${signature}`;
 }
 
+function signExpiredJwt(secret: string) {
+  return signJwt(secret, Math.floor(Date.now() / 1000) - 60);
+}
+
 async function injectLogin(
   input: {
     email?: unknown;
     password?: unknown;
     ip?: string;
+    headers?: Record<string, string>;
     env?: AppEnv;
     omitEmail?: boolean;
     omitPassword?: boolean;
@@ -200,7 +205,7 @@ async function injectLogin(
   }
   const result = await handler?.(
     {
-      headers: {},
+      headers: input.headers ?? {},
       body,
       ip: input.ip ?? '127.0.0.1',
     },
@@ -293,6 +298,19 @@ describe('auth login rate limiting', () => {
     expect(readSetCookieHeader(response.headers)).toContain('SameSite=None');
   });
 
+  it('sets Secure on the HttpOnly session cookie for HTTPS proxy requests outside production', async () => {
+    const response = await injectLogin({
+      env: buildEnv({ NODE_ENV: 'development' }),
+      headers: {
+        'x-forwarded-proto': 'https',
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(readSetCookieHeader(response.headers)).toContain('Secure');
+    expect(readSetCookieHeader(response.headers)).toContain('SameSite=None');
+  });
+
   it('supports login then /auth/me using the HttpOnly cookie', async () => {
     const handlers = createAuthRouteHandlers();
     const loginReply = createReply();
@@ -347,6 +365,60 @@ describe('auth login rate limiting', () => {
     );
   });
 
+  it('restores /auth/me from a valid cookie when a stale bearer header is also present', async () => {
+    const handlers = createAuthRouteHandlers();
+    const loginReply = createReply();
+    await handlers.post['/auth/login']?.(
+      {
+        headers: {},
+        body: {
+          email: 'vendor@example.com',
+          password: 'demo123',
+        },
+        ip: '127.0.0.1',
+      },
+      loginReply,
+    );
+
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(loginReply.headers));
+    const meReply = createReply();
+    const request = {
+      method: 'GET',
+      headers: {
+        authorization: 'Bearer stale-local-storage-token',
+        cookie: sessionCookie,
+      },
+    };
+    const meResult = await invokeGetRoute(
+      handlers.get['/auth/me'],
+      request,
+      meReply,
+    );
+    const mePayload = meReply.sent ? meReply.payload : meResult;
+
+    expect(meReply.statusCode).toBe(200);
+    expect(request).toMatchObject({
+      authSessionSource: 'cookie',
+      authDiagnostics: expect.objectContaining({
+        cookiePresent: true,
+        authorizationBearerPresent: true,
+        jwtVerifySuccess: true,
+        userLookupSuccess: true,
+        authFailureStage: null,
+        selectedSessionSource: 'cookie',
+        attemptedSessionSources: ['bearer', 'cookie'],
+      }),
+    });
+    expect(mePayload).toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          email: 'vendor@example.com',
+          role: 'vendor',
+        }),
+      }),
+    );
+  });
+
   it('rejects /auth/me when the session cookie is missing', async () => {
     const handlers = createAuthRouteHandlers();
     const reply = createReply();
@@ -361,7 +433,18 @@ describe('auth login rate limiting', () => {
     );
 
     expect(reply.statusCode).toBe(401);
-    expect(reply.payload).toEqual({ message: 'Unauthorized' });
+    expect(reply.payload).toEqual({
+      message: 'Unauthorized',
+      authDiagnostics: {
+        cookiePresent: false,
+        authorizationBearerPresent: false,
+        jwtVerifySuccess: false,
+        userLookupSuccess: false,
+        authFailureStage: 'missing_token',
+        selectedSessionSource: null,
+        attemptedSessionSources: [],
+      },
+    });
   });
 
   it('rejects /auth/me when the session cookie is expired', async () => {
@@ -382,7 +465,53 @@ describe('auth login rate limiting', () => {
     );
 
     expect(reply.statusCode).toBe(401);
-    expect(reply.payload).toEqual({ message: 'Unauthorized' });
+    expect(reply.payload).toEqual({
+      message: 'Unauthorized',
+      authDiagnostics: {
+        cookiePresent: true,
+        authorizationBearerPresent: false,
+        jwtVerifySuccess: false,
+        userLookupSuccess: false,
+        authFailureStage: 'jwt_verify',
+        selectedSessionSource: null,
+        attemptedSessionSources: ['cookie'],
+      },
+    });
+    expect(JSON.stringify(reply.payload)).not.toContain(expiredToken);
+  });
+
+  it('diagnoses /auth/me user lookup failures without exposing the cookie token', async () => {
+    const env = buildEnv();
+    const handlers = createAuthRouteHandlers(env);
+    const reply = createReply();
+    const token = signJwt(env.JWT_SECRET, Math.floor(Date.now() / 1000) + 3600);
+    findUniqueMock.mockResolvedValueOnce(null);
+
+    await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        headers: {
+          cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+        },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual({
+      message: 'Unauthorized',
+      authDiagnostics: {
+        cookiePresent: true,
+        authorizationBearerPresent: false,
+        jwtVerifySuccess: true,
+        userLookupSuccess: false,
+        authFailureStage: 'user_lookup',
+        selectedSessionSource: null,
+        attemptedSessionSources: ['cookie'],
+      },
+    });
+    expect(JSON.stringify(reply.payload)).not.toContain(token);
   });
 
   it('authenticates frontend users from the HttpOnly session cookie', async () => {
