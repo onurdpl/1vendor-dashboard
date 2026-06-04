@@ -218,18 +218,19 @@ describe('OrdersPage control center', () => {
     expect(screen.getAllByRole('searchbox')).toHaveLength(1);
     const metricsStrip = screen.getByLabelText('Orders operational metrics');
     expect(metricsStrip).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Total orders')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Awaiting shipment')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Tracking missing')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Fulfilled')).toBeInTheDocument();
-    expect(within(metricsStrip).getByText('Tracking visible')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Work priority')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Shipment queue')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Allocation issues')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Tracking sync')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Operations health')).toBeInTheDocument();
+    expect(within(metricsStrip).getByText('Shopify sync')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getAllByRole('combobox')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Filters' })).toBeVisible();
     expect(screen.getAllByText('Tracking').length).toBeGreaterThan(0);
     expect(screen.getAllByText('DHL / TRK-A-1002').length).toBeGreaterThan(0);
     expect(screen.getAllByText('1 line items').length).toBeGreaterThan(0);
-    expect(screen.getByRole('link', { name: 'İNCELE' })).toHaveAttribute('href', '/orders/ORD-A-1002');
+    expect(screen.getByRole('link', { name: 'View' })).toHaveAttribute('href', '/orders/ORD-A-1002');
     expect(await screen.findByText('Barcode gateway license')).toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Monitor delivery evidence');
     expect(screen.getByRole('img', { name: 'Barcode gateway license product image' })).toHaveAttribute(
@@ -237,7 +238,7 @@ describe('OrdersPage control center', () => {
       'https://cdn.example.com/barcode-license.png',
     );
     expect(screen.queryByText('0 attention')).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'View' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'İNCELE' })).not.toBeInTheDocument();
   });
 
   it('renders the inspector line item initials fallback when imageUrl is missing', async () => {
@@ -281,7 +282,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?workflow=awaiting-shipment']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Awaiting shipment');
-    expect(screen.getByRole('button', { name: /Awaiting shipment/i })).toHaveClass('is-active');
+    expect(screen.getByRole('button', { name: /Shipment queue/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1001')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
 
@@ -318,7 +319,7 @@ describe('OrdersPage control center', () => {
     renderOrdersPage(['/orders?workflow=blocked-allocation']);
 
     expect(await screen.findByLabelText('Active workflow filter')).toHaveTextContent('Blocked allocation');
-    expect(screen.getByRole('button', { name: /Blocked/i })).toHaveClass('is-active');
+    expect(screen.getByRole('button', { name: /Allocation issues/i })).toHaveClass('is-active');
     expect((await screen.findAllByText('#1005')).length).toBeGreaterThan(0);
     expect(screen.queryByText('#1002')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Review allocation');
@@ -405,7 +406,7 @@ describe('OrdersPage control center', () => {
     expect(screen.getByRole('heading', { name: 'Orders' })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('Search order, customer, tracking, carrier...')).toBeInTheDocument();
     expect(screen.getByRole('columnheader', { name: 'Order' })).toBeInTheDocument();
-    expect(screen.getByRole('columnheader', { name: 'Status' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Fulfillment' })).toBeInTheDocument();
     expect(screen.getAllByRole('row').length).toBeGreaterThan(1);
     expect(screen.getAllByRole('heading', { name: 'Waiting for vendor context' }).length).toBeGreaterThan(0);
     expect(screen.queryByText('Order detail will hydrate after the list finishes loading.')).not.toBeInTheDocument();
@@ -555,7 +556,7 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    const labelButton = await screen.findByRole('button', { name: /Etiketi yazdır/i });
+    const labelButton = await screen.findByRole('button', { name: /Print label/i });
     await userEvent.click(labelButton);
 
     expect(openMock).toHaveBeenCalledWith('https://labels.example/TRK-A-1002.pdf', '_blank', 'noopener,noreferrer');
@@ -590,7 +591,7 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    const labelButton = await screen.findByRole('button', { name: /Kargo etiketi yazdır/i });
+    const labelButton = await screen.findByRole('button', { name: /Create shipment/i });
     expect(screen.getByLabelText('Workflow action guidance')).toHaveTextContent('Create shipment');
     await userEvent.click(labelButton);
 
@@ -628,7 +629,7 @@ describe('OrdersPage control center', () => {
 
     renderOrdersPage();
 
-    const labelButton = await screen.findByRole('button', { name: /Tekrar dene/i });
+    const labelButton = await screen.findByRole('button', { name: /Retry shipment/i });
     await userEvent.click(labelButton);
 
     await waitFor(() =>

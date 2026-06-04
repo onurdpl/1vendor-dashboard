@@ -66,6 +66,9 @@ export type AppEnv = {
   NAVLUNGO_DEFAULT_BARCODE_FORMAT?: string;
   NAVLUNGO_DEFAULT_CARRIER_ID?: string;
   NAVLUNGO_CREATE_POST_PROBE_CONFIRM?: string;
+  IYZICO_SANDBOX_API_KEY?: string;
+  IYZICO_SANDBOX_SECRET_KEY?: string;
+  IYZICO_SANDBOX_BASE_URL?: string;
 };
 
 function normalizeNodeEnv(value: string | undefined): NodeEnv {
@@ -238,6 +241,9 @@ export function loadEnv(): AppEnv {
   const navlungoDefaultBarcodeFormat = process.env.NAVLUNGO_DEFAULT_BARCODE_FORMAT || undefined;
   const navlungoDefaultCarrierId = process.env.NAVLUNGO_DEFAULT_CARRIER_ID || undefined;
   const navlungoCreatePostProbeConfirm = process.env.NAVLUNGO_CREATE_POST_PROBE_CONFIRM || undefined;
+  const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
+  const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
+  const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
   const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
 
@@ -360,5 +366,8 @@ export function loadEnv(): AppEnv {
     NAVLUNGO_DEFAULT_BARCODE_FORMAT: navlungoDefaultBarcodeFormat,
     NAVLUNGO_DEFAULT_CARRIER_ID: navlungoDefaultCarrierId,
     NAVLUNGO_CREATE_POST_PROBE_CONFIRM: navlungoCreatePostProbeConfirm,
+    IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
+    IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
+    IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,
   };
 }
