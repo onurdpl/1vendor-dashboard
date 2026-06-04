@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import React from 'react';
+import { captureFrontendError } from '../lib/sentry';
 
 type ErrorBoundaryProps = {
   children: ReactNode;
@@ -23,10 +24,15 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('[client-render-error]', {
+    const context = {
       routeName: this.props.routeName ?? 'unknown',
-      message: error.message,
       componentStack: info.componentStack,
+    };
+    captureFrontendError(error, context);
+    console.error('[client-render-error]', {
+      routeName: context.routeName,
+      message: error.message,
+      componentStack: context.componentStack,
     });
   }
 

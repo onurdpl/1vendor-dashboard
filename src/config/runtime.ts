@@ -7,6 +7,7 @@ type RuntimeEnv = ImportMeta['env'] & {
   VITE_APP_VERSION?: string;
   VITE_BUILD_TIMESTAMP?: string;
   VITE_GIT_COMMIT?: string;
+  VITE_SENTRY_DSN?: string;
 };
 
 const env = import.meta.env as RuntimeEnv;

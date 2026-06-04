@@ -31,6 +31,7 @@ import { registerVendorIntegrationRoutes } from './modules/vendor-integration/ve
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
+import { registerBackendSentryFastifyHooks } from './lib/sentry.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -210,6 +211,7 @@ export function createApp() {
   const app = Fastify({
     logger: env.NODE_ENV !== 'test',
   });
+  registerBackendSentryFastifyHooks(app, env);
 
   void app.register(cors, {
     origin: ((origin, callback) => {
