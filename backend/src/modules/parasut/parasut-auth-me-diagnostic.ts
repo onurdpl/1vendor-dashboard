@@ -24,6 +24,10 @@ const REQUIRED_ENV_KEYS = [
   'PARASUT_PASSWORD',
 ] as const;
 const SENSITIVE_KEY_PATTERN = /access|refresh|token|secret|password|authorization|client_secret/i;
+const JWT_LIKE_PATTERN = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
+const BEARER_VALUE_PATTERN = /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi;
+const KEY_VALUE_SECRET_PATTERN =
+  /\b(access[_-]?token|refresh[_-]?token|token|client[_-]?secret|password|authorization)\b\s*[:=]\s*([^\s,;&]+)/gi;
 
 function readEnv(env: ParasutEnv, key: string) {
   return env[key]?.trim() ?? '';
@@ -55,6 +59,36 @@ function summarizeBody(body: unknown) {
   return {
     bodyType: 'object',
     bodyKeys: Object.keys(body).filter((key) => !SENSITIVE_KEY_PATTERN.test(key)).sort(),
+  };
+}
+
+function sanitizeDiagnosticText(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  return trimmed
+    .replace(JWT_LIKE_PATTERN, '[redacted-jwt]')
+    .replace(BEARER_VALUE_PATTERN, 'Bearer [redacted]')
+    .replace(KEY_VALUE_SECRET_PATTERN, '$1=[redacted]');
+}
+
+function extractOAuthErrorDetails(body: unknown) {
+  if (!isRecord(body)) {
+    return {};
+  }
+
+  const error = sanitizeDiagnosticText(body.error);
+  const errorDescription = sanitizeDiagnosticText(body.error_description);
+
+  return {
+    ...(error ? { error } : {}),
+    ...(errorDescription ? { errorDescription } : {}),
   };
 }
 
@@ -233,6 +267,7 @@ export async function runParasutAuthMeDiagnostic(options: ParasutAuthMeDiagnosti
           status: tokenResponse.status,
           contentType: tokenResponse.contentType,
           ...summarizeBody(tokenResponse.body),
+          ...extractOAuthErrorDetails(tokenResponse.body),
           tokenReceived: Boolean(accessToken),
         },
         error: {

@@ -235,6 +235,7 @@ describe('Paraşüt auth/me diagnostic probe', () => {
       mockJsonResponse(
         {
           error: 'invalid_grant',
+          error_description: 'Invalid username or password.',
           access_token: PARASUT_SECRET_VALUES.accessToken,
           client_secret: PARASUT_SECRET_VALUES.clientSecret,
           password: PARASUT_SECRET_VALUES.password,
@@ -257,7 +258,9 @@ describe('Paraşüt auth/me diagnostic probe', () => {
         writesPerformed: false,
         oauth: expect.objectContaining({
           status: 401,
-          bodyKeys: ['error'],
+          bodyKeys: ['error', 'error_description'],
+          error: 'invalid_grant',
+          errorDescription: 'Invalid username or password.',
         }),
         error: expect.objectContaining({
           code: 'parasut_oauth_failed',
@@ -265,6 +268,45 @@ describe('Paraşüt auth/me diagnostic probe', () => {
       }),
     );
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.heroku-staging.parasut.com/oauth/token');
+    expect(fetchMock.mock.calls.some((call) => /contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
+    expectNoSecrets(result.body);
+  });
+
+  it('redacts token-like substrings from OAuth diagnostic error strings', async () => {
+    const fetchMock = vi.fn(async () =>
+      mockJsonResponse(
+        {
+          error: `invalid_token token=${PARASUT_SECRET_VALUES.accessToken}`,
+          error_description: `Authorization Bearer ${PARASUT_SECRET_VALUES.accessToken}; client_secret=${PARASUT_SECRET_VALUES.clientSecret}; password=${PARASUT_SECRET_VALUES.password}; jwt=eyJabc.def.ghi`,
+        },
+        400,
+      ),
+    );
+
+    const result = await runParasutAuthMeDiagnostic({
+      env: buildEnv(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result.statusCode).toBe(502);
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        ok: false,
+        oauthSuccess: false,
+        meSuccess: false,
+        writesPerformed: false,
+        oauth: expect.objectContaining({
+          status: 400,
+          bodyKeys: ['error', 'error_description'],
+          error: 'invalid_token token=[redacted]',
+          errorDescription: 'Authorization Bearer [redacted]; client_secret=[redacted]; password=[redacted]; jwt=[redacted-jwt]',
+          tokenReceived: false,
+        }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some((call) => /contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
     expectNoSecrets(result.body);
   });
 });
