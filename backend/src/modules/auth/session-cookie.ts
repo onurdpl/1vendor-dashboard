@@ -46,11 +46,12 @@ function serializeCookie(input: {
   httpOnly?: boolean;
   secure: boolean;
 }) {
+  const sameSite = input.secure ? 'None' : 'Lax';
   const attributes = [
     `${input.name}=${encodeURIComponent(input.value)}`,
     `Max-Age=${Math.max(0, Math.floor(input.maxAgeSeconds))}`,
     `Path=${COOKIE_PATH}`,
-    'SameSite=Lax',
+    `SameSite=${sameSite}`,
   ];
 
   if (input.httpOnly) {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 
@@ -103,21 +103,51 @@ function createReply() {
 }
 
 function createLoginRoute(env = buildEnv()) {
-  let handler: ((request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>) | null = null;
+  return createAuthRouteHandlers(env).post['/auth/login'] ?? null;
+}
+
+function createAuthRouteHandlers(env = buildEnv()) {
+  type Handler = (request: Record<string, unknown>, reply: ReturnType<typeof createReply>) => Promise<unknown>;
+  type Route = {
+    preHandler?: Handler;
+    handler: Handler;
+  };
+  const handlers = {
+    post: {} as Record<string, Handler>,
+    get: {} as Record<string, Route>,
+  };
   const app = {
-    post: vi.fn((path: string, routeHandler: typeof handler) => {
-      if (path === '/auth/login') {
-        handler = routeHandler;
-      }
+    post: vi.fn((path: string, routeHandler: Handler) => {
+      handlers.post[path] = routeHandler;
     }),
-    get: vi.fn(),
+    get: vi.fn((path: string, _optionsOrHandler: unknown, maybeHandler?: Handler) => {
+      handlers.get[path] = typeof _optionsOrHandler === 'function'
+        ? { handler: _optionsOrHandler }
+        : {
+            preHandler: (_optionsOrHandler as { preHandler?: Handler } | undefined)?.preHandler,
+            handler: maybeHandler as Handler,
+          };
+    }),
     log: {
       info: vi.fn(),
     },
   };
 
   registerAuthRoutes(app as never, env);
-  return handler;
+  return handlers;
+}
+
+async function invokeGetRoute(
+  route: ReturnType<typeof createAuthRouteHandlers>['get'][string] | undefined,
+  request: Record<string, unknown>,
+  reply: ReturnType<typeof createReply>,
+) {
+  await route?.preHandler?.(request, reply);
+  if (reply.sent) {
+    return reply.payload;
+  }
+
+  return route?.handler(request, reply);
 }
 
 function readSetCookieHeader(headers: Record<string, string | string[]>) {
@@ -129,6 +159,24 @@ function extractSessionCookie(setCookieHeader: string) {
   const cookie = setCookieHeader.split(';')[0] ?? '';
   expect(cookie).toMatch(new RegExp(`^${SESSION_COOKIE_NAME}=`));
   return cookie;
+}
+
+function base64Url(input: string) {
+  return Buffer.from(input).toString('base64url');
+}
+
+function signExpiredJwt(secret: string) {
+  const header = base64Url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }));
+  const payload = base64Url(JSON.stringify({
+    sub: 'user-1',
+    email: 'vendor@example.com',
+    role: 'vendor',
+    exp: Math.floor(Date.now() / 1000) - 60,
+  }));
+  const signature = createHmac('sha256', secret)
+    .update(`${header}.${payload}`)
+    .digest('base64url');
+  return `${header}.${payload}.${signature}`;
 }
 
 async function injectLogin(
@@ -242,6 +290,99 @@ describe('auth login rate limiting', () => {
     });
 
     expect(readSetCookieHeader(response.headers)).toContain('Secure');
+    expect(readSetCookieHeader(response.headers)).toContain('SameSite=None');
+  });
+
+  it('supports login then /auth/me using the HttpOnly cookie', async () => {
+    const handlers = createAuthRouteHandlers();
+    const loginReply = createReply();
+    const loginResult = await handlers.post['/auth/login']?.(
+      {
+        headers: {},
+        body: {
+          email: 'vendor@example.com',
+          password: 'demo123',
+        },
+        ip: '127.0.0.1',
+      },
+      loginReply,
+    );
+    const loginPayload = loginReply.sent ? loginReply.payload : loginResult;
+
+    expect(loginReply.statusCode).toBe(200);
+    expect(loginPayload).toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          email: 'vendor@example.com',
+          role: 'vendor',
+        }),
+        csrfToken: expect.any(String),
+      }),
+    );
+    expect(JSON.stringify(loginPayload)).not.toContain('eyJ');
+
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(loginReply.headers));
+    const meReply = createReply();
+    const meResult = await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        headers: {
+          cookie: sessionCookie,
+        },
+      },
+      meReply,
+    );
+    const mePayload = meReply.sent ? meReply.payload : meResult;
+
+    expect(meReply.statusCode).toBe(200);
+    expect(mePayload).toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          email: 'vendor@example.com',
+          role: 'vendor',
+        }),
+        csrfToken: expect.any(String),
+      }),
+    );
+  });
+
+  it('rejects /auth/me when the session cookie is missing', async () => {
+    const handlers = createAuthRouteHandlers();
+    const reply = createReply();
+
+    await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        headers: {},
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual({ message: 'Unauthorized' });
+  });
+
+  it('rejects /auth/me when the session cookie is expired', async () => {
+    const env = buildEnv();
+    const handlers = createAuthRouteHandlers(env);
+    const reply = createReply();
+    const expiredToken = signExpiredJwt(env.JWT_SECRET);
+
+    await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        headers: {
+          cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(expiredToken)}`,
+        },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual({ message: 'Unauthorized' });
   });
 
   it('authenticates frontend users from the HttpOnly session cookie', async () => {

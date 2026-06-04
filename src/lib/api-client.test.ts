@@ -178,4 +178,36 @@ describe('apiClient real-mode cookie auth', () => {
     expect(headers.get('X-CSRF-Token')).toBe('csrf-from-cookie-session');
     expect(window.localStorage.getItem('vendor-dashboard.session-token')).toBe('stale-local-token');
   });
+
+  it('sends credentials with /auth/me without attaching a localStorage bearer token in real mode', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', 'https://backend.example.com');
+    window.localStorage.clear();
+    setToken('stale-local-token');
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      user: {
+        email: 'admin@demo.com',
+        name: 'Demo Admin',
+        role: 'admin',
+        vendorAccess: [],
+      },
+      csrfToken: 'csrf-from-cookie-session',
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    await realApiClient.get('/auth/me', { vendorId: null });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Headers;
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://backend.example.com/auth/me');
+    expect(init.credentials).toBe('include');
+    expect(headers.get('Authorization')).toBeNull();
+  });
 });

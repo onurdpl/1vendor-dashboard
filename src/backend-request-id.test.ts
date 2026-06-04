@@ -45,4 +45,25 @@ describe('backend request id diagnostics', () => {
       await app.close();
     }
   });
+
+  it('allows credentialed CORS requests from an exact configured frontend origin', async () => {
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/auth/me',
+        headers: {
+          origin: 'http://localhost:5173',
+          'access-control-request-method': 'GET',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+    } finally {
+      await app.close();
+    }
+  });
 });
