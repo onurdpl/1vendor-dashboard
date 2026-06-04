@@ -31,53 +31,6 @@ const adminNavItems = [
   { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X' },
 ];
 
-type SidebarNavItem = {
-  to: string;
-  label: string;
-  icon: string;
-  adminOnly?: boolean;
-};
-
-const ordersSidebarGroups: Array<{ label: string; items: SidebarNavItem[] }> = [
-  {
-    label: 'Control center',
-    items: [
-      { to: '/orders', label: 'Orders', icon: 'O' },
-      { to: '/orders', label: 'Shipments', icon: 'S' },
-      { to: '/returns', label: 'Returns', icon: 'R' },
-      { to: '/admin/operations', label: 'Allocations', icon: 'A', adminOnly: true },
-      { to: '/orders', label: 'Tracking', icon: 'T' },
-      { to: '/admin/operations', label: 'Exceptions', icon: 'E', adminOnly: true },
-    ],
-  },
-  {
-    label: 'Insights',
-    items: [
-      { to: '/', label: 'Dashboard', icon: 'D' },
-      { to: '/finance', label: 'Reports', icon: 'R' },
-      { to: '/admin/operations', label: 'Reconciliation', icon: 'N', adminOnly: true },
-      { to: '/admin/diagnostics', label: 'Diagnostics', icon: 'X', adminOnly: true },
-    ],
-  },
-  {
-    label: 'Vendors',
-    items: [
-      { to: '/admin/providers', label: 'Vendors', icon: 'V', adminOnly: true },
-      { to: '/vendor/profile', label: 'Catalog', icon: 'C' },
-      { to: '/finance', label: 'Performance', icon: 'P' },
-    ],
-  },
-  {
-    label: 'Settings',
-    items: [
-      { to: '/automation', label: 'Rules', icon: 'R' },
-      { to: '/admin/providers', label: 'Integrations', icon: 'I', adminOnly: true },
-      { to: '/admin/support', label: 'Users', icon: 'U', adminOnly: true },
-      { to: '/vendor/profile', label: 'Settings', icon: 'S' },
-    ],
-  },
-];
-
 const missingVendorContext = {
   vendorId: '',
   vendorName: 'No vendor selected',
@@ -107,12 +60,6 @@ export function AppShell() {
     : vendors;
   const currentVendor =
     visibleVendors.find((vendor) => vendor.vendorId === selectedVendorId) ?? visibleVendors[0] ?? vendors[0] ?? missingVendorContext;
-  const visibleOrdersSidebarGroups = ordersSidebarGroups
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) => !item.adminOnly || isAdmin),
-    }))
-    .filter((group) => group.items.length > 0);
 
   useEffect(() => {
     setSelectedVendorId(appReadiness.currentVendor.vendorId);
@@ -150,90 +97,63 @@ export function AppShell() {
       <aside className="sidebar">
         <div className="brand shell-brand">
           <div className="brand-mark" aria-hidden="true">
-            {isOrdersRoute ? 'VB' : 'VD'}
+            VD
           </div>
           <div>
-            <div className="brand-name">{isOrdersRoute ? 'VendBridge' : 'VendorOps'}</div>
-            <div className="brand-subtitle">{isOrdersRoute ? 'Operational command' : 'Shopify control center'}</div>
+            <div className="brand-name">VendorOps</div>
+            <div className="brand-subtitle">Shopify control center</div>
           </div>
         </div>
 
-        {isOrdersRoute ? (
-          <div className="orders-sidebar-nav">
-            {visibleOrdersSidebarGroups.map((group) => (
-              <div className="nav-group" key={group.label}>
-                <div className="nav-group-label">{group.label}</div>
-                <nav className="nav" aria-label={group.label}>
-                  {group.items.map((item) => (
-                    <NavLink
-                      key={`${group.label}-${item.label}`}
-                      to={item.to}
-                      end={item.to === '/'}
-                      className={({ isActive }) =>
-                        isActive && (item.to !== '/orders' || item.label === 'Orders') ? 'nav-link active' : 'nav-link'
-                      }
-                    >
-                      <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                      {item.label}
-                    </NavLink>
-                  ))}
-                </nav>
-              </div>
+        <div className="nav-group">
+          <div className="nav-group-label">Workspace</div>
+          <nav className="nav" aria-label="Primary">
+            {workspaceNavItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end
+                className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+              >
+                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                {item.label}
+              </NavLink>
             ))}
-          </div>
-        ) : (
-          <>
-            <div className="nav-group">
-              <div className="nav-group-label">Workspace</div>
-              <nav className="nav" aria-label="Primary">
-                {workspaceNavItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    end
-                    className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                  >
-                    <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
-            </div>
+          </nav>
+        </div>
 
-            <div className="nav-group">
-              <div className="nav-group-label">Operations</div>
-              <nav className="nav" aria-label="Operations">
-                {operationsNavItems.map((item) => (
-                  <NavLink
-                    key={item.to}
-                    to={item.to}
-                    className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                  >
-                    <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                    {item.label}
-                  </NavLink>
-                ))}
-              </nav>
-            </div>
-            {isAdmin ? (
-              <div className="nav-group">
-                <div className="nav-group-label admin-nav-label">Admin tools</div>
-                <nav className="nav" aria-label="Admin tools">
-                  {adminNavItems.map((item) => (
-                    <NavLink
-                      key={item.to}
-                      to={item.to}
-                      className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
-                    >
-                      <span className="nav-icon" aria-hidden="true">{item.icon}</span>
-                      {item.label}
-                    </NavLink>
-                  ))}
-                </nav>
-              </div>
-            ) : null}
-          </>
-        )}
+        <div className="nav-group">
+          <div className="nav-group-label">Operations</div>
+          <nav className="nav" aria-label="Operations">
+            {operationsNavItems.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+              >
+                <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                {item.label}
+              </NavLink>
+            ))}
+          </nav>
+        </div>
+        {isAdmin ? (
+          <div className="nav-group">
+            <div className="nav-group-label admin-nav-label">Admin tools</div>
+            <nav className="nav" aria-label="Admin tools">
+              {adminNavItems.map((item) => (
+                <NavLink
+                  key={item.to}
+                  to={item.to}
+                  className={({ isActive }) => (isActive ? 'nav-link active' : 'nav-link')}
+                >
+                  <span className="nav-icon" aria-hidden="true">{item.icon}</span>
+                  {item.label}
+                </NavLink>
+              ))}
+            </nav>
+          </div>
+        ) : null}
 
         <div className="vendor-card shell-card">
           <div>

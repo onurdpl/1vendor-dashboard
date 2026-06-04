@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import {
   EmptyStatePanel,
   FilterBar,
+  OperationalActionGroup,
   OperationalSection,
   SectionErrorRetry,
   SectionSkeleton,
@@ -137,15 +138,6 @@ function getAttentionLabel(order: OrderSummary) {
   return 'In flow';
 }
 
-function orderNeedsAction(order: OrderSummary) {
-  return (
-    order.allocationStatus === 'vendor_blocked' ||
-    order.allocationStatus === 'pending_reassignment' ||
-    order.shippingStatus === 'Awaiting Shipment' ||
-    !order.trackingNumber && !order.carrier
-  );
-}
-
 function getLifecyclePrimaryLabel(order: OrderSummary) {
   if (order.shippingStatus === 'Awaiting Shipment') {
     return 'Awaiting shipment';
@@ -242,16 +234,14 @@ function parseOperationalAmount(amount: string) {
   return Number.isFinite(value) ? value : 0;
 }
 
-function MetricIcon({ tone }: { tone: string }) {
-  if (tone === 'blocked') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M12 4 4 19h16L12 4z" />
-        <path d="M12 9v4" />
-        <path d="M12 16h.01" />
-      </svg>
-    );
+function formatMetricShare(value: number, total: number) {
+  if (!total) {
+    return '0% of queue';
   }
+  return `${Math.round((value / total) * 100)}% of queue`;
+}
+
+function MetricIcon({ tone }: { tone: string }) {
   if (tone === 'awaiting') {
     return (
       <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -292,6 +282,22 @@ function MetricIcon({ tone }: { tone: string }) {
       <path d="M6 7h12v10H6z" />
       <path d="M9 7V5h6v2" />
       <path d="M9 11h6" />
+    </svg>
+  );
+}
+
+function MetricSparkline({ tone }: { tone: string }) {
+  const pointsByTone: Record<string, string> = {
+    orders: '0,18 12,15 24,16 36,10 48,13 60,7 72,9 84,4',
+    awaiting: '0,16 12,17 24,14 36,15 48,10 60,12 72,8 84,9',
+    missing: '0,12 12,12 24,12 36,12 48,12 60,12 72,12 84,12',
+    fulfilled: '0,17 12,16 24,16 36,14 48,13 60,11 72,8 84,5',
+    tracking: '0,18 12,16 24,17 36,14 48,12 60,11 72,7 84,6',
+  };
+
+  return (
+    <svg className="orders-kpi-sparkline" viewBox="0 0 84 24" preserveAspectRatio="none" aria-hidden="true">
+      <polyline points={pointsByTone[tone] ?? pointsByTone.orders} />
     </svg>
   );
 }
@@ -550,66 +556,15 @@ export function OrdersPage() {
     };
   }, [orders]);
 
+  const orderKpis = [
+    { label: 'Total orders', value: summary.total, detail: 'Current vendor scope', tone: 'orders', trend: 'Live queue' },
+    { label: 'Awaiting shipment', value: summary.awaitingShipment, detail: 'Needs fulfillment progress', tone: 'awaiting', trend: formatMetricShare(summary.awaitingShipment, summary.total) },
+    { label: 'Tracking missing', value: summary.trackingMissing, detail: 'No carrier evidence yet', tone: 'missing', trend: formatMetricShare(summary.trackingMissing, summary.total) },
+    { label: 'Fulfilled', value: summary.fulfilled, detail: 'Fulfillment complete', tone: 'fulfilled', trend: formatMetricShare(summary.fulfilled, summary.total) },
+    { label: 'Tracking visible', value: summary.tracked, detail: 'Carrier or tracking present', tone: 'tracking', trend: formatMetricShare(summary.tracked, summary.total) },
+  ];
+
   const recentOrders = filteredOrders.slice(0, 3);
-  const needsActionOrders = filteredOrders.filter(orderNeedsAction);
-  const inFlowOrders = filteredOrders.filter((order) => !orderNeedsAction(order));
-
-  const latestOperationalTimestamp = useMemo(() => {
-    const timestamps = safeArray(orders)
-      .map((order) => getSafeTimestamp(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date, 0))
-      .filter((value) => value > 0);
-    return timestamps.length ? Math.max(...timestamps) : 0;
-  }, [orders]);
-  const latestOperationalDate = latestOperationalTimestamp ? new Date(latestOperationalTimestamp).toISOString() : null;
-  const latestOperationalLabel = latestOperationalDate ? formatDate(latestOperationalDate) : 'Not synced';
-
-  const priorityQueues = [
-    {
-      key: 'awaiting' as OrderQuickFilter,
-      label: 'Shipment queue',
-      value: summary.awaitingShipment,
-      detail: 'Awaiting shipment',
-      tone: 'awaiting',
-    },
-    {
-      key: 'blocked' as OrderQuickFilter,
-      label: 'Allocation issues',
-      value: summary.blocked,
-      detail: 'Needs attention',
-      tone: 'blocked',
-    },
-    {
-      key: 'tracking_missing' as OrderQuickFilter,
-      label: 'Tracking sync',
-      value: summary.trackingMissing,
-      detail: 'Missing or failed',
-      tone: 'missing',
-    },
-  ];
-
-  const operationsHealth = [
-    {
-      label: 'Shopify sync',
-      state: diagnostics ? 'Check API' : 'Synced',
-      detail: diagnostics?.status ? `HTTP ${diagnostics.status}` : 'Canonical data',
-      age: latestOperationalLabel,
-      tone: diagnostics ? 'warning' : 'success',
-    },
-    {
-      label: 'Provider status',
-      state: summary.trackingMissing ? 'Provider pending' : 'Healthy',
-      detail: `${summary.trackingMissing} missing tracking`,
-      age: `${summary.tracked} tracked`,
-      tone: summary.trackingMissing ? 'warning' : 'success',
-    },
-    {
-      label: 'Reconciliation',
-      state: activeWorkflowFilter ? 'Filtered' : 'Fresh',
-      detail: activeWorkflowFilter?.label ?? `${filteredOrders.length} visible orders`,
-      age: `${summary.total} in scope`,
-      tone: 'info',
-    },
-  ];
 
   const quickFilters: Array<{ key: OrderQuickFilter; label: string; count: number }> = [
     { key: 'all', label: 'All orders', count: orders?.length ?? 0 },
@@ -675,140 +630,52 @@ export function OrdersPage() {
 
   function getSmartLabelButtonText(shipmentExecution?: ShipmentExecution | null) {
     if (isLabelActionPending) {
-      return 'Creating shipment...';
+      return 'Etiket oluşturuluyor...';
     }
     if (shipmentExecution?.labelUrl) {
-      return 'Print label';
+      return 'Etiketi yazdır';
     }
     if (shipmentExecution?.shipmentStatus === 'failed' || labelActionFeedback?.tone === 'error') {
-      return 'Retry shipment';
+      return 'Tekrar dene';
     }
-    return 'Create shipment';
-  }
-
-  function renderOrderRow(order: OrderSummary) {
-    const lifecyclePrimary = getLifecyclePrimaryLabel(order);
-    const lifecycleSecondary = getLifecycleSecondaryLabel(order);
-    const shippingOperational = getShippingOperationalLabel(order);
-    const trackingPresent = Boolean(order.trackingNumber || order.carrier);
-
-    return (
-      <OperationalTableRow
-        key={order.id}
-        selected={selectedOrderSummary?.id === order.id}
-        onSelect={() => setSelectedOrderId(order.id)}
-      >
-        <span className="orders-table-order-cell">
-          <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
-          <small>{formatDate(order.date)}</small>
-        </span>
-        <span className="orders-table-allocation-cell">
-          <strong>{currentVendor.vendorName}</strong>
-          <small>{safeStatusLabel(order.allocationStatus)}</small>
-        </span>
-        <span className="orders-table-customer-cell">
-          <strong>{getCustomerLabel(order.customer)}</strong>
-          <small>{order.channel}</small>
-        </span>
-        <div className="orders-table-status-cell">
-          <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
-          {lifecycleSecondary ? <small>{lifecycleSecondary}</small> : null}
-        </div>
-        <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
-          <strong>{shippingOperational.label}</strong>
-          {shippingOperational.helper ? <small>{shippingOperational.helper}</small> : null}
-        </span>
-        <span className="orders-table-tracking-cell">
-          <StatusBadge tone={trackingPresent ? 'info' : 'danger'}>
-            {trackingPresent ? 'Tracking synced' : 'Tracking missing'}
-          </StatusBadge>
-          <small>{trackingPresent ? getTrackingLabel(order) : 'Carrier evidence pending'}</small>
-        </span>
-        <span className="orders-table-amount-cell">
-          <strong className="finance-amount-emphasis">{order.amount}</strong>
-          <small>{getLineItemCount(order)} line items</small>
-        </span>
-      </OperationalTableRow>
-    );
+    return 'Kargo etiketi yazdır';
   }
 
   return (
     <section className="op-page orders-control-center orders-enterprise-workspace">
       <div className="orders-workspace-shell">
-        <div className="orders-command-header">
-          <div className="orders-command-title">
-            <h2>Orders</h2>
-            <p>Allocation-scoped order operations, fulfillment progress, and tracking sync.</p>
-          </div>
-          <div className="orders-context-strip" aria-label="Orders workspace context">
-            <div className="orders-context-card">
-              <span>Vendor scope</span>
-              <strong>{currentVendor.vendorName}</strong>
+        <div className="orders-compact-header">
+          <div>
+            <div className="orders-title-row">
+              <h2>Orders</h2>
+              <StatusBadge tone="info">{currentVendor.vendorName}</StatusBadge>
             </div>
-            <div className="orders-context-card orders-context-good">
-              <span>Shopify canonical</span>
-              <strong>{diagnostics ? 'Review API' : 'Synced'}</strong>
-            </div>
-            <div className="orders-context-card">
-              <span>Last queue update</span>
-              <strong>{latestOperationalLabel}</strong>
-            </div>
+            <p>Manage shipments and tracking</p>
           </div>
         </div>
 
-        <section className="orders-priority-band" aria-label="Orders operational metrics">
-          <div className="orders-work-priority">
-            <div className="orders-band-heading">
-              <h3>Work priority</h3>
-              <span>{needsActionOrders.length} needs action</span>
-            </div>
-            <div className="orders-priority-grid">
-              {priorityQueues.map((queue) => (
-                <button
-                  key={queue.key}
-                  type="button"
-                  className={`orders-priority-card orders-priority-${queue.tone} ${effectiveQuickFilter === queue.key ? 'is-active' : ''}`}
-                  onClick={() => {
-                    clearWorkflowFilter();
-                    setQuickFilter(queue.key);
-                  }}
-                >
-                  <span className="orders-priority-icon" aria-hidden="true">
-                    <MetricIcon tone={queue.tone} />
+        <div className="op-control-layout orders-control-layout orders-workspace-grid">
+          <div className="orders-left-column">
+            <div className="orders-enterprise-kpis" aria-label="Orders operational metrics">
+              {orderKpis.map((metric) => (
+                <article key={metric.label} className={`orders-enterprise-kpi orders-kpi-${metric.tone}`}>
+                  <span className="orders-kpi-icon" aria-hidden="true">
+                    <MetricIcon tone={metric.tone} />
                   </span>
-                  <span>
-                    <strong>{queue.label}</strong>
-                    <small>{queue.detail}</small>
-                  </span>
-                  <b>{queue.value}</b>
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="orders-health-panel">
-            <div className="orders-band-heading">
-              <h3>Operations health</h3>
-              <button type="button" className="orders-link-button" onClick={() => void refetch()}>
-                Refresh
-              </button>
-            </div>
-            <div className="orders-health-list">
-              {operationsHealth.map((item) => (
-                <div key={item.label} className="orders-health-row">
-                  <span className={`orders-health-dot orders-health-${item.tone}`} aria-hidden="true" />
-                  <div>
-                    <strong>{item.label}</strong>
-                    <small>{item.detail}</small>
+                  <div className="orders-kpi-copy">
+                    <span>{metric.label}</span>
+                    <strong>{metric.value}</strong>
+                    <small>{metric.detail}</small>
                   </div>
-                  <span>{item.state}</span>
-                  <small>{item.age}</small>
-                </div>
+                  <div className="orders-kpi-signal">
+                    <small>{metric.trend}</small>
+                    <MetricSparkline tone={metric.tone} />
+                  </div>
+                </article>
               ))}
             </div>
-          </div>
-        </section>
 
-        <div className="orders-filter-card">
+            <div className="orders-filter-card">
               <OperationalToolbar>
                 <SearchInput
                   placeholder="Search order, customer, tracking, carrier..."
@@ -899,11 +766,9 @@ export function OrdersPage() {
               </div>
             </div>
 
-        <div className="op-control-layout orders-control-layout orders-workspace-grid">
-          <div className="orders-left-column">
             <div className="op-main-column orders-table-shell">
               <OperationalTable
-                columns={['Order', 'Vendor allocation', 'Customer', 'Fulfillment', 'Shipping', 'Tracking', 'Amount']}
+                columns={['Order', 'Status', 'Tracking', 'Value', 'Updated', 'Actions']}
                 className="orders-op-table orders-op-table-v3"
               >
                 {isError && !orders ? (
@@ -929,7 +794,7 @@ export function OrdersPage() {
                     />
                   </OperationalTableRow>
                 ) : isLoading ? (
-                  <TableSkeletonRows columns={7} rows={5} />
+                  <TableSkeletonRows columns={6} rows={5} />
                 ) : filteredOrders.length === 0 ? (
                   <OperationalTableRow>
                     <EmptyStatePanel
@@ -937,30 +802,53 @@ export function OrdersPage() {
                       description={activeWorkflowFilter?.emptyDescription ?? 'Adjust the search or filters to inspect vendor-scoped Shopify orders.'}
                     />
                   </OperationalTableRow>
-                ) : (
-                  <>
-                    {needsActionOrders.length ? (
-                      <OperationalTableRow className="orders-group-row">
-                        <span className="orders-group-label">Needs action ({needsActionOrders.length})</span>
-                      </OperationalTableRow>
-                    ) : null}
-                    {needsActionOrders.map(renderOrderRow)}
-                    {inFlowOrders.length ? (
-                      <OperationalTableRow className="orders-group-row orders-group-row-muted">
-                        <span className="orders-group-label">In flow ({inFlowOrders.length})</span>
-                      </OperationalTableRow>
-                    ) : null}
-                    {inFlowOrders.map(renderOrderRow)}
-                  </>
-                )}
+                ) : filteredOrders.map((order) => {
+                  const lifecyclePrimary = getLifecyclePrimaryLabel(order);
+                  const lifecycleSecondary = getLifecycleSecondaryLabel(order);
+                  const shippingOperational = getShippingOperationalLabel(order);
+                  return (
+                    <OperationalTableRow
+                      key={order.id}
+                      selected={selectedOrderSummary?.id === order.id}
+                      onSelect={() => setSelectedOrderId(order.id)}
+                    >
+                      <span className="orders-table-order-cell">
+                        <strong>{formatShopifyOrderNumber(order.sourceShopifyOrderNumber)}</strong>
+                        <small>{getCustomerLabel(order.customer)}</small>
+                        <small>{currentVendor.vendorName} · {order.channel}</small>
+                      </span>
+                      <div className="orders-table-status-cell">
+                        <StatusBadge tone={getStatusTone(lifecyclePrimary)}>{lifecyclePrimary}</StatusBadge>
+                        {lifecycleSecondary ? <small>{lifecycleSecondary}</small> : null}
+                      </div>
+                      <span className={`orders-table-shipping-cell orders-table-shipping-${shippingOperational.tone}`}>
+                        <strong>{shippingOperational.label}</strong>
+                        {shippingOperational.helper ? <small>{shippingOperational.helper}</small> : null}
+                      </span>
+                      <span>
+                        <strong className="finance-amount-emphasis">{order.amount}</strong>
+                        <small>{getLineItemCount(order)} line items</small>
+                      </span>
+                      <span>
+                        <strong>{formatDate(order.shipmentUpdatedAt ?? order.fulfilledAt ?? order.date)}</strong>
+                        <small>{order.channel}</small>
+                      </span>
+                      <OperationalActionGroup>
+                        <Link className="button button-primary" to={`/orders/${order.id}`} onClick={(event) => event.stopPropagation()}>
+                          Open detail
+                        </Link>
+                      </OperationalActionGroup>
+                    </OperationalTableRow>
+                  );
+                })}
               </OperationalTable>
             </div>
           </div>
 
           <SideDetailPanel
-            eyebrow="Action workspace"
+            eyebrow={selectedOrder ? currentVendor.vendorName : 'Order detail'}
             title={selectedOrder ? formatShopifyOrderNumber(selectedOrder.sourceShopifyOrderNumber) : 'No order selected'}
-            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>View</Link> : null}
+            action={selectedOrder ? <Link className="button button-secondary" to={`/orders/${selectedOrder.id}`}>İNCELE</Link> : null}
           >
           {selectedOrder ? (
             (() => {
@@ -981,16 +869,11 @@ export function OrdersPage() {
                 hasShipment: Boolean(shipmentExecution),
                 hasLabel: Boolean(labelUrl),
               });
-              const railActionDescription =
-                selectedOrder.allocationStatus === 'pending_reassignment' || selectedOrder.allocationStatus === 'vendor_blocked'
-                  ? 'Resolve vendor scope before shipment work.'
-                  : workflowGuidance.description;
               const smartLabelDisabled = isLabelActionPending || Boolean(shipmentExecution && !shipmentExecution.labelUrl && shipmentExecution.shipmentStatus !== 'failed');
               const warehouseId = shipmentExecution?.warehouseId ?? '—';
               const lastUpdate = selectedOrder.shipmentUpdatedAt ?? shipmentExecution?.lastProviderResponseAt ?? selectedOrder.fulfilledAt ?? selectedOrder.date;
               const orderSnapshot = (selectedOrder as OrderDetail).orderSnapshot ?? null;
               const snapshotCurrency = getSnapshotCurrency(selectedOrder);
-              const railLineItems = safeArray((selectedOrder as OrderDetail).lineItems);
               const timelineItems: Array<{ label: string; at?: string | null; detail?: string }> = [
                 { label: 'Order received', at: formatDate(selectedOrder.date) },
               ];
@@ -1010,8 +893,32 @@ export function OrdersPage() {
 
               return (
             <>
-              <section className="orders-detail-card orders-recommended-action-card" aria-label="Smart label action">
-                <div className="orders-recommended-body">
+              <div className="orders-detail-rail-header">
+                <div className="orders-detail-rail-badges">
+                  <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{safeStatusLabel(selectedOrder.allocationStatus)}</StatusBadge>
+                  <StatusBadge tone={getStatusTone(selectedOrder.fulfillmentStatus)}>{selectedOrder.fulfillmentStatus}</StatusBadge>
+                </div>
+              </div>
+
+              <div className={`orders-detail-status-strip orders-detail-status-${shippingOperational.tone}`}>
+                <strong>{selectedOrder.shippingStatus}</strong>
+                <span>{shippingOperational.label}</span>
+                <span>Shopify {shopifyFulfillmentState?.toLowerCase() ?? 'unknown'}</span>
+              </div>
+
+              <WorkflowActionGuidance
+                actionLabel={workflowGuidance.actionLabel}
+                description={workflowGuidance.description}
+                tone={workflowGuidance.tone}
+              />
+
+              <section className="orders-smart-label-card" aria-label="Smart label action">
+                <button
+                  type="button"
+                  className="orders-smart-label-button"
+                  disabled={smartLabelDisabled}
+                  onClick={() => void handleSmartLabelAction(selectedOrder)}
+                >
                   <span className="orders-smart-label-icon" aria-hidden="true">
                     <svg viewBox="0 0 24 24">
                       <path d="M7 8V4h10v4" />
@@ -1020,32 +927,18 @@ export function OrdersPage() {
                       <path d="M17 11h.01" />
                     </svg>
                   </span>
-                  <WorkflowActionGuidance
-                    actionLabel={workflowGuidance.actionLabel}
-                    description={railActionDescription}
-                    tone={workflowGuidance.tone}
-                    title="Recommended next action"
-                  >
-                    <button
-                      type="button"
-                      className="orders-primary-action-button"
-                      disabled={smartLabelDisabled}
-                      onClick={() => void handleSmartLabelAction(selectedOrder)}
-                    >
-                      {getSmartLabelButtonText(shipmentExecution)}
-                    </button>
-                  </WorkflowActionGuidance>
-                </div>
-                <details className="orders-why-action">
-                  <summary>Why this action?</summary>
-                  <p>
-                    {labelUrl
-                        ? 'A provider label already exists for this allocation, so opening it avoids a duplicate shipment.'
+                  <span>
+                    <strong>{getSmartLabelButtonText(shipmentExecution)}</strong>
+                    <small>
+                      {labelUrl
+                        ? 'Open existing label without creating a duplicate.'
                         : shipmentExecution
-                          ? 'The shipment job already exists. The provider controls when tracking and label evidence becomes available.'
-                          : railActionDescription}
-                  </p>
-                </details>
+                          ? 'Shipment exists. Label availability is controlled by the provider.'
+                          : 'Create shipment and open label when available.'}
+                    </small>
+                  </span>
+                  <span className="orders-smart-label-arrow" aria-hidden="true">›</span>
+                </button>
                 {labelActionFeedback ? (
                   <p className={`orders-smart-label-feedback orders-smart-label-${labelActionFeedback.tone}`}>
                     {labelActionFeedback.message}
@@ -1053,107 +946,7 @@ export function OrdersPage() {
                 ) : null}
               </section>
 
-              <section className="orders-detail-card orders-allocation-card">
-                <div className="orders-card-heading-row">
-                  <h4>Allocation details</h4>
-                  <Link className="orders-rail-link" to={`/orders/${selectedOrder.id}`}>Edit allocation</Link>
-                </div>
-                <div className="orders-allocation-grid">
-                  <div>
-                    <span>Vendor</span>
-                    <strong>{currentVendor.vendorName}</strong>
-                  </div>
-                  <div>
-                    <span>Allocation</span>
-                    <strong>1 of {Math.max(getLineItemCount(selectedOrder), 1)}</strong>
-                  </div>
-                  <div>
-                    <span>Allocation status</span>
-                    <StatusBadge tone={getStatusTone(selectedOrder.allocationStatus)}>{safeStatusLabel(selectedOrder.allocationStatus)}</StatusBadge>
-                  </div>
-                  <div>
-                    <span>Requested</span>
-                    <strong>{formatDate(selectedOrder.date)}</strong>
-                  </div>
-                  <div>
-                    <span>Allocated</span>
-                    <strong>{formatDate(selectedOrder.shipmentCreatedAt ?? selectedOrder.date)}</strong>
-                  </div>
-                  <div>
-                    <span>Source</span>
-                    <strong>{selectedOrder.channel}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section className="orders-detail-card orders-line-items-card">
-                <h4>Line items ({getLineItemCount(selectedOrder)})</h4>
-                {railLineItems.length ? (
-                  <div className="order-detail-items">
-                    {railLineItems.slice(0, 1).map((item) => (
-                      <article key={item.id} className="order-detail-item">
-                        <ProductImagePreview
-                          imageUrl={item.imageUrl}
-                          fallbackLabel={getItemInitials(item.name || item.sku || 'Item')}
-                          alt={getLineItemImageAlt(item)}
-                          title={item.name || item.sku || 'Product image'}
-                          subtitle={[item.sku, item.variantTitle].filter(Boolean).join(' · ')}
-                          size="compact"
-                        />
-                        <div className="order-detail-item-copy">
-                          <strong>{item.name}</strong>
-                          <small>SKU: {item.sku}</small>
-                        </div>
-                        <div className="return-detail-item-meta">
-                          <span>Qty {item.quantity}</span>
-                          <span>{item.price}</span>
-                        </div>
-                        <details className="orders-line-item-audit">
-                          <summary>Tax detail</summary>
-                          <small>
-                            {[
-                              `VAT ${formatVatRate(item.vatRate)}`,
-                              item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
-                              `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
-                              `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
-                              item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
-                            ].filter(Boolean).join(' · ')}
-                          </small>
-                        </details>
-                      </article>
-                    ))}
-                    {railLineItems.length > 1 ? (
-                      <div className="orders-line-items-more">
-                        <span>{railLineItems.length - 1} more item{railLineItems.length - 1 === 1 ? '' : 's'}</span>
-                        <Link className="orders-rail-link" to={`/orders/${selectedOrder.id}`}>View all</Link>
-                      </div>
-                    ) : null}
-                  </div>
-                ) : (
-                  <p className="page-description">No line items synced.</p>
-                )}
-              </section>
-
-              <section className="orders-detail-card orders-support-card">
-                <div className="orders-support-row">
-                  <strong>Support & returns</strong>
-                  <span>
-                    <Link className="orders-rail-link" to={`/returns?order=${encodeURIComponent(String(selectedOrder.sourceShopifyOrderNumber))}`}>
-                      View returns
-                    </Link>
-                    <Link className="orders-rail-link" to={`/support?order=${encodeURIComponent(String(selectedOrder.sourceShopifyOrderNumber))}`}>
-                      Contact customer
-                    </Link>
-                  </span>
-                </div>
-              </section>
-
-              <section className="orders-detail-card orders-timeline-card">
-                <h4>Timeline</h4>
-                <TimelineBlock items={timelineItems} />
-              </section>
-
-              <section className="orders-detail-card orders-fulfillment-card">
+              <section className="orders-detail-card">
                 <h4>Fulfillment and shipping</h4>
                 <div className="orders-rail-summary-list">
                   <div>
@@ -1268,6 +1061,50 @@ export function OrdersPage() {
                   </div>
                 </section>
               ) : null}
+
+              <section className="orders-detail-card">
+                <h4>Line items</h4>
+                {(selectedOrder as OrderDetail).lineItems?.length ? (
+                  <div className="order-detail-items">
+                    {safeArray((selectedOrder as OrderDetail).lineItems).map((item) => (
+                      <article key={item.id} className="order-detail-item">
+                        <ProductImagePreview
+                          imageUrl={item.imageUrl}
+                          fallbackLabel={getItemInitials(item.name || item.sku || 'Item')}
+                          alt={getLineItemImageAlt(item)}
+                          title={item.name || item.sku || 'Product image'}
+                          subtitle={[item.sku, item.variantTitle].filter(Boolean).join(' · ')}
+                          size="compact"
+                        />
+                        <div className="order-detail-item-copy">
+                          <strong>{item.name}</strong>
+                          <small>{item.sku} · {item.variantTitle}</small>
+                          <small>
+                            {[
+                              `VAT ${formatVatRate(item.vatRate)}`,
+                              item.lineTaxAmount ? `VAT amount ${formatSnapshotAmount(item.lineTaxAmount, snapshotCurrency)}` : null,
+                              `Unit price incl. VAT ${formatSnapshotAmount(item.unitPriceVatIncluded, snapshotCurrency)}`,
+                              `Line total incl. VAT ${formatSnapshotAmount(item.lineTotalVatIncluded, snapshotCurrency)}`,
+                              item.shopifyProductId ? `Shopify product ${item.shopifyProductId}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          </small>
+                        </div>
+                        <div className="return-detail-item-meta">
+                          <span>Qty {item.quantity}</span>
+                          <span>{item.price}</span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="page-description">No line items synced.</p>
+                )}
+              </section>
+
+              <section className="orders-detail-card">
+                <h4>Operational timeline</h4>
+                <TimelineBlock items={timelineItems} />
+              </section>
 
               {isAdmin ? (
                 <details className="orders-detail-card orders-rail-diagnostics">
