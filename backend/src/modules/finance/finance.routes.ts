@@ -18,6 +18,30 @@ import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import type { PreparePayoutBatchDto, ShippingCostInputDto, VendorFinancialProfileUpdateDto } from './finance.types.js';
 
+const SUPPORTED_VENDOR_FINANCIAL_SHIPPING_MODES = new Set(['disabled', 'fixed', 'external_provider']);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateVendorFinancialShippingMode(body: unknown) {
+  if (!isRecord(body) || !Object.prototype.hasOwnProperty.call(body, 'shippingMode')) {
+    return { ok: true as const };
+  }
+
+  if (
+    typeof body.shippingMode !== 'string' ||
+    !SUPPORTED_VENDOR_FINANCIAL_SHIPPING_MODES.has(body.shippingMode)
+  ) {
+    return {
+      ok: false as const,
+      message: 'shippingMode must be disabled, fixed, or external_provider.',
+    };
+  }
+
+  return { ok: true as const };
+}
+
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
@@ -64,6 +88,11 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       const { vendorId } = request.params as { vendorId: string };
       try {
+        const shippingModeValidation = validateVendorFinancialShippingMode(request.body);
+        if (!shippingModeValidation.ok) {
+          return reply.code(400).send({ message: shippingModeValidation.message });
+        }
+
         return await upsertVendorFinancialProfile(vendorId, (request.body ?? {}) as VendorFinancialProfileUpdateDto);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Vendor financial profile could not be saved.';
