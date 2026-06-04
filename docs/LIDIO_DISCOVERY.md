@@ -24,11 +24,19 @@ The schema includes these marketplace-related paths:
 - `CreateAuthKeyResult` includes a `token` field.
 - Lidio support confirmed Sporgym's `MerchantCode` is `SPORGYM`.
 - Lidio support confirmed the server-to-server token type is `MxS2S`.
+- Lidio support confirmed the server-to-server authorization format is `Authorization: MxS2S <token>`.
+- `MxS2S` is the authorization scheme, and the value after `MxS2S` is the token.
 - Lidio support confirmed `MerchantKey`, `ApiPassword`, and an authorization credential exist.
 - Lidio support confirmed `MerchantKey` validates ReturnURL hash.
 - Lidio support confirmed `ApiPassword` validates payment notification `parameterhash`.
 - Unknown: the exact sandbox base URL. The OpenAPI `servers` entry only contains `/api`.
-- Unknown: the exact `MxS2S` token creation flow because the inspected OpenAPI descriptions mention `MxC2S` and `MxM2S`, while Lidio support confirmed `MxS2S` for server-to-server use.
+- Unknown: the exact `MxS2S` token acquisition endpoint.
+- Unknown: token expiry and token rotation behavior.
+- Unknown: whether the provided authorization credential is a static token or an exchange credential.
+- `CreateAuthKeyRequest` appears customer/session oriented because it uses fields such as `sessionId`, `deviceId`, `phone`, `customerUserId`, and `location`.
+- `CreateAuthKeyResult` only returns `result`, `resultMessage`, and `token`.
+- `LoginRequest` uses `methodNames`, `expiresInMinutes`, and `oneTimeUsage`, and does not explain a merchant credential login flow.
+- Therefore `MxS2S` auth implementation must wait for an explicit Lidio auth contract.
 
 ## Subseller Model
 `CreateSubsellerRequest` supports:
@@ -62,14 +70,22 @@ Lidio response/list models confirm both identifiers:
 - `BasketItemMPDetails` optionally accepts:
   - `subsellerPayoutAmount`
 - `BasketItemMPDetails.subsellerId` is described as `SubsellerId. If the value is zero, the basket item is processed as if it belongs to the marketplace itself`.
+- `BasketItemMPDetails.subsellerPayoutAmount` is described as the subseller payout amount. If it is null, Lidio calculates payout according to the subseller configuration.
 
 Conclusion from schema shape: sub-seller assignment is item-level, not only payment-level.
 
 ## Commission And Platform Amount
 - The marketplace request-side models inspected do not expose a marketplace split field named `commissionAmount` or `platformCommission`.
 - The available item-level payout control is `BasketItemMPDetails.subsellerPayoutAmount`.
-- Likely implementation implication requiring Lidio confirmation: platform commission may be derived operationally as `itemTotalPrice - subsellerPayoutAmount`.
-- Unknown: whether Lidio treats that difference exactly as platform commission in all marketplace settlement flows.
+- `FCPaybackTransaction` exposes marketplace and PSP commission fields:
+  - `mpCommissionRate`
+  - `mpTotalCommission`
+  - `pspCommissionRate`
+  - `pspCommission`
+  - `commisssionTotal`
+  - `paybackAmount`
+- This confirms marketplace commission is represented in Lidio payback/settlement records.
+- Unknown: exact commission calculation formula. Do not assume `itemTotalPrice - subsellerPayoutAmount` is the confirmed commission formula unless Lidio documents it.
 
 ## Multiple Subseller Split
 - Because payment requests accept `basketItems[]`, and each `BasketItem` can contain its own `marketplace.subsellerId`, the schema supports one payment request containing multiple item-level subseller assignments.
@@ -80,17 +96,134 @@ Conclusion from schema shape: sub-seller assignment is item-level, not only paym
 - `ReleasePaymentRequest` requires `orderId`.
 - `ReleasePaymentRequest` optionally accepts `basketItems: PostPaymentBasketItem[]`.
 - `PostPaymentBasketItem` requires `basketItemId`.
-- This indicates release can target specific marketplace basket items.
+- This confirms item-level release targeting by `basketItemId`.
 - `/Unrelease` uses the same request shape through `UnreleasePaymentRequest`, with optional `basketItems: PostPaymentBasketItem[]`.
-- Unknown: whether partial monetary release is supported. `PostPaymentBasketItem` does not expose an amount field in the inspected schema.
+- This confirms item-level unrelease targeting by `basketItemId`.
+- `ReleasePaymentRequest` and `UnreleasePaymentRequest` do not expose `releaseAmount`.
+- Unknown: whether monetary partial release is supported. Item-level release/unrelease is confirmed; amount-level partial release remains unknown.
 
 ## Payout Distribution
 - `/DistributeSubsellerPayout` uses `DistributeSubsellerPayoutRequest`.
 - `DistributeSubsellerPayoutRequest` requires `orderId`.
 - `DistributeSubsellerPayoutRequest` optionally accepts `basketItems: BasketItem[]`.
+- The `BasketItem` model used by `DistributeSubsellerPayoutRequest` includes `marketplace.subsellerId`, `marketplace.itemTotalPrice`, and optional `marketplace.subsellerPayoutAmount`.
+- Therefore `DistributeSubsellerPayout` is item-level capable by schema.
 - `PaymentRequest`, `StartHostedPaymentProcessRequest`, and `StartHostedPrePaymentRequest` include `dontDistributeSubsellerPayout`.
 - The `dontDistributeSubsellerPayout` description says it is only for Marketplace merchants and changes the standard marketplace flow where payout distribution is handled from payment transaction marketplace basket item details.
-- Unknown: exact operational timing and settlement lifecycle.
+- `FCDistributeSubsellerPayoutResult` returns `paymentInfo`, and `FCPaymentResultInfo` includes `paybackTransactionList`.
+- `FCPaybackTransactionProcessType` includes `distribute`.
+- This confirms distribution is represented in payback transaction process types.
+- Unknown: exact operational preconditions and effect, including whether `/Release` must happen first, whether payout distribution creates payable balance, whether it triggers external money movement, or whether it only records settlement distribution.
+
+## Balance Transfer
+- `/BalanceTransfer` uses `BalanceTransferRequest`.
+- `BalanceTransferRequest` requires:
+  - `transactionId`
+  - `sourceSubsellerId`
+  - `destinationSubsellerId`
+  - `totalAmount`
+  - `currency`
+- `BalanceTransferRequest` also supports:
+  - `refOrderId`
+  - `refBasketItemId`
+  - `paymentNote`
+  - `dueDate`
+- `FCBalanceTransferResult` returns:
+  - `transactionId`
+  - `refOrderId`
+  - `refBasketItemId`
+  - `availableSourceBalance` when the result is insufficient balance
+  - `adjustedDueDate`
+- Balance transfer is confirmed as subseller-to-subseller balance movement by schema.
+- Balance transfer can be linked to order and basket item references.
+- Unknown: exact production use case for Sporgym until Lidio confirms whether this flow is needed operationally.
+
+## Marketplace Balance Instrument
+- `MarketplaceBalance` is included in the `FCPaymentInstruments` enum.
+- `PaymentInstrumentInfo` includes `marketplaceBalance: MarketplaceBalance`.
+- The `MarketplaceBalance` description says marketplaces can use this instrument to make some or all of the order amount over progress payment amounts.
+- The `MarketplaceBalance` description says `usageType` must be submitted inside `paymentInstrumentInfo` when using this instrument.
+- The description says the same order number as the original transaction can be used to manage the relationship with the original transaction.
+- Example usage values in the description include `merchantpoint`, `payingatdoor`, `campaign`, and `gift`.
+- This confirms a marketplace balance payment instrument exists.
+- Unknown: exact accounting relationship between `MarketplaceBalance`, `/Release`, `/DistributeSubsellerPayout`, and `/BalanceTransfer`.
+
+## Payback And Settlement Accounting
+- `FCPaybackTotal` includes:
+  - `paybackUniqueId`
+  - `subsellerId`
+  - `subsellerIdGivenByMerchant`
+  - `paybackDate`
+  - `currency`
+  - `isPaid`
+  - `paybackTotal`
+- `FCPaybackTotal.paybackTotal` may be negative due to refunds or chargebacks.
+- `FCPaybackTransactionProcessType` includes:
+  - `sales`
+  - `cancel`
+  - `refund`
+  - `postauth`
+  - `distribute`
+  - `marketplaceBalance`
+- `FCPaybackTransaction` includes:
+  - `orderId`
+  - `systemTransId`
+  - `processType`
+  - `instrumentType`
+  - `amountRequested`
+  - `amountProcessed`
+  - `transType`
+  - `detailType`
+  - `transAmount`
+  - `mpCommissionRate`
+  - `mpTotalCommission`
+  - `pspCommissionRate`
+  - `pspCommission`
+  - `commisssionTotal`
+  - `paybackAmount`
+  - `basketItemId`
+  - `basketItemIdGivenByMerchant`
+- `FCGetPaybackTotalResult.paybackTotalList` returns `FCPaybackTotal[]`.
+- `FCGetPaybackTransactionListResult.paybackTransactionList` returns `FCPaybackTransaction[]`.
+- Lidio has a marketplace-aware settlement accounting model.
+- Payback records can be linked to subseller and basket item references.
+- Unknown: exact accounting lifecycle order without Lidio confirmation.
+
+## Payout Account
+- `/PayoutAccountInquiry` uses `PayoutAccountInquiryRequest`.
+- `PayoutAccountInquiryRequest` uses `payoutSourceAccount`.
+- `FCPayoutAccountInquiryResult` returns:
+  - `payoutSourceAccount`
+  - `balance`
+  - `active`
+  - `currency`
+  - `passivateReason`
+- `PayoutAccountPassivateReason` includes compliance and risk states such as:
+  - `FraudSuspicion`
+  - `ComplianceIssue`
+  - `UnderReview`
+  - `TemporarySuspension`
+- Payout account is confirmed as a balance-bearing entity.
+- Unknown: relationship between payout account, subseller balance, and external payout unless documented by `/StartPayout` and `/PayoutInquiry` flow.
+
+## Subseller Payout Controls
+- `FCGetSubsellerInfo` includes:
+  - `subsellerId`
+  - `subsellerProfileId`
+  - `isActive`
+  - `payOutNotAllowed`
+  - `payOutPreventionReason`
+  - `payOutBlockageAmount`
+  - `ibanList`
+- `payOutPreventionReason` references `PayoutBlockReason`, which includes:
+  - `NegativeBalance`
+  - `NegativeMarketPlaceBalance`
+  - `MerchantRequest`
+  - `Manual`
+  - `InvalidSignature`
+  - `UnexpectedTotalAmount`
+- Lidio supports subseller payout blocking and partial blockage.
+- These controls are relevant for operational risk handling and vendor payout safety.
 
 ## Refunds And Cancel
 - `/Cancel` uses `CancelPaymentRequest`.
@@ -106,6 +239,14 @@ Conclusion from schema shape: sub-seller assignment is item-level, not only paym
 - Unknown: whether refunds are auto-allocated when `basketItems` is omitted.
 - `RefundPaymentRequest` has `refundTransId` for refund idempotency.
 - The `refundTransId` description says repeated refund calls for the same `orderId` plus `refundTransId` can return `DuplicateRequest`, and merchants may process that equivalent to success if a previous attempt succeeded.
+- `FCPaymentInquiryResult.paymentInfo` exposes:
+  - `isRefunded`
+  - `isFullRefunded`
+  - `totalRefundedAmount`
+- `FCPaymentInquiryResult` also exposes:
+  - `totalRefund`
+  - `transactionDetailList`
+- `transactionDetailList` is specifically described as used for refund inquiries where multiple refund transactions may exist for the same `orderId`.
 
 ## Webhook, Callback, And Notification
 - `PaymentRequest`, `StartHostedPaymentProcessRequest`, and `StartHostedPrePaymentRequest` include `notificationUrl` and `alternateNotificationUrl`.
@@ -118,9 +259,12 @@ Conclusion from schema shape: sub-seller assignment is item-level, not only paym
   - `customerInfo`
   - `basketItems`
   - `paymentList`
+- `FCPaymentNotification.companyInfo` references `FCCompanyInfo`, which includes `merchantKey`.
+- Lidio support says `ApiPassword` is used for payment notification `parameterhash`.
 - No webhook signature field was confirmed in the `FCPaymentNotification` schema.
 - Return URL hash verification exists in the `ProcessPayment` and hosted flow descriptions.
-- Unknown: notification signing. Lidio support must confirm whether notifications are signed, which header or field carries the signature, and which algorithm is used.
+- Unknown: exact payment notification `parameterhash` formula.
+- Do not implement notification verification until the formula is confirmed by Lidio.
 
 ## Idempotency
 - Refund idempotency is explicitly documented through `RefundPaymentRequest.refundTransId`.
@@ -171,14 +315,14 @@ The initial OpenAPI-only PoC recommendation has been replaced by the more specif
 No production payment execution should happen until Lidio confirms the sandbox contract and webhook security behavior.
 
 ## Conclusion
-Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema evidence is `BasketItem.marketplace -> BasketItemMPDetails` with `subsellerId`, `itemTotalPrice`, and optional `subsellerPayoutAmount`. `RefundBasketItem` confirms item-level marketplace refund allocation. However, Shopify compatibility, webhook signature rules, production enablement, settlement timing, and some payout lifecycle behavior remain unknown.
+Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema evidence is `BasketItem.marketplace -> BasketItemMPDetails` with `subsellerId`, `itemTotalPrice`, and optional `subsellerPayoutAmount`. `RefundBasketItem` confirms item-level marketplace refund allocation. Payback, payout-account, marketplace balance, release/unrelease, distribution, and balance-transfer schemas confirm Lidio has marketplace-aware settlement and balance primitives. However, Shopify compatibility, notification `parameterhash` formula, production enablement, settlement lifecycle order, and some payout lifecycle behavior remain unknown.
 
 # Lidio Support Validation Matrix
 
 | Topic | Current Evidence | Risk | Blocking? | Required From Lidio |
 |---------|---------|---------|---------|---------|
 | Sandbox Base URL | OpenAPI `servers` only shows `/api`. Support confirmed Sporgym credentials exist, but not the base URL. | Cannot run deterministic sandbox probes. | Blocking | Exact sandbox base URL, production base URL, and whether `/api` is included in the base. |
-| MxS2S token creation flow | Support confirmed server-to-server token type is `MxS2S`. OpenAPI descriptions mention `MxC2S` for `/CreateAPIKey` and `MxM2S` for `/CreateAuthKey`. | Wrong auth flow could block all server-side calls. | Blocking | Exact token endpoint, request body, headers, credential inputs, token lifetime, and final `Authorization` header format. |
+| MxS2S token creation flow | Support confirmed server-to-server token type and header format: `Authorization: MxS2S <token>`. OpenAPI descriptions mention `MxC2S` for `/CreateAPIKey` and `MxM2S` for `/CreateAuthKey`. | Wrong token acquisition flow could block all server-side calls. | Blocking | Exact token endpoint, request body, required headers, credential inputs, token lifetime, rotation behavior, and whether the authorization credential is static or exchange-based. |
 | `parameterhash` formula | Support confirmed `ApiPassword` validates payment notification `parameterhash`. OpenAPI confirms ReturnURL hash but not notification hash formula. | Notifications cannot be safely trusted without verification. | Blocking | Exact canonical string, included fields, ordering, separators, hash algorithm, encoding, and sample payload/hash. |
 | Notification signature model | `FCPaymentNotification` exists, but no signature field was confirmed in that schema. Support confirmed `parameterhash` exists for payment notifications. | Callback ingestion could accept forged or replayed events if verification is wrong. | Blocking | Whether `parameterhash` is the only notification signature, where it appears, replay protection guidance, and failure handling expectations. |
 | Release lifecycle | `/Release` exists and accepts `orderId` plus optional basket item ids. | Incorrect release timing could pay vendors before operational approval. | Important | State machine from payment success to release eligibility, required trigger, and expected result statuses. |
@@ -190,6 +334,8 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 | Marketplace refund allocation behavior | `RefundBasketItem` requires `basketItemId` and `itemRefundAmount` for marketplace transactions. | Refunds could be rejected or misallocated if item allocation is omitted. | Blocking | Whether marketplace refunds require `basketItems`, whether omission is rejected or auto-allocated, and how duplicate `refundTransId` should be handled operationally. |
 | Platform commission defaulting | Request-side marketplace models expose `subsellerPayoutAmount`, but no marketplace `commissionAmount` or `platformCommission` field was confirmed. | Commission math could be wrong when payout amount is omitted. | Important | How commission is configured when `subsellerPayoutAmount` is null, and whether `itemTotalPrice - subsellerPayoutAmount` is the correct merchant-side interpretation. |
 | Hosted flow payout fields | Hosted payment requests include `basketItems[]` and `dontDistributeSubsellerPayout`, but production behavior is not verified. | Hosted checkout may accept basket items but ignore or restrict payout fields. | Blocking | Confirmation that `subsellerPayoutAmount` can be supplied per item in the hosted payment flow used by Sporgym. |
+| Marketplace balance accounting | `MarketplaceBalance` exists as a payment instrument and its process type appears in payback transaction process types. | Balance-funded adjustments could be misunderstood as payout movement. | Important | How `MarketplaceBalance` relates to release, payout distribution, balance transfer, and external payout. |
+| Payout account relationship | `/PayoutAccountInquiry` confirms a balance-bearing payout account with active/passivated status. | External payout assumptions could be wrong without mapping account balance to subseller/payback balances. | Important | Relationship between payout account, subseller balance, payback records, and `/StartPayout` / `/PayoutInquiry`. |
 | Shopify hosted checkout compatibility | OpenAPI proves Lidio marketplace primitives, not Shopify checkout integration compatibility. | Sporgym may be unable to use these primitives inside Shopify checkout. | Blocking | Supported Shopify integration mode and whether hosted payment can receive item-level marketplace data from Shopify checkout. |
 | Shopify payment provider compatibility | No OpenAPI evidence confirms Lidio is usable as a Shopify payment provider with marketplace basket split. | Checkout/payment architecture could be incompatible even if Lidio API supports marketplace. | Blocking | Whether Lidio is available/approved as a Shopify payment provider for this merchant/region and how provider callbacks map to Lidio marketplace APIs. |
 | Production activation requirements | OpenAPI includes marketplace APIs, but enablement requirements are not specified. | Sandbox success may not translate to production readiness. | Blocking | Required contracts, marketplace flags, IP allowlists, KYB/vendor data requirements, webhook allowlist, rate limits, and go-live checklist. |
@@ -203,9 +349,9 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 | Vendor onboarding | PARTIALLY CONFIRMED | `/CreateSubseller`, `/UpdateSubseller`, `/GetSubsellerList`, Lidio-assigned `subsellerId`, merchant-provided `subsellerIdGivenByMerchant`, and support-confirmed `SubsellerProfileId=3`. | Sandbox base URL, `MxS2S` auth flow, required production KYB fields, and activation rules. |
 | Vendor mapping | PARTIALLY CONFIRMED | Lidio returns both `subsellerId` and `subsellerIdGivenByMerchant`; Sporgym backend can remain source of truth for vendor-to-subseller mapping. | No runtime mapping has been implemented; Shopify compatibility remains unknown. |
 | Basket item allocation | CONFIRMED | `PaymentRequest`, `StartHostedPaymentProcessRequest`, and `StartHostedPrePaymentRequest` accept `basketItems[]`; each `BasketItem` can include `marketplace`. | Production multi-subseller limits still need support confirmation. |
-| Split payment modeling | PARTIALLY CONFIRMED | `BasketItemMPDetails` requires `subsellerId` and `itemTotalPrice`, with optional `subsellerPayoutAmount`. | Platform commission behavior when `subsellerPayoutAmount` is null remains unknown. |
+| Split payment modeling | PARTIALLY CONFIRMED | `BasketItemMPDetails` requires `subsellerId` and `itemTotalPrice`, with optional `subsellerPayoutAmount`; FCPayback records expose marketplace commission fields. | Exact commission calculation formula remains unknown. |
 | Refund modeling | PARTIALLY CONFIRMED | `RefundPaymentRequest` accepts `basketItems: RefundBasketItem[]`; `RefundBasketItem` requires `basketItemId` and `itemRefundAmount`; `refundTransId` supports refund idempotency. | Omitted `basketItems` behavior and production refund allocation rules remain unknown. |
-| Payout modeling | PARTIALLY CONFIRMED | `subsellerPayoutAmount`, `dontDistributeSubsellerPayout`, `/DistributeSubsellerPayout`, and `/BalanceTransfer` exist. | Settlement timing, payout status visibility, and two-step payout lifecycle remain unknown. |
+| Payout modeling | PARTIALLY CONFIRMED | `subsellerPayoutAmount`, `dontDistributeSubsellerPayout`, `/DistributeSubsellerPayout`, `/BalanceTransfer`, payback records, payout-account inquiry, and subseller payout controls exist. | Settlement timing, payout account relationship, external payout behavior, and lifecycle order remain unknown. |
 | Release modeling | PARTIALLY CONFIRMED | `/Release` and `/Unrelease` exist and can target `PostPaymentBasketItem.basketItemId`. | Partial monetary release, unrelease constraints, and release-to-settlement lifecycle remain unknown. |
 | Shopify compatibility | UNKNOWN | OpenAPI confirms Lidio marketplace API primitives only. | Shopify hosted checkout and Shopify payment provider compatibility must be confirmed by Lidio and/or Shopify before runtime implementation. |
 
@@ -216,7 +362,7 @@ Document only. No implementation is included in this discovery.
 ## PoC-1: MxS2S Authentication
 - Confirm sandbox base URL.
 - Create or obtain an `MxS2S` token using the support-confirmed Sporgym credentials.
-- Verify the final `Authorization` header format without calling payment execution endpoints.
+- Verify sandbox accepts the support-confirmed `Authorization: MxS2S <token>` header without calling payment execution endpoints.
 
 ## PoC-2: CreateSubseller
 - Create one sandbox subseller using `CreateSubsellerRequest`.
@@ -246,7 +392,7 @@ Document only. No implementation is included in this discovery.
 # Questions To Send To Lidio
 
 1. What are the exact sandbox and production base URLs, and should requests append `/api`?
-2. What is the exact `MxS2S` token creation flow, including endpoint, request body, required headers, credential inputs, token lifetime, and `Authorization` header format?
+2. What is the exact `MxS2S` token acquisition flow, including endpoint, request body, required headers, credential inputs, token lifetime, rotation behavior, and whether the authorization credential is static or exchange-based?
 3. What is the exact payment notification `parameterhash` formula, including fields, ordering, separators, algorithm, encoding, and one sample payload/hash?
 4. Is `parameterhash` the complete notification signature model, and what replay protection or timestamp/idempotency checks should merchants apply?
 5. Can a production payment contain multiple `basketItems[].marketplace.subsellerId` values, and what are the item, subseller, and amount limits?
