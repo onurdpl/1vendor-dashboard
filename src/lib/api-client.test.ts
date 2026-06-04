@@ -179,6 +179,39 @@ describe('apiClient real-mode cookie auth', () => {
     expect(window.localStorage.getItem('vendor-dashboard.session-token')).toBe('stale-local-token');
   });
 
+  it('sends login to the configured backend origin with credentials included', async () => {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', 'https://backend.example.com');
+    window.localStorage.clear();
+
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      user: {
+        email: 'admin@demo.com',
+        name: 'Demo Admin',
+        role: 'admin',
+        vendorAccess: [],
+      },
+      csrfToken: 'csrf-from-cookie-session',
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { apiClient: realApiClient } = await import('./api-client');
+    await realApiClient.post('/auth/login', { email: 'admin@demo.com', password: 'demo123' }, {
+      skipVendorContext: true,
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const headers = init.headers as Headers;
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://backend.example.com/auth/login');
+    expect(init.credentials).toBe('include');
+    expect(headers.get('Authorization')).toBeNull();
+  });
+
   it('sends credentials with /auth/me without attaching a localStorage bearer token in real mode', async () => {
     vi.resetModules();
     vi.stubEnv('VITE_API_MODE', 'real');

@@ -265,18 +265,19 @@ export const runtimeServices = {
       options: { authAttemptId?: string; signal?: AbortSignal } = {},
     ): Promise<{ token: string | null; user: CurrentUser }> {
       if (runtimeConfig.apiMode === 'real') {
-        const response = await backendAuth.login(email, password, {
+        await backendAuth.login(email, password, {
           authAttemptId: options.authAttemptId,
           signal: options.signal,
         });
+        const user = await backendAuth.me();
         return {
           token: null,
           user: createCurrentUserFromVendorAccess({
-            email: response.user.email,
-            name: response.user.name,
-            role: response.user.role,
-            status: response.user.status,
-            vendorAccess: response.user.vendorAccess,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            status: user.status,
+            vendorAccess: user.vendorAccess,
           }),
         };
       }

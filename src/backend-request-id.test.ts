@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApp } from '../backend/src/app';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 describe('backend request id diagnostics', () => {
   it('propagates a safe request id header and error response field', async () => {
@@ -61,6 +65,28 @@ describe('backend request id diagnostics', () => {
 
       expect(response.statusCode).toBe(204);
       expect(response.headers['access-control-allow-origin']).toBe('http://localhost:5173');
+      expect(response.headers['access-control-allow-credentials']).toBe('true');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('allows credentialed CORS requests from the configured Render frontend origin', async () => {
+    vi.stubEnv('CORS_ORIGIN', 'https://onevendor-dashboard.onrender.com');
+    const app = createApp();
+
+    try {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/auth/me',
+        headers: {
+          origin: 'https://onevendor-dashboard.onrender.com',
+          'access-control-request-method': 'GET',
+        },
+      });
+
+      expect(response.statusCode).toBe(204);
+      expect(response.headers['access-control-allow-origin']).toBe('https://onevendor-dashboard.onrender.com');
       expect(response.headers['access-control-allow-credentials']).toBe('true');
     } finally {
       await app.close();

@@ -69,6 +69,18 @@ describe('runtime configuration diagnostics', () => {
     expect(runtimeConfig.startupIssues).toEqual([]);
   });
 
+  it('flags production real-mode API configuration that points at the frontend origin', async () => {
+    vi.stubEnv('VITE_APP_ENV', 'production');
+    vi.stubEnv('VITE_API_MODE', 'real');
+    vi.stubEnv('VITE_API_BASE_URL', window.location.origin);
+
+    const { runtimeConfig } = await loadRuntimeConfig();
+
+    expect(runtimeConfig.startupIssues).toContain(
+      'Production real API mode requires VITE_API_BASE_URL to point to the backend origin, not the frontend origin.',
+    );
+  });
+
   it('preserves development mock fallback when VITE_API_MODE is missing', async () => {
     vi.stubEnv('VITE_APP_ENV', 'development');
     vi.stubEnv('VITE_API_MODE', undefined);
