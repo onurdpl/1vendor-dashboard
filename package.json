@@ -15,6 +15,7 @@
     "backend:build": "npm --prefix backend run build",
     "backend:typecheck": "npm --prefix backend run typecheck",
     "backend:smoke": "npm --prefix backend run smoke",
+    "backend:lidio:sandbox-probe": "npm --prefix backend run lidio:sandbox-probe",
     "backend:db:generate": "npm --prefix backend run db:generate",
     "backend:db:deploy": "npm --prefix backend run db:deploy",
     "backend:db:migrate": "npm --prefix backend run db:migrate",
