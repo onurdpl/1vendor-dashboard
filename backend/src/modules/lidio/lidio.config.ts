@@ -6,8 +6,8 @@ export type LidioReadOnlyConfig = {
   merchantCode: string;
   authorizationScheme: string;
   authorizationToken: string;
-  merchantKey: string;
-  apiPassword: string;
+  merchantKey?: string;
+  apiPassword?: string;
   subsellerProfileId: number;
 };
 
@@ -74,21 +74,17 @@ export function validateLidioReadOnlyConfig(env: LidioEnv = process.env): LidioR
   const diagnostics = getLidioConfigDiagnostics(env);
   const baseUrl = readEnvValue(env, 'LIDIO_BASE_URL');
   const merchantCode = readEnvValue(env, 'LIDIO_MERCHANT_CODE');
-  const authorizationScheme = readEnvValue(env, 'LIDIO_AUTHORIZATION_SCHEME');
+  const authorizationScheme = readEnvValue(env, 'LIDIO_AUTHORIZATION_SCHEME') || EXPECTED_AUTHORIZATION_SCHEME;
   const authorizationToken = readEnvValue(env, 'LIDIO_AUTHORIZATION_TOKEN');
   const merchantKey = readEnvValue(env, 'LIDIO_MERCHANT_KEY');
   const apiPassword = readEnvValue(env, 'LIDIO_API_PASSWORD');
   const subsellerProfileIdRaw = readEnvValue(env, 'LIDIO_SUBSELLER_PROFILE_ID');
-  const subsellerProfileId = subsellerProfileIdRaw ? parsePositiveInteger(subsellerProfileIdRaw) : null;
+  const subsellerProfileId = subsellerProfileIdRaw ? parsePositiveInteger(subsellerProfileIdRaw) : 3;
   const missing = [
     diagnostics.enabled ? null : 'LIDIO_ENABLED=true',
     baseUrl ? null : 'LIDIO_BASE_URL',
     merchantCode ? null : 'LIDIO_MERCHANT_CODE',
-    authorizationScheme ? null : 'LIDIO_AUTHORIZATION_SCHEME',
     authorizationToken ? null : 'LIDIO_AUTHORIZATION_TOKEN',
-    merchantKey ? null : 'LIDIO_MERCHANT_KEY',
-    apiPassword ? null : 'LIDIO_API_PASSWORD',
-    subsellerProfileId ? null : 'LIDIO_SUBSELLER_PROFILE_ID',
   ].filter((key): key is string => Boolean(key));
 
   if (missing.length) {
@@ -100,7 +96,7 @@ export function validateLidioReadOnlyConfig(env: LidioEnv = process.env): LidioR
     };
   }
 
-  if (!baseUrl || !merchantCode || !authorizationScheme || !authorizationToken || !merchantKey || !apiPassword || !subsellerProfileId) {
+  if (!baseUrl || !merchantCode || !authorizationToken || !subsellerProfileId) {
     return {
       ok: false,
       message: 'Required Lidio sandbox env vars are missing.',
@@ -126,13 +122,15 @@ export function validateLidioReadOnlyConfig(env: LidioEnv = process.env): LidioR
       merchantCode,
       authorizationScheme,
       authorizationToken,
-      merchantKey,
-      apiPassword,
+      merchantKey: merchantKey || undefined,
+      apiPassword: apiPassword || undefined,
       subsellerProfileId,
     },
     diagnostics: {
       ...diagnostics,
       baseUrl: normalizeBaseUrl(baseUrl),
+      authorizationScheme,
+      subsellerProfileId,
     },
   };
 }

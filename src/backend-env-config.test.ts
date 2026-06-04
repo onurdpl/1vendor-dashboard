@@ -9,6 +9,14 @@ function resetEnv(overrides: Record<string, string | undefined>) {
     NODE_ENV: 'test',
     JWT_SECRET: 'test',
     SHOPIFY_WEBHOOK_SECRET: 'test',
+    LIDIO_ENABLED: undefined,
+    LIDIO_BASE_URL: undefined,
+    LIDIO_MERCHANT_CODE: undefined,
+    LIDIO_AUTHORIZATION_SCHEME: undefined,
+    LIDIO_AUTHORIZATION_TOKEN: undefined,
+    LIDIO_MERCHANT_KEY: undefined,
+    LIDIO_API_PASSWORD: undefined,
+    LIDIO_SUBSELLER_PROFILE_ID: undefined,
     ...overrides,
   };
 }
@@ -255,5 +263,51 @@ describe('backend env shipping provider gates', () => {
     });
 
     expect(() => loadEnv()).toThrow('KARGONOMI_API_TOKEN is required when SHIPPING_PROVIDER=kargonomi.');
+  });
+});
+
+describe('backend env Lidio configuration', () => {
+  afterEach(() => {
+    process.env = { ...originalEnv };
+  });
+
+  it('exposes Lidio configuration with documented defaults', () => {
+    resetEnv({
+      LIDIO_ENABLED: 'true',
+      LIDIO_BASE_URL: 'https://test.lidio.com/api',
+      LIDIO_MERCHANT_CODE: 'SPORGYM',
+      LIDIO_AUTHORIZATION_SCHEME: undefined,
+      LIDIO_AUTHORIZATION_TOKEN: 'configured-token',
+      LIDIO_MERCHANT_KEY: '',
+      LIDIO_API_PASSWORD: '',
+      LIDIO_SUBSELLER_PROFILE_ID: undefined,
+    });
+
+    const env = loadEnv();
+
+    expect(env.LIDIO_ENABLED).toBe(true);
+    expect(env.LIDIO_BASE_URL).toBe('https://test.lidio.com/api');
+    expect(env.LIDIO_MERCHANT_CODE).toBe('SPORGYM');
+    expect(env.LIDIO_AUTHORIZATION_SCHEME).toBe('MxS2S');
+    expect(env.LIDIO_AUTHORIZATION_TOKEN).toBe('configured-token');
+    expect(env.LIDIO_MERCHANT_KEY).toBeUndefined();
+    expect(env.LIDIO_API_PASSWORD).toBeUndefined();
+    expect(env.LIDIO_SUBSELLER_PROFILE_ID).toBe(3);
+  });
+
+  it('requires only base URL, merchant code, and authorization token when Lidio is enabled', () => {
+    resetEnv({
+      LIDIO_ENABLED: 'true',
+      LIDIO_BASE_URL: 'https://test.lidio.com/api',
+      LIDIO_MERCHANT_CODE: 'SPORGYM',
+      LIDIO_AUTHORIZATION_TOKEN: undefined,
+      LIDIO_MERCHANT_KEY: undefined,
+      LIDIO_API_PASSWORD: undefined,
+      LIDIO_SUBSELLER_PROFILE_ID: undefined,
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'Missing required Lidio env vars when LIDIO_ENABLED=true: LIDIO_AUTHORIZATION_TOKEN.',
+    );
   });
 });

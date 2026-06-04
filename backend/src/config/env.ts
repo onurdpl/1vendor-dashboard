@@ -255,13 +255,13 @@ export function loadEnv(): AppEnv {
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
-  const lidioAuthorizationScheme = process.env.LIDIO_AUTHORIZATION_SCHEME?.trim() || undefined;
+  const lidioAuthorizationScheme = process.env.LIDIO_AUTHORIZATION_SCHEME?.trim() || 'MxS2S';
   const lidioAuthorizationToken = process.env.LIDIO_AUTHORIZATION_TOKEN?.trim() || undefined;
   const lidioMerchantKey = process.env.LIDIO_MERCHANT_KEY?.trim() || undefined;
   const lidioApiPassword = process.env.LIDIO_API_PASSWORD?.trim() || undefined;
   const lidioSubsellerProfileId = process.env.LIDIO_SUBSELLER_PROFILE_ID?.trim()
     ? parsePositiveInteger(process.env.LIDIO_SUBSELLER_PROFILE_ID, 3)
-    : undefined;
+    : 3;
   const tryOtoWebhookIngestEnabled = parseBoolean(process.env.TRY_OTO_WEBHOOK_INGEST_ENABLED, false);
   const tryOtoWebhookSharedSecret = process.env.TRY_OTO_WEBHOOK_SHARED_SECRET?.trim() || undefined;
 
@@ -308,11 +308,7 @@ export function loadEnv(): AppEnv {
     const missingLidioKeys = [
       lidioBaseUrl ? null : 'LIDIO_BASE_URL',
       lidioMerchantCode ? null : 'LIDIO_MERCHANT_CODE',
-      lidioAuthorizationScheme ? null : 'LIDIO_AUTHORIZATION_SCHEME',
       lidioAuthorizationToken ? null : 'LIDIO_AUTHORIZATION_TOKEN',
-      lidioMerchantKey ? null : 'LIDIO_MERCHANT_KEY',
-      lidioApiPassword ? null : 'LIDIO_API_PASSWORD',
-      lidioSubsellerProfileId ? null : 'LIDIO_SUBSELLER_PROFILE_ID',
     ].filter((key): key is string => Boolean(key));
 
     if (missingLidioKeys.length) {

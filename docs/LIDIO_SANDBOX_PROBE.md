@@ -7,7 +7,7 @@
 - Do not create payment routes, database migrations, card storage, shipping/provider logic, Try OTO/Kargonomi work, or finance ledger persistence.
 - The first executable probe must be read-only.
 
-## Required Environment Variables
+## Sandbox Environment Variables
 Use placeholders for all secrets. Do not commit real tokens, keys, passwords, or credentials.
 
 ```bash
@@ -22,6 +22,7 @@ LIDIO_SUBSELLER_PROFILE_ID=3
 ```
 
 Notes:
+- Shared env templates should keep placeholders empty and avoid committing real support values. See `docs/LIDIO_ENV_SETUP.md`.
 - `LIDIO_ENABLED=true` is required for the executable read-only probe.
 - `LIDIO_BASE_URL=https://test.lidio.com/api` is the support-provided test base URL.
 - `developer.lidio.com` and `lab.lidio.com` are documentation URLs, not API base URLs, unless Lidio explicitly confirms otherwise.
@@ -32,6 +33,8 @@ Notes:
 - `LIDIO_API_PASSWORD` is for paymentNotification `parameterhash` verification.
 - The paymentNotification `parameterhash` formula is still unknown.
 - `LIDIO_SUBSELLER_PROFILE_ID=3` is support-confirmed.
+- The first read-only probe validates only `LIDIO_ENABLED`, `LIDIO_BASE_URL`, `LIDIO_MERCHANT_CODE`, and `LIDIO_AUTHORIZATION_TOKEN`.
+- `LIDIO_MERCHANT_KEY` and `LIDIO_API_PASSWORD` may remain empty until ReturnURL and notification validation probes are approved.
 
 ## Safe Read-Only Probe Order
 1. Validate environment presence only.
