@@ -202,6 +202,10 @@ enum InvoiceExecutionProvider {
   BIRFATURA
 }
 
+enum PaymentProvider {
+  PARATIKA
+}
+
 enum InvoiceExecutionStatus {
   PENDING
   CREATED
@@ -241,6 +245,7 @@ model Vendor {
   shippingWarehouses    VendorShippingWarehouse[]
   shipmentExecutions    ShipmentExecution[]
   financialProfile      VendorFinancialProfile?
+  paymentProviderSellers VendorPaymentProviderSeller[]
   payoutBatches         PayoutBatch[]
   operationalSignals    OperationalSignal[]
   automationActions     AutomationAction[]
@@ -336,6 +341,21 @@ model VendorFinancialProfile {
   vendor                 Vendor                @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId, active])
+}
+
+model VendorPaymentProviderSeller {
+  id               String          @id @default(cuid())
+  vendorId         String
+  provider         PaymentProvider
+  externalSellerId String
+  enabled          Boolean         @default(true)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  vendor           Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, vendorId])
+  @@unique([provider, externalSellerId])
+  @@index([vendorId, provider, enabled])
 }
 
 model UserVendorAccess {

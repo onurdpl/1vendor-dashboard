@@ -1,4 +1,5 @@
 import { prisma } from '../src/db/prisma.js';
+import { seedVendorPaymentSellerMappings } from '../src/modules/payments/vendor-payment-seller.service.js';
 import { upsertSeedUser, type SeedUserInput } from './seed-user-utils.js';
 
 type SeedVendorInput = {
@@ -80,6 +81,8 @@ async function runSeed() {
       create: vendor,
     });
   }
+
+  await seedVendorPaymentSellerMappings(prisma);
 
   const sporjinalShippingConfig = await prisma.vendorShippingConfig.upsert({
     where: {
