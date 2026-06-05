@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { listNotificationsForUser, updateNotificationLifecycle } from './notifications.service.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 type NotificationActionBody = {
   notificationId?: string;
@@ -19,11 +20,13 @@ export function registerNotificationRoutes(app: FastifyInstance, env: AppEnv) {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
     },
     async (request) => {
-      return listNotificationsForUser({
-        role: request.authUser?.role ?? 'vendor',
-        vendorId: request.authUser?.role === 'admin' ? null : request.vendorContext?.vendorId,
-        env,
-      });
+      return withDashboardRouteTiming('GET /notifications', () =>
+        listNotificationsForUser({
+          role: request.authUser?.role ?? 'vendor',
+          vendorId: request.authUser?.role === 'admin' ? null : request.vendorContext?.vendorId,
+          env,
+        }),
+      );
     },
   );
 

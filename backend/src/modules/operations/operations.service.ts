@@ -15,6 +15,7 @@ import { listOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
 import { listAutomationActions } from '../automation/automation-actions.service.js';
 import { deriveSupportSlaState } from '../support/support.service.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
@@ -354,7 +355,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
   const candidateTake = offset + limit;
-  const allocations = await prisma.vendorAllocation.findMany({
+  const allocations = await withDashboardTiming('operations.allocation_fetch', () => prisma.vendorAllocation.findMany({
     select: {
       id: true,
       assignedVendorId: true,
@@ -396,9 +397,10 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       createdAt: 'desc',
     },
     take: candidateTake,
-  });
+  }));
 
   const items: OperationsQueueItemDto[] = [];
+  const allocationAggregationStartedAt = startDashboardTimer();
 
   for (const allocation of allocations) {
     const vendorName = allocation.assignedVendor.name;
@@ -465,8 +467,9 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       });
     }
   }
+  logDashboardTiming('operations.allocation_aggregation', allocationAggregationStartedAt);
 
-  const pendingReturns = await prisma.returnRecord.findMany({
+  const pendingReturns = await withDashboardTiming('operations.pending_return_fetch', () => prisma.returnRecord.findMany({
     where: {
       status: {
         in: ['pending', 'open', 'needs_review'],
@@ -506,8 +509,9 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       createdAt: 'desc',
     },
     take: candidateTake,
-  });
+  }));
 
+  const returnAggregationStartedAt = startDashboardTimer();
   for (const returnRecord of pendingReturns) {
     items.push({
       id: `op-refund-${returnRecord.id}`,
@@ -527,11 +531,13 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       destinationPath: `/admin/orders/${returnRecord.vendorAllocation.order.sourceShopifyOrderId}`,
     });
   }
+  logDashboardTiming('operations.return_aggregation', returnAggregationStartedAt);
 
-  const signalDashboard = await listOperationalSignals({
+  const signalDashboard = await withDashboardTiming('operations.operational_signals_service', () => listOperationalSignals({
     includeInternal: true,
     limit: 100,
-  });
+  }));
+  const signalAggregationStartedAt = startDashboardTimer();
   for (const signal of signalDashboard.signals) {
     const relatedShopifyOrderId =
       typeof signal.metadata === 'object' && signal.metadata !== null && 'sourceShopifyOrderId' in signal.metadata
@@ -555,8 +561,10 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
     });
   }
+  logDashboardTiming('operations.signal_aggregation', signalAggregationStartedAt);
 
-  const automationDashboard = await listAutomationActions();
+  const automationDashboard = await withDashboardTiming('operations.automation_actions_service', () => listAutomationActions());
+  const automationAggregationStartedAt = startDashboardTimer();
   for (const action of automationDashboard.actions) {
     if (action.status !== 'suggested' && action.status !== 'pending' && action.status !== 'failed') {
       continue;
@@ -580,7 +588,9 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
       destinationPath: '/admin/operations',
     });
   }
+  logDashboardTiming('operations.automation_aggregation', automationAggregationStartedAt);
 
+  const finalAggregationStartedAt = startDashboardTimer();
   items.sort((a, b) => {
     const severityDelta = getSeverityRank(a.severity) - getSeverityRank(b.severity);
     if (severityDelta !== 0) {
@@ -589,10 +599,12 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
     return a.createdAt < b.createdAt ? 1 : -1;
   });
 
-  return {
+  const dashboard: OperationsQueueDashboardDto = {
     summary: createSummary(items),
     items: items.slice(offset, offset + limit),
   };
+  logDashboardTiming('operations.metrics_aggregation', finalAggregationStartedAt);
+  return dashboard;
 }
 
 export async function getAdminOperationsAttentionCenter(): Promise<OperationsAttentionDashboardDto> {

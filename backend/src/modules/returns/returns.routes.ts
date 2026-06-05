@@ -21,6 +21,7 @@ import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { backfillShopifyReturnReasons } from './return-reason-backfill.service.js';
 import { cleanupDuplicateReturnRecords } from './duplicate-return-cleanup.service.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 type ReturnReasonBackfillBody = {
   dryRun?: boolean;
@@ -147,7 +148,9 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, resolvePagination(request.query)));
+      return withDashboardRouteTiming('GET /returns', () =>
+        withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, resolvePagination(request.query))),
+      );
     },
   );
 

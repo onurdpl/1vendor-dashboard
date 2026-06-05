@@ -1,6 +1,7 @@
 import { OperationalJobStatus, OperationalJobType, type OperationalJob, type WebhookEvent } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AppEnv } from '../../config/env.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import { fetchSellerInfoWithRetry } from '../shopify/seller-info-retry.service.js';
 import { ingestShopifyOrderWebhook } from '../shopify/order-ingestion.service.js';
@@ -1286,7 +1287,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     staleAllocations,
     scheduledReconciliationJobs,
   ] = await Promise.all([
-    prisma.webhookEvent.findMany({
+    withDashboardTiming('diagnostics.stuck_received_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
         status: 'RECEIVED',
         receivedAt: {
@@ -1303,8 +1304,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       orderBy: {
         receivedAt: 'desc',
       },
-    }),
-    prisma.webhookEvent.findMany({
+    })),
+    withDashboardTiming('diagnostics.failed_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
         status: 'FAILED',
       },
@@ -1318,8 +1319,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       orderBy: {
         receivedAt: 'desc',
       },
-    }),
-    prisma.fulfillment.findMany({
+    })),
+    withDashboardTiming('diagnostics.fulfillment_failures_fetch', () => prisma.fulfillment.findMany({
       where: {
         syncStatus: 'fulfillment_sync_failed',
       },
@@ -1337,8 +1338,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       orderBy: {
         updatedAt: 'desc',
       },
-    }),
-    prisma.webhookEvent.findMany({
+    })),
+    withDashboardTiming('diagnostics.missing_payload_webhooks_fetch', () => prisma.webhookEvent.findMany({
       where: {
         rawPayload: null,
       },
@@ -1352,8 +1353,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       orderBy: {
         receivedAt: 'desc',
       },
-    }),
-    prisma.vendorAllocation.findMany({
+    })),
+    withDashboardTiming('diagnostics.stale_allocations_fetch', () => prisma.vendorAllocation.findMany({
       where: {
         OR: [
           {
@@ -1384,8 +1385,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
       orderBy: {
         updatedAt: 'desc',
       },
-    }),
-    prisma.operationalJob.findMany({
+    })),
+    withDashboardTiming('diagnostics.scheduled_reconciliation_jobs_fetch', () => prisma.operationalJob.findMany({
       where: {
         jobType: OperationalJobType.RECONCILIATION,
         status: {
@@ -1414,8 +1415,9 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
         updatedAt: 'desc',
       },
       take: 25,
-    }),
+    })),
   ]);
+  const aggregationStartedAt = startDashboardTimer();
 
   const stuckItems: ReconciliationItem[] = stuckReceived.map((event) => ({
     id: `reconciliation-stuck-${event.id}`,
@@ -1538,7 +1540,7 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
   });
 
-  return {
+  const response = {
     summary: {
       stuckReceived: stuckItems.length,
       failedWebhooks: failedItems.length,
@@ -1550,6 +1552,8 @@ export async function getReconciliationDiagnostics(): Promise<ReconciliationResp
     },
     items,
   };
+  logDashboardTiming('diagnostics.reconciliation_aggregation', aggregationStartedAt);
+  return response;
 }
 
 export async function recoverWebhookEvent(

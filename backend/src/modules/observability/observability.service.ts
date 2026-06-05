@@ -1,5 +1,6 @@
 import { OperationalJobStatus, OperationalJobType, WebhookStatus } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type {
   ObservabilityMetricsResponse,
   ObservabilitySummary,
@@ -203,7 +204,10 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
   const now = new Date();
   const windows = await Promise.all(
     windowDefinitions.map((definition) =>
-      getWindowMetrics(definition.key, new Date(now.getTime() - definition.durationMs)),
+      withDashboardTiming(
+        `observability.window_metrics.${definition.key}`,
+        () => getWindowMetrics(definition.key, new Date(now.getTime() - definition.durationMs)),
+      ),
     ),
   );
 
@@ -215,25 +219,25 @@ export async function getObservabilityMetrics(): Promise<ObservabilityMetricsRes
 
 export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
   const [metrics, reconciliationDiagnostics, retryScheduled, retrying, deadLetterReady, permanentlyFailed, reconciliationPending, reconciliationProcessing, reconciliationCompleted24h, reconciliationFailed24h, receivedWebhooks, processingWebhooks] = await Promise.all([
-    getObservabilityMetrics(),
-    getReconciliationDiagnostics(),
-    prisma.operationalJob.count({ where: { status: OperationalJobStatus.RETRY_SCHEDULED } }),
-    prisma.operationalJob.count({ where: { status: OperationalJobStatus.RETRYING } }),
-    prisma.operationalJob.count({ where: { status: OperationalJobStatus.DEAD_LETTER_READY } }),
-    prisma.operationalJob.count({ where: { status: OperationalJobStatus.PERMANENTLY_FAILED } }),
-    prisma.operationalJob.count({
+    withDashboardTiming('observability.metrics_service', () => getObservabilityMetrics()),
+    withDashboardTiming('observability.reconciliation_diagnostics_service', () => getReconciliationDiagnostics()),
+    withDashboardTiming('observability.retry_scheduled_count', () => prisma.operationalJob.count({ where: { status: OperationalJobStatus.RETRY_SCHEDULED } })),
+    withDashboardTiming('observability.retrying_count', () => prisma.operationalJob.count({ where: { status: OperationalJobStatus.RETRYING } })),
+    withDashboardTiming('observability.dead_letter_ready_count', () => prisma.operationalJob.count({ where: { status: OperationalJobStatus.DEAD_LETTER_READY } })),
+    withDashboardTiming('observability.permanently_failed_count', () => prisma.operationalJob.count({ where: { status: OperationalJobStatus.PERMANENTLY_FAILED } })),
+    withDashboardTiming('observability.reconciliation_pending_count', () => prisma.operationalJob.count({
       where: {
         jobType: OperationalJobType.RECONCILIATION,
         status: OperationalJobStatus.PENDING,
       },
-    }),
-    prisma.operationalJob.count({
+    })),
+    withDashboardTiming('observability.reconciliation_processing_count', () => prisma.operationalJob.count({
       where: {
         jobType: OperationalJobType.RECONCILIATION,
         status: OperationalJobStatus.PROCESSING,
       },
-    }),
-    prisma.operationalJob.count({
+    })),
+    withDashboardTiming('observability.reconciliation_completed_24h_count', () => prisma.operationalJob.count({
       where: {
         jobType: OperationalJobType.RECONCILIATION,
         status: OperationalJobStatus.COMPLETED,
@@ -241,8 +245,8 @@ export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
           gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
         },
       },
-    }),
-    prisma.operationalJob.count({
+    })),
+    withDashboardTiming('observability.reconciliation_failed_24h_count', () => prisma.operationalJob.count({
       where: {
         jobType: OperationalJobType.RECONCILIATION,
         status: {
@@ -256,10 +260,11 @@ export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
           gte: new Date(Date.now() - 24 * 60 * 60 * 1000),
         },
       },
-    }),
-    prisma.webhookEvent.count({ where: { status: WebhookStatus.RECEIVED } }),
-    prisma.webhookEvent.count({ where: { status: WebhookStatus.PROCESSING } }),
+    })),
+    withDashboardTiming('observability.received_webhooks_count', () => prisma.webhookEvent.count({ where: { status: WebhookStatus.RECEIVED } })),
+    withDashboardTiming('observability.processing_webhooks_count', () => prisma.webhookEvent.count({ where: { status: WebhookStatus.PROCESSING } })),
   ]);
+  const aggregationStartedAt = startDashboardTimer();
   const last24h = metrics.windows.find((window) => window.window === 'last24h') ?? metrics.windows[0];
   const retryPressureScore = retryScheduled + retrying * 2 + deadLetterReady * 3 + permanentlyFailed * 4;
   const staleStateCount = reconciliationDiagnostics.summary.total;
@@ -271,7 +276,7 @@ export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
     staleStateCount,
   });
 
-  return {
+  const summary: ObservabilitySummary = {
     health,
     generatedAt: metrics.generatedAt,
     windows: metrics.windows,
@@ -314,4 +319,6 @@ export async function getObservabilitySummary(): Promise<ObservabilitySummary> {
       staleStateCount,
     }),
   };
+  logDashboardTiming('observability.summary_aggregation', aggregationStartedAt);
+  return summary;
 }

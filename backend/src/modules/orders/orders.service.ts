@@ -13,6 +13,7 @@ import {
   mapWebhookEventToReturnSignalDiscovery,
 } from '../shopify/return-signal-discovery.service.js';
 import type { FetchOrderLineItemImagesResult } from '../shopify/shopify-admin.types.js';
+import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function toAmountString(value: number) {
   return value.toFixed(2);
@@ -1091,7 +1092,7 @@ export async function listVendorOrders(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<OrderSummaryDto[]> {
-  const allocations = await prisma.vendorAllocation.findMany({
+  const allocations = await withDashboardTiming('orders.vendor_allocation_fetch', () => prisma.vendorAllocation.findMany({
     where: {
       assignedVendorId: vendorId,
     },
@@ -1134,9 +1135,9 @@ export async function listVendorOrders(
     },
     take: options.limit ?? 100,
     skip: options.offset ?? 0,
-  });
+  }));
 
-  return allocations.map((allocation) => {
+  return withDashboardTiming('orders.metrics_aggregation', () => allocations.map((allocation) => {
     const totalAmount = computeTotalAmount(allocation.lineItems);
     return {
       id: allocation.id,
@@ -1159,7 +1160,7 @@ export async function listVendorOrders(
       createdAt: allocation.createdAt.toISOString(),
       updatedAt: allocation.updatedAt.toISOString(),
     };
-  });
+  }));
 }
 
 export async function getVendorOrderById(

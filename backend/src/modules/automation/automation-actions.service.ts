@@ -15,6 +15,7 @@ import {
 import { prisma } from '../../db/prisma.js';
 import { createOperationalJob, serializeOperationalJob } from '../operational-jobs/operational-jobs.service.js';
 import { listOperationalSignals } from '../rules/rules.service.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type {
   AutomationActionDto,
   AutomationActionExecutionMode,
@@ -323,11 +324,13 @@ export async function listAutomationActions(options: {
   status?: AutomationActionStatus;
   includeNotifications?: boolean;
 } = {}): Promise<AutomationActionsResponseDto> {
-  await generateAutomationActionsForSignals({
-    includeNotifications: options.includeNotifications,
-  });
+  await withDashboardTiming('automation_actions.generate_for_signals_service', () =>
+    generateAutomationActionsForSignals({
+      includeNotifications: options.includeNotifications,
+    }),
+  );
 
-  const actions = await prisma.automationAction.findMany({
+  const actions = await withDashboardTiming('automation_actions.action_fetch', () => prisma.automationAction.findMany({
     where: {
       status: options.status ?? {
         in: ACTIVE_ACTION_STATUSES,
@@ -339,13 +342,16 @@ export async function listAutomationActions(options: {
       },
     ],
     take: 100,
-  });
+  }));
+  const aggregationStartedAt = startDashboardTimer();
   const mapped = actions.map(mapAutomationAction);
 
-  return {
+  const response = {
     summary: buildSummary(mapped),
     actions: mapped,
   };
+  logDashboardTiming('automation_actions.metrics_aggregation', aggregationStartedAt);
+  return response;
 }
 
 export async function executeAutomationAction(input: {

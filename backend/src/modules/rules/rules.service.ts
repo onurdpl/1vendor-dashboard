@@ -17,6 +17,7 @@ import type {
   OperationalSignalsResponseDto,
   OperationalSignalSummaryDto,
 } from './rules.types.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 type SignalDefinition = {
   id: string;
@@ -667,8 +668,10 @@ export async function listOperationalSignals(options: {
   status?: OperationalSignalStatus;
   limit?: number;
 } = {}): Promise<OperationalSignalsResponseDto> {
-  await evaluateOperationalSignals({ vendorId: options.vendorId });
-  const signals = await prisma.operationalSignal.findMany({
+  await withDashboardTiming('signals.evaluate_operational_signals_service', () =>
+    evaluateOperationalSignals({ vendorId: options.vendorId }),
+  );
+  const signals = await withDashboardTiming('signals.operational_signal_fetch', () => prisma.operationalSignal.findMany({
     where: {
       vendorId: options.vendorId ?? undefined,
       status: options.status ?? OperationalSignalStatus.ACTIVE,
@@ -687,13 +690,16 @@ export async function listOperationalSignals(options: {
       },
     ],
     take: options.limit ?? 50,
-  });
+  }));
+  const aggregationStartedAt = startDashboardTimer();
   const mapped = signals.map(mapSignal);
 
-  return {
+  const response = {
     summary: buildSummary(mapped),
     signals: mapped,
   };
+  logDashboardTiming('signals.metrics_aggregation', aggregationStartedAt);
+  return response;
 }
 
 export async function updateOperationalSignalStatus(

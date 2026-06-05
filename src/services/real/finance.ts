@@ -98,14 +98,15 @@ export const __financeStatusMapping = {
   mapRecordStatusLabel,
 };
 
-function readVendorRequestOptions(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
-  const requestOptions: { vendorId?: string; signal?: AbortSignal } = {};
+function readVendorRequestOptions(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}) {
+  const requestOptions: { vendorId?: string; signal?: AbortSignal; headers?: HeadersInit } = {};
   if (options.vendorId) requestOptions.vendorId = options.vendorId;
   if (options.signal) requestOptions.signal = options.signal;
+  if (options.headers) requestOptions.headers = options.headers;
   return Object.keys(requestOptions).length > 0 ? requestOptions : undefined;
 }
 
-export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal } = {}): Promise<FinanceDashboard> {
+export async function getFinanceDashboard(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<FinanceDashboard> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));

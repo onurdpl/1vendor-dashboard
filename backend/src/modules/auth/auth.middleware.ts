@@ -2,6 +2,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { createAuthService } from './auth.service.js';
 import type { AuthRestoreDiagnostics } from './auth.types.js';
 import { CSRF_HEADER_NAME, getSessionCookieToken } from './session-cookie.js';
+import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 function getBearerToken(request: FastifyRequest) {
   const authHeader = request.headers.authorization;
@@ -27,6 +28,7 @@ function requiresCsrfProtection(request: FastifyRequest) {
 
 export function createAuthMiddleware(authService: ReturnType<typeof createAuthService>) {
   async function authenticateRequest(request: FastifyRequest, reply: FastifyReply) {
+    return withDashboardTiming('auth.session_validation', async () => {
     const bearerToken = getBearerToken(request);
     const cookieToken = getSessionCookieToken(request);
     const diagnostics: AuthRestoreDiagnostics = {
@@ -89,6 +91,7 @@ export function createAuthMiddleware(authService: ReturnType<typeof createAuthSe
         return reply.code(403).send({ message: 'CSRF verification failed.' });
       }
     }
+    });
   }
 
   return {

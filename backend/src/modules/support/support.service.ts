@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type { AuthUserContext } from '../auth/auth.types.js';
 import type { RequestVendorContext } from '../vendor-access/vendor-access.types.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type {
   AddSupportTicketReplyInput,
   AddSupportTicketNoteInput,
@@ -859,7 +860,7 @@ export async function createSupportTicket(
 }
 
 export async function listAdminSupportTickets(filters: SupportTicketFilters = {}): Promise<SupportTicketDto[]> {
-  const tickets = await prisma.supportTicket.findMany({
+  const tickets = await withDashboardTiming('support.admin_ticket_fetch', () => prisma.supportTicket.findMany({
     include: {
       vendor: {
         select: { name: true },
@@ -869,9 +870,10 @@ export async function listAdminSupportTickets(filters: SupportTicketFilters = {}
       updatedAt: 'desc',
     },
     take: 250,
-  });
+  }));
 
-  return applyFilters(tickets.map((ticket) => mapAdminTicket(ticket, { includeSla: true })), filters)
+  const aggregationStartedAt = startDashboardTimer();
+  const result = applyFilters(tickets.map((ticket) => mapAdminTicket(ticket, { includeSla: true })), filters)
     .sort((left, right) => {
       const leftRank = left.sla?.isOverdue ? 0 : left.sla?.escalationLevel === 'due_soon' ? 1 : 2;
       const rightRank = right.sla?.isOverdue ? 0 : right.sla?.escalationLevel === 'due_soon' ? 1 : 2;
@@ -880,6 +882,8 @@ export async function listAdminSupportTickets(filters: SupportTicketFilters = {}
       }
       return new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime();
     });
+  logDashboardTiming('support.admin_ticket_aggregation', aggregationStartedAt);
+  return result;
 }
 
 export async function getAdminSupportAnalytics(): Promise<SupportAnalyticsDto> {
@@ -906,7 +910,7 @@ export async function getAdminSupportAnalytics(): Promise<SupportAnalyticsDto> {
 }
 
 export async function listVendorSupportTickets(vendorId: string, filters: SupportTicketFilters = {}): Promise<SupportTicketDto[]> {
-  const tickets = await prisma.supportTicket.findMany({
+  const tickets = await withDashboardTiming('support.vendor_ticket_fetch', () => prisma.supportTicket.findMany({
     where: { vendorId },
     include: {
       vendor: {
@@ -917,9 +921,12 @@ export async function listVendorSupportTickets(vendorId: string, filters: Suppor
       updatedAt: 'desc',
     },
     take: 100,
-  });
+  }));
 
-  return applyFilters(tickets.map((ticket) => mapVendorTicket(ticket)), filters);
+  const aggregationStartedAt = startDashboardTimer();
+  const result = applyFilters(tickets.map((ticket) => mapVendorTicket(ticket)), filters);
+  logDashboardTiming('support.vendor_ticket_aggregation', aggregationStartedAt);
+  return result;
 }
 
 export async function getAdminSupportTicket(ticketId: string): Promise<SupportTicketDto | null> {

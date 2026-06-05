@@ -5,6 +5,7 @@ import { createAuthService } from '../auth/auth.service.js';
 import { getAdminOperationsAttentionCenter, getAdminOperationsQueue } from './operations.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -20,7 +21,9 @@ export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue(resolvePagination(request.query)));
+      return withDashboardRouteTiming('GET /admin/operations', () =>
+        withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue(resolvePagination(request.query))),
+      );
     },
   );
 

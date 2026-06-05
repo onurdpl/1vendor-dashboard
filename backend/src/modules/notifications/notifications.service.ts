@@ -14,6 +14,7 @@ import type { AuthRole } from '../auth/auth.types.js';
 import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import { runEmailDeliveryForIntent, type EmailDeliveryConfig } from './email-delivery.service.js';
 import type { NotificationIntentDto, NotificationsResponseDto } from './notifications.types.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 const VENDOR_SAFE_SOURCE_AREAS = new Set<OperationalSignalSourceArea>([
   OperationalSignalSourceArea.PAYOUT,
@@ -301,9 +302,9 @@ export async function listNotificationsForUser(input: {
   vendorId?: string | null;
   env: EmailDeliveryConfig;
 }): Promise<NotificationsResponseDto> {
-  await generateNotificationsForSignals(input);
+  await withDashboardTiming('notifications.generate_for_signals_service', () => generateNotificationsForSignals(input));
 
-  const notifications = await prisma.notificationIntent.findMany({
+  const notifications = await withDashboardTiming('notifications.notification_fetch', () => prisma.notificationIntent.findMany({
     where:
       input.role === 'admin'
         ? {
@@ -317,13 +318,16 @@ export async function listNotificationsForUser(input: {
       createdAt: 'desc',
     },
     take: 50,
-  });
+  }));
+  const aggregationStartedAt = startDashboardTimer();
   const mapped = notifications.map(mapNotification);
 
-  return {
+  const response = {
     summary: buildSummary(mapped),
     notifications: mapped,
   };
+  logDashboardTiming('notifications.metrics_aggregation', aggregationStartedAt);
+  return response;
 }
 
 export async function updateNotificationLifecycle(input: {

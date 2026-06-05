@@ -7,6 +7,7 @@ import { getAdminShopifyOrderBreakdown, getVendorOrderByIdForUser, listVendorOrd
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
 import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -24,7 +25,9 @@ export function registerOrdersRoutes(app: FastifyInstance, env: AppEnv) {
         return [];
       }
 
-      return withSlowEndpointTiming('GET /orders', () => listVendorOrders(vendorId, resolvePagination(request.query)));
+      return withDashboardRouteTiming('GET /orders', () =>
+        withSlowEndpointTiming('GET /orders', () => listVendorOrders(vendorId, resolvePagination(request.query))),
+      );
     },
   );
 

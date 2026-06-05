@@ -5,6 +5,7 @@ import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
 import { listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
 import type { OperationalSignalLifecycleAction } from './rules.types.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -18,10 +19,12 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
     async (request) => {
       const includeInternal = request.authUser?.role === 'admin';
 
-      return listOperationalSignals({
-        vendorId: request.vendorContext?.vendorId,
-        includeInternal,
-      });
+      return withDashboardRouteTiming('GET /signals', () =>
+        listOperationalSignals({
+          vendorId: request.vendorContext?.vendorId,
+          includeInternal,
+        }),
+      );
     },
   );
 

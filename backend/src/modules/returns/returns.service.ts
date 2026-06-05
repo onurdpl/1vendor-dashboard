@@ -12,6 +12,7 @@ import {
   type NavlungoCreatePostPayload,
   type NavlungoCreatePostEndpointPath,
 } from '../shipping/navlungo-provider.adapter.js';
+import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type { ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 import {
   backfillMissingLineItemImages,
@@ -848,7 +849,7 @@ export async function listVendorReturns(
   vendorId: string,
   options: { limit?: number; offset?: number } = {},
 ): Promise<ReturnSummaryDto[]> {
-  const records = await prisma.returnRecord.findMany({
+  const records = await withDashboardTiming('returns.vendor_return_fetch', () => prisma.returnRecord.findMany({
     where: {
       vendorAllocation: {
         assignedVendorId: vendorId,
@@ -920,9 +921,9 @@ export async function listVendorReturns(
     },
     take: options.limit ?? 100,
     skip: options.offset ?? 0,
-  });
+  }));
 
-  return records.map((record) => {
+  return withDashboardTiming('returns.metrics_aggregation', () => records.map((record) => {
     const matchingRefundRecords = getMatchingRefundRecords(record);
     const refundAmount = matchingRefundRecords.reduce(
       (sum, refund) => sum + toNumber(refund.amount),
@@ -992,7 +993,7 @@ export async function listVendorReturns(
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
-  });
+  }));
 }
 
 export async function getVendorReturnById(

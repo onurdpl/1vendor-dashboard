@@ -5,16 +5,16 @@ export async function createSupportTicket(input: CreateSupportTicketInput): Prom
   return apiClient.post<SupportTicket>('/support/tickets', input);
 }
 
-export async function listAdminSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
-  return apiClient.get<SupportTicket[]>('/admin/support/tickets', { signal: options.signal });
+export async function listAdminSupportTickets(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<SupportTicket[]> {
+  return apiClient.get<SupportTicket[]>('/admin/support/tickets', { signal: options.signal, headers: options.headers });
 }
 
 export async function getAdminSupportAnalytics(options: { signal?: AbortSignal } = {}): Promise<SupportAnalytics> {
   return apiClient.get<SupportAnalytics>('/admin/support/analytics', { signal: options.signal });
 }
 
-export async function listVendorSupportTickets(options: { signal?: AbortSignal } = {}): Promise<SupportTicket[]> {
-  return apiClient.get<SupportTicket[]>('/support/tickets', { signal: options.signal });
+export async function listVendorSupportTickets(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<SupportTicket[]> {
+  return apiClient.get<SupportTicket[]>('/support/tickets', { signal: options.signal, headers: options.headers });
 }
 
 export async function getAdminSupportTicket(ticketId: string, options: { signal?: AbortSignal } = {}): Promise<SupportTicket> {

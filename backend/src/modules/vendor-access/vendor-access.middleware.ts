@@ -1,7 +1,9 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import { resolveRequestVendorContext } from './vendor-access.service.js';
 
 export async function requireVendorAccess(request: FastifyRequest, reply: FastifyReply) {
+  return withDashboardTiming('auth.vendor_context_validation', async () => {
   if (!request.authUser) {
     return reply.code(401).send({ message: 'Unauthorized' });
   }
@@ -13,5 +15,5 @@ export async function requireVendorAccess(request: FastifyRequest, reply: Fastif
   }
 
   request.vendorContext = result.context;
+  });
 }
-

@@ -1,4 +1,5 @@
 import { prisma } from '../../db/prisma.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type {
   AutomationAlertDto,
   AutomationAlertStatus,
@@ -92,7 +93,7 @@ export async function getAutomationDashboard(
   vendorName: string,
 ): Promise<AutomationDashboardDto> {
   const [allocations, pendingReturns, failedFulfillments, vendorWebhookEvents] = await Promise.all([
-    prisma.vendorAllocation.findMany({
+    withDashboardTiming('automation.allocation_fetch', () => prisma.vendorAllocation.findMany({
       where: {
         assignedVendorId: vendorId,
       },
@@ -103,8 +104,8 @@ export async function getAutomationDashboard(
         updatedAt: 'desc',
       },
       take: 12,
-    }),
-    prisma.returnRecord.findMany({
+    })),
+    withDashboardTiming('automation.pending_return_fetch', () => prisma.returnRecord.findMany({
       where: {
         vendorAllocation: {
           assignedVendorId: vendorId,
@@ -124,8 +125,8 @@ export async function getAutomationDashboard(
         updatedAt: 'desc',
       },
       take: 8,
-    }),
-    prisma.fulfillment.findMany({
+    })),
+    withDashboardTiming('automation.failed_fulfillment_fetch', () => prisma.fulfillment.findMany({
       where: {
         vendorAllocation: {
           assignedVendorId: vendorId,
@@ -146,8 +147,8 @@ export async function getAutomationDashboard(
         updatedAt: 'desc',
       },
       take: 8,
-    }),
-    prisma.webhookEvent.findMany({
+    })),
+    withDashboardTiming('automation.failed_webhook_fetch', () => prisma.webhookEvent.findMany({
       where: {
         status: 'FAILED',
         shopifyOrder: {
@@ -165,8 +166,9 @@ export async function getAutomationDashboard(
         receivedAt: 'desc',
       },
       take: 8,
-    }),
+    })),
   ]);
+  const aggregationStartedAt = startDashboardTimer();
 
   const alerts: AutomationAlertDto[] = [];
   const seenAlertIds = new Set<string>();
@@ -275,8 +277,10 @@ export async function getAutomationDashboard(
     return rightTime - leftTime;
   });
 
-  return {
+  const dashboard = {
     alerts: alerts.slice(0, 12),
     suggestions: createSuggestionsFromAlerts({ vendorId, vendorName }, alerts),
   };
+  logDashboardTiming('automation.metrics_aggregation', aggregationStartedAt);
+  return dashboard;
 }

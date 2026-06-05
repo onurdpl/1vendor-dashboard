@@ -24,6 +24,7 @@ import {
   deriveInvoiceVisibility,
   mapInvoiceProvider,
 } from '../invoices/invoice-visibility.js';
+import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 const ACTIVE_PAYOUT_BATCH_STATUSES = ['DRAFT', 'REVIEW', 'APPROVED', 'EXECUTION_PENDING', 'PAID_PLACEHOLDER'] as const;
 
@@ -599,7 +600,7 @@ export async function getVendorFinanceDashboard(
   options: { limit?: number; offset?: number } = {},
 ): Promise<FinanceDashboardDto> {
   const [summaryEntries, entries, storedProfile, latestBatch] = await Promise.all([
-    prisma.financeLedgerEntry.findMany({
+    withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
       },
@@ -659,8 +660,8 @@ export async function getVendorFinanceDashboard(
       orderBy: {
         createdAt: 'desc',
       },
-    }),
-    prisma.financeLedgerEntry.findMany({
+    })),
+    withDashboardTiming('finance.records_fetch', () => prisma.financeLedgerEntry.findMany({
       where: {
         vendorId,
       },
@@ -764,14 +765,14 @@ export async function getVendorFinanceDashboard(
       },
       take: options.limit ?? 100,
       skip: options.offset ?? 0,
-    }),
-    prisma.vendorFinancialProfile.findFirst({
+    })),
+    withDashboardTiming('finance.vendor_profile_fetch', () => prisma.vendorFinancialProfile.findFirst({
       where: {
         vendorId,
         active: true,
       },
-    }),
-    prisma.payoutBatch.findFirst({
+    })),
+    withDashboardTiming('finance.latest_payout_batch_fetch', () => prisma.payoutBatch.findFirst({
       where: {
         vendorId,
       },
@@ -785,8 +786,9 @@ export async function getVendorFinanceDashboard(
           },
         },
       },
-    }),
+    })),
   ]);
+  const aggregationStartedAt = startDashboardTimer();
   const profile = mapProfile(storedProfile, vendorId);
 
   const grossSales = summaryEntries
@@ -944,7 +946,7 @@ export async function getVendorFinanceDashboard(
     };
   });
 
-  return {
+  const dashboard: FinanceDashboardDto = {
     summary: {
       grossSales: toAmountString(grossSales),
       refunds: toAmountString(refunds),
@@ -969,6 +971,8 @@ export async function getVendorFinanceDashboard(
     },
     records,
   };
+  logDashboardTiming('finance.metrics_aggregation', aggregationStartedAt);
+  return dashboard;
 }
 
 export async function getVendorFinancialProfile(vendorId: string): Promise<VendorFinancialProfileDto> {

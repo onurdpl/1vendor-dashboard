@@ -26,6 +26,7 @@ import type {
   SupportTicketFilters,
   UpdateSupportTicketStatusInput,
 } from './support.types.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 function sendSupportError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof SupportTicketError) {
@@ -67,7 +68,10 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(401).send({ message: 'Unauthorized' });
       }
 
-      return listVendorSupportTickets(request.vendorContext.vendorId, request.query ?? {});
+      const vendorContext = request.vendorContext;
+      return withDashboardRouteTiming('GET /support/tickets', () =>
+        listVendorSupportTickets(vendorContext.vendorId, request.query ?? {}),
+      );
     },
   );
 
@@ -145,7 +149,7 @@ export function registerSupportRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Admin access required.' });
       }
 
-      return listAdminSupportTickets(request.query ?? {});
+      return withDashboardRouteTiming('GET /admin/support/tickets', () => listAdminSupportTickets(request.query ?? {}));
     },
   );
 

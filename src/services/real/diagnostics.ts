@@ -459,8 +459,8 @@ export async function listSyncEvents(options: { signal?: AbortSignal } = {}) {
   return apiClient.get<SyncEventsResponseDto>('/admin/diagnostics/sync-events', { signal: options.signal });
 }
 
-export async function getReconciliationDiagnostics(options: { signal?: AbortSignal } = {}) {
-  return apiClient.get<ReconciliationResponseDto>('/admin/diagnostics/reconciliation', { signal: options.signal });
+export async function getReconciliationDiagnostics(options: { signal?: AbortSignal; headers?: HeadersInit } = {}) {
+  return apiClient.get<ReconciliationResponseDto>('/admin/diagnostics/reconciliation', { signal: options.signal, headers: options.headers });
 }
 
 export async function runKargonomiLocationLookupDiagnostics() {

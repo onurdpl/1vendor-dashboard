@@ -20,8 +20,78 @@ import type {
 import { runtimeServices } from '../../services/runtime-services';
 import { ApiError } from './errors';
 
+const DASHBOARD_INITIAL_LOAD_HEADER = 'X-Dashboard-Initial-Load';
+const SLOW_DASHBOARD_OPERATION_MS = 300;
+const SLOW_DASHBOARD_TOTAL_MS = 1000;
+
 function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
+}
+
+function createDashboardRequestId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `dashboard-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function getDashboardNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
+}
+
+function createDashboardHeaders(requestId: string): HeadersInit {
+  return {
+    'X-Request-Id': requestId,
+    [DASHBOARD_INITIAL_LOAD_HEADER]: 'true',
+  };
+}
+
+function logDashboardClientTiming(input: {
+  requestId: string;
+  step: string;
+  durationMs: number;
+  failed?: boolean;
+  thresholdMs?: number;
+}) {
+  const payload = {
+    event: 'ADMIN_DASHBOARD_TIMING',
+    requestId: input.requestId,
+    step: input.step,
+    durationMs: Math.max(0, Math.round(input.durationMs)),
+    failed: Boolean(input.failed),
+  };
+  console.info(payload);
+
+  const thresholdMs = input.thresholdMs ?? SLOW_DASHBOARD_OPERATION_MS;
+  if (payload.durationMs > thresholdMs) {
+    console.warn({
+      event: input.step === 'dashboard.route.end' ? 'ADMIN_DASHBOARD_SLOW_TOTAL' : 'ADMIN_DASHBOARD_SLOW_OPERATION',
+      requestId: input.requestId,
+      step: input.step,
+      durationMs: payload.durationMs,
+      thresholdMs,
+      failed: payload.failed,
+    });
+  }
+}
+
+async function withDashboardClientTiming<T>(requestId: string, step: string, action: () => Promise<T>): Promise<T> {
+  const startedAt = getDashboardNow();
+  let failed = false;
+  try {
+    return await action();
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    logDashboardClientTiming({
+      requestId,
+      step,
+      durationMs: getDashboardNow() - startedAt,
+      failed,
+    });
+  }
 }
 
 function readErrorStatus(error: unknown) {
@@ -309,25 +379,45 @@ function createPriorityWork(input: {
 }
 
 async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal?: AbortSignal } = {}): Promise<DashboardOverview> {
+  const requestId = createDashboardRequestId();
+  const totalStartedAt = getDashboardNow();
+  let failed = false;
+  logDashboardClientTiming({ requestId, step: 'dashboard.route.start', durationMs: 0 });
+
+  try {
   const currentVendorId = resolveVendorId(vendorId);
   const currentVendor = getCurrentVendorContext();
   const currentUser = getCurrentUser();
   const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
+  const dashboardReadOptions = {
+    signal: options.signal,
+    headers: createDashboardHeaders(requestId),
+  };
 
   const partialDataWarnings: string[] = [];
   const dashboardRequests = await Promise.allSettled([
-    runtimeServices.orders.list(currentVendorId, { signal: options.signal }),
-    runtimeServices.returns.list(currentVendorId, { signal: options.signal }),
-    runtimeServices.finance.dashboard(currentVendorId, { signal: options.signal }),
-    runtimeServices.automation.dashboard(currentVendorId, { signal: options.signal }),
-    currentUser?.role === 'admin' ? runtimeServices.operations.list({ signal: options.signal }) : Promise.resolve(null),
-    runtimeServices.signals.list(currentVendorId, { signal: options.signal }),
-    runtimeServices.notifications.list(notificationScopeVendorId, { signal: options.signal }),
+    withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions)),
     currentUser?.role === 'admin'
-      ? runtimeServices.support.listAdmin({ signal: options.signal })
-      : runtimeServices.support.listVendor({ signal: options.signal }),
-    currentUser?.role === 'admin' ? runtimeServices.diagnostics.reconciliation({ signal: options.signal }) : Promise.resolve(null),
-    currentUser?.role === 'admin' ? runtimeServices.observability.summary({ signal: options.signal }) : Promise.resolve(null),
+      ? withDashboardClientTiming(requestId, 'client.operations.list', () => runtimeServices.operations.list(dashboardReadOptions))
+      : Promise.resolve(null),
+    withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.notifications.list', () =>
+      runtimeServices.notifications.list(notificationScopeVendorId, dashboardReadOptions),
+    ),
+    currentUser?.role === 'admin'
+      ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions))
+      : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions)),
+    currentUser?.role === 'admin'
+      ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
+          runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
+        )
+      : Promise.resolve(null),
+    currentUser?.role === 'admin'
+      ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions))
+      : Promise.resolve(null),
   ]);
 
   throwDashboardAuthError(dashboardRequests);
@@ -395,6 +485,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     partialDataWarnings.push('Operational observability is temporarily unavailable.');
   }
 
+  const aggregationStartedAt = getDashboardNow();
   const awaitingShipmentCount = orders.filter((order) => order.shippingStatus === 'Awaiting Shipment').length;
   const blockedCount = orders.filter(
     (order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked',
@@ -479,6 +570,12 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
       }
     : undefined;
 
+  logDashboardClientTiming({
+    requestId,
+    step: 'dashboard.metrics_aggregation',
+    durationMs: getDashboardNow() - aggregationStartedAt,
+  });
+
   return {
     vendorId: currentVendorId,
     vendorName: currentVendor.vendorName,
@@ -501,6 +598,18 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     notificationSummary,
     partialDataWarnings,
   };
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    logDashboardClientTiming({
+      requestId,
+      step: 'dashboard.route.end',
+      durationMs: getDashboardNow() - totalStartedAt,
+      failed,
+      thresholdMs: SLOW_DASHBOARD_TOTAL_MS,
+    });
+  }
 }
 
 export function buildDashboardOverview(vendorId?: VendorId): DashboardOverview {

@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 import {
   getWebhookDiagnosticById,
   getReturnVisibilityDiagnostic,
@@ -83,7 +84,7 @@ export function registerDiagnosticsRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return getReconciliationDiagnostics();
+      return withDashboardRouteTiming('GET /admin/diagnostics/reconciliation', () => getReconciliationDiagnostics());
     },
   );
 

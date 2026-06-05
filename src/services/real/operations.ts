@@ -47,12 +47,13 @@ function mapSeverity(severity: OperationsResponseDto['items'][number]['severity'
   return 'critical';
 }
 
-export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal } = {}): Promise<OperationsQueueItem[]> {
+export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
   const response = await apiClient.get<OperationsResponseDto>(`/admin/operations${params.size ? `?${params.toString()}` : ''}`, {
     signal: options.signal,
+    headers: options.headers,
   });
 
   return response.items.map((item) => ({

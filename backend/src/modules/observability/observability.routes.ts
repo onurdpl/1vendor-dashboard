@@ -3,6 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { getObservabilityMetrics, getObservabilitySummary } from './observability.service.js';
+import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
 export function registerObservabilityRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
@@ -18,7 +19,7 @@ export function registerObservabilityRoutes(app: FastifyInstance, env: AppEnv) {
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      return getObservabilitySummary();
+      return withDashboardRouteTiming('GET /admin/observability/summary', () => getObservabilitySummary());
     },
   );
 

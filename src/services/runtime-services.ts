@@ -44,7 +44,7 @@ function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
 }
 
-type ReadRequestOptions = { signal?: AbortSignal };
+type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit };
 
 const mockSupportTickets: SupportTicket[] = [];
 
@@ -347,7 +347,9 @@ export const runtimeServices = {
   },
   orders: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
-      runtimeConfig.apiMode === 'real' ? realOrders.listOrders({ vendorId, signal: options.signal }) : Promise.resolve(listMockOrders(vendorId)),
+      runtimeConfig.apiMode === 'real'
+        ? realOrders.listOrders({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(listMockOrders(vendorId)),
     async detail(orderId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.getOrder(orderId, { vendorId, signal: options.signal });
@@ -1283,7 +1285,9 @@ export const runtimeServices = {
   },
   returns: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
-      runtimeConfig.apiMode === 'real' ? realReturns.listReturns({ vendorId, signal: options.signal }) : Promise.resolve(listMockReturns(vendorId)),
+      runtimeConfig.apiMode === 'real'
+        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(listMockReturns(vendorId)),
     async detail(returnId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.getReturn(returnId, { vendorId, signal: options.signal });
@@ -1462,7 +1466,7 @@ export const runtimeServices = {
   finance: {
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal })
+        ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal, headers: options.headers })
         : Promise.resolve(getMockFinanceDashboard(vendorId)),
     updateProfile: (
       vendorId: string,
@@ -1597,13 +1601,13 @@ export const runtimeServices = {
   automation: {
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realAutomation.getAutomationDashboard(vendorId, { signal: options.signal })
+        ? realAutomation.getAutomationDashboard(vendorId, { signal: options.signal, headers: options.headers })
         : Promise.resolve(getMockAutomationDashboard(vendorId)),
   },
   operations: {
     list: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.listAdminOperationsQueue({ signal: options.signal })
+        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers })
         : Promise.resolve(listMockAdminOperationsQueue()),
     attention: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
@@ -1623,7 +1627,7 @@ export const runtimeServices = {
   signals: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSignals.listOperationalSignals(vendorId, { signal: options.signal })
+        ? realSignals.listOperationalSignals(vendorId, { signal: options.signal, headers: options.headers })
         : Promise.resolve({
             summary: {
               total: 0,
@@ -1638,7 +1642,7 @@ export const runtimeServices = {
   notifications: {
     list: (vendorId: string | null = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realNotifications.listNotifications(vendorId, { signal: options.signal })
+        ? realNotifications.listNotifications(vendorId, { signal: options.signal, headers: options.headers })
         : Promise.resolve({
             summary: {
               total: 0,
@@ -1731,7 +1735,7 @@ export const runtimeServices = {
     },
     listAdmin: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSupport.listAdminSupportTickets({ signal: options.signal })
+        ? realSupport.listAdminSupportTickets({ signal: options.signal, headers: options.headers })
         : Promise.resolve(mockSupportTickets),
     analytics: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
@@ -1739,7 +1743,7 @@ export const runtimeServices = {
         : Promise.resolve(buildMockSupportAnalytics()),
     listVendor: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realSupport.listVendorSupportTickets({ signal: options.signal })
+        ? realSupport.listVendorSupportTickets({ signal: options.signal, headers: options.headers })
         : Promise.resolve(mockSupportTickets.filter((ticket) => ticket.vendorId === getCurrentVendorId()).map(toMockVendorSupportTicket)),
     async detailAdmin(ticketId: string, options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
@@ -1985,7 +1989,7 @@ export const runtimeServices = {
           }),
     reconciliation: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realDiagnostics.getReconciliationDiagnostics({ signal: options.signal })
+        ? realDiagnostics.getReconciliationDiagnostics({ signal: options.signal, headers: options.headers })
         : Promise.resolve({
             summary: {
               stuckReceived: 0,
@@ -2324,7 +2328,7 @@ export const runtimeServices = {
   observability: {
     summary: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realObservability.getObservabilitySummary({ signal: options.signal })
+        ? realObservability.getObservabilitySummary({ signal: options.signal, headers: options.headers })
         : Promise.resolve({
             health: 'healthy' as const,
             generatedAt: new Date().toISOString(),
