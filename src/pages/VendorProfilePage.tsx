@@ -15,6 +15,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getFinanceDashboard } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
+import { getVendorBillingProfile } from '../features/vendors/api';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
 import type { SupportTicket, VendorShippingConfig } from '../lib/api/contracts';
@@ -270,6 +271,11 @@ export function VendorProfilePage() {
     ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
     { enabled: appReadiness.ready },
   );
+  const billingQuery = useQueryResource(
+    queryKeys.vendorProfile.billingProfile(currentVendor.vendorId),
+    ({ signal }) => getVendorBillingProfile(currentVendor.vendorId, { signal }),
+    { enabled: appReadiness.ready && isAdmin },
+  );
   const supportQuery = useQueryResource(
     queryKeys.vendorProfile.supportTickets(currentVendor.vendorId),
     ({ signal }) => (isAdmin ? listAdminSupportTickets({ signal }) : listVendorSupportTickets({ signal })),
@@ -278,6 +284,7 @@ export function VendorProfilePage() {
 
   const shippingConfig = shippingQuery.data;
   const financeProfile = financeQuery.data?.profile ?? null;
+  const billingProfile = billingQuery.data ?? null;
   const supportTickets = useMemo(
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
@@ -562,6 +569,52 @@ export function VendorProfilePage() {
             <MetadataRow label="Signed-in user" value={currentUser?.email ?? 'Unknown'} />
             <MetadataRow label="Seller of record" value="Not configured" />
           </MetadataGroup>
+        </OperationalSection>
+
+        <OperationalSection
+          title="Billing / Legal Profile"
+          description="Seller legal billing identity used later as the Paraşüt contact source for Sporgym commission invoices."
+        >
+          {!isAdmin ? (
+            <MetadataGroup>
+              <MetadataRow label="Visibility" value="Admin-managed" />
+              <MetadataRow label="Commission invoice readiness" value="Requires configuration review" />
+              <MetadataRow label="Edit access" value="Not available in vendor view" />
+            </MetadataGroup>
+          ) : billingQuery.isError ? (
+            <SectionErrorRetry
+              title="Billing profile unavailable"
+              description={billingQuery.error ?? 'Unable to load the vendor billing profile.'}
+              onRetry={() => void billingQuery.refetch()}
+            />
+          ) : billingQuery.isInitialLoading ? (
+            <SectionSkeleton title="Loading billing profile" description="Fetching seller legal billing identity." />
+          ) : (
+            <>
+              <MetadataGroup>
+                <MetadataRow label="Legal company name" value={formatValue(billingProfile?.legalCompanyName)} />
+                <MetadataRow label="Tax number / TCKN" value={formatValue(billingProfile?.taxNumber)} />
+                <MetadataRow label="Tax office" value={formatValue(billingProfile?.taxOffice)} />
+                <MetadataRow label="Billing address" value={formatValue(billingProfile?.billingAddress)} />
+                <MetadataRow label="Authorized person" value={formatValue(billingProfile?.authorizedPerson)} />
+                <MetadataRow label="Billing email" value={formatValue(billingProfile?.billingEmail)} />
+                <MetadataRow label="Billing phone" value={formatValue(billingProfile?.billingPhone)} />
+                <MetadataRow label="IBAN" value={formatValue(billingProfile?.iban)} />
+              </MetadataGroup>
+              <div className="vendor-profile-integration-list">
+                <div>
+                  <span>Paraşüt contact source</span>
+                  <StatusBadge tone={billingProfile ? 'success' : 'warning'}>
+                    {billingProfile ? 'Configured' : 'Required for commission invoices'}
+                  </StatusBadge>
+                </div>
+                <div>
+                  <span>Admin edit UI</span>
+                  <StatusBadge tone="neutral">Deferred</StatusBadge>
+                </div>
+              </div>
+            </>
+          )}
         </OperationalSection>
 
         <OperationalSection

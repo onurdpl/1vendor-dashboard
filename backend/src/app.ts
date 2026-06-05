@@ -28,6 +28,7 @@ import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execu
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
+import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.routes.js';
 import { registerPaymentReturnRoutes } from './modules/payments/payment-return.routes.js';
@@ -360,6 +361,7 @@ export function createApp() {
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
   registerVendorIntegrationRoutes(app, env);
+  registerVendorBillingProfileRoutes(app, env);
   registerPaymentReturnRoutes(app);
   registerParasutProbeRoutes(app, env);
   registerParatikaProbeRoutes(app, env);

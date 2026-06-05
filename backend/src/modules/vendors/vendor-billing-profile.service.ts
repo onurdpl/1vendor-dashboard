@@ -1,0 +1,129 @@
+import type { VendorBillingProfile } from '@prisma/client';
+import { prisma } from '../../db/prisma.js';
+
+export type VendorBillingProfileDto = {
+  id: string;
+  vendorId: string;
+  legalCompanyName: string | null;
+  taxNumber: string | null;
+  taxOffice: string | null;
+  billingAddress: string | null;
+  iban: string | null;
+  authorizedPerson: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VendorBillingProfileInputDto = {
+  legalCompanyName?: unknown;
+  taxNumber?: unknown;
+  taxOffice?: unknown;
+  billingAddress?: unknown;
+  iban?: unknown;
+  authorizedPerson?: unknown;
+  billingEmail?: unknown;
+  billingPhone?: unknown;
+};
+
+const REQUIRED_FIELDS = ['legalCompanyName', 'taxNumber', 'taxOffice', 'billingAddress'] as const;
+const OPTIONAL_FIELDS = ['iban', 'authorizedPerson', 'billingEmail', 'billingPhone'] as const;
+
+function trimRequiredString(input: VendorBillingProfileInputDto, key: (typeof REQUIRED_FIELDS)[number]) {
+  const value = input[key];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${key} is required.`);
+  }
+  return value.trim();
+}
+
+function trimOptionalString(input: VendorBillingProfileInputDto, key: (typeof OPTIONAL_FIELDS)[number]) {
+  const value = input[key];
+  if (value === undefined || value === null) {
+    return null;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`${key} must be a string or null.`);
+  }
+  return value.trim() || null;
+}
+
+function mapBillingProfile(profile: VendorBillingProfile): VendorBillingProfileDto {
+  return {
+    id: profile.id,
+    vendorId: profile.vendorId,
+    legalCompanyName: profile.legalCompanyName,
+    taxNumber: profile.taxNumber,
+    taxOffice: profile.taxOffice,
+    billingAddress: profile.billingAddress,
+    iban: profile.iban,
+    authorizedPerson: profile.authorizedPerson,
+    billingEmail: profile.billingEmail,
+    billingPhone: profile.billingPhone,
+    createdAt: profile.createdAt.toISOString(),
+    updatedAt: profile.updatedAt.toISOString(),
+  };
+}
+
+function normalizeBillingProfileInput(input: VendorBillingProfileInputDto) {
+  return {
+    legalCompanyName: trimRequiredString(input, 'legalCompanyName'),
+    taxNumber: trimRequiredString(input, 'taxNumber'),
+    taxOffice: trimRequiredString(input, 'taxOffice'),
+    billingAddress: trimRequiredString(input, 'billingAddress'),
+    iban: trimOptionalString(input, 'iban'),
+    authorizedPerson: trimOptionalString(input, 'authorizedPerson'),
+    billingEmail: trimOptionalString(input, 'billingEmail'),
+    billingPhone: trimOptionalString(input, 'billingPhone'),
+  };
+}
+
+async function assertVendorExists(vendorId: string) {
+  const vendor = await prisma.vendor.findUnique({
+    where: {
+      id: vendorId,
+    },
+    select: {
+      id: true,
+    },
+  });
+  if (!vendor) {
+    throw new Error('Vendor could not be found.');
+  }
+}
+
+export async function getVendorBillingProfile(vendorId: string): Promise<VendorBillingProfileDto | null> {
+  await assertVendorExists(vendorId);
+  const profile = await prisma.vendorBillingProfile.findUnique({
+    where: {
+      vendorId,
+    },
+  });
+
+  return profile ? mapBillingProfile(profile) : null;
+}
+
+export async function upsertVendorBillingProfile(
+  vendorId: string,
+  input: VendorBillingProfileInputDto,
+): Promise<VendorBillingProfileDto> {
+  await assertVendorExists(vendorId);
+  const data = normalizeBillingProfileInput(input);
+  const profile = await prisma.vendorBillingProfile.upsert({
+    where: {
+      vendorId,
+    },
+    update: data,
+    create: {
+      vendorId,
+      ...data,
+    },
+  });
+
+  return mapBillingProfile(profile);
+}
+
+export const __vendorBillingProfileTesting = {
+  normalizeBillingProfileInput,
+};

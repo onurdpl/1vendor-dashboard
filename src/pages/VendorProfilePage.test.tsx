@@ -4,11 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
-import type { FinanceDashboard, SupportTicket, VendorShippingConfig } from '../lib/api/contracts';
+import type { FinanceDashboard, SupportTicket, VendorBillingProfile, VendorShippingConfig } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>();
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
+const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const createSupportTicketMock = vi.fn();
@@ -26,6 +27,14 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
+  };
+});
+
+vi.mock('../features/vendors/api', async () => {
+  const actual = await vi.importActual<typeof import('../features/vendors/api')>('../features/vendors/api');
+  return {
+    ...actual,
+    getVendorBillingProfile: () => getVendorBillingProfileMock(),
   };
 });
 
@@ -99,6 +108,21 @@ const financeDashboard: FinanceDashboard = {
     latestBatch: null,
   },
   transactions: [],
+};
+
+const billingProfile: VendorBillingProfile = {
+  id: 'billing-demo-vendor-a',
+  vendorId: 'demo-vendor-a',
+  legalCompanyName: 'Demo Vendor A Ltd.',
+  taxNumber: '1111111111',
+  taxOffice: 'Kadikoy',
+  billingAddress: 'Billing Street 1, Istanbul',
+  iban: 'TR000000000000000000000000',
+  authorizedPerson: 'Demo Authorized Person',
+  billingEmail: 'billing@example.test',
+  billingPhone: '+905551112233',
+  createdAt: '2026-06-05T10:00:00Z',
+  updatedAt: '2026-06-05T10:00:00Z',
 };
 
 function supportTicket(overrides: Partial<SupportTicket> = {}): SupportTicket {
@@ -184,6 +208,8 @@ describe('VendorProfilePage', () => {
     getVendorShippingConfigMock.mockResolvedValue(shippingConfig);
     getFinanceDashboardMock.mockReset();
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getVendorBillingProfileMock.mockReset();
+    getVendorBillingProfileMock.mockResolvedValue(null);
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);
     listAdminSupportTicketsMock.mockReset();
@@ -221,6 +247,10 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Warehouse configured')).toBeInTheDocument();
     expect(screen.getByText('Finance readiness means estimate visibility only, not payout or accounting execution.')).toBeInTheDocument();
     expect(screen.getByText('Integration status')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();
+    expect(screen.getByText('Admin-managed')).toBeInTheDocument();
+    expect(screen.getByText('Not available in vendor view')).toBeInTheDocument();
+    expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
     expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
     expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
@@ -356,5 +386,32 @@ describe('VendorProfilePage', () => {
     await userEvent.click(supportButtons[0]);
     expect(await screen.findByText('Admin support detail route')).toBeInTheDocument();
     expect(createSupportTicketMock).not.toHaveBeenCalled();
+  });
+
+  it('renders admin billing profile values read-only when configured', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+    expect(await screen.findByText('Demo Vendor A Ltd.')).toBeInTheDocument();
+    expect(screen.getByText('1111111111')).toBeInTheDocument();
+    expect(screen.getByText('Kadikoy')).toBeInTheDocument();
+    expect(screen.getByText('Billing Street 1, Istanbul')).toBeInTheDocument();
+    expect(screen.getByText('billing@example.test')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Configured')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Deferred')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
   });
 });

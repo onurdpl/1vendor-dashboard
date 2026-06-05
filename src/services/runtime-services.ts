@@ -23,6 +23,7 @@ import * as realNotifications from './real/notifications';
 import * as realSupport from './real/support';
 import * as realRuntime from './real/runtime';
 import * as realVendorIntegration from './real/vendorIntegration';
+import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
   SupportAnalytics,
@@ -32,6 +33,7 @@ import type {
   SupportTicketStatus,
   ShipmentCustomerOverrides,
   ShippingProvider,
+  VendorBillingProfileInput,
   VendorShippingConfigUpdate,
   VendorIntegrationProviderManagement,
   VendorIntegrationProviderRevokeResult,
@@ -256,6 +258,29 @@ export const runtimeServices = {
             timestamp: new Date().toISOString(),
             dbReachable: false,
             migrationsReachable: false,
+          }),
+  },
+  vendors: {
+    billingProfile: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.getVendorBillingProfile(vendorId, { signal: options.signal })
+        : Promise.resolve(null),
+    updateBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.updateVendorBillingProfile(vendorId, input)
+        : Promise.resolve({
+            id: `mock-billing-profile-${vendorId}`,
+            vendorId,
+            legalCompanyName: input.legalCompanyName,
+            taxNumber: input.taxNumber,
+            taxOffice: input.taxOffice,
+            billingAddress: input.billingAddress,
+            iban: input.iban ?? null,
+            authorizedPerson: input.authorizedPerson ?? null,
+            billingEmail: input.billingEmail ?? null,
+            billingPhone: input.billingPhone ?? null,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
           }),
   },
   auth: {

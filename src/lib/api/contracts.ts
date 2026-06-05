@@ -1247,6 +1247,32 @@ export type VendorFinancialProfile = {
   source: 'configured' | 'default';
 };
 
+export type VendorBillingProfile = {
+  id: string;
+  vendorId: string;
+  legalCompanyName: string | null;
+  taxNumber: string | null;
+  taxOffice: string | null;
+  billingAddress: string | null;
+  iban: string | null;
+  authorizedPerson: string | null;
+  billingEmail: string | null;
+  billingPhone: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type VendorBillingProfileInput = {
+  legalCompanyName: string;
+  taxNumber: string;
+  taxOffice: string;
+  billingAddress: string;
+  iban?: string | null;
+  authorizedPerson?: string | null;
+  billingEmail?: string | null;
+  billingPhone?: string | null;
+};
+
 export type PayoutCalculation = {
   grossAmount: string;
   commission: string;
