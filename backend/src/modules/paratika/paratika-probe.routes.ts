@@ -18,6 +18,11 @@ const PARATIKA_FORBIDDEN_PAYLOAD_KEYS = [
   'PAN',
 ];
 const PARATIKA_FORBIDDEN_ACTIONS = new Set(['SALE', 'PREAUTH', 'REFUND', 'VOID']);
+const PARATIKA_HOSTED_PAYMENT_URL_CANDIDATE_BASES = [
+  'https://entegrasyon.paratika.com.tr/merchant/post/sale',
+  'https://entegrasyon.paratika.com.tr/merchant/post/sale3d',
+  'https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d',
+];
 
 function adminProbesEnabled() {
   return process.env.ADMIN_PROBES_ENABLED?.trim().toLowerCase() === 'true';
@@ -257,6 +262,14 @@ function buildHostedPaymentUrl(sessionToken: string | null, env: AppEnv) {
   return `${baseUrl.replace(/\/+$/, '')}/${sessionToken}`;
 }
 
+function buildHostedPaymentUrlCandidates(sessionToken: string | null, env: AppEnv) {
+  if (!sessionToken || env.PARATIKA_PROBE_CONFIRM !== PARATIKA_SESSIONTOKEN_PROBE_CONFIRM) {
+    return [];
+  }
+
+  return PARATIKA_HOSTED_PAYMENT_URL_CANDIDATE_BASES.map((baseUrl) => `${baseUrl}/${sessionToken}`);
+}
+
 async function runPaymentSellerMappingBackfill(request: FastifyRequest, reply: FastifyReply) {
   if (request.authUser?.role !== 'admin') {
     return reply.code(403).send({ message: 'Forbidden' });
@@ -436,6 +449,10 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           response.ok && sanitized.responseCode === '00'
             ? buildHostedPaymentUrl(readParatikaSessionToken(rawBody), env)
             : null;
+        const hostedPaymentUrlCandidates =
+          response.ok && sanitized.responseCode === '00'
+            ? buildHostedPaymentUrlCandidates(readParatikaSessionToken(rawBody), env)
+            : [];
 
         return reply.code(response.ok ? 200 : 502).send({
           ok: response.ok,
@@ -456,6 +473,7 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           sessionTokenReceived: sanitized.sessionTokenReceived,
           sessionTokenLength: sanitized.sessionTokenLength,
           hostedPaymentUrl,
+          hostedPaymentUrlCandidates,
           rawBodyKeys: sanitized.rawBodyKeys,
           externalApiCallAttempted: true,
           cardDataIncluded: false,

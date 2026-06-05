@@ -239,9 +239,14 @@ Live probe behavior:
 - Returns `writesPerformed=true` because an external SESSIONTOKEN request was made.
 - Returns `responseCode`, `responseMsg`, whether a session token was received, session token length only, and raw response body keys only.
 - When `responseCode=00` and a session token is returned, derives `hostedPaymentUrl` as `PARATIKA_HOSTED_PAYMENT_BASE_URL/sessionToken` for manual redirect testing.
+- Also returns `hostedPaymentUrlCandidates` for manual testing of known Paratika hosted paths:
+  - `https://entegrasyon.paratika.com.tr/merchant/post/sale/{sessionToken}`
+  - `https://entegrasyon.paratika.com.tr/merchant/post/sale3d/{sessionToken}`
+  - `https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d/{sessionToken}`
 - Uses the selected `PARATIKA_MARKETPLACE_MODEL`.
 - Never returns the session token value separately and never returns merchant credentials.
 - Does not perform `SALE`; the hosted URL is only for manual redirect testing.
+- Does not fetch or open hosted URL candidates server-side.
 
 Remove or keep disabled after test-mode SESSIONTOKEN behavior is confirmed.
 

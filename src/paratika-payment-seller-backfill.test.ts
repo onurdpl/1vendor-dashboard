@@ -559,6 +559,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
       }),
     );
     expect(result).not.toHaveProperty('hostedPaymentUrl');
+    expect(result).not.toHaveProperty('hostedPaymentUrlCandidates');
     expect(result).toEqual(
       expect.objectContaining({
         payloadKeys: expect.arrayContaining(['ACTION', 'ORDERITEMS', 'TOTALSELLERCOMMISSION', 'RETURNURL']),
@@ -697,13 +698,22 @@ describe('Paratika payment seller mapping backfill probe', () => {
         sessionTokenReceived: true,
         sessionTokenLength: sessionToken.length,
         hostedPaymentUrl: `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
+        hostedPaymentUrlCandidates: [
+          `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
+          `https://entegrasyon.paratika.com.tr/merchant/post/sale3d/${sessionToken}`,
+          `https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d/${sessionToken}`,
+        ],
         rawBodyKeys: ['responseCode', 'responseMsg', 'sessionToken'],
         externalApiCallAttempted: true,
         cardDataIncluded: false,
       }),
     );
-    const { hostedPaymentUrl: _hostedPaymentUrl, ...resultWithoutHostedPaymentUrl } = result as Record<string, unknown>;
-    const serializedResult = JSON.stringify(resultWithoutHostedPaymentUrl);
+    const {
+      hostedPaymentUrl: _hostedPaymentUrl,
+      hostedPaymentUrlCandidates: _hostedPaymentUrlCandidates,
+      ...resultWithoutHostedPaymentUrls
+    } = result as Record<string, unknown>;
+    const serializedResult = JSON.stringify(resultWithoutHostedPaymentUrls);
     expect(serializedResult).not.toContain(sessionToken);
     expect(serializedResult).not.toContain('merchant-password-secret');
     expect(serializedResult).not.toContain('merchant-user-secret');
