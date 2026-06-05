@@ -127,6 +127,14 @@ Runtime configuration needed for a complete preview:
 
 - `PARATIKA_RETURN_URL`
 
+Example:
+
+```text
+PARATIKA_RETURN_URL=https://onevendor-dashboard.onrender.com/payments/paratika/return
+```
+
+`RETURNURL` is required for `ACTION=SESSIONTOKEN` preview generation. The preview remains fail-closed when `PARATIKA_RETURN_URL` is missing.
+
 Customer IP/user-agent are read only from the stored Shopify order webhook payload if present. They are not invented from the admin probe request.
 
 ## Temporary Production Backfill Probe

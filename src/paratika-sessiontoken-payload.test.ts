@@ -176,6 +176,19 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
     ]);
   });
 
+  it('fails closed when PARATIKA_RETURN_URL is not configured', async () => {
+    mockHappyPath();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+
+    const result = await buildParatikaSessionTokenPayloadPreviewForOrder('order-100');
+
+    expect(result.ok).toBe(false);
+    expect(result.sessionTokenPayloadPreview).toBeNull();
+    expect(result.validationErrors).toContain('RETURNURL is required for Paratika SESSIONTOKEN preview.');
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
   it('defers shipping deductions in preview-only sellerPaymentAmount calculations', async () => {
     mockHappyPath();
     prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({

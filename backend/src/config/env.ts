@@ -69,6 +69,7 @@ export type AppEnv = {
   IYZICO_SANDBOX_API_KEY?: string;
   IYZICO_SANDBOX_SECRET_KEY?: string;
   IYZICO_SANDBOX_BASE_URL?: string;
+  PARATIKA_RETURN_URL?: string;
   LIDIO_ENABLED?: boolean;
   LIDIO_BASE_URL?: string;
   LIDIO_MERCHANT_CODE?: string;
@@ -252,6 +253,7 @@ export function loadEnv(): AppEnv {
   const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
   const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
   const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
+  const paratikaReturnUrl = process.env.PARATIKA_RETURN_URL?.trim() || undefined;
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
@@ -398,6 +400,7 @@ export function loadEnv(): AppEnv {
     IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
     IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
     IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,
+    PARATIKA_RETURN_URL: paratikaReturnUrl,
     LIDIO_ENABLED: lidioEnabled,
     LIDIO_BASE_URL: lidioBaseUrl,
     LIDIO_MERCHANT_CODE: lidioMerchantCode,

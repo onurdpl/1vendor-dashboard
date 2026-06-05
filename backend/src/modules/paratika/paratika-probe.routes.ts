@@ -51,7 +51,7 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       const result = await buildParatikaSessionTokenPayloadPreviewForOrder(request.params.orderId, {
-        returnUrl: process.env.PARATIKA_RETURN_URL,
+        returnUrl: env.PARATIKA_RETURN_URL,
       });
 
       return reply.code(result.ok ? 200 : 422).send(result);

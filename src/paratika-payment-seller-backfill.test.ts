@@ -26,10 +26,11 @@ vi.mock('../backend/src/modules/paratika/paratika-sessiontoken-payload.service.j
 
 const { registerParatikaProbeRoutes } = await import('../backend/src/modules/paratika/paratika-probe.routes.js');
 
-function buildAppEnv() {
+function buildAppEnv(overrides: Partial<AppEnv> = {}) {
   return {
     JWT_SECRET: 'test-secret',
     JWT_EXPIRES_IN: '1h',
+    ...overrides,
   } as AppEnv;
 }
 
@@ -65,6 +66,23 @@ function registerBackfillRoute(method: 'get' | 'post' = 'post') {
   };
 
   registerParatikaProbeRoutes(app as never, buildAppEnv());
+  return handler;
+}
+
+function registerPreviewRoute(envOverrides: Partial<AppEnv> = {}) {
+  let handler:
+    | ((request: { authUser?: { role?: string }; params: { orderId: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
+    | null = null;
+  const app = {
+    get: vi.fn((path: string, ...args: unknown[]) => {
+      if (path === '/admin/probes/paratika/orders/:orderId/sessiontoken-payload-preview') {
+        handler = args.at(-1) as typeof handler;
+      }
+    }),
+    post: vi.fn(),
+  };
+
+  registerParatikaProbeRoutes(app as never, buildAppEnv(envOverrides));
   return handler;
 }
 
@@ -184,5 +202,47 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(secondResult).toEqual(firstResult);
     expect(seedVendorPaymentSellerMappingsMock).toHaveBeenCalledTimes(2);
     expectNoSecrets(secondResult);
+  });
+
+  it('passes configured PARATIKA_RETURN_URL to SESSIONTOKEN preview builder', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue({
+      ok: true,
+      writesPerformed: false,
+      provider: 'PARATIKA',
+      model: 'seller_payment_amount_based',
+      shippingDeductionPolicy: 'deferred_not_applied',
+      paymentReference: 'SPORGYM-SHOPIFY-order-100',
+      sessionTokenPayloadPreview: {
+        RETURNURL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      },
+      itemBreakdown: [],
+      validationErrors: [],
+      omittedCredentialFields: ['MERCHANTUSER', 'MERCHANTPASSWORD', 'MERCHANT'],
+      externalApiCallAttempted: false,
+      cardDataIncluded: false,
+    });
+    const handler = registerPreviewRoute({
+      PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    });
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        sessionTokenPayloadPreview: expect.objectContaining({
+          RETURNURL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+        }),
+      }),
+    );
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).toHaveBeenCalledWith('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    });
+    expect(seedVendorPaymentSellerMappingsMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(result).toLowerCase()).not.toContain('secret');
+    expect(JSON.stringify(result).toLowerCase()).not.toContain('access_token');
+    expect(JSON.stringify(result).toLowerCase()).not.toContain('refresh_token');
   });
 });

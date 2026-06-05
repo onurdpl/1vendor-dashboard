@@ -46,6 +46,16 @@ describe('backend env shipping provider gates', () => {
     expect(env.KARGO_ENTEGRATOR_API_KEY).toBe('configured');
   });
 
+  it('reads Paratika return URL for SESSIONTOKEN previews', () => {
+    resetEnv({
+      PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    });
+
+    const env = loadEnv();
+
+    expect(env.PARATIKA_RETURN_URL).toBe('https://onevendor-dashboard.onrender.com/payments/paratika/return');
+  });
+
   it('enables live Kargo execution only when the global and provider gates are both true', () => {
     resetEnv({
       SHIPPING_PROVIDER: 'kargo_entegrator',
