@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
-import { runParasutAuthMeDiagnostic, runParasutEnvDiagnostic } from '../backend/src/modules/parasut/parasut-auth-me-diagnostic.js';
+import {
+  runParasutAuthMeDiagnostic,
+  runParasutEnvDiagnostic,
+  runParasutOAuthResponseDiagnostic,
+} from '../backend/src/modules/parasut/parasut-auth-me-diagnostic.js';
 import { registerParasutProbeRoutes } from '../backend/src/modules/parasut/parasut-probe.routes.js';
 
 const PARASUT_SECRET_VALUES = {
@@ -404,6 +408,82 @@ describe('Paraşüt auth/me diagnostic probe', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls.some((call) => /contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
     expectNoSecrets(result.body);
+  });
+
+  it('returns only sanitized OAuth response details and stops before /v4/me', async () => {
+    const fetchMock = vi.fn(async () =>
+      mockJsonResponse(
+        {
+          error: 'invalid_grant',
+          error_description: 'Invalid credentials.',
+          message: `client_secret=${PARASUT_SECRET_VALUES.clientSecret}; token=${PARASUT_SECRET_VALUES.accessToken}; password=${PARASUT_SECRET_VALUES.password}`,
+          access_token: PARASUT_SECRET_VALUES.accessToken,
+          refresh_token: PARASUT_SECRET_VALUES.refreshToken,
+        },
+        400,
+      ),
+    );
+
+    const result = await runParasutOAuthResponseDiagnostic({
+      env: buildEnv(),
+      fetchImpl: fetchMock as unknown as typeof fetch,
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.body).toEqual({
+      ok: true,
+      provider: 'PARASUT',
+      mode: 'oauth_response_inspect',
+      oauthStatus: 400,
+      oauthResponseKeys: ['error', 'error_description', 'message'],
+      oauthError: 'invalid_grant',
+      oauthErrorDescription: 'Invalid credentials.',
+      oauthMessage: 'client_secret=[redacted]; token=[redacted]; password=[redacted]',
+      writesPerformed: false,
+      continuedAfterAuth: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.heroku-staging.parasut.com/oauth/token');
+    expect(fetchMock.mock.calls.some((call) => /v4\/me|contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
+    expectNoSecrets(result.body);
+  });
+
+  it('serves OAuth response inspection through the guarded admin route', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    Object.assign(process.env, buildEnv());
+    const fetchMock = vi.fn(async () =>
+      mockJsonResponse(
+        {
+          error: 'invalid_client',
+          error_description: 'Client mismatch.',
+        },
+        401,
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handler = registerRoute('/admin/probes/parasut/oauth-response');
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        provider: 'PARASUT',
+        mode: 'oauth_response_inspect',
+        oauthStatus: 401,
+        oauthResponseKeys: ['error', 'error_description'],
+        oauthError: 'invalid_client',
+        oauthErrorDescription: 'Client mismatch.',
+        writesPerformed: false,
+        continuedAfterAuth: false,
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('https://api.heroku-staging.parasut.com/oauth/token');
+    expect(fetchMock.mock.calls.some((call) => /v4\/me|contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
+    expectNoSecrets(result);
   });
 });
 

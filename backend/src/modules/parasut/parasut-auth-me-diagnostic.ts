@@ -11,6 +11,11 @@ export type ParasutAuthMeDiagnosticOptions = {
   fetchImpl?: typeof fetch;
 };
 
+export type ParasutOAuthResponseDiagnosticOptions = {
+  env?: ParasutEnv;
+  fetchImpl?: typeof fetch;
+};
+
 export type ParasutEnvDiagnosticOptions = {
   env?: ParasutEnv;
 };
@@ -107,10 +112,12 @@ function extractOAuthErrorDetails(body: unknown) {
 
   const error = sanitizeDiagnosticText(body.error);
   const errorDescription = sanitizeDiagnosticText(body.error_description);
+  const message = sanitizeDiagnosticText(body.message);
 
   return {
     ...(error ? { error } : {}),
     ...(errorDescription ? { errorDescription } : {}),
+    ...(message ? { message } : {}),
   };
 }
 
@@ -248,6 +255,17 @@ export function runParasutEnvDiagnostic(options: ParasutEnvDiagnosticOptions = {
   };
 }
 
+function buildTokenParams(env: ParasutEnv) {
+  return new URLSearchParams({
+    grant_type: 'password',
+    client_id: readEnv(env, 'PARASUT_CLIENT_ID'),
+    client_secret: readEnv(env, 'PARASUT_CLIENT_SECRET'),
+    username: readEnv(env, 'PARASUT_USERNAME'),
+    password: readEnv(env, 'PARASUT_PASSWORD'),
+    redirect_uri: readEnv(env, 'PARASUT_REDIRECT_URI'),
+  });
+}
+
 function buildFailure(env: ParasutEnv, code: string, message: string, statusCode = 422, details?: Record<string, unknown>) {
   return {
     statusCode,
@@ -259,6 +277,64 @@ function buildFailure(env: ParasutEnv, code: string, message: string, statusCode
         message,
         ...(details ?? {}),
       },
+    },
+  };
+}
+
+export async function runParasutOAuthResponseDiagnostic(options: ParasutOAuthResponseDiagnosticOptions = {}) {
+  const env = options.env ?? process.env;
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const baseUrl = normalizeBaseUrl(readEnv(env, 'PARASUT_BASE_URL'));
+
+  const missing = REQUIRED_ENV_KEYS.filter((key) => !readEnv(env, key));
+  if (missing.length) {
+    return buildFailure(env, 'parasut_env_missing', 'Required Paraşüt diagnostic env vars are missing.', 422, {
+      missing,
+    });
+  }
+
+  if (readEnv(env, 'PARASUT_ENABLED').toLowerCase() !== 'true') {
+    return buildFailure(env, 'parasut_disabled', 'PARASUT_ENABLED=true is required for this diagnostic.');
+  }
+
+  if (readEnv(env, 'PARASUT_TEST_MODE').toLowerCase() !== 'true') {
+    return buildFailure(env, 'parasut_test_mode_required', 'PARASUT_TEST_MODE=true is required for this diagnostic.');
+  }
+
+  if (baseUrl !== STAGING_BASE_URL) {
+    return buildFailure(env, 'parasut_staging_base_url_required', 'PARASUT_BASE_URL must be the Paraşüt staging URL.', 422, {
+      expectedBaseUrl: STAGING_BASE_URL,
+      actualBaseUrl: baseUrl || null,
+    });
+  }
+
+  let tokenResponse: HttpResult;
+  try {
+    tokenResponse = await readJsonResponse(
+      await fetchImpl(`${baseUrl}/oauth/token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        body: buildTokenParams(env).toString(),
+      }),
+    );
+  } catch (error) {
+    return buildFailure(env, 'parasut_oauth_fetch_failed', error instanceof Error ? error.message : 'OAuth request failed.', 502);
+  }
+
+  const oauthDetails = extractOAuthErrorDetails(tokenResponse.body);
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      provider: 'PARASUT',
+      mode: 'oauth_response_inspect',
+      oauthStatus: tokenResponse.status,
+      oauthResponseKeys: summarizeBody(tokenResponse.body).bodyKeys,
+      oauthError: oauthDetails.error ?? null,
+      oauthErrorDescription: oauthDetails.errorDescription ?? null,
+      oauthMessage: oauthDetails.message ?? null,
+      writesPerformed: false,
+      continuedAfterAuth: false,
     },
   };
 }
@@ -292,22 +368,13 @@ export async function runParasutAuthMeDiagnostic(options: ParasutAuthMeDiagnosti
     });
   }
 
-  const tokenParams = new URLSearchParams({
-    grant_type: 'password',
-    client_id: readEnv(env, 'PARASUT_CLIENT_ID'),
-    client_secret: readEnv(env, 'PARASUT_CLIENT_SECRET'),
-    username: readEnv(env, 'PARASUT_USERNAME'),
-    password: readEnv(env, 'PARASUT_PASSWORD'),
-    redirect_uri: readEnv(env, 'PARASUT_REDIRECT_URI'),
-  });
-
   let tokenResponse: HttpResult;
   try {
     tokenResponse = await readJsonResponse(
       await fetchImpl(`${baseUrl}/oauth/token`, {
         method: 'POST',
         headers: { 'content-type': 'application/x-www-form-urlencoded' },
-        body: tokenParams.toString(),
+        body: buildTokenParams(env).toString(),
       }),
     );
   } catch (error) {
