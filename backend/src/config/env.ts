@@ -269,7 +269,7 @@ export function loadEnv(): AppEnv {
   const paratikaMerchantUser = process.env.PARATIKA_MERCHANTUSER?.trim() || undefined;
   const paratikaMerchantPassword = process.env.PARATIKA_MERCHANTPASSWORD?.trim() || undefined;
   const paratikaReturnUrl = process.env.PARATIKA_RETURN_URL?.trim() || undefined;
-  const paratikaHostedPaymentBaseUrl = process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL?.trim() || undefined;
+  const paratikaHostedPaymentBaseUrl = process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL?.trim() || 'https://entegrasyon.paratika.com.tr/payment';
   const paratikaTestMode = parseBoolean(process.env.PARATIKA_TEST_MODE, false);
   const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
   const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;

@@ -7,6 +7,7 @@ import { buildParatikaSessionTokenPayloadPreviewForOrder } from './paratika-sess
 
 const PARATIKA_SESSIONTOKEN_PROBE_CONFIRM = 'CREATE_SESSIONTOKEN_TEST';
 const PARATIKA_CREDENTIAL_PAYLOAD_KEYS = new Set(['MERCHANTUSER', 'MERCHANTPASSWORD', 'MERCHANT']);
+const PARATIKA_HOSTED_PAYMENT_PAGE_BASE_URL = 'https://entegrasyon.paratika.com.tr/payment';
 const PARATIKA_FORBIDDEN_PAYLOAD_KEYS = [
   'CARDNUMBER',
   'CARDHOLDER',
@@ -19,10 +20,12 @@ const PARATIKA_FORBIDDEN_PAYLOAD_KEYS = [
 ];
 const PARATIKA_FORBIDDEN_ACTIONS = new Set(['SALE', 'PREAUTH', 'REFUND', 'VOID']);
 const PARATIKA_HOSTED_PAYMENT_URL_CANDIDATE_BASES = [
+  PARATIKA_HOSTED_PAYMENT_PAGE_BASE_URL,
   'https://entegrasyon.paratika.com.tr/merchant/post/sale',
   'https://entegrasyon.paratika.com.tr/merchant/post/sale3d',
   'https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d',
 ];
+const PARATIKA_DIRECTPOST_PATHS = new Set(['/merchant/post/sale', '/merchant/post/sale3d', '/paratika/api/v2/post/sale3d']);
 
 function adminProbesEnabled() {
   return process.env.ADMIN_PROBES_ENABLED?.trim().toLowerCase() === 'true';
@@ -254,12 +257,27 @@ function readParatikaSessionToken(rawBody: string) {
 }
 
 function buildHostedPaymentUrl(sessionToken: string | null, env: AppEnv) {
-  const baseUrl = readConfiguredValue(env.PARATIKA_HOSTED_PAYMENT_BASE_URL);
-  if (!sessionToken || !baseUrl || env.PARATIKA_PROBE_CONFIRM !== PARATIKA_SESSIONTOKEN_PROBE_CONFIRM) {
+  const baseUrl = readHostedPaymentBaseUrl(env.PARATIKA_HOSTED_PAYMENT_BASE_URL);
+  if (!sessionToken || env.PARATIKA_PROBE_CONFIRM !== PARATIKA_SESSIONTOKEN_PROBE_CONFIRM) {
     return null;
   }
 
-  return `${baseUrl.replace(/\/+$/, '')}/${sessionToken}`;
+  return `${baseUrl}/${sessionToken}`;
+}
+
+function readHostedPaymentBaseUrl(value: string | undefined | null) {
+  const configured = readConfiguredValue(value) ?? PARATIKA_HOSTED_PAYMENT_PAGE_BASE_URL;
+
+  try {
+    const url = new URL(configured);
+    if (PARATIKA_DIRECTPOST_PATHS.has(url.pathname.replace(/\/+$/, ''))) {
+      return `${url.origin}/payment`;
+    }
+  } catch {
+    return configured.replace(/\/+$/, '');
+  }
+
+  return configured.replace(/\/+$/, '');
 }
 
 function buildHostedPaymentUrlCandidates(sessionToken: string | null, env: AppEnv) {

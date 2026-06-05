@@ -128,7 +128,7 @@ function buildLiveProbeEnv(overrides: Partial<AppEnv> = {}) {
     PARATIKA_MERCHANTUSER: 'merchant-user-secret',
     PARATIKA_MERCHANTPASSWORD: 'merchant-password-secret',
     PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
-    PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/merchant/post/sale',
+    PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/payment',
     PARATIKA_TEST_MODE: true,
     PARATIKA_PROBE_DRY_RUN: true,
     ...overrides,
@@ -412,7 +412,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
     process.env.PARATIKA_MERCHANT = '100000123';
     process.env.PARATIKA_MERCHANTUSER = 'onur@example.com';
     process.env.PARATIKA_MERCHANTPASSWORD = 'merchant-password-secret';
-    process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL = 'https://entegrasyon.paratika.com.tr/merchant/post/sale';
+    process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL = 'https://entegrasyon.paratika.com.tr/payment';
     process.env.PARATIKA_TEST_MODE = 'true';
     process.env.PARATIKA_PROBE_DRY_RUN = 'false';
     process.env.PARATIKA_PROBE_CONFIRM = 'CREATE_SESSIONTOKEN_TEST';
@@ -697,8 +697,9 @@ describe('Paratika payment seller mapping backfill probe', () => {
         responseMsg: 'Approved',
         sessionTokenReceived: true,
         sessionTokenLength: sessionToken.length,
-        hostedPaymentUrl: `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
+        hostedPaymentUrl: `https://entegrasyon.paratika.com.tr/payment/${sessionToken}`,
         hostedPaymentUrlCandidates: [
+          `https://entegrasyon.paratika.com.tr/payment/${sessionToken}`,
           `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
           `https://entegrasyon.paratika.com.tr/merchant/post/sale3d/${sessionToken}`,
           `https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d/${sessionToken}`,
@@ -717,6 +718,47 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(serializedResult).not.toContain(sessionToken);
     expect(serializedResult).not.toContain('merchant-password-secret');
     expect(serializedResult).not.toContain('merchant-user-secret');
+  });
+
+  it('uses the hosted payment page URL when a legacy DirectPost base is configured', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue(buildSessionTokenPreviewResult());
+    const sessionToken = 'secret-session-token-value';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          responseCode: '00',
+          responseMsg: 'Approved',
+          sessionToken,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(
+      buildLiveProbeEnv({
+        PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/merchant/post/sale',
+        PARATIKA_PROBE_DRY_RUN: false,
+        PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        hostedPaymentUrl: `https://entegrasyon.paratika.com.tr/payment/${sessionToken}`,
+        hostedPaymentUrlCandidates: expect.arrayContaining([
+          `https://entegrasyon.paratika.com.tr/payment/${sessionToken}`,
+          `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
+        ]),
+      }),
+    );
+    expect((result as { hostedPaymentUrlCandidates: string[] }).hostedPaymentUrlCandidates[0]).toBe(
+      `https://entegrasyon.paratika.com.tr/payment/${sessionToken}`,
+    );
   });
 
   it('returns safe Paratika error details without exposing tokens or credentials', async () => {

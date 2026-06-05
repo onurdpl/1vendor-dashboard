@@ -216,7 +216,7 @@ Required runtime configuration:
 - `PARATIKA_MERCHANTUSER`
 - `PARATIKA_MERCHANTPASSWORD`
 - `PARATIKA_RETURN_URL`
-- `PARATIKA_HOSTED_PAYMENT_BASE_URL`, for example `https://entegrasyon.paratika.com.tr/merchant/post/sale`
+- `PARATIKA_HOSTED_PAYMENT_BASE_URL`, defaults to `https://entegrasyon.paratika.com.tr/payment`
 - `PARATIKA_TEST_MODE`
 - `PARATIKA_PROBE_DRY_RUN`
 - `PARATIKA_PROBE_CONFIRM`
@@ -238,8 +238,9 @@ Live probe behavior:
 - Posts a form-encoded `ACTION=SESSIONTOKEN` payload to `PARATIKA_API_URL`.
 - Returns `writesPerformed=true` because an external SESSIONTOKEN request was made.
 - Returns `responseCode`, `responseMsg`, whether a session token was received, session token length only, and raw response body keys only.
-- When `responseCode=00` and a session token is returned, derives `hostedPaymentUrl` as `PARATIKA_HOSTED_PAYMENT_BASE_URL/sessionToken` for manual redirect testing.
+- When `responseCode=00` and a session token is returned, derives `hostedPaymentUrl` as `PARATIKA_HOSTED_PAYMENT_BASE_URL/sessionToken` for manual redirect testing. The documented hosted payment page base is `/payment`; `/merchant/post/sale` is DirectPost Non3D and is not used as the primary hosted page URL.
 - Also returns `hostedPaymentUrlCandidates` for manual testing of known Paratika hosted paths:
+  - `https://entegrasyon.paratika.com.tr/payment/{sessionToken}`
   - `https://entegrasyon.paratika.com.tr/merchant/post/sale/{sessionToken}`
   - `https://entegrasyon.paratika.com.tr/merchant/post/sale3d/{sessionToken}`
   - `https://entegrasyon.paratika.com.tr/paratika/api/v2/post/sale3d/{sessionToken}`
