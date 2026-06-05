@@ -1,7 +1,12 @@
+import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import { SectionErrorRetry, SectionSkeleton } from '../components/OperationalPrimitives';
-import { getAdminShopifyOrderBreakdown } from '../features/orders/api';
+import {
+  createParatikaHostedPaymentLink,
+  getAdminShopifyOrderBreakdown,
+  type ParatikaSessionTokenLiveProbeResult,
+} from '../features/orders/api';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useAppReadiness } from '../lib/appReadiness';
@@ -21,10 +26,29 @@ function getClassToken(value: string | null | undefined) {
   return (value ?? 'unknown').toLowerCase().replace(/\s+/g, '-');
 }
 
+function getSafeProbeText(value: string | null | undefined) {
+  if (!value?.trim()) {
+    return null;
+  }
+
+  return value
+    .replace(/((?:access|refresh|session)[_-]?token|token|password|secret|merchantpassword|merchantuser)\s*[:=]\s*[^&\s,}]+/gi, '$1=[redacted]')
+    .slice(0, 180);
+}
+
+function getProbeErrorMessage(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return getSafeProbeText(error.message) ?? 'Paratika probe failed.';
+  }
+
+  return 'Paratika probe failed.';
+}
+
 export function AdminShopifyOrderPage() {
   const { shopifyOrderId } = useParams();
   const appReadiness = useAppReadiness();
   const { message, tone, showFeedback } = useActionFeedback();
+  const [paratikaProbeResult, setParatikaProbeResult] = useState<ParatikaSessionTokenLiveProbeResult | null>(null);
   const reassignAllocation = useMutationAction(
     async (payload: { allocationOrderId: string; nextVendorId: string }) => payload,
     {
@@ -36,6 +60,30 @@ export function AdminShopifyOrderPage() {
       },
       onError: () => {
         showFeedback('Unable to prepare reassignment request.', 'error');
+      },
+    },
+  );
+  const paratikaLiveProbe = useMutationAction(
+    async () => {
+      if (!shopifyOrderId) {
+        throw new Error('Shopify order id is missing.');
+      }
+
+      return createParatikaHostedPaymentLink(shopifyOrderId);
+    },
+    {
+      onSuccess: (result) => {
+        setParatikaProbeResult(result);
+        showFeedback(
+          result.hostedPaymentUrl
+            ? 'Paratika hosted payment link created for manual testing.'
+            : 'Paratika SESSIONTOKEN probe completed without a hosted link.',
+          result.hostedPaymentUrl ? 'success' : 'info',
+        );
+      },
+      onError: (error) => {
+        setParatikaProbeResult(null);
+        showFeedback(getProbeErrorMessage(error), 'error');
       },
     },
   );
@@ -117,6 +165,76 @@ export function AdminShopifyOrderPage() {
           </div>
         </div>
       </div>
+
+      <article className="panel operational-card paratika-probe-card">
+        <header className="allocation-header">
+          <div>
+            <p className="eyebrow">Paratika diagnostics</p>
+            <h3>Create hosted payment link</h3>
+            <p className="page-description">
+              Runs the guarded SESSIONTOKEN live probe for this Shopify order. It does not mark the order paid, call Shopify, or create accounting records.
+            </p>
+          </div>
+          <button
+            className="button button-primary"
+            type="button"
+            disabled={paratikaLiveProbe.isPending}
+            onClick={() => paratikaLiveProbe.mutate(undefined)}
+          >
+            {paratikaLiveProbe.isPending ? 'Creating link...' : 'Create Paratika hosted payment link'}
+          </button>
+        </header>
+
+        {paratikaProbeResult ? (
+          <div className="paratika-probe-result">
+            <div className="compact-meta-grid">
+              <div className="meta-item">
+                <span>Response</span>
+                <strong>{getSafeProbeText(paratikaProbeResult.responseCode) ?? 'Unknown'}</strong>
+              </div>
+              <div className="meta-item">
+                <span>Message</span>
+                <strong>{getSafeProbeText(paratikaProbeResult.responseMsg) ?? 'No message'}</strong>
+              </div>
+              <div className="meta-item">
+                <span>Payment reference</span>
+                <strong>{getSafeProbeText(paratikaProbeResult.paymentReference) ?? 'Not returned'}</strong>
+              </div>
+              <div className="meta-item">
+                <span>Mutation status</span>
+                <strong>No payment state changed</strong>
+              </div>
+              {paratikaProbeResult.errorCode ? (
+                <div className="meta-item">
+                  <span>Error code</span>
+                  <strong>{getSafeProbeText(paratikaProbeResult.errorCode)}</strong>
+                </div>
+              ) : null}
+              {paratikaProbeResult.violatorParam ? (
+                <div className="meta-item">
+                  <span>Violator param</span>
+                  <strong>{getSafeProbeText(paratikaProbeResult.violatorParam)}</strong>
+                </div>
+              ) : null}
+            </div>
+
+            {paratikaProbeResult.errorMsg ? (
+              <ActionFeedback tone="error" message={getSafeProbeText(paratikaProbeResult.errorMsg) ?? 'Paratika returned an error.'} />
+            ) : null}
+
+            {paratikaProbeResult.hostedPaymentUrl ? (
+              <a
+                className="button button-secondary paratika-probe-link"
+                href={paratikaProbeResult.hostedPaymentUrl}
+                target="_blank"
+                rel="noreferrer"
+              >
+                Open Paratika payment page
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+      </article>
 
       {breakdown.allocations.map((allocation) => (
         <article key={allocation.vendorId} className="panel allocation-card operational-card">

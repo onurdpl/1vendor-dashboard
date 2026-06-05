@@ -14,6 +14,10 @@ export async function getAdminShopifyOrderBreakdown(shopifyOrderId: string, opti
   return runtimeServices.orders.adminBreakdown(shopifyOrderId, { signal: options.signal });
 }
 
+export async function createParatikaHostedPaymentLink(shopifyOrderId: string) {
+  return runtimeServices.orders.createParatikaHostedPaymentLink(shopifyOrderId);
+}
+
 export async function submitFulfillmentTracking(
   allocationId: string,
   payload: {

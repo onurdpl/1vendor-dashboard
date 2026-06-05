@@ -1,6 +1,7 @@
 export {
   cancelShipmentExecution,
   createShipmentExecution,
+  createParatikaHostedPaymentLink,
   createReturnShipmentLabel,
   getAdminShopifyOrderBreakdown,
   getOrder,
@@ -29,4 +30,5 @@ export type {
   ShopifyOrderBreakdown,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
+  ParatikaSessionTokenLiveProbeResult,
 } from '../../lib/api/contracts';

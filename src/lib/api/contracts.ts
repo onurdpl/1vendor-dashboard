@@ -868,6 +868,32 @@ export type ShopifyOrderBreakdown = {
   allocations: VendorAllocationSummary[];
 };
 
+export type ParatikaSessionTokenLiveProbeResult = {
+  ok: boolean;
+  writesPerformed: boolean;
+  provider: 'PARATIKA';
+  mode: string;
+  action: 'SESSIONTOKEN';
+  model?: string;
+  marketplaceModel?: string;
+  paymentReference?: string | null;
+  totalSellerCommissionPolicy?: string | null;
+  httpStatus?: number;
+  responseCode?: string | null;
+  responseMsg?: string | null;
+  errorCode?: string | null;
+  errorMsg?: string | null;
+  violatorParam?: string | null;
+  sessionTokenReceived?: boolean;
+  sessionTokenLength?: number;
+  hostedPaymentUrl?: string | null;
+  hostedPaymentUrlCandidates?: string[];
+  rawBodyKeys?: string[];
+  externalApiCallAttempted: boolean;
+  cardDataIncluded: boolean;
+  validationErrors?: string[];
+};
+
 export type ReturnStatus =
   | 'Requested'
   | 'Approved'

@@ -18,6 +18,7 @@ import type {
   VendorAllocationSummary,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
+  ParatikaSessionTokenLiveProbeResult,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
 
@@ -508,6 +509,16 @@ export async function getAdminShopifyOrderBreakdown(
       };
     }),
   };
+}
+
+export async function createParatikaHostedPaymentLink(
+  shopifyOrderId: string,
+): Promise<ParatikaSessionTokenLiveProbeResult> {
+  return apiClient.post<ParatikaSessionTokenLiveProbeResult>(
+    `/admin/probes/paratika/orders/${encodeURIComponent(shopifyOrderId)}/sessiontoken-live-probe`,
+    undefined,
+    { skipVendorContext: true },
+  );
 }
 
 export async function submitFulfillmentTracking(

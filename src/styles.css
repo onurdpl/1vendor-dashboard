@@ -2283,6 +2283,20 @@ h3 {
   background: rgba(251, 146, 60, 0.08);
 }
 
+.paratika-probe-card {
+  display: grid;
+  gap: 14px;
+}
+
+.paratika-probe-result {
+  display: grid;
+  gap: 12px;
+}
+
+.paratika-probe-link {
+  justify-self: flex-start;
+}
+
 .timeline-block {
   display: grid;
   gap: 10px;
