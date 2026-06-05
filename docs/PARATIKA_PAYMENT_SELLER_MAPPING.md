@@ -119,6 +119,32 @@ Runtime configuration needed for a complete preview:
 
 Customer IP/user-agent are read only from the stored Shopify order webhook payload if present. They are not invented from the admin probe request.
 
+## Temporary Production Backfill Probe
+
+Temporary admin-only endpoint:
+
+```text
+POST /admin/probes/paratika/payment-seller-mappings/backfill
+```
+
+Purpose:
+
+- Backfill the confirmed `VendorPaymentProviderSeller` rows in environments where the migration exists but seed/backfill data was not applied.
+- Upsert only:
+  - `sporjinal` / `PARATIKA` / `100003585`
+  - `yalispor` / `PARATIKA` / `100003586`
+
+Behavior:
+
+- Requires authenticated admin access.
+- Requires `ADMIN_PROBES_ENABLED=true`.
+- Does not call Paratika.
+- Does not return credentials or secrets.
+- Returns `writesPerformed=true` only when the DB upsert path executes.
+- Is idempotent because it uses provider/vendor upserts.
+
+Remove or disable this temporary probe after production mapping presence is confirmed.
+
 ## Refund Note
 
 Paratika `REFUND` supports optional `ORDERITEMS` for product-code-based partial refund according to the reviewed contract, but refund is not implemented in this step.
