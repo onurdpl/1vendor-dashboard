@@ -69,7 +69,14 @@ export type AppEnv = {
   IYZICO_SANDBOX_API_KEY?: string;
   IYZICO_SANDBOX_SECRET_KEY?: string;
   IYZICO_SANDBOX_BASE_URL?: string;
+  PARATIKA_API_URL?: string;
+  PARATIKA_MERCHANT?: string;
+  PARATIKA_MERCHANTUSER?: string;
+  PARATIKA_MERCHANTPASSWORD?: string;
   PARATIKA_RETURN_URL?: string;
+  PARATIKA_TEST_MODE?: boolean;
+  PARATIKA_PROBE_DRY_RUN?: boolean;
+  PARATIKA_PROBE_CONFIRM?: string;
   LIDIO_ENABLED?: boolean;
   LIDIO_BASE_URL?: string;
   LIDIO_MERCHANT_CODE?: string;
@@ -253,7 +260,14 @@ export function loadEnv(): AppEnv {
   const iyzicoSandboxApiKey = process.env.IYZICO_SANDBOX_API_KEY || undefined;
   const iyzicoSandboxSecretKey = process.env.IYZICO_SANDBOX_SECRET_KEY || undefined;
   const iyzicoSandboxBaseUrl = process.env.IYZICO_SANDBOX_BASE_URL || undefined;
+  const paratikaApiUrl = process.env.PARATIKA_API_URL?.trim() || undefined;
+  const paratikaMerchant = process.env.PARATIKA_MERCHANT?.trim() || undefined;
+  const paratikaMerchantUser = process.env.PARATIKA_MERCHANTUSER?.trim() || undefined;
+  const paratikaMerchantPassword = process.env.PARATIKA_MERCHANTPASSWORD?.trim() || undefined;
   const paratikaReturnUrl = process.env.PARATIKA_RETURN_URL?.trim() || undefined;
+  const paratikaTestMode = parseBoolean(process.env.PARATIKA_TEST_MODE, false);
+  const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
+  const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
@@ -400,7 +414,14 @@ export function loadEnv(): AppEnv {
     IYZICO_SANDBOX_API_KEY: iyzicoSandboxApiKey,
     IYZICO_SANDBOX_SECRET_KEY: iyzicoSandboxSecretKey,
     IYZICO_SANDBOX_BASE_URL: iyzicoSandboxBaseUrl,
+    PARATIKA_API_URL: paratikaApiUrl,
+    PARATIKA_MERCHANT: paratikaMerchant,
+    PARATIKA_MERCHANTUSER: paratikaMerchantUser,
+    PARATIKA_MERCHANTPASSWORD: paratikaMerchantPassword,
     PARATIKA_RETURN_URL: paratikaReturnUrl,
+    PARATIKA_TEST_MODE: paratikaTestMode,
+    PARATIKA_PROBE_DRY_RUN: paratikaProbeDryRun,
+    PARATIKA_PROBE_CONFIRM: paratikaProbeConfirm,
     LIDIO_ENABLED: lidioEnabled,
     LIDIO_BASE_URL: lidioBaseUrl,
     LIDIO_MERCHANT_CODE: lidioMerchantCode,

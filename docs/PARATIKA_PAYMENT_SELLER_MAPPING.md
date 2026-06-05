@@ -137,6 +137,58 @@ PARATIKA_RETURN_URL=https://onevendor-dashboard.onrender.com/payments/paratika/r
 
 Customer IP/user-agent are read only from the stored Shopify order webhook payload if present. They are not invented from the admin probe request.
 
+## Temporary SESSIONTOKEN Live Probe
+
+Temporary admin-only diagnostic endpoint:
+
+```text
+POST /admin/probes/paratika/orders/:orderId/sessiontoken-live-probe
+```
+
+Purpose:
+
+- Send only `ACTION=SESSIONTOKEN` to Paratika test mode after the preview payload validates.
+- Verify whether Paratika returns a `sessionToken`.
+- Keep checkout, card payment, `SALE`, `PREAUTH`, `REFUND`, and `VOID` out of scope.
+
+Required gates:
+
+- Authenticated admin session.
+- `ADMIN_PROBES_ENABLED=true`.
+- `PARATIKA_TEST_MODE=true`.
+- `PARATIKA_PROBE_DRY_RUN=true` by default for no external API call.
+- `PARATIKA_PROBE_CONFIRM=CREATE_SESSIONTOKEN_TEST` only when `PARATIKA_PROBE_DRY_RUN=false`.
+
+Required runtime configuration:
+
+- `PARATIKA_API_URL`
+- `PARATIKA_MERCHANT`
+- `PARATIKA_MERCHANTUSER`
+- `PARATIKA_MERCHANTPASSWORD`
+- `PARATIKA_RETURN_URL`
+- `PARATIKA_TEST_MODE`
+- `PARATIKA_PROBE_DRY_RUN`
+- `PARATIKA_PROBE_CONFIRM`
+
+Dry-run behavior:
+
+- Builds the existing preview payload.
+- Does not call Paratika.
+- Returns `writesPerformed=false`.
+- Returns sanitized payload keys and `ORDERITEMS` preview.
+- Does not return `MERCHANTUSER`, `MERCHANTPASSWORD`, merchant credential values, card fields, or a session token.
+
+Live probe behavior:
+
+- Requires `PARATIKA_PROBE_DRY_RUN=false`.
+- Requires `PARATIKA_PROBE_CONFIRM=CREATE_SESSIONTOKEN_TEST`.
+- Posts a form-encoded `ACTION=SESSIONTOKEN` payload to `PARATIKA_API_URL`.
+- Returns `writesPerformed=true` because an external SESSIONTOKEN request was made.
+- Returns `responseCode`, `responseMsg`, whether a session token was received, session token length only, and raw response body keys only.
+- Never returns the session token value or merchant credentials.
+
+Remove or keep disabled after test-mode SESSIONTOKEN behavior is confirmed.
+
 ## Temporary Production Backfill Probe
 
 Temporary admin-only endpoints:

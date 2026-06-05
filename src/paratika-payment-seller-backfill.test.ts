@@ -86,6 +86,78 @@ function registerPreviewRoute(envOverrides: Partial<AppEnv> = {}) {
   return handler;
 }
 
+function registerLiveProbeRoute(envOverrides: Partial<AppEnv> = {}) {
+  let handler:
+    | ((request: { authUser?: { role?: string }; params: { orderId: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
+    | null = null;
+  const app = {
+    get: vi.fn(),
+    post: vi.fn((path: string, ...args: unknown[]) => {
+      if (path === '/admin/probes/paratika/orders/:orderId/sessiontoken-live-probe') {
+        handler = args.at(-1) as typeof handler;
+      }
+    }),
+  };
+
+  registerParatikaProbeRoutes(app as never, buildAppEnv(envOverrides));
+  return handler;
+}
+
+function buildLiveProbeEnv(overrides: Partial<AppEnv> = {}) {
+  return {
+    PARATIKA_API_URL: 'https://paratika.example/sessiontoken',
+    PARATIKA_MERCHANT: 'merchant-secret',
+    PARATIKA_MERCHANTUSER: 'merchant-user-secret',
+    PARATIKA_MERCHANTPASSWORD: 'merchant-password-secret',
+    PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    PARATIKA_TEST_MODE: true,
+    PARATIKA_PROBE_DRY_RUN: true,
+    ...overrides,
+  } satisfies Partial<AppEnv>;
+}
+
+function buildSessionTokenPreviewResult() {
+  return {
+    ok: true,
+    writesPerformed: false,
+    provider: 'PARATIKA',
+    model: 'seller_payment_amount_based',
+    shippingDeductionPolicy: 'deferred_not_applied',
+    paymentReference: 'SPORGYM-SHOPIFY-order-100',
+    sessionTokenPayloadPreview: {
+      ACTION: 'SESSIONTOKEN',
+      AMOUNT: '60.00',
+      CURRENCY: 'TRY',
+      MERCHANTPAYMENTID: 'SPORGYM-SHOPIFY-order-100',
+      RETURNURL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      CUSTOMER: 'customer-100',
+      CUSTOMERNAME: 'Test Customer',
+      CUSTOMEREMAIL: 'customer@example.test',
+      CUSTOMERIP: '127.0.0.1',
+      CUSTOMERUSERAGENT: 'Vitest',
+      CUSTOMERPHONE: '+905551112233',
+      ORDERITEMS: JSON.stringify([
+        {
+          productCode: 'variant-sporjinal-1',
+          name: 'Sporjinal Shoe',
+          description: 'SPJ-SKU-1',
+          quantity: 1,
+          amount: '60.00',
+          sellerID: '100003585',
+          sellerPaymentAmount: '54.00',
+        },
+      ]),
+      TOTALSELLERPAYMENTAMOUNT: '54.00',
+      SESSIONTYPE: 'PAYMENTSESSION',
+    },
+    itemBreakdown: [],
+    validationErrors: [],
+    omittedCredentialFields: ['MERCHANTUSER', 'MERCHANTPASSWORD', 'MERCHANT'],
+    externalApiCallAttempted: false,
+    cardDataIncluded: false,
+  };
+}
+
 function expectNoSecrets(value: unknown) {
   const serialized = JSON.stringify(value).toLowerCase();
 
@@ -244,5 +316,196 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(JSON.stringify(result).toLowerCase()).not.toContain('secret');
     expect(JSON.stringify(result).toLowerCase()).not.toContain('access_token');
     expect(JSON.stringify(result).toLowerCase()).not.toContain('refresh_token');
+  });
+
+  it('rejects non-admin users for the live SESSIONTOKEN probe', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(buildLiveProbeEnv());
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'vendor' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ message: 'Forbidden' });
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects the live SESSIONTOKEN probe when admin probes are disabled', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'false';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(buildLiveProbeEnv());
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ ok: false, writesPerformed: false, message: 'Admin probe endpoints are disabled.' });
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects the live SESSIONTOKEN probe when required env values are missing', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute({
+      PARATIKA_TEST_MODE: true,
+      PARATIKA_PROBE_DRY_RUN: true,
+    });
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        writesPerformed: false,
+        provider: 'PARATIKA',
+        externalApiCallAttempted: false,
+        missingEnv: expect.arrayContaining(['PARATIKA_API_URL', 'PARATIKA_MERCHANT', 'PARATIKA_RETURN_URL']),
+      }),
+    );
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps the live SESSIONTOKEN probe dry-run from calling Paratika', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue(buildSessionTokenPreviewResult());
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(buildLiveProbeEnv());
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        writesPerformed: false,
+        provider: 'PARATIKA',
+        mode: 'sessiontoken_live_probe_dry_run',
+        action: 'SESSIONTOKEN',
+        externalApiCallAttempted: false,
+        credentialValuesOmitted: true,
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        payloadKeys: expect.arrayContaining(['ACTION', 'ORDERITEMS', 'TOTALSELLERPAYMENTAMOUNT', 'RETURNURL']),
+        orderItemsPreview: [
+          expect.objectContaining({
+            productCode: 'variant-sporjinal-1',
+            sellerID: '100003585',
+            sellerPaymentAmount: '54.00',
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('MERCHANTUSER');
+    expect(JSON.stringify(result)).not.toContain('MERCHANTPASSWORD');
+    expect(JSON.stringify(result)).not.toContain('merchant-password-secret');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('requires explicit confirmation before live SESSIONTOKEN requests', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(
+      buildLiveProbeEnv({
+        PARATIKA_PROBE_DRY_RUN: false,
+        PARATIKA_PROBE_CONFIRM: undefined,
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        writesPerformed: false,
+        validationErrors: ['PARATIKA_PROBE_CONFIRM=CREATE_SESSIONTOKEN_TEST is required for a live SESSIONTOKEN probe.'],
+        externalApiCallAttempted: false,
+      }),
+    );
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('posts a form-encoded SESSIONTOKEN payload and sanitizes the response in live mode', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue(buildSessionTokenPreviewResult());
+    const sessionToken = 'secret-session-token-value';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          responseCode: '00',
+          responseMsg: 'Approved',
+          sessionToken,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(
+      buildLiveProbeEnv({
+        PARATIKA_PROBE_DRY_RUN: false,
+        PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://paratika.example/sessiontoken');
+    expect(init.method).toBe('POST');
+    expect(init.headers).toEqual({ 'Content-Type': 'application/x-www-form-urlencoded' });
+    expect(init.body).toBeInstanceOf(URLSearchParams);
+
+    const body = init.body as URLSearchParams;
+    expect(body.get('ACTION')).toBe('SESSIONTOKEN');
+    expect(body.get('MERCHANT')).toBe('merchant-secret');
+    expect(body.get('MERCHANTUSER')).toBe('merchant-user-secret');
+    expect(body.get('MERCHANTPASSWORD')).toBe('merchant-password-secret');
+    expect(body.get('ORDERITEMS')).toContain('"sellerID":"100003585"');
+    expect(body.has('CARDNUMBER')).toBe(false);
+    expect(body.has('CVV')).toBe(false);
+    expect(body.get('ACTION')).not.toBe('SALE');
+    expect(body.get('ACTION')).not.toBe('PREAUTH');
+    expect(body.get('ACTION')).not.toBe('REFUND');
+    expect(body.get('ACTION')).not.toBe('VOID');
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        writesPerformed: true,
+        provider: 'PARATIKA',
+        action: 'SESSIONTOKEN',
+        httpStatus: 200,
+        responseCode: '00',
+        responseMsg: 'Approved',
+        sessionTokenReceived: true,
+        sessionTokenLength: sessionToken.length,
+        rawBodyKeys: ['responseCode', 'responseMsg', 'sessionToken'],
+        externalApiCallAttempted: true,
+        cardDataIncluded: false,
+      }),
+    );
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(sessionToken);
+    expect(serializedResult).not.toContain('merchant-password-secret');
+    expect(serializedResult).not.toContain('merchant-user-secret');
   });
 });
