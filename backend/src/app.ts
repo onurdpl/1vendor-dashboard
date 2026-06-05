@@ -36,7 +36,7 @@ import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyz
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
 import { registerBackendSentryFastifyHooks } from './lib/sentry.js';
-import { DASHBOARD_INITIAL_LOAD_HEADER, registerDashboardTimingHooks } from './lib/dashboard-timing.js';
+import { DASHBOARD_DEFERRED_LOAD_HEADER, DASHBOARD_INITIAL_LOAD_HEADER, registerDashboardTimingHooks } from './lib/dashboard-timing.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -235,6 +235,7 @@ export function createApp() {
       'X-CSRF-Token',
       'X-Request-Id',
       DASHBOARD_INITIAL_LOAD_HEADER,
+      DASHBOARD_DEFERRED_LOAD_HEADER,
       'X-Auth-Attempt-Id',
       'X-Vendor-Id',
       'X-Shopify-Hmac-Sha256',

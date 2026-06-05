@@ -38,6 +38,7 @@ export const queryKeys = {
   },
   dashboard: {
     overview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'overview', vendorId] as const,
+    deferredOverview: (vendorId = getCurrentVendorContext().vendorId) => ['dashboard', 'deferred-overview', vendorId] as const,
   },
   orders: {
     list: (vendorId = getCurrentVendorContext().vendorId) => ['orders', 'list', vendorId] as const,

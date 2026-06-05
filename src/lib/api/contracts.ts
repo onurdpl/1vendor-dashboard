@@ -1498,6 +1498,7 @@ export type DashboardOverview = {
   vendorName: string;
   title: string;
   description: string;
+  loadPhase?: 'initial' | 'deferred';
   stats: DashboardStat[];
   recentActivity: string[];
   workspaceStatus: string;

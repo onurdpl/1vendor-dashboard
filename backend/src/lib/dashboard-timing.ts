@@ -2,13 +2,16 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import type { FastifyBaseLogger, FastifyInstance, FastifyRequest } from 'fastify';
 
 export const DASHBOARD_INITIAL_LOAD_HEADER = 'x-dashboard-initial-load';
+export const DASHBOARD_DEFERRED_LOAD_HEADER = 'x-dashboard-deferred-load';
 
 const SLOW_OPERATION_THRESHOLD_MS = 300;
 const SLOW_TOTAL_THRESHOLD_MS = 1000;
 
+type DashboardLoadPhase = 'initial' | 'deferred';
+
 type DashboardTimingContext = {
   requestId: string;
-  initialLoad: boolean;
+  loadPhase: DashboardLoadPhase | null;
   logger: FastifyBaseLogger;
 };
 
@@ -34,7 +37,7 @@ function getElapsedMs(startedAt: bigint) {
 
 function getActiveContext() {
   const context = timingContext.getStore();
-  return context?.initialLoad ? context : null;
+  return context?.loadPhase ? context : null;
 }
 
 function logInfo(context: DashboardTimingContext, payload: Record<string, unknown>, message = 'admin dashboard timing') {
@@ -45,8 +48,20 @@ function logWarn(context: DashboardTimingContext, payload: Record<string, unknow
   context.logger.warn(payload, message);
 }
 
-function isDashboardInitialLoad(request: FastifyRequest) {
-  return readHeaderValue(request.headers[DASHBOARD_INITIAL_LOAD_HEADER]).trim().toLowerCase() === 'true';
+function isHeaderTrue(value: string | string[] | undefined) {
+  return readHeaderValue(value).trim().toLowerCase() === 'true';
+}
+
+function getDashboardLoadPhase(request: FastifyRequest): DashboardLoadPhase | null {
+  if (isHeaderTrue(request.headers[DASHBOARD_INITIAL_LOAD_HEADER])) {
+    return 'initial';
+  }
+
+  if (isHeaderTrue(request.headers[DASHBOARD_DEFERRED_LOAD_HEADER])) {
+    return 'deferred';
+  }
+
+  return null;
 }
 
 function classifyExternalProvider(url: URL) {
@@ -90,7 +105,7 @@ function installFetchExternalCallInstrumentation() {
   const originalFetch = globalThis.fetch.bind(globalThis);
   globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
     const context = getActiveContext();
-    const url = context ? resolveFetchUrl(input) : null;
+    const url = context?.loadPhase === 'initial' ? resolveFetchUrl(input) : null;
 
     if (!context || !url || !shouldReportExternalCall(url)) {
       return originalFetch(input, init);
@@ -110,6 +125,7 @@ function installFetchExternalCallInstrumentation() {
         event: 'DASHBOARD_EXTERNAL_CALL_DURING_INITIAL_LOAD',
         requestId: context.requestId,
         step: `external.${provider}`,
+        loadPhase: context.loadPhase,
         provider,
         host: url.hostname,
         durationMs,
@@ -128,7 +144,7 @@ export function registerDashboardTimingHooks(app: FastifyInstance) {
   app.addHook('onRequest', async (request) => {
     timingContext.enterWith({
       requestId: request.requestId ?? 'unknown',
-      initialLoad: isDashboardInitialLoad(request),
+      loadPhase: getDashboardLoadPhase(request),
       logger: request.log,
     });
   });
@@ -144,6 +160,7 @@ export function logDashboardRouteStart(step: string) {
     event: 'ADMIN_DASHBOARD_TIMING',
     requestId: context.requestId,
     step,
+    loadPhase: context.loadPhase,
     durationMs: 0,
   });
 }
@@ -172,6 +189,7 @@ export async function withDashboardTiming<T>(
       event: 'ADMIN_DASHBOARD_TIMING',
       requestId: context.requestId,
       step,
+      loadPhase: context.loadPhase,
       durationMs,
       failed,
     };
@@ -183,6 +201,7 @@ export async function withDashboardTiming<T>(
         event: options.warnEvent ?? 'ADMIN_DASHBOARD_SLOW_OPERATION',
         requestId: context.requestId,
         step,
+        loadPhase: context.loadPhase,
         durationMs,
         thresholdMs,
         failed,
@@ -207,6 +226,7 @@ export function logDashboardTiming(step: string, startedAt: bigint | null, optio
     event: 'ADMIN_DASHBOARD_TIMING',
     requestId: context.requestId,
     step,
+    loadPhase: context.loadPhase,
     durationMs,
     failed: false,
   });
@@ -216,6 +236,7 @@ export function logDashboardTiming(step: string, startedAt: bigint | null, optio
       event: options.warnEvent ?? 'ADMIN_DASHBOARD_SLOW_OPERATION',
       requestId: context.requestId,
       step,
+      loadPhase: context.loadPhase,
       durationMs,
       thresholdMs,
       failed: false,

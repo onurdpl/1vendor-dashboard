@@ -44,7 +44,7 @@ function getCurrentVendorId() {
   return getCurrentVendorContext().vendorId;
 }
 
-type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit };
+type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
 
 const mockSupportTickets: SupportTicket[] = [];
 
@@ -348,7 +348,7 @@ export const runtimeServices = {
   orders: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOrders.listOrders({ vendorId, signal: options.signal, headers: options.headers })
+        ? realOrders.listOrders({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(listMockOrders(vendorId)),
     async detail(orderId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
@@ -1286,7 +1286,7 @@ export const runtimeServices = {
   returns: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers })
+        ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(listMockReturns(vendorId)),
     async detail(returnId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
@@ -1466,7 +1466,7 @@ export const runtimeServices = {
   finance: {
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal, headers: options.headers })
+        ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(getMockFinanceDashboard(vendorId)),
     updateProfile: (
       vendorId: string,
@@ -1607,7 +1607,7 @@ export const runtimeServices = {
   operations: {
     list: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
-        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers })
+        ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(listMockAdminOperationsQueue()),
     attention: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'

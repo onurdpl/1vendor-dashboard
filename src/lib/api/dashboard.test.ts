@@ -108,24 +108,24 @@ async function importDashboardWithServices(
   configureServices?.(services, ApiError);
   vi.doMock('../../services/runtime-services', () => ({ runtimeServices: services }));
 
-  const { getDashboardOverview } = await import('./dashboard');
-  return { getDashboardOverview, services, ApiError };
+  const { getDashboardDeferredOverview, getDashboardOverview } = await import('./dashboard');
+  return { getDashboardDeferredOverview, getDashboardOverview, services, ApiError };
 }
 
-describe('getDashboardOverview real-mode aggregation', () => {
+describe('dashboard real-mode loading', () => {
   afterEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
   });
 
   it('propagates 401 failures from orders instead of returning empty dashboard metrics', async () => {
-    const { getDashboardOverview, services, ApiError } = await importDashboardWithServices((runtimeServices, ApiErrorClass) => {
+    const { getDashboardDeferredOverview, services, ApiError } = await importDashboardWithServices((runtimeServices, ApiErrorClass) => {
       runtimeServices.orders.list.mockRejectedValue(
         new ApiErrorClass('Unauthorized request.', 'unauthorized', { status: 401 }),
       );
     });
 
-    await expect(getDashboardOverview('demo-vendor-a')).rejects.toMatchObject({
+    await expect(getDashboardDeferredOverview('demo-vendor-a')).rejects.toMatchObject({
       kind: 'unauthorized',
       status: 401,
     } satisfies Partial<InstanceType<typeof ApiError>>);
@@ -133,33 +133,47 @@ describe('getDashboardOverview real-mode aggregation', () => {
   });
 
   it('propagates 403 failures from finance instead of returning a partial finance snapshot', async () => {
-    const { getDashboardOverview, ApiError } = await importDashboardWithServices((runtimeServices, ApiErrorClass) => {
+    const { getDashboardDeferredOverview, ApiError } = await importDashboardWithServices((runtimeServices, ApiErrorClass) => {
       runtimeServices.finance.dashboard.mockRejectedValue(
         new ApiErrorClass('You do not have access to this workspace.', 'server', { status: 403 }),
       );
     });
 
-    await expect(getDashboardOverview('demo-vendor-a')).rejects.toMatchObject({
+    await expect(getDashboardDeferredOverview('demo-vendor-a')).rejects.toMatchObject({
       status: 403,
     } satisfies Partial<InstanceType<typeof ApiError>>);
   });
 
   it('keeps partial dashboard warnings for non-auth subrequest failures', async () => {
-    const { getDashboardOverview } = await importDashboardWithServices((runtimeServices) => {
+    const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
       runtimeServices.finance.dashboard.mockRejectedValue(new Error('Finance backend timed out.'));
     });
 
-    const overview = await getDashboardOverview('demo-vendor-a');
+    const overview = await getDashboardDeferredOverview('demo-vendor-a');
 
     expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('1');
     expect(overview.financeSnapshot).toBeUndefined();
     expect(overview.partialDataWarnings).toContain('Finance snapshot is temporarily unavailable.');
   });
 
-  it('passes the dashboard vendor id to every vendor-scoped subrequest', async () => {
+  it('keeps the initial real dashboard overview as a lightweight shell', async () => {
     const { getDashboardOverview, services } = await importDashboardWithServices();
 
-    await getDashboardOverview('vendor-query-key');
+    const overview = await getDashboardOverview('demo-vendor-a');
+
+    expect(overview.loadPhase).toBe('initial');
+    expect(overview.title).toBe('Stored Vendor command center');
+    expect(services.orders.list).not.toHaveBeenCalled();
+    expect(services.returns.list).not.toHaveBeenCalled();
+    expect(services.finance.dashboard).not.toHaveBeenCalled();
+    expect(services.diagnostics.reconciliation).not.toHaveBeenCalled();
+    expect(services.observability.summary).not.toHaveBeenCalled();
+  });
+
+  it('passes the dashboard vendor id to every vendor-scoped subrequest', async () => {
+    const { getDashboardDeferredOverview, services } = await importDashboardWithServices();
+
+    await getDashboardDeferredOverview('vendor-query-key');
 
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
@@ -171,17 +185,34 @@ describe('getDashboardOverview real-mode aggregation', () => {
   });
 
   it('uses explicit global admin notification scope for admin dashboard aggregation', async () => {
-    const { getDashboardOverview, services } = await importDashboardWithServices(undefined, 'admin');
+    const { getDashboardDeferredOverview, services } = await importDashboardWithServices(undefined, 'admin');
 
-    await getDashboardOverview('vendor-query-key');
+    await getDashboardDeferredOverview('vendor-query-key');
 
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
     expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
   });
 
+  it('marks deferred dashboard subrequests with deferred headers and small list limits', async () => {
+    const { getDashboardDeferredOverview, services } = await importDashboardWithServices();
+
+    await getDashboardDeferredOverview('vendor-query-key');
+
+    const orderOptions = services.orders.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const returnOptions = services.returns.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const financeOptions = services.finance.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+
+    expect(orderOptions?.headers?.['X-Request-Id']).toEqual(expect.any(String));
+    expect(orderOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
+    expect(orderOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(orderOptions?.limit).toBe(10);
+    expect(returnOptions?.limit).toBe(10);
+    expect(financeOptions?.limit).toBe(10);
+  });
+
   it('returns normalized dashboard operational counts from existing backend payloads', async () => {
-    const { getDashboardOverview } = await importDashboardWithServices((runtimeServices) => {
+    const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
       runtimeServices.finance.dashboard.mockResolvedValue({
         summary: {
           grossSales: 'TRY 100.00',
@@ -391,7 +422,7 @@ describe('getDashboardOverview real-mode aggregation', () => {
       });
     });
 
-    const overview = await getDashboardOverview('vendor-query-key');
+    const overview = await getDashboardDeferredOverview('vendor-query-key');
 
     const automationWork = overview.priorityWork.find((item) => item.label === 'Automation issue groups');
     expect(automationWork?.value).toBe('2');

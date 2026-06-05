@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -12,7 +12,12 @@ import {
   WorkflowActionGuidance,
 } from '../components/OperationalPrimitives';
 import { useActionFeedback } from '../lib/ui';
-import { getDashboardOverview } from '../lib/api/dashboard';
+import {
+  createDashboardRequestHeaders,
+  createDashboardRequestId,
+  getDashboardDeferredOverview,
+  getDashboardOverview,
+} from '../lib/api/dashboard';
 import { useAppReadiness } from '../lib/appReadiness';
 import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
@@ -476,17 +481,72 @@ export function DashboardPage() {
   const { message, tone, showFeedback } = useActionFeedback();
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
-  const { data: dashboard, isLoading, isError, error, diagnostics, refetch: refetchDashboard } = useQueryResource(
-    queryKeys.dashboard.overview(vendorId),
-    ({ signal }) => getDashboardOverview(vendorId, { signal }),
-    { enabled: appReadiness.ready },
+  const [shouldLoadDeferredDashboard, setShouldLoadDeferredDashboard] = useState(false);
+  const dashboardRequestId = useMemo(() => createDashboardRequestId(), [vendorId]);
+  const dashboardDeferredHeaders = useMemo(
+    () => createDashboardRequestHeaders(dashboardRequestId, 'deferred'),
+    [dashboardRequestId],
   );
   const {
+    data: dashboardShell,
+    isLoading,
+    isError,
+    error,
+    diagnostics,
+    refetch: refetchDashboardShell,
+  } = useQueryResource(
+    queryKeys.dashboard.overview(vendorId),
+    ({ signal }) => getDashboardOverview(vendorId, { signal, requestId: dashboardRequestId }),
+    { enabled: appReadiness.ready },
+  );
+  const initialDashboard = dashboardShell?.vendorId === vendorId ? dashboardShell : null;
+
+  useEffect(() => {
+    setShouldLoadDeferredDashboard(false);
+  }, [vendorId]);
+
+  useEffect(() => {
+    if (!appReadiness.ready || !initialDashboard) {
+      return undefined;
+    }
+
+    if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+      const frameId = window.requestAnimationFrame(() => setShouldLoadDeferredDashboard(true));
+      return () => window.cancelAnimationFrame(frameId);
+    }
+
+    const timeoutId = window.setTimeout(() => setShouldLoadDeferredDashboard(true), 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [appReadiness.ready, initialDashboard, vendorId]);
+
+  const {
+    data: deferredDashboard,
+    isError: isDeferredDashboardError,
+    refetch: refetchDeferredDashboard,
+  } = useQueryResource(
+    queryKeys.dashboard.deferredOverview(vendorId),
+    ({ signal }) => getDashboardDeferredOverview(vendorId, { signal, requestId: dashboardRequestId }),
+    { enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard) },
+  );
+  const dashboard = deferredDashboard?.vendorId === vendorId ? deferredDashboard : initialDashboard;
+  const {
     data: notifications,
+    isLoading: isNotificationsLoading,
     refetch: refetchNotifications,
-  } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.list(notificationScopeVendorId, { signal }), {
-    enabled: appReadiness.ready && Boolean(dashboard),
+  } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.list(notificationScopeVendorId, {
+    signal,
+    headers: dashboardDeferredHeaders,
+  }), {
+    enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard),
   });
+
+  async function refetchDashboard() {
+    const shellRefresh = refetchDashboardShell();
+    if (shouldLoadDeferredDashboard) {
+      void refetchDeferredDashboard();
+    }
+    await shellRefresh;
+  }
   const markNotificationReadMutation = useMutationAction(
     (notificationId: string) => runtimeServices.notifications.markRead(notificationId),
     {
@@ -635,7 +695,9 @@ export function DashboardPage() {
   const operationalActionTotal = actionProjections.reduce((sum, item) => sum + (item.count ?? 0), 0);
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
   const dashboardKpis = dashboardStats.slice(0, 5);
-  const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !dashboard);
+  const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !initialDashboard);
+  const isDashboardShellOnly = dashboard?.loadPhase === 'initial' && !deferredDashboard && !isDeferredDashboardError;
+  const isDashboardDataLoading = isDashboardInitialLoading || isDashboardShellOnly;
   const fulfillmentProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('awaiting shipment'));
   const returnsProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('refund attention'));
   const automationProjection = actionProjections.find((item) => item.id === 'automation-issue-groups');
@@ -761,7 +823,7 @@ export function DashboardPage() {
             description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
             onRetry={() => void refetchDashboard()}
           />
-        ) : isDashboardInitialLoading ? (
+        ) : isDashboardDataLoading ? (
           <div className="dashboard-action-grid" aria-label="Dashboard action skeleton">
             {Array.from({ length: 4 }, (_, index) => (
               <article key={`dashboard-action-skeleton-${index}`} className="dashboard-action-card op-skeleton-row">
@@ -811,7 +873,7 @@ export function DashboardPage() {
           {queueCards.map((queue) => (
             <article key={queue.label} className={`dashboard-queue-card dashboard-queue-${queue.tone}`}>
               <span>{queue.label}</span>
-              <strong>{isDashboardInitialLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
+              <strong>{isDashboardDataLoading ? <SkeletonText width="3rem" /> : queue.value}</strong>
               <small>{queue.description}</small>
               <small>Next: {queue.guidance.actionLabel}</small>
               <Link className="dashboard-queue-link" to={queue.to}>
@@ -826,7 +888,7 @@ export function DashboardPage() {
             description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
             onRetry={() => void refetchDashboard()}
           />
-        ) : isDashboardInitialLoading ? (
+        ) : isDashboardDataLoading ? (
           <div className="dashboard-priority-table" aria-label="Dashboard priority skeleton">
             <div className="dashboard-priority-head" aria-hidden="true">
               <span>Priority</span>
@@ -885,7 +947,7 @@ export function DashboardPage() {
       </div>
 
       <div className="dashboard-enterprise-kpi-row dashboard-passive-kpis">
-        {isDashboardInitialLoading ? (
+        {isDashboardDataLoading ? (
           <MetricSkeletonGrid labels={['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate']} />
         ) : dashboardKpis.map((stat) => (
           <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
@@ -899,7 +961,7 @@ export function DashboardPage() {
       <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Compact passive dashboard insights">
         <div className="dashboard-enterprise-main">
           <OperationalSection title="Recent operational events" description="Compact grouped history for context.">
-            {isDashboardInitialLoading ? (
+            {isDashboardDataLoading ? (
               <ul className="dashboard-activity-list dashboard-event-list" aria-label="Dashboard activity skeleton">
                 {Array.from({ length: 3 }, (_, index) => (
                   <li key={`dashboard-activity-skeleton-${index}`} className="op-skeleton-row">
@@ -1067,6 +1129,14 @@ export function DashboardPage() {
                   </div>
                 )}
               </div>
+            ) : isDashboardDataLoading || isNotificationsLoading ? (
+              <div className="notification-center">
+                <div className="notification-summary-row">
+                  <MetadataRow label="Unread" value={<SkeletonText width="2rem" />} />
+                  <MetadataRow label="High priority" value={<SkeletonText width="2rem" />} />
+                  <MetadataRow label="Total" value={<SkeletonText width="2rem" />} />
+                </div>
+              </div>
             ) : dashboard ? dashboardView.notificationSummary ? (
               <div className="op-meta-grid">
                 <MetadataRow label="Unread" value={dashboardView.notificationSummary.unread} />
@@ -1099,26 +1169,41 @@ export function DashboardPage() {
             <div className="dashboard-status-metric-list dashboard-finance-rows">
               <div className="dashboard-status-metric-row">
                 <span>Gross sales</span>
-                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Refunds</span>
-                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Net revenue</span>
-                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
               </div>
               <div className="dashboard-status-metric-row">
                 <span>Payout estimate</span>
-                <strong>{!appReadiness.ready || (isLoading && !dashboard) ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
               </div>
             </div>
           </OperationalSection>
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Diagnostics summary" description="System health and reconciliation overview.">
-              {dashboardView.diagnosticsSummary ? (
+              {isDashboardDataLoading ? (
+                <div className="dashboard-status-metric-list dashboard-diagnostics-rows">
+                  <div className="dashboard-status-metric-row">
+                    <span>Failed webhooks</span>
+                    <strong><SkeletonText width="3rem" /></strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Stuck received</span>
+                    <strong><SkeletonText width="3rem" /></strong>
+                  </div>
+                  <div className="dashboard-status-metric-row">
+                    <span>Fulfillment sync failures</span>
+                    <strong><SkeletonText width="3rem" /></strong>
+                  </div>
+                </div>
+              ) : dashboardView.diagnosticsSummary ? (
                 <div className="dashboard-status-metric-list dashboard-diagnostics-rows">
                   <div className="dashboard-status-metric-row">
                     <span>
@@ -1150,7 +1235,16 @@ export function DashboardPage() {
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Operational health" description="Uptime and operational metrics.">
-              {dashboardView.observabilitySummary ? (
+              {isDashboardDataLoading ? (
+                <div className="dashboard-status-metric-list dashboard-health-list">
+                  {['Health', 'Success rate 24h', 'Failed webhooks 24h', 'Retry pressure', 'Dead-letter', 'Reconciliation backlog', 'Stale signals'].map((label) => (
+                    <div key={label} className="dashboard-status-metric-row">
+                      <span>{label}</span>
+                      <strong><SkeletonText width="3rem" /></strong>
+                    </div>
+                  ))}
+                </div>
+              ) : dashboardView.observabilitySummary ? (
                 <div className="dashboard-status-metric-list dashboard-health-list">
                   <div className="dashboard-status-metric-row">
                     <span>

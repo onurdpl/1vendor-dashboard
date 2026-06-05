@@ -8,7 +8,8 @@ import type { DashboardOverview, NotificationIntent, NotificationsResponse } fro
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
-const listNotificationsMock = vi.fn<(vendorId?: string | null) => Promise<NotificationsResponse>>();
+const getDashboardDeferredOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
+const listNotificationsMock = vi.fn<(vendorId?: string | null, options?: { headers?: HeadersInit }) => Promise<NotificationsResponse>>();
 const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 
@@ -17,13 +18,14 @@ vi.mock('../lib/api/dashboard', async () => {
   return {
     ...actual,
     getDashboardOverview: (vendorId?: string) => getDashboardOverviewMock(vendorId),
+    getDashboardDeferredOverview: (vendorId?: string) => getDashboardDeferredOverviewMock(vendorId),
   };
 });
 
 vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     notifications: {
-      list: (vendorId?: string) => listNotificationsMock(vendorId),
+      list: (vendorId?: string, options?: { headers?: HeadersInit }) => listNotificationsMock(vendorId, options),
       markRead: (notificationId: string) => markNotificationReadMock(notificationId),
       dismiss: (notificationId: string) => dismissNotificationMock(notificationId),
     },
@@ -76,6 +78,18 @@ const dashboardOverview: DashboardOverview = {
   },
 };
 
+const dashboardShellOverview: DashboardOverview = {
+  vendorId: 'demo-vendor-a',
+  vendorName: 'Demo Vendor A',
+  title: 'Demo Vendor A command center',
+  description: 'Operational overview is loading.',
+  loadPhase: 'initial',
+  stats: [],
+  recentActivity: [],
+  workspaceStatus: 'Dashboard data is loading.',
+  priorityWork: [],
+};
+
 const notification: NotificationIntent = {
   id: 'notif-1',
   signalId: 'signal-1',
@@ -122,6 +136,8 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+const pendingDeferredDashboard = new Promise<DashboardOverview>(() => undefined);
+
 function getNotificationCenter() {
   const headings = screen.getAllByRole('heading', { name: /notification (center|history)/i });
   const heading = headings[headings.length - 1];
@@ -155,6 +171,8 @@ describe('DashboardPage command center', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getDashboardOverviewMock.mockReset();
+    getDashboardDeferredOverviewMock.mockReset();
+    getDashboardDeferredOverviewMock.mockReturnValue(pendingDeferredDashboard);
     listNotificationsMock.mockReset();
     markNotificationReadMock.mockReset();
     dismissNotificationMock.mockReset();
@@ -207,6 +225,45 @@ describe('DashboardPage command center', () => {
     expect(screen.queryByText('Loading operational overview')).not.toBeInTheDocument();
   });
 
+  it('renders the dashboard shell without waiting for deferred dashboard domains', async () => {
+    const deferredDashboard = deferred<DashboardOverview>();
+    getDashboardOverviewMock.mockResolvedValue(dashboardShellOverview);
+    getDashboardDeferredOverviewMock.mockReturnValue(deferredDashboard.promise);
+
+    renderDashboardPage();
+
+    expect(getDashboardDeferredOverviewMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    expect(screen.getByLabelText('Dashboard action skeleton')).toBeInTheDocument();
+    expect(screen.getByText('Operational overview is loading.')).toBeInTheDocument();
+  });
+
+  it('fetches deferred dashboard domains after the initial shell renders', async () => {
+    const deferredDashboard = deferred<DashboardOverview>();
+    getDashboardOverviewMock.mockResolvedValue(dashboardShellOverview);
+    getDashboardDeferredOverviewMock.mockReturnValue(deferredDashboard.promise);
+
+    renderDashboardPage();
+
+    expect(getDashboardDeferredOverviewMock).not.toHaveBeenCalled();
+    expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
+    await waitFor(() => expect(getDashboardDeferredOverviewMock).toHaveBeenCalledWith('demo-vendor-a'));
+  });
+
+  it('marks dashboard widget notification requests as deferred, not initial', async () => {
+    getDashboardOverviewMock.mockResolvedValue(dashboardShellOverview);
+
+    renderDashboardPage();
+
+    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
+    const notificationOptions = listNotificationsMock.mock.calls[0]?.[1];
+    const headers = new Headers(notificationOptions?.headers);
+
+    expect(headers.get('X-Request-Id')).toEqual(expect.any(String));
+    expect(headers.get('X-Dashboard-Deferred-Load')).toBe('true');
+    expect(headers.get('X-Dashboard-Initial-Load')).toBeNull();
+  });
+
   it('orders dashboard hierarchy from action work to queues before passive insight history', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
 
@@ -257,7 +314,7 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
-    expect(listNotificationsMock).toHaveBeenCalledWith(null);
+    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
     expect(screen.getByText('Admin passive notification history')).toBeInTheDocument();
     expect(screen.getByText('Top grouped admin alert history. Lower priority groups stay collapsed.')).toBeInTheDocument();
   });
@@ -277,7 +334,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-a');
+    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
   });
 
   it('renders the notification center list with compact metadata', async () => {
@@ -287,8 +344,8 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
-    expect(screen.getByText('Shipping cost review needed')).toBeInTheDocument();
-    expect(screen.getByText('External-provider shipping cost is missing from the operational record.')).toBeInTheDocument();
+    expect(await screen.findByText('Shipping cost review needed')).toBeInTheDocument();
+    expect(await screen.findByText('External-provider shipping cost is missing from the operational record.')).toBeInTheDocument();
     expect(screen.getByText('shipping cost')).toBeInTheDocument();
     expect(screen.getByText('Internal reference')).toBeInTheDocument();
     expect(screen.getByText('Signal signal-1')).toBeInTheDocument();

@@ -20,15 +20,21 @@ import type {
 import { runtimeServices } from '../../services/runtime-services';
 import { ApiError } from './errors';
 
-const DASHBOARD_INITIAL_LOAD_HEADER = 'X-Dashboard-Initial-Load';
+export const DASHBOARD_INITIAL_LOAD_HEADER = 'X-Dashboard-Initial-Load';
+export const DASHBOARD_DEFERRED_LOAD_HEADER = 'X-Dashboard-Deferred-Load';
 const SLOW_DASHBOARD_OPERATION_MS = 300;
 const SLOW_DASHBOARD_TOTAL_MS = 1000;
+const DASHBOARD_DEFERRED_LIST_LIMIT = 10;
+const DASHBOARD_DEFERRED_OPERATIONS_LIMIT = 20;
+
+type DashboardLoadPhase = 'initial' | 'deferred';
+type DashboardRequestOptions = { signal?: AbortSignal; requestId?: string };
 
 function resolveVendorId(vendorId?: VendorId) {
   return vendorId ?? getCurrentVendorContext().vendorId;
 }
 
-function createDashboardRequestId() {
+export function createDashboardRequestId() {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
@@ -40,17 +46,25 @@ function getDashboardNow() {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now();
 }
 
-function createDashboardHeaders(requestId: string): HeadersInit {
-  return {
+export function createDashboardRequestHeaders(requestId: string, phase: DashboardLoadPhase): HeadersInit {
+  const headers: Record<string, string> = {
     'X-Request-Id': requestId,
-    [DASHBOARD_INITIAL_LOAD_HEADER]: 'true',
   };
+
+  if (phase === 'initial') {
+    headers[DASHBOARD_INITIAL_LOAD_HEADER] = 'true';
+  } else {
+    headers[DASHBOARD_DEFERRED_LOAD_HEADER] = 'true';
+  }
+
+  return headers;
 }
 
 function logDashboardClientTiming(input: {
   requestId: string;
   step: string;
   durationMs: number;
+  loadPhase?: DashboardLoadPhase;
   failed?: boolean;
   thresholdMs?: number;
 }) {
@@ -58,6 +72,7 @@ function logDashboardClientTiming(input: {
     event: 'ADMIN_DASHBOARD_TIMING',
     requestId: input.requestId,
     step: input.step,
+    ...(input.loadPhase ? { loadPhase: input.loadPhase } : {}),
     durationMs: Math.max(0, Math.round(input.durationMs)),
     failed: Boolean(input.failed),
   };
@@ -66,9 +81,10 @@ function logDashboardClientTiming(input: {
   const thresholdMs = input.thresholdMs ?? SLOW_DASHBOARD_OPERATION_MS;
   if (payload.durationMs > thresholdMs) {
     console.warn({
-      event: input.step === 'dashboard.route.end' ? 'ADMIN_DASHBOARD_SLOW_TOTAL' : 'ADMIN_DASHBOARD_SLOW_OPERATION',
+      event: input.step === 'dashboard.route.end' || input.step === 'dashboard.deferred.route.end' ? 'ADMIN_DASHBOARD_SLOW_TOTAL' : 'ADMIN_DASHBOARD_SLOW_OPERATION',
       requestId: input.requestId,
       step: input.step,
+      ...(input.loadPhase ? { loadPhase: input.loadPhase } : {}),
       durationMs: payload.durationMs,
       thresholdMs,
       failed: payload.failed,
@@ -76,7 +92,12 @@ function logDashboardClientTiming(input: {
   }
 }
 
-async function withDashboardClientTiming<T>(requestId: string, step: string, action: () => Promise<T>): Promise<T> {
+async function withDashboardClientTiming<T>(
+  requestId: string,
+  step: string,
+  action: () => Promise<T>,
+  loadPhase?: DashboardLoadPhase,
+): Promise<T> {
   const startedAt = getDashboardNow();
   let failed = false;
   try {
@@ -88,6 +109,7 @@ async function withDashboardClientTiming<T>(requestId: string, step: string, act
     logDashboardClientTiming({
       requestId,
       step,
+      loadPhase,
       durationMs: getDashboardNow() - startedAt,
       failed,
     });
@@ -339,6 +361,23 @@ function buildMockDashboardOverview(vendorId?: VendorId): DashboardOverview {
   };
 }
 
+function buildRealDashboardShellOverview(vendorId?: VendorId): DashboardOverview {
+  const currentVendorId = resolveVendorId(vendorId);
+  const currentVendor = getCurrentVendorContext();
+
+  return {
+    vendorId: currentVendorId,
+    vendorName: currentVendor.vendorName,
+    title: `${currentVendor.vendorName} command center`,
+    description: 'Operational overview is loading.',
+    loadPhase: 'initial',
+    stats: [],
+    recentActivity: [],
+    workspaceStatus: 'Dashboard data is loading.',
+    priorityWork: [],
+  };
+}
+
 function toMoneyValue(value: string) {
   const parsed = Number.parseFloat(value.replace(/[^0-9.-]/g, '') || '0');
   return Number.isFinite(parsed) ? parsed : 0;
@@ -378,11 +417,42 @@ function createPriorityWork(input: {
   ];
 }
 
-async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal?: AbortSignal } = {}): Promise<DashboardOverview> {
-  const requestId = createDashboardRequestId();
+async function buildRealDashboardInitialOverview(vendorId?: VendorId, options: DashboardRequestOptions = {}): Promise<DashboardOverview> {
+  const requestId = options.requestId ?? createDashboardRequestId();
   const totalStartedAt = getDashboardNow();
   let failed = false;
-  logDashboardClientTiming({ requestId, step: 'dashboard.route.start', durationMs: 0 });
+  logDashboardClientTiming({ requestId, step: 'dashboard.route.start', loadPhase: 'initial', durationMs: 0 });
+
+  try {
+    const aggregationStartedAt = getDashboardNow();
+    const overview = buildRealDashboardShellOverview(vendorId);
+    logDashboardClientTiming({
+      requestId,
+      step: 'dashboard.metrics_aggregation',
+      loadPhase: 'initial',
+      durationMs: getDashboardNow() - aggregationStartedAt,
+    });
+    return overview;
+  } catch (error) {
+    failed = true;
+    throw error;
+  } finally {
+    logDashboardClientTiming({
+      requestId,
+      step: 'dashboard.route.end',
+      loadPhase: 'initial',
+      durationMs: getDashboardNow() - totalStartedAt,
+      failed,
+      thresholdMs: SLOW_DASHBOARD_TOTAL_MS,
+    });
+  }
+}
+
+async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: DashboardRequestOptions = {}): Promise<DashboardOverview> {
+  const requestId = options.requestId ?? createDashboardRequestId();
+  const totalStartedAt = getDashboardNow();
+  let failed = false;
+  logDashboardClientTiming({ requestId, step: 'dashboard.deferred.route.start', loadPhase: 'deferred', durationMs: 0 });
 
   try {
   const currentVendorId = resolveVendorId(vendorId);
@@ -391,32 +461,42 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
   const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
   const dashboardReadOptions = {
     signal: options.signal,
-    headers: createDashboardHeaders(requestId),
+    headers: createDashboardRequestHeaders(requestId, 'deferred'),
+    limit: DASHBOARD_DEFERRED_LIST_LIMIT,
+    offset: 0,
+  };
+  const dashboardOperationsReadOptions = {
+    signal: options.signal,
+    headers: createDashboardRequestHeaders(requestId, 'deferred'),
+    limit: DASHBOARD_DEFERRED_OPERATIONS_LIMIT,
+    offset: 0,
   };
 
   const partialDataWarnings: string[] = [];
   const dashboardRequests = await Promise.allSettled([
-    withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions)),
-    withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions)),
-    withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions)),
-    withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
+    withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
+    withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
+    withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
     currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.operations.list', () => runtimeServices.operations.list(dashboardReadOptions))
+      ? withDashboardClientTiming(requestId, 'client.operations.list', () => runtimeServices.operations.list(dashboardOperationsReadOptions), 'deferred')
       : Promise.resolve(null),
-    withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions)),
+    withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
     withDashboardClientTiming(requestId, 'client.notifications.list', () =>
       runtimeServices.notifications.list(notificationScopeVendorId, dashboardReadOptions),
+      'deferred',
     ),
     currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions))
-      : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions)),
+      ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
+      : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
     currentUser?.role === 'admin'
       ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
           runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
+          'deferred',
         )
       : Promise.resolve(null),
     currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions))
+      ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
       : Promise.resolve(null),
   ]);
 
@@ -573,6 +653,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
   logDashboardClientTiming({
     requestId,
     step: 'dashboard.metrics_aggregation',
+    loadPhase: 'deferred',
     durationMs: getDashboardNow() - aggregationStartedAt,
   });
 
@@ -581,6 +662,7 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
     vendorName: currentVendor.vendorName,
     title: `${currentVendor.vendorName} command center`,
     description: `Monitor backend-derived operational state for ${currentVendor.vendorName} from one workspace.`,
+    loadPhase: 'deferred',
     stats: [
       { label: 'Vendor orders', value: formatCount(orders.length) },
       { label: 'Awaiting shipment', value: formatCount(awaitingShipmentCount) },
@@ -604,7 +686,8 @@ async function buildRealDashboardOverview(vendorId?: VendorId, options: { signal
   } finally {
     logDashboardClientTiming({
       requestId,
-      step: 'dashboard.route.end',
+      step: 'dashboard.deferred.route.end',
+      loadPhase: 'deferred',
       durationMs: getDashboardNow() - totalStartedAt,
       failed,
       thresholdMs: SLOW_DASHBOARD_TOTAL_MS,
@@ -616,9 +699,17 @@ export function buildDashboardOverview(vendorId?: VendorId): DashboardOverview {
   return buildMockDashboardOverview(vendorId);
 }
 
-export async function getDashboardOverview(vendorId?: VendorId, options: { signal?: AbortSignal } = {}): Promise<DashboardOverview> {
+export async function getDashboardOverview(vendorId?: VendorId, options: DashboardRequestOptions = {}): Promise<DashboardOverview> {
   if (runtimeConfig.apiMode === 'real') {
-    return buildRealDashboardOverview(vendorId, options);
+    return buildRealDashboardInitialOverview(vendorId, options);
+  }
+
+  return buildMockDashboardOverview(vendorId);
+}
+
+export async function getDashboardDeferredOverview(vendorId?: VendorId, options: DashboardRequestOptions = {}): Promise<DashboardOverview> {
+  if (runtimeConfig.apiMode === 'real') {
+    return buildRealDashboardDeferredOverview(vendorId, options);
   }
 
   return buildMockDashboardOverview(vendorId);
