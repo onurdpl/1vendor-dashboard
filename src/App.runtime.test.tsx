@@ -51,13 +51,21 @@ describe('App startup runtime safety', () => {
     const { default: App } = await import('./App');
 
     render(
-      <MemoryRouter initialEntries={['/payments/paratika/return?token=secret-session-token&cardNumber=4111111111111111']}>
+      <MemoryRouter
+        initialEntries={[
+          '/payments/paratika/return?responseCode=99&merchantPaymentId=SPORGYM-SHOPIFY-order-100&token=secret-session-token&cardNumber=4111111111111111',
+        ]}
+      >
         <App />
       </MemoryRouter>,
     );
 
     expect(screen.getByText('Payment return received. Verification pending.')).toBeInTheDocument();
     expect(screen.getByText(/No payment, Shopify order, settlement, or payout state has been changed/i)).toBeInTheDocument();
+    expect(screen.getByText('Received status')).toBeInTheDocument();
+    expect(screen.getByText('99')).toBeInTheDocument();
+    expect(screen.getByText('Reference')).toBeInTheDocument();
+    expect(screen.getByText('SPORGYM-SHOPIFY-order-100')).toBeInTheDocument();
     expect(screen.queryByText('secret-session-token')).not.toBeInTheDocument();
     expect(screen.queryByText('4111111111111111')).not.toBeInTheDocument();
   });
