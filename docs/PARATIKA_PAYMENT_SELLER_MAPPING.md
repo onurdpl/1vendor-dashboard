@@ -87,9 +87,19 @@ Required non-credential fields currently modeled:
 - `quantity`: Shopify line quantity.
 - `amount`: gross VAT-included line amount.
 - `sellerID`: backend-resolved Paratika seller id.
-- `sellerPaymentAmount`: vendor payment amount from existing configured finance profile logic only.
+- `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
 
 `TOTALSELLERPAYMENTAMOUNT` is the sum of `ORDERITEMS[].sellerPaymentAmount`.
+
+For preview/test payloads, shipping deduction is intentionally deferred and not applied. The preview response reports:
+
+```json
+{
+  "shippingDeductionPolicy": "deferred_not_applied"
+}
+```
+
+This is because the current finance model stores shipping deductions at allocation level, not exact line-item level. Production payment execution must not guess a line-level shipping split, must not use proportional shipping deduction unless explicitly approved, and must continue to fail closed until the shipping deduction policy is confirmed.
 
 The preview fails closed instead of guessing when seller ID mapping, product code, customer context, return URL, amount, or seller payment amount cannot be proven from current backend data/configuration.
 

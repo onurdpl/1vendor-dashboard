@@ -20,11 +20,14 @@ type ParatikaOrderItemPreview = {
 
 type ParatikaPayloadPreview = Record<string, string>;
 
+const PARATIKA_SHIPPING_DEDUCTION_POLICY = 'deferred_not_applied' as const;
+
 export type ParatikaSessionTokenPayloadPreview = {
   ok: boolean;
   writesPerformed: false;
   provider: 'PARATIKA';
   model: 'seller_payment_amount_based';
+  shippingDeductionPolicy: typeof PARATIKA_SHIPPING_DEDUCTION_POLICY;
   paymentReference: string | null;
   sessionTokenPayloadPreview: ParatikaPayloadPreview | null;
   itemBreakdown: ParatikaOrderItemPreview[];
@@ -226,6 +229,7 @@ function buildEmptyResult(validationErrors: string[], itemBreakdown: ParatikaOrd
     writesPerformed: false,
     provider: 'PARATIKA',
     model: 'seller_payment_amount_based',
+    shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
     paymentReference: null,
     sessionTokenPayloadPreview: null,
     itemBreakdown,
@@ -280,12 +284,6 @@ async function buildOrderItemPreview(
   const profile = await readActiveVendorFinancialProfile(vendorId);
   if (!profile) {
     validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: active vendor financial profile is missing.`);
-    return null;
-  }
-  if (profile.deductShippingEnabled) {
-    validationErrors.push(
-      `Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: shipping deductions are not modeled for item-level Paratika previews.`,
-    );
     return null;
   }
 
@@ -445,6 +443,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
     writesPerformed: false,
     provider: 'PARATIKA',
     model: 'seller_payment_amount_based',
+    shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
     paymentReference: buildPaymentReference(order),
     sessionTokenPayloadPreview,
     itemBreakdown: items,

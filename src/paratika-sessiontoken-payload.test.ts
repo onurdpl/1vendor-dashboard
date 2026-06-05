@@ -129,6 +129,7 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
 
     expect(result.ok).toBe(true);
     expect(result.writesPerformed).toBe(false);
+    expect(result.shippingDeductionPolicy).toBe('deferred_not_applied');
     expect(result.externalApiCallAttempted).toBe(false);
     expect(result.cardDataIncluded).toBe(false);
     expect(result.sessionTokenPayloadPreview).toMatchObject({
@@ -173,6 +174,33 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
       ['sporjinal', '100003585'],
       ['yalispor', '100003586'],
     ]);
+  });
+
+  it('defers shipping deductions in preview-only sellerPaymentAmount calculations', async () => {
+    mockHappyPath();
+    prismaMock.vendorFinancialProfile.findFirst.mockResolvedValue({
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+      deductShippingEnabled: true,
+      shippingMode: 'FIXED',
+      fixedShippingFee: '35.00',
+    });
+
+    const result = await buildParatikaSessionTokenPayloadPreviewForOrder('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.shippingDeductionPolicy).toBe('deferred_not_applied');
+    expect(result.validationErrors).not.toContain(
+      'Line item shopify-line-1 cannot compute sellerPaymentAmount: shipping deductions are not modeled for item-level Paratika previews.',
+    );
+    expect(result.sessionTokenPayloadPreview).toMatchObject({
+      TOTALSELLERPAYMENTAMOUNT: '90.00',
+    });
+
+    const orderItems = JSON.parse(result.sessionTokenPayloadPreview?.ORDERITEMS ?? '[]');
+    expect(orderItems.map((item: { sellerPaymentAmount: string }) => item.sellerPaymentAmount)).toEqual(['54.00', '36.00']);
   });
 
   it('fails closed when a Paratika seller mapping is missing', async () => {
