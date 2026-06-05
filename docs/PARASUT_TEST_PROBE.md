@@ -23,6 +23,7 @@ OAuth/token options:
 - `PARASUT_CLIENT_ID=`
 - `PARASUT_CLIENT_SECRET=`
 - `PARASUT_REDIRECT_URI=`
+- `PARASUT_GRANT_TYPE=password`
 - `PARASUT_USERNAME=`
 - `PARASUT_PASSWORD=`
 - `PARASUT_ACCESS_TOKEN=`
@@ -58,6 +59,21 @@ npm run parasut:commission-probe
 
 ## Temporary Render Runtime Auth Diagnostic
 
+The deployed backend includes a temporary no-network env diagnostic endpoint for checking Paraşüt runtime env shape from the Render backend runtime:
+
+```text
+GET /admin/probes/parasut/env-check
+```
+
+This endpoint:
+
+- requires a logged-in admin session;
+- requires `ADMIN_PROBES_ENABLED=true`;
+- reports only presence/absence for `PARASUT_CLIENT_ID`, `PARASUT_CLIENT_SECRET`, `PARASUT_USERNAME`, `PARASUT_PASSWORD`, `PARASUT_COMPANY_ID`, `PARASUT_REDIRECT_URI`, and `PARASUT_GRANT_TYPE`;
+- does not return client secrets, passwords, usernames, tokens, or credential values;
+- warns when `PARASUT_GRANT_TYPE` is missing or not configured as `password`;
+- performs no Paraşüt API calls and no writes.
+
 The deployed backend includes a temporary read-only diagnostic endpoint for checking Paraşüt runtime env, OAuth, and `/v4/me` from the Render backend runtime:
 
 ```text
@@ -75,6 +91,17 @@ This endpoint:
 - does not return access tokens, refresh tokens, passwords, client secrets, or full upstream response bodies.
 
 Keep `ADMIN_PROBES_ENABLED=false` unless actively diagnosing Paraşüt runtime configuration. Disable the endpoint again after the runtime check is complete.
+
+## Confirmed Auth Notes
+
+Paraşüt support confirmed:
+
+- `PARASUT_COMPANY_ID` / `firma_no` is correct when it matches the numeric company id visible in the Paraşüt app URL.
+- The configured `PARASUT_REDIRECT_URI` is already registered correctly.
+- Authorization-code flow is not mandatory for this server-side probe.
+- OAuth password grant can be used for the current controlled probe flow.
+- `PARASUT_CLIENT_ID` and `PARASUT_CLIENT_SECRET` must belong to the same Paraşüt email/account used in `PARASUT_USERNAME`.
+- For e-invoice tests, Paraşüt VKN `6490512763` can be used because the e-invoice taxpayer list may not be current.
 
 Live test probe with creation enabled:
 

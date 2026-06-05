@@ -11,6 +11,10 @@ export type ParasutAuthMeDiagnosticOptions = {
   fetchImpl?: typeof fetch;
 };
 
+export type ParasutEnvDiagnosticOptions = {
+  env?: ParasutEnv;
+};
+
 const STAGING_BASE_URL = 'https://api.heroku-staging.parasut.com';
 const REQUIRED_ENV_KEYS = [
   'PARASUT_ENABLED',
@@ -23,6 +27,17 @@ const REQUIRED_ENV_KEYS = [
   'PARASUT_USERNAME',
   'PARASUT_PASSWORD',
 ] as const;
+const SAFE_ENV_DIAGNOSTIC_KEYS = [
+  'PARASUT_CLIENT_ID',
+  'PARASUT_CLIENT_SECRET',
+  'PARASUT_USERNAME',
+  'PARASUT_PASSWORD',
+  'PARASUT_COMPANY_ID',
+  'PARASUT_REDIRECT_URI',
+  'PARASUT_GRANT_TYPE',
+] as const;
+const PASSWORD_GRANT = 'password';
+const TEST_EINVOICE_VKN = '6490512763';
 const SENSITIVE_KEY_PATTERN = /access|refresh|token|secret|password|authorization|client_secret/i;
 const JWT_LIKE_PATTERN = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g;
 const BEARER_VALUE_PATTERN = /Bearer\s+[A-Za-z0-9._~+/-]+=*/gi;
@@ -36,6 +51,13 @@ function readEnv(env: ParasutEnv, key: string) {
 function buildEnvPresence(env: ParasutEnv) {
   return Object.fromEntries(REQUIRED_ENV_KEYS.map((key) => [key, Boolean(readEnv(env, key))])) as Record<
     (typeof REQUIRED_ENV_KEYS)[number],
+    boolean
+  >;
+}
+
+function buildSafeEnvPresence(env: ParasutEnv) {
+  return Object.fromEntries(SAFE_ENV_DIAGNOSTIC_KEYS.map((key) => [key, Boolean(readEnv(env, key))])) as Record<
+    (typeof SAFE_ENV_DIAGNOSTIC_KEYS)[number],
     boolean
   >;
 }
@@ -186,6 +208,43 @@ function buildBaseResponse(env: ParasutEnv) {
     oauthSuccess: false,
     meSuccess: false,
     writesPerformed: false,
+  };
+}
+
+export function runParasutEnvDiagnostic(options: ParasutEnvDiagnosticOptions = {}) {
+  const env = options.env ?? process.env;
+  const grantType = readEnv(env, 'PARASUT_GRANT_TYPE').toLowerCase();
+  const grantTypeConfigured = Boolean(grantType);
+  const grantTypeIsPassword = grantType === PASSWORD_GRANT;
+  const grantTypeWarning =
+    grantTypeConfigured && !grantTypeIsPassword
+      ? 'PARASUT_GRANT_TYPE should be password for the current Paraşüt probe flow.'
+      : !grantTypeConfigured
+        ? 'PARASUT_GRANT_TYPE is not configured; set it to password for the current Paraşüt probe flow.'
+        : null;
+
+  return {
+    statusCode: 200,
+    body: {
+      ok: true,
+      envPresence: buildSafeEnvPresence(env),
+      grantType: {
+        passwordExpectedForCurrentProbeFlow: true,
+        configured: grantTypeConfigured,
+        matchesPasswordGrant: grantTypeIsPassword,
+        warning: grantTypeWarning,
+      },
+      authConfirmation: {
+        companyIdConfirmedCorrect: true,
+        redirectUriRegisteredCorrectly: true,
+        passwordGrantAllowed: true,
+        authorizationCodeRequired: false,
+        clientCredentialsMustBelongToConfiguredAccountEmail: true,
+        testEinvoiceVkn: TEST_EINVOICE_VKN,
+      },
+      writesPerformed: false,
+      externalApiCallsPerformed: false,
+    },
   };
 }
 

@@ -235,12 +235,19 @@ Confirmed:
 - The newest `refresh_token` must be persisted.
 - `CLIENT_ID` and `CLIENT_SECRET` are obtained from Paraşüt support.
 - Firma isolation still applies after OAuth.
+- Paraşüt support confirmed the configured company id is correct when it matches the numeric company id visible in the Paraşüt app URL.
+- Paraşüt support confirmed the configured redirect URI is already registered correctly.
+- Authorization-code flow is not mandatory for the current server-side probe.
+- OAuth password grant can be used for the current controlled probe flow.
+- The Paraşüt `client_id` and `client_secret` must belong to the same email/account used for the Paraşüt account/request.
+- For e-invoice tests, Paraşüt VKN `6490512763` can be used because the e-invoice taxpayer list may not be current.
 
 Operational implications:
 
 - Token storage/security becomes a production secret-management concern for Sporgym Paraşüt credentials.
 - Token refresh failures would become operational blockers for invoice/accounting sync.
 - OAuth credentials must not be logged or exposed through diagnostics.
+- Runtime diagnostics must report only credential presence/absence, never credential values.
 
 ## Implementation Warning
 

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
-import { runParasutAuthMeDiagnostic } from '../backend/src/modules/parasut/parasut-auth-me-diagnostic.js';
+import { runParasutAuthMeDiagnostic, runParasutEnvDiagnostic } from '../backend/src/modules/parasut/parasut-auth-me-diagnostic.js';
 import { registerParasutProbeRoutes } from '../backend/src/modules/parasut/parasut-probe.routes.js';
 
 const PARASUT_SECRET_VALUES = {
@@ -21,6 +21,7 @@ function buildEnv(overrides: Record<string, string | undefined> = {}) {
     PARASUT_CLIENT_ID: PARASUT_SECRET_VALUES.clientId,
     PARASUT_CLIENT_SECRET: PARASUT_SECRET_VALUES.clientSecret,
     PARASUT_REDIRECT_URI: 'urn:ietf:wg:oauth:2.0:oob',
+    PARASUT_GRANT_TYPE: 'password',
     PARASUT_USERNAME: PARASUT_SECRET_VALUES.username,
     PARASUT_PASSWORD: PARASUT_SECRET_VALUES.password,
     ...overrides,
@@ -51,13 +52,13 @@ function buildReply() {
   return reply;
 }
 
-function registerRoute() {
+function registerRoute(pathToCapture = '/admin/probes/parasut/auth-me') {
   let handler:
     | ((request: { authUser?: { role?: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
     | null = null;
   const app = {
     get: vi.fn((path: string, ...args: unknown[]) => {
-      if (path === '/admin/probes/parasut/auth-me') {
+      if (path === pathToCapture) {
         handler = args.at(-1) as typeof handler;
       }
     }),
@@ -121,6 +122,96 @@ describe('Paraşüt auth/me diagnostic probe', () => {
     expect(result).toEqual({ ok: false, message: 'Admin probe endpoints are disabled.' });
     expect(reply.statusCode).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns safe env diagnostic presence and support confirmations without secret values', async () => {
+    const fetchMock = vi.fn();
+    const result = runParasutEnvDiagnostic({
+      env: buildEnv(),
+    });
+
+    expect(result.statusCode).toBe(200);
+    expect(result.body).toEqual({
+      ok: true,
+      envPresence: {
+        PARASUT_CLIENT_ID: true,
+        PARASUT_CLIENT_SECRET: true,
+        PARASUT_USERNAME: true,
+        PARASUT_PASSWORD: true,
+        PARASUT_COMPANY_ID: true,
+        PARASUT_REDIRECT_URI: true,
+        PARASUT_GRANT_TYPE: true,
+      },
+      grantType: {
+        passwordExpectedForCurrentProbeFlow: true,
+        configured: true,
+        matchesPasswordGrant: true,
+        warning: null,
+      },
+      authConfirmation: {
+        companyIdConfirmedCorrect: true,
+        redirectUriRegisteredCorrectly: true,
+        passwordGrantAllowed: true,
+        authorizationCodeRequired: false,
+        clientCredentialsMustBelongToConfiguredAccountEmail: true,
+        testEinvoiceVkn: '6490512763',
+      },
+      writesPerformed: false,
+      externalApiCallsPerformed: false,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expectNoSecrets(result.body);
+  });
+
+  it('warns when safe env diagnostic grant type is not password without returning the configured value', async () => {
+    const result = runParasutEnvDiagnostic({
+      env: buildEnv({ PARASUT_GRANT_TYPE: 'authorization_code' }),
+    });
+
+    expect(result.body).toEqual(
+      expect.objectContaining({
+        envPresence: expect.objectContaining({
+          PARASUT_GRANT_TYPE: true,
+        }),
+        grantType: expect.objectContaining({
+          configured: true,
+          matchesPasswordGrant: false,
+          warning: 'PARASUT_GRANT_TYPE should be password for the current Paraşüt probe flow.',
+        }),
+      }),
+    );
+    expect(JSON.stringify(result.body)).not.toContain('authorization_code');
+    expectNoSecrets(result.body);
+  });
+
+  it('serves the safe env diagnostic through the guarded admin route', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    Object.assign(process.env, buildEnv());
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const handler = registerRoute('/admin/probes/parasut/env-check');
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        envPresence: expect.objectContaining({
+          PARASUT_CLIENT_SECRET: true,
+          PARASUT_PASSWORD: true,
+        }),
+        authConfirmation: expect.objectContaining({
+          passwordGrantAllowed: true,
+          authorizationCodeRequired: false,
+          testEinvoiceVkn: '6490512763',
+        }),
+        externalApiCallsPerformed: false,
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expectNoSecrets(result);
   });
 
   it('rejects non-staging base URLs before OAuth', async () => {
