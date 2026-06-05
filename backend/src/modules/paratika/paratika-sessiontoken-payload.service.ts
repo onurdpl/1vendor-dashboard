@@ -19,7 +19,6 @@ type ParatikaOrderItemPreview = {
   amount: string;
   sellerID: string;
   sellerPaymentAmount?: string;
-  sellerCommissionAmount?: string;
   sellerCommission?: string;
   sku: string | null;
   vendorId: string;
@@ -308,13 +307,52 @@ async function buildOrderItemPreview(
 
   const profile = await readActiveVendorFinancialProfile(vendorId);
   if (!profile) {
-    validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: active vendor financial profile is missing.`);
+    validationErrors.push(
+      marketplaceModel === 'SELLER_COMMISSION_RATE'
+        ? `Line item ${lineItem.sourceLineItemId} cannot compute sellerCommission: active vendor financial profile is missing.`
+        : `Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: active vendor financial profile is missing.`,
+    );
     return null;
   }
 
   const commissionPercent = toNumber(profile.commissionPercent);
+  if (commissionPercent === null) {
+    validationErrors.push(
+      marketplaceModel === 'SELLER_COMMISSION_RATE'
+        ? `Line item ${lineItem.sourceLineItemId} cannot compute sellerCommission: vendor financial profile is invalid.`
+        : `Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: vendor financial profile is invalid.`,
+    );
+    return null;
+  }
+
+  const fallbackName = lineItem.sku ?? productCode;
+  const itemBase = {
+    productCode,
+    name: lineItem.title?.trim() || fallbackName,
+    description: lineItem.sku?.trim() || productCode,
+    quantity,
+    amount: centsToMoney(amountCents),
+    sellerID,
+    sku: lineItem.sku,
+    vendorId,
+    shopifyLineItemId: lineItem.sourceLineItemId,
+  };
+
+  if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
+    const sellerCommission = formatCommissionRate(commissionPercent);
+    if (!sellerCommission) {
+      validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerCommission.`);
+      return null;
+    }
+
+    return {
+      ...itemBase,
+      sellerCommission,
+    };
+  }
+
   const commissionVatPercent = toNumber(profile.commissionVatPercent);
-  if (commissionPercent === null || commissionVatPercent === null) {
+  if (commissionVatPercent === null) {
     validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount: vendor financial profile is invalid.`);
     return null;
   }
@@ -332,45 +370,6 @@ async function buildOrderItemPreview(
     },
   });
 
-  const fallbackName = lineItem.sku ?? productCode;
-  const itemBase = {
-    productCode,
-    name: lineItem.title?.trim() || fallbackName,
-    description: lineItem.sku?.trim() || productCode,
-    quantity,
-    amount: centsToMoney(amountCents),
-    sellerID,
-    sku: lineItem.sku,
-    vendorId,
-    shopifyLineItemId: lineItem.sourceLineItemId,
-  };
-
-  if (marketplaceModel === 'SELLER_COMMISSION_AMOUNT') {
-    const sellerCommissionAmountCents = parseMoneyToCents((payout.commission + payout.commissionVat).toFixed(2));
-    if (sellerCommissionAmountCents === null || sellerCommissionAmountCents < 0) {
-      validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerCommissionAmount.`);
-      return null;
-    }
-
-    return {
-      ...itemBase,
-      sellerCommissionAmount: centsToMoney(sellerCommissionAmountCents),
-    };
-  }
-
-  if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
-    const sellerCommission = formatCommissionRate(commissionPercent);
-    if (!sellerCommission) {
-      validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerCommission.`);
-      return null;
-    }
-
-    return {
-      ...itemBase,
-      sellerCommission,
-    };
-  }
-
   const sellerPaymentAmountCents = parseMoneyToCents(payout.estimatedPayout.toFixed(2));
   if (sellerPaymentAmountCents === null || sellerPaymentAmountCents < 0) {
     validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount.`);
@@ -383,7 +382,7 @@ async function buildOrderItemPreview(
   };
 }
 
-function sumItemMoney(items: ParatikaOrderItemPreview[], field: 'sellerPaymentAmount' | 'sellerCommissionAmount') {
+function sumItemMoney(items: ParatikaOrderItemPreview[], field: 'sellerPaymentAmount') {
   let total = 0;
   for (const item of items) {
     const cents = parseMoneyToCents(item[field]);
@@ -401,18 +400,6 @@ function buildMarketplaceTotalFields(
   items: ParatikaOrderItemPreview[],
   validationErrors: string[],
 ): Record<string, string> {
-  if (marketplaceModel === 'SELLER_COMMISSION_AMOUNT') {
-    const sellerCommissionAmountTotalCents = sumItemMoney(items, 'sellerCommissionAmount');
-    if (sellerCommissionAmountTotalCents === null || sellerCommissionAmountTotalCents < 0) {
-      validationErrors.push('TOTALSELLERCOMMISSIONAMOUNT is invalid.');
-      return {};
-    }
-
-    return {
-      TOTALSELLERCOMMISSIONAMOUNT: centsToMoney(sellerCommissionAmountTotalCents),
-    };
-  }
-
   if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
     const commissionRates = [...new Set(items.map((item) => item.sellerCommission).filter((value): value is string => Boolean(value)))];
     if (commissionRates.length !== 1) {
@@ -444,11 +431,9 @@ function buildOrderItemsPayload(items: ParatikaOrderItemPreview[], marketplaceMo
     quantity: item.quantity,
     amount: item.amount,
     sellerID: item.sellerID,
-    ...(marketplaceModel === 'SELLER_COMMISSION_AMOUNT'
-      ? { sellerCommissionAmount: item.sellerCommissionAmount ?? '' }
-      : marketplaceModel === 'SELLER_COMMISSION_RATE'
-        ? { sellerCommission: item.sellerCommission ?? '' }
-        : { sellerPaymentAmount: item.sellerPaymentAmount ?? '' }),
+    ...(marketplaceModel === 'SELLER_COMMISSION_RATE'
+      ? { sellerCommission: item.sellerCommission ?? '' }
+      : { sellerPaymentAmount: item.sellerPaymentAmount ?? '' }),
   }));
 }
 

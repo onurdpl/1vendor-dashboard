@@ -56,7 +56,7 @@ describe('backend env shipping provider gates', () => {
       PARATIKA_TEST_MODE: 'true',
       PARATIKA_PROBE_DRY_RUN: 'false',
       PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
-      PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_AMOUNT',
+      PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_RATE',
     });
 
     const env = loadEnv();
@@ -69,17 +69,17 @@ describe('backend env shipping provider gates', () => {
     expect(env.PARATIKA_TEST_MODE).toBe(true);
     expect(env.PARATIKA_PROBE_DRY_RUN).toBe(false);
     expect(env.PARATIKA_PROBE_CONFIRM).toBe('CREATE_SESSIONTOKEN_TEST');
-    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_AMOUNT');
+    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_RATE');
   });
 
-  it('defaults Paratika marketplace model to seller payment amount', () => {
+  it('defaults Paratika marketplace model to seller commission rate', () => {
     resetEnv({
       PARATIKA_MARKETPLACE_MODEL: undefined,
     });
 
     const env = loadEnv();
 
-    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_PAYMENT_AMOUNT');
+    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_RATE');
   });
 
   it('rejects unsupported Paratika marketplace models', () => {
@@ -88,7 +88,7 @@ describe('backend env shipping provider gates', () => {
     });
 
     expect(() => loadEnv()).toThrow(
-      'Invalid PARATIKA_MARKETPLACE_MODEL value. Expected SELLER_PAYMENT_AMOUNT, SELLER_COMMISSION_AMOUNT, or SELLER_COMMISSION_RATE.',
+      'Invalid PARATIKA_MARKETPLACE_MODEL value. Expected SELLER_PAYMENT_AMOUNT or SELLER_COMMISSION_RATE.',
     );
   });
 

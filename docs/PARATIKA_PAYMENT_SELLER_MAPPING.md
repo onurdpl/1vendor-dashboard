@@ -52,9 +52,10 @@ No live payment construction is implemented yet.
 
 ## Confirmed Marketplace Contract
 
-The default probe model remains **Satıcı Ödeme Tutarı Bazlı** / Seller Payment Amount Based.
+The active probe model is now **Komisyon Oranı Bazlı** / Commission Rate Based.
 
-The first live `ACTION=SESSIONTOKEN` probe using Seller Payment Amount Based reached Paratika and returned:
+The current Paratika merchant panel does not provide the Payment Amount Based option. The first live
+`ACTION=SESSIONTOKEN` probe using Seller Payment Amount Based reached Paratika and returned:
 
 ```text
 responseCode=99
@@ -63,23 +64,22 @@ errorMsg=Invalid Marketplace Integration Mode
 violatorParam=MERCHANT
 ```
 
-That response indicates the request reached Paratika but the configured merchant may not match the selected marketplace model. The probe now supports the other documented marketplace models so the configured merchant mode can be tested without implementing production payment execution.
+That response indicates the request reached Paratika but the configured merchant does not match the seller-payment payload model. The active test model is therefore the documented `sellerCommission` commission-rate payload.
 
 The selected probe model is controlled by:
 
 ```text
-PARATIKA_MARKETPLACE_MODEL=SELLER_PAYMENT_AMOUNT
+PARATIKA_MARKETPLACE_MODEL=SELLER_COMMISSION_RATE
 ```
 
 Allowed values:
 
 | Env value | ORDERITEMS field | Top-level total field |
 | --- | --- | --- |
-| `SELLER_PAYMENT_AMOUNT` | `sellerPaymentAmount` | `TOTALSELLERPAYMENTAMOUNT` |
-| `SELLER_COMMISSION_AMOUNT` | `sellerCommissionAmount` | `TOTALSELLERCOMMISSIONAMOUNT` |
 | `SELLER_COMMISSION_RATE` | `sellerCommission` | `TOTALSELLERCOMMISSION` |
+| `SELLER_PAYMENT_AMOUNT` | `sellerPaymentAmount` | `TOTALSELLERPAYMENTAMOUNT` |
 
-`SELLER_PAYMENT_AMOUNT` is the default when `PARATIKA_MARKETPLACE_MODEL` is not configured.
+`SELLER_COMMISSION_RATE` is the default when `PARATIKA_MARKETPLACE_MODEL` is not configured. `SELLER_PAYMENT_AMOUNT` remains available only as a comparison probe mode.
 
 The prepared preview builder produces a form-style `ACTION=SESSIONTOKEN` payload preview for the selected model. It intentionally omits merchant credential fields from the response:
 
@@ -115,9 +115,8 @@ Required non-credential fields currently modeled:
 - `amount`: gross VAT-included line amount.
 - `sellerID`: backend-resolved Paratika Satıcı Numarası.
 - selected marketplace split field:
-  - `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
-  - `sellerCommissionAmount`: merchant commission amount per line from the current vendor financial profile.
   - `sellerCommission`: commission rate from the current vendor financial profile.
+  - `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
 
 The selected top-level marketplace field is paired with the selected `ORDERITEMS` split field. The probe does not mix marketplace model fields in one payload.
 
@@ -131,7 +130,7 @@ For preview/test payloads, shipping deduction is intentionally deferred and not 
 
 This is because the current finance model stores shipping deductions at allocation level, not exact line-item level. Production payment execution must not guess a line-level shipping split, must not use proportional shipping deduction unless explicitly approved, and must continue to fail closed until the shipping deduction policy is confirmed.
 
-The preview fails closed instead of guessing when seller ID mapping, product code, customer context, return URL, amount, seller payment amount, seller commission amount, or seller commission rate cannot be proven from current backend data/configuration.
+The preview fails closed instead of guessing when seller ID mapping, product code, customer context, return URL, amount, seller payment amount, or seller commission rate cannot be proven from current backend data/configuration.
 
 ## Preview Endpoint
 
@@ -157,13 +156,13 @@ Behavior:
 Runtime configuration needed for a complete preview:
 
 - `PARATIKA_RETURN_URL`
-- `PARATIKA_MARKETPLACE_MODEL` optional, defaults to `SELLER_PAYMENT_AMOUNT`
+- `PARATIKA_MARKETPLACE_MODEL` optional, defaults to `SELLER_COMMISSION_RATE`
 
 Example:
 
 ```text
 PARATIKA_RETURN_URL=https://onevendor-dashboard.onrender.com/payments/paratika/return
-PARATIKA_MARKETPLACE_MODEL=SELLER_PAYMENT_AMOUNT
+PARATIKA_MARKETPLACE_MODEL=SELLER_COMMISSION_RATE
 ```
 
 `RETURNURL` is required for `ACTION=SESSIONTOKEN` preview generation. The preview remains fail-closed when `PARATIKA_RETURN_URL` is missing.
