@@ -103,6 +103,23 @@ function registerLiveProbeRoute(envOverrides: Partial<AppEnv> = {}) {
   return handler;
 }
 
+function registerEnvCheckRoute(envOverrides: Partial<AppEnv> = {}) {
+  let handler:
+    | ((request: { authUser?: { role?: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
+    | null = null;
+  const app = {
+    get: vi.fn((path: string, ...args: unknown[]) => {
+      if (path === '/admin/probes/paratika/env-check') {
+        handler = args.at(-1) as typeof handler;
+      }
+    }),
+    post: vi.fn(),
+  };
+
+  registerParatikaProbeRoutes(app as never, buildAppEnv(envOverrides));
+  return handler;
+}
+
 function buildLiveProbeEnv(overrides: Partial<AppEnv> = {}) {
   return {
     PARATIKA_API_URL: 'https://paratika.example/sessiontoken',
@@ -316,6 +333,95 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(JSON.stringify(result).toLowerCase()).not.toContain('secret');
     expect(JSON.stringify(result).toLowerCase()).not.toContain('access_token');
     expect(JSON.stringify(result).toLowerCase()).not.toContain('refresh_token');
+  });
+
+  it('rejects non-admin users for the Paratika env diagnostic', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerEnvCheckRoute(buildLiveProbeEnv());
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'vendor' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ message: 'Forbidden' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects the Paratika env diagnostic when admin probes are disabled', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'false';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerEnvCheckRoute(buildLiveProbeEnv());
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ ok: false, writesPerformed: false, message: 'Admin probe endpoints are disabled.' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns safe Paratika env shape without exposing password or calling Paratika', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    process.env.RENDER_GIT_COMMIT = 'abcdef1234567890';
+    process.env.PARATIKA_API_URL = 'https://vpos.paratika.example/payment/api';
+    process.env.PARATIKA_MERCHANT = '100000123';
+    process.env.PARATIKA_MERCHANTUSER = 'onur@example.com';
+    process.env.PARATIKA_MERCHANTPASSWORD = 'merchant-password-secret';
+    process.env.PARATIKA_TEST_MODE = 'true';
+    process.env.PARATIKA_PROBE_DRY_RUN = 'false';
+    process.env.PARATIKA_PROBE_CONFIRM = 'CREATE_SESSIONTOKEN_TEST';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerEnvCheckRoute(
+      buildLiveProbeEnv({
+        PARATIKA_API_URL: 'https://vpos.paratika.example/payment/api',
+        PARATIKA_MERCHANT: '100000123',
+        PARATIKA_MERCHANTUSER: 'onur@example.com',
+        PARATIKA_MERCHANTPASSWORD: 'merchant-password-secret',
+        PARATIKA_PROBE_DRY_RUN: false,
+        PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        writesPerformed: false,
+        provider: 'PARATIKA',
+        externalApiCallAttempted: false,
+        envPresence: {
+          PARATIKA_API_URL: true,
+          PARATIKA_MERCHANT: true,
+          PARATIKA_MERCHANTUSER: true,
+          PARATIKA_MERCHANTPASSWORD: true,
+          PARATIKA_TEST_MODE: true,
+          PARATIKA_PROBE_DRY_RUN: true,
+          PARATIKA_PROBE_CONFIRM: true,
+        },
+        apiUrlHost: 'vpos.paratika.example',
+        merchant: '100000123',
+        maskedMerchantUser: 'o***@example.com',
+        testMode: true,
+        dryRun: false,
+        confirmPresent: true,
+        runtime: expect.objectContaining({
+          gitCommit: 'abcdef123456',
+          nodeEnv: undefined,
+          uptimeSeconds: expect.any(Number),
+        }),
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('merchant-password-secret');
+    expect(JSON.stringify(result)).not.toContain('onur@example.com');
+    expect(JSON.stringify(result)).not.toContain('MERCHANTPASSWORD=');
   });
 
   it('rejects non-admin users for the live SESSIONTOKEN probe', async () => {

@@ -27,6 +27,75 @@ function readConfiguredValue(value: string | undefined | null) {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function maskParatikaUsername(value: string | undefined | null) {
+  const configured = readConfiguredValue(value);
+  if (!configured) {
+    return null;
+  }
+
+  const [localPart, domain] = configured.split('@');
+  if (domain && localPart) {
+    return `${localPart.charAt(0)}***@${domain}`;
+  }
+
+  return `${configured.charAt(0)}***`;
+}
+
+function getUrlHost(value: string | undefined | null) {
+  const configured = readConfiguredValue(value);
+  if (!configured) {
+    return null;
+  }
+
+  try {
+    return new URL(configured).host;
+  } catch {
+    return null;
+  }
+}
+
+function getRuntimeCommit() {
+  const rawCommit =
+    process.env.RENDER_GIT_COMMIT ||
+    process.env.GIT_COMMIT ||
+    process.env.COMMIT_SHA ||
+    process.env.SOURCE_VERSION ||
+    null;
+
+  return rawCommit?.trim() ? rawCommit.trim().slice(0, 12) : null;
+}
+
+function buildParatikaEnvDiagnostic(env: AppEnv) {
+  const hasEnv = (name: string) => Boolean(readConfiguredValue(process.env[name]));
+
+  return {
+    ok: true,
+    writesPerformed: false,
+    provider: 'PARATIKA',
+    externalApiCallAttempted: false,
+    envPresence: {
+      PARATIKA_API_URL: hasEnv('PARATIKA_API_URL'),
+      PARATIKA_MERCHANT: hasEnv('PARATIKA_MERCHANT'),
+      PARATIKA_MERCHANTUSER: hasEnv('PARATIKA_MERCHANTUSER'),
+      PARATIKA_MERCHANTPASSWORD: hasEnv('PARATIKA_MERCHANTPASSWORD'),
+      PARATIKA_TEST_MODE: hasEnv('PARATIKA_TEST_MODE'),
+      PARATIKA_PROBE_DRY_RUN: hasEnv('PARATIKA_PROBE_DRY_RUN'),
+      PARATIKA_PROBE_CONFIRM: hasEnv('PARATIKA_PROBE_CONFIRM'),
+    },
+    apiUrlHost: getUrlHost(env.PARATIKA_API_URL),
+    merchant: readConfiguredValue(env.PARATIKA_MERCHANT),
+    maskedMerchantUser: maskParatikaUsername(env.PARATIKA_MERCHANTUSER),
+    testMode: env.PARATIKA_TEST_MODE === true,
+    dryRun: env.PARATIKA_PROBE_DRY_RUN !== false,
+    confirmPresent: Boolean(readConfiguredValue(env.PARATIKA_PROBE_CONFIRM)),
+    runtime: {
+      uptimeSeconds: Math.max(0, Math.round(process.uptime())),
+      gitCommit: getRuntimeCommit(),
+      nodeEnv: env.NODE_ENV,
+    },
+  };
+}
+
 function validateLiveProbeEnv(env: AppEnv) {
   const missingEnv: string[] = [];
   const validationErrors: string[] = [];
@@ -195,6 +264,24 @@ async function runPaymentSellerMappingBackfill(request: FastifyRequest, reply: F
 export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+
+  app.get(
+    '/admin/probes/paratika/env-check',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, writesPerformed: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      return reply.code(200).send(buildParatikaEnvDiagnostic(env));
+    },
+  );
 
   app.get<{ Params: { orderId: string } }>(
     '/admin/probes/paratika/orders/:orderId/sessiontoken-payload-preview',
