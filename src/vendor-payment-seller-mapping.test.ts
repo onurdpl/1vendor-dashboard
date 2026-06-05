@@ -33,12 +33,12 @@ describe('vendor payment provider seller mapping', () => {
       {
         vendorId: 'sporjinal',
         provider: PARATIKA,
-        externalSellerId: '100003585',
+        externalSellerId: 'Sporjinal',
       },
       {
         vendorId: 'yalispor',
         provider: PARATIKA,
-        externalSellerId: '100003586',
+        externalSellerId: 'Yalispor',
       },
     ]);
 
@@ -62,7 +62,7 @@ describe('vendor payment provider seller mapping', () => {
         create: expect.objectContaining({
           vendorId: 'sporjinal',
           provider: PARATIKA,
-          externalSellerId: '100003585',
+          externalSellerId: 'Sporjinal',
           enabled: true,
         }),
       }),
@@ -79,7 +79,7 @@ describe('vendor payment provider seller mapping', () => {
         create: expect.objectContaining({
           vendorId: 'yalispor',
           provider: PARATIKA,
-          externalSellerId: '100003586',
+          externalSellerId: 'Yalispor',
           enabled: true,
         }),
       }),
@@ -87,8 +87,8 @@ describe('vendor payment provider seller mapping', () => {
   });
 
   it.each([
-    ['sporjinal', '100003585'],
-    ['yalispor', '100003586'],
+    ['sporjinal', 'Sporjinal'],
+    ['yalispor', 'Yalispor'],
   ])('resolves Paratika seller id for %s', async (vendorId, externalSellerId) => {
     prismaMock.vendor.findUnique.mockResolvedValue({ id: vendorId });
     prismaMock.vendorPaymentProviderSeller.findUnique.mockResolvedValue({
@@ -132,7 +132,7 @@ describe('vendor payment provider seller mapping', () => {
   it('fails closed when the vendor mapping is disabled', async () => {
     prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal' });
     prismaMock.vendorPaymentProviderSeller.findUnique.mockResolvedValue({
-      externalSellerId: '100003585',
+      externalSellerId: 'Sporjinal',
       enabled: false,
     });
 

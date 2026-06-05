@@ -9,12 +9,12 @@ vi.mock('../backend/src/modules/payments/vendor-payment-seller.service.js', () =
     {
       vendorId: 'sporjinal',
       provider: 'PARATIKA',
-      externalSellerId: '100003585',
+      externalSellerId: 'Sporjinal',
     },
     {
       vendorId: 'yalispor',
       provider: 'PARATIKA',
-      externalSellerId: '100003586',
+      externalSellerId: 'Yalispor',
     },
   ],
   seedVendorPaymentSellerMappings: seedVendorPaymentSellerMappingsMock,
@@ -160,7 +160,7 @@ function buildSessionTokenPreviewResult() {
           description: 'SPJ-SKU-1',
           quantity: 1,
           amount: '60.00',
-          sellerID: '100003585',
+          sellerID: 'Sporjinal',
           sellerPaymentAmount: '54.00',
         },
       ]),
@@ -241,8 +241,8 @@ describe('Paratika payment seller mapping backfill probe', () => {
       writesPerformed: true,
       provider: 'PARATIKA',
       upserted: [
-        { vendorId: 'sporjinal', externalSellerId: '100003585', enabled: true },
-        { vendorId: 'yalispor', externalSellerId: '100003586', enabled: true },
+        { vendorId: 'sporjinal', externalSellerId: 'Sporjinal', enabled: true },
+        { vendorId: 'yalispor', externalSellerId: 'Yalispor', enabled: true },
       ],
     });
     expect(seedVendorPaymentSellerMappingsMock).toHaveBeenCalledTimes(1);
@@ -267,8 +267,8 @@ describe('Paratika payment seller mapping backfill probe', () => {
       writesPerformed: true,
       provider: 'PARATIKA',
       upserted: [
-        { vendorId: 'sporjinal', externalSellerId: '100003585', enabled: true },
-        { vendorId: 'yalispor', externalSellerId: '100003586', enabled: true },
+        { vendorId: 'sporjinal', externalSellerId: 'Sporjinal', enabled: true },
+        { vendorId: 'yalispor', externalSellerId: 'Yalispor', enabled: true },
       ],
     });
     expect(seedVendorPaymentSellerMappingsMock).toHaveBeenCalledTimes(1);
@@ -508,7 +508,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         orderItemsPreview: [
           expect.objectContaining({
             productCode: 'variant-sporjinal-1',
-            sellerID: '100003585',
+            sellerID: 'Sporjinal',
             sellerPaymentAmount: '54.00',
           }),
         ],
@@ -585,7 +585,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(body.get('MERCHANT')).toBe('merchant-secret');
     expect(body.get('MERCHANTUSER')).toBe('merchant-user-secret');
     expect(body.get('MERCHANTPASSWORD')).toBe('merchant-password-secret');
-    expect(body.get('ORDERITEMS')).toContain('"sellerID":"100003585"');
+    expect(body.get('ORDERITEMS')).toContain('"sellerID":"Sporjinal"');
     expect(body.has('CARDNUMBER')).toBe(false);
     expect(body.has('CVV')).toBe(false);
     expect(body.get('ACTION')).not.toBe('SALE');

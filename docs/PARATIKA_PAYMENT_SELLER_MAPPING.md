@@ -2,18 +2,18 @@
 
 ## Purpose
 
-This document records the backend-side mapping from Sporgym internal vendors to Paratika marketplace seller IDs.
+This document records the backend-side mapping from Sporgym internal vendors to Paratika marketplace seller numbers.
 
 This is a mapping and payload-preview foundation only. It does not call Paratika APIs, create live `SESSIONTOKEN` values, perform `SALE`, execute refunds/cancels, change checkout, execute payouts, change settlements, create invoices, or change Shopify fulfillment behavior.
 
-## Confirmed Seller IDs
+## Confirmed Seller Numbers
 
 | Internal vendor id | Provider | External seller id |
 | --- | --- | --- |
-| `sporjinal` | `PARATIKA` | `100003585` |
-| `yalispor` | `PARATIKA` | `100003586` |
+| `sporjinal` | `PARATIKA` | `Sporjinal` |
+| `yalispor` | `PARATIKA` | `Yalispor` |
 
-`externalSellerId` is stored as a string because provider identifiers are external references, not local numeric values.
+`externalSellerId` is stored as a string because Paratika expects the marketplace `ORDERITEMS[].sellerID` value to use the **Satıcı Numarası**, not the numeric Kurum/Firma ID.
 
 ## Source Of Truth
 
@@ -26,7 +26,7 @@ Shopify line item
 -> internal Vendor.id
 ```
 
-The Paratika seller ID is resolved only after the internal vendor is known:
+The Paratika seller number is resolved only after the internal vendor is known:
 
 ```text
 internal Vendor.id
@@ -34,7 +34,7 @@ internal Vendor.id
 -> externalSellerId
 ```
 
-Do not store Paratika seller IDs in Shopify unless a later implementation explicitly changes the architecture and documents the reason.
+Do not store Paratika seller numbers in Shopify unless a later implementation explicitly changes the architecture and documents the reason.
 
 ## Runtime Behavior
 
@@ -86,7 +86,7 @@ Required non-credential fields currently modeled:
 - `description`: SKU when present, otherwise product code.
 - `quantity`: Shopify line quantity.
 - `amount`: gross VAT-included line amount.
-- `sellerID`: backend-resolved Paratika seller id.
+- `sellerID`: backend-resolved Paratika Satıcı Numarası.
 - `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
 
 `TOTALSELLERPAYMENTAMOUNT` is the sum of `ORDERITEMS[].sellerPaymentAmount`.
@@ -233,8 +233,8 @@ Purpose:
 
 - Backfill the confirmed `VendorPaymentProviderSeller` rows in environments where the migration exists but seed/backfill data was not applied.
 - Upsert only:
-  - `sporjinal` / `PARATIKA` / `100003585`
-  - `yalispor` / `PARATIKA` / `100003586`
+  - `sporjinal` / `PARATIKA` / `Sporjinal`
+  - `yalispor` / `PARATIKA` / `Yalispor`
 
 Behavior:
 

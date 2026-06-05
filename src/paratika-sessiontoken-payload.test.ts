@@ -95,8 +95,8 @@ function mockHappyPath(order = buildOrderFixture()) {
   prismaMock.vendorPaymentProviderSeller.findUnique.mockImplementation(
     async ({ where }: { where: { provider_vendorId: { vendorId: string } } }) => {
       const sellerIds: Record<string, string> = {
-        sporjinal: '100003585',
-        yalispor: '100003586',
+        sporjinal: 'Sporjinal',
+        yalispor: 'Yalispor',
       };
       const externalSellerId = sellerIds[where.provider_vendorId.vendorId];
       return externalSellerId ? { externalSellerId, enabled: true } : null;
@@ -157,7 +157,7 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
         description: 'SPJ-SKU-1',
         quantity: 1,
         amount: '60.00',
-        sellerID: '100003585',
+        sellerID: 'Sporjinal',
         sellerPaymentAmount: '54.00',
       },
       {
@@ -166,13 +166,13 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
         description: 'YALI-SKU-1',
         quantity: 2,
         amount: '40.00',
-        sellerID: '100003586',
+        sellerID: 'Yalispor',
         sellerPaymentAmount: '36.00',
       },
     ]);
     expect(result.itemBreakdown.map((item) => [item.vendorId, item.sellerID])).toEqual([
-      ['sporjinal', '100003585'],
-      ['yalispor', '100003586'],
+      ['sporjinal', 'Sporjinal'],
+      ['yalispor', 'Yalispor'],
     ]);
   });
 
@@ -221,7 +221,7 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
     prismaMock.vendorPaymentProviderSeller.findUnique.mockImplementation(
       async ({ where }: { where: { provider_vendorId: { vendorId: string } } }) =>
         where.provider_vendorId.vendorId === 'sporjinal'
-          ? { externalSellerId: '100003585', enabled: true }
+          ? { externalSellerId: 'Sporjinal', enabled: true }
           : null,
     );
 

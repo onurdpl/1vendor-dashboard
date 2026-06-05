@@ -5,12 +5,12 @@ export const CONFIRMED_VENDOR_PAYMENT_SELLERS = [
   {
     vendorId: 'sporjinal',
     provider: PaymentProvider.PARATIKA,
-    externalSellerId: '100003585',
+    externalSellerId: 'Sporjinal',
   },
   {
     vendorId: 'yalispor',
     provider: PaymentProvider.PARATIKA,
-    externalSellerId: '100003586',
+    externalSellerId: 'Yalispor',
   },
 ] as const;
 
