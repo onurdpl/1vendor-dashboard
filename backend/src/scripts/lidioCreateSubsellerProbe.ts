@@ -12,6 +12,7 @@ export type LidioCreateSubsellerProbeOptions = {
 
 const WRITE_ENDPOINT = '/CreateSubseller';
 const WRITE_PROBE_FLAG = 'LIDIO_ALLOW_WRITE_PROBE';
+const SANDBOX_TEST_VKN = '9999999994';
 const SENSITIVE_RESPONSE_KEY_PATTERN =
   /authorization|token|secret|password|merchantkey|apikey|api_password|iban|vkntckn|tax|tckn|vkn|phone|email|contact|address/i;
 
@@ -53,7 +54,7 @@ function buildCreateSubsellerRequest(profileId: number, now: Date): CreateSubsel
     companyName: `Sporgym Lidio Sandbox Vendor ${runId}`,
     companyType: 'Limited',
     taxOffice: 'Sandbox Tax Office',
-    vkntckn: `999${runId.slice(-7)}`,
+    vkntckn: SANDBOX_TEST_VKN,
     registeredCountry: 'TR',
     registeredCity: 'Istanbul',
     registeredDistrict: 'Kadikoy',

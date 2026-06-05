@@ -95,6 +95,9 @@ Implications:
 - The command exits before sending any request unless `LIDIO_ALLOW_WRITE_PROBE=true`.
 - It creates only sandbox test subseller data and must not be used in production.
 - It does not store the returned subseller in the database.
+- Previous live attempt reached Lidio but failed with `InvalidParameter` because the generated `vkntckn` did not pass Lidio validation.
+- `vkntckn` must pass Lidio validation even in sandbox.
+- The probe uses the checksum-valid dummy VKN `9999999994` as fake sandbox-only test data. Do not replace it with a real personal or company tax number.
 - Output must include the endpoint, HTTP status, Lidio `result` / `resultMessage`, returned `subsellerId` when present, and `writesPerformed=true` only if the request was actually sent.
 - It must not call `/ProcessPayment`, `/StartHostedPaymentProcess`, `/Release`, `/Unrelease`, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout`.
 - It should run only after an explicit approval for a mutating sandbox vendor-onboarding probe.

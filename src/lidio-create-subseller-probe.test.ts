@@ -75,6 +75,7 @@ describe('Lidio CreateSubseller sandbox probe', () => {
     expect(JSON.parse(String(request.body))).toMatchObject({
       companyName: 'Sporgym Lidio Sandbox Vendor 20260605123456',
       companyType: 'Limited',
+      vkntckn: '9999999994',
       subsellerIdGivenByMerchant: 'SPORGYM-LIDIO-SANDBOX-20260605123456',
       subsellerProfileId: 3,
       payOutNotAllowed: true,
