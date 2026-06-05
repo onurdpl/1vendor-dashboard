@@ -216,6 +216,7 @@ Required runtime configuration:
 - `PARATIKA_MERCHANTUSER`
 - `PARATIKA_MERCHANTPASSWORD`
 - `PARATIKA_RETURN_URL`
+- `PARATIKA_HOSTED_PAYMENT_BASE_URL`, for example `https://entegrasyon.paratika.com.tr/merchant/post/sale`
 - `PARATIKA_TEST_MODE`
 - `PARATIKA_PROBE_DRY_RUN`
 - `PARATIKA_PROBE_CONFIRM`
@@ -228,7 +229,7 @@ Dry-run behavior:
 - Returns `writesPerformed=false`.
 - Returns sanitized payload keys and `ORDERITEMS` preview.
 - Returns selected `marketplaceModel` and `model`.
-- Does not return `MERCHANTUSER`, `MERCHANTPASSWORD`, merchant credential values, card fields, or a session token.
+- Does not return `MERCHANTUSER`, `MERCHANTPASSWORD`, merchant credential values, card fields, a session token, or a hosted payment URL.
 
 Live probe behavior:
 
@@ -237,8 +238,10 @@ Live probe behavior:
 - Posts a form-encoded `ACTION=SESSIONTOKEN` payload to `PARATIKA_API_URL`.
 - Returns `writesPerformed=true` because an external SESSIONTOKEN request was made.
 - Returns `responseCode`, `responseMsg`, whether a session token was received, session token length only, and raw response body keys only.
+- When `responseCode=00` and a session token is returned, derives `hostedPaymentUrl` as `PARATIKA_HOSTED_PAYMENT_BASE_URL/sessionToken` for manual redirect testing.
 - Uses the selected `PARATIKA_MARKETPLACE_MODEL`.
-- Never returns the session token value or merchant credentials.
+- Never returns the session token value separately and never returns merchant credentials.
+- Does not perform `SALE`; the hosted URL is only for manual redirect testing.
 
 Remove or keep disabled after test-mode SESSIONTOKEN behavior is confirmed.
 

@@ -128,6 +128,7 @@ function buildLiveProbeEnv(overrides: Partial<AppEnv> = {}) {
     PARATIKA_MERCHANTUSER: 'merchant-user-secret',
     PARATIKA_MERCHANTPASSWORD: 'merchant-password-secret',
     PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/merchant/post/sale',
     PARATIKA_TEST_MODE: true,
     PARATIKA_PROBE_DRY_RUN: true,
     ...overrides,
@@ -411,6 +412,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
     process.env.PARATIKA_MERCHANT = '100000123';
     process.env.PARATIKA_MERCHANTUSER = 'onur@example.com';
     process.env.PARATIKA_MERCHANTPASSWORD = 'merchant-password-secret';
+    process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL = 'https://entegrasyon.paratika.com.tr/merchant/post/sale';
     process.env.PARATIKA_TEST_MODE = 'true';
     process.env.PARATIKA_PROBE_DRY_RUN = 'false';
     process.env.PARATIKA_PROBE_CONFIRM = 'CREATE_SESSIONTOKEN_TEST';
@@ -443,6 +445,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
           PARATIKA_MERCHANT: true,
           PARATIKA_MERCHANTUSER: true,
           PARATIKA_MERCHANTPASSWORD: true,
+          PARATIKA_HOSTED_PAYMENT_BASE_URL: true,
           PARATIKA_TEST_MODE: true,
           PARATIKA_PROBE_DRY_RUN: true,
           PARATIKA_PROBE_CONFIRM: true,
@@ -451,6 +454,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         apiUrlHost: 'vpos.paratika.example',
         merchant: '100000123',
         maskedMerchantUser: 'o***@example.com',
+        hostedPaymentBaseUrlHost: 'entegrasyon.paratika.com.tr',
         testMode: true,
         dryRun: false,
         confirmPresent: true,
@@ -517,7 +521,12 @@ describe('Paratika payment seller mapping backfill probe', () => {
         writesPerformed: false,
         provider: 'PARATIKA',
         externalApiCallAttempted: false,
-        missingEnv: expect.arrayContaining(['PARATIKA_API_URL', 'PARATIKA_MERCHANT', 'PARATIKA_RETURN_URL']),
+        missingEnv: expect.arrayContaining([
+          'PARATIKA_API_URL',
+          'PARATIKA_MERCHANT',
+          'PARATIKA_RETURN_URL',
+          'PARATIKA_HOSTED_PAYMENT_BASE_URL',
+        ]),
       }),
     );
     expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
@@ -549,6 +558,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         credentialValuesOmitted: true,
       }),
     );
+    expect(result).not.toHaveProperty('hostedPaymentUrl');
     expect(result).toEqual(
       expect.objectContaining({
         payloadKeys: expect.arrayContaining(['ACTION', 'ORDERITEMS', 'TOTALSELLERCOMMISSION', 'RETURNURL']),
@@ -686,12 +696,14 @@ describe('Paratika payment seller mapping backfill probe', () => {
         responseMsg: 'Approved',
         sessionTokenReceived: true,
         sessionTokenLength: sessionToken.length,
+        hostedPaymentUrl: `https://entegrasyon.paratika.com.tr/merchant/post/sale/${sessionToken}`,
         rawBodyKeys: ['responseCode', 'responseMsg', 'sessionToken'],
         externalApiCallAttempted: true,
         cardDataIncluded: false,
       }),
     );
-    const serializedResult = JSON.stringify(result);
+    const { hostedPaymentUrl: _hostedPaymentUrl, ...resultWithoutHostedPaymentUrl } = result as Record<string, unknown>;
+    const serializedResult = JSON.stringify(resultWithoutHostedPaymentUrl);
     expect(serializedResult).not.toContain(sessionToken);
     expect(serializedResult).not.toContain('merchant-password-secret');
     expect(serializedResult).not.toContain('merchant-user-secret');

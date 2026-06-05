@@ -53,6 +53,7 @@ describe('backend env shipping provider gates', () => {
       PARATIKA_MERCHANTUSER: 'merchant-user',
       PARATIKA_MERCHANTPASSWORD: 'merchant-password',
       PARATIKA_RETURN_URL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      PARATIKA_HOSTED_PAYMENT_BASE_URL: 'https://entegrasyon.paratika.com.tr/merchant/post/sale',
       PARATIKA_TEST_MODE: 'true',
       PARATIKA_PROBE_DRY_RUN: 'false',
       PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
@@ -66,6 +67,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.PARATIKA_MERCHANTUSER).toBe('merchant-user');
     expect(env.PARATIKA_MERCHANTPASSWORD).toBe('merchant-password');
     expect(env.PARATIKA_RETURN_URL).toBe('https://onevendor-dashboard.onrender.com/payments/paratika/return');
+    expect(env.PARATIKA_HOSTED_PAYMENT_BASE_URL).toBe('https://entegrasyon.paratika.com.tr/merchant/post/sale');
     expect(env.PARATIKA_TEST_MODE).toBe(true);
     expect(env.PARATIKA_PROBE_DRY_RUN).toBe(false);
     expect(env.PARATIKA_PROBE_CONFIRM).toBe('CREATE_SESSIONTOKEN_TEST');

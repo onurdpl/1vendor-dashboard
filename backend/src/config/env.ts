@@ -76,6 +76,7 @@ export type AppEnv = {
   PARATIKA_MERCHANTUSER?: string;
   PARATIKA_MERCHANTPASSWORD?: string;
   PARATIKA_RETURN_URL?: string;
+  PARATIKA_HOSTED_PAYMENT_BASE_URL?: string;
   PARATIKA_TEST_MODE?: boolean;
   PARATIKA_PROBE_DRY_RUN?: boolean;
   PARATIKA_PROBE_CONFIRM?: string;
@@ -268,6 +269,7 @@ export function loadEnv(): AppEnv {
   const paratikaMerchantUser = process.env.PARATIKA_MERCHANTUSER?.trim() || undefined;
   const paratikaMerchantPassword = process.env.PARATIKA_MERCHANTPASSWORD?.trim() || undefined;
   const paratikaReturnUrl = process.env.PARATIKA_RETURN_URL?.trim() || undefined;
+  const paratikaHostedPaymentBaseUrl = process.env.PARATIKA_HOSTED_PAYMENT_BASE_URL?.trim() || undefined;
   const paratikaTestMode = parseBoolean(process.env.PARATIKA_TEST_MODE, false);
   const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
   const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;
@@ -423,6 +425,7 @@ export function loadEnv(): AppEnv {
     PARATIKA_MERCHANTUSER: paratikaMerchantUser,
     PARATIKA_MERCHANTPASSWORD: paratikaMerchantPassword,
     PARATIKA_RETURN_URL: paratikaReturnUrl,
+    PARATIKA_HOSTED_PAYMENT_BASE_URL: paratikaHostedPaymentBaseUrl,
     PARATIKA_TEST_MODE: paratikaTestMode,
     PARATIKA_PROBE_DRY_RUN: paratikaProbeDryRun,
     PARATIKA_PROBE_CONFIRM: paratikaProbeConfirm,

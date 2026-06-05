@@ -78,6 +78,7 @@ function buildParatikaEnvDiagnostic(env: AppEnv) {
       PARATIKA_MERCHANT: hasEnv('PARATIKA_MERCHANT'),
       PARATIKA_MERCHANTUSER: hasEnv('PARATIKA_MERCHANTUSER'),
       PARATIKA_MERCHANTPASSWORD: hasEnv('PARATIKA_MERCHANTPASSWORD'),
+      PARATIKA_HOSTED_PAYMENT_BASE_URL: hasEnv('PARATIKA_HOSTED_PAYMENT_BASE_URL'),
       PARATIKA_TEST_MODE: hasEnv('PARATIKA_TEST_MODE'),
       PARATIKA_PROBE_DRY_RUN: hasEnv('PARATIKA_PROBE_DRY_RUN'),
       PARATIKA_PROBE_CONFIRM: hasEnv('PARATIKA_PROBE_CONFIRM'),
@@ -86,6 +87,7 @@ function buildParatikaEnvDiagnostic(env: AppEnv) {
     apiUrlHost: getUrlHost(env.PARATIKA_API_URL),
     merchant: readConfiguredValue(env.PARATIKA_MERCHANT),
     maskedMerchantUser: maskParatikaUsername(env.PARATIKA_MERCHANTUSER),
+    hostedPaymentBaseUrlHost: getUrlHost(env.PARATIKA_HOSTED_PAYMENT_BASE_URL),
     testMode: env.PARATIKA_TEST_MODE === true,
     dryRun: env.PARATIKA_PROBE_DRY_RUN !== false,
     confirmPresent: Boolean(readConfiguredValue(env.PARATIKA_PROBE_CONFIRM)),
@@ -112,6 +114,7 @@ function validateLiveProbeEnv(env: AppEnv) {
     PARATIKA_MERCHANTUSER: env.PARATIKA_MERCHANTUSER,
     PARATIKA_MERCHANTPASSWORD: env.PARATIKA_MERCHANTPASSWORD,
     PARATIKA_RETURN_URL: env.PARATIKA_RETURN_URL,
+    PARATIKA_HOSTED_PAYMENT_BASE_URL: env.PARATIKA_HOSTED_PAYMENT_BASE_URL,
   };
 
   for (const [key, value] of Object.entries(requiredEnv)) {
@@ -238,6 +241,20 @@ function sanitizeParatikaResponse(rawBody: string) {
     sessionTokenLength: typeof sessionToken === 'string' ? sessionToken.length : 0,
     rawBodyKeys: Object.keys(parsed),
   };
+}
+
+function readParatikaSessionToken(rawBody: string) {
+  const parsed = parseParatikaResponseBody(rawBody);
+  return readCaseInsensitive(parsed, ['sessionToken', 'SESSIONTOKEN', 'session_token']);
+}
+
+function buildHostedPaymentUrl(sessionToken: string | null, env: AppEnv) {
+  const baseUrl = readConfiguredValue(env.PARATIKA_HOSTED_PAYMENT_BASE_URL);
+  if (!sessionToken || !baseUrl || env.PARATIKA_PROBE_CONFIRM !== PARATIKA_SESSIONTOKEN_PROBE_CONFIRM) {
+    return null;
+  }
+
+  return `${baseUrl.replace(/\/+$/, '')}/${sessionToken}`;
 }
 
 async function runPaymentSellerMappingBackfill(request: FastifyRequest, reply: FastifyReply) {
@@ -415,6 +432,10 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
         });
         const rawBody = await response.text();
         const sanitized = sanitizeParatikaResponse(rawBody);
+        const hostedPaymentUrl =
+          response.ok && sanitized.responseCode === '00'
+            ? buildHostedPaymentUrl(readParatikaSessionToken(rawBody), env)
+            : null;
 
         return reply.code(response.ok ? 200 : 502).send({
           ok: response.ok,
@@ -434,6 +455,7 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           violatorParam: sanitized.violatorParam,
           sessionTokenReceived: sanitized.sessionTokenReceived,
           sessionTokenLength: sanitized.sessionTokenLength,
+          hostedPaymentUrl,
           rawBodyKeys: sanitized.rawBodyKeys,
           externalApiCallAttempted: true,
           cardDataIncluded: false,
