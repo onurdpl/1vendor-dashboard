@@ -121,10 +121,11 @@ Customer IP/user-agent are read only from the stored Shopify order webhook paylo
 
 ## Temporary Production Backfill Probe
 
-Temporary admin-only endpoint:
+Temporary admin-only endpoints:
 
 ```text
 POST /admin/probes/paratika/payment-seller-mappings/backfill
+GET /admin/probes/paratika/payment-seller-mappings/backfill
 ```
 
 Purpose:
@@ -142,6 +143,7 @@ Behavior:
 - Does not return credentials or secrets.
 - Returns `writesPerformed=true` only when the DB upsert path executes.
 - Is idempotent because it uses provider/vendor upserts.
+- The `GET` route is temporary and exists only for manual diagnostics where invoking the CSRF-protected `POST` route is impractical.
 
 Remove or disable this temporary probe after production mapping presence is confirmed.
 

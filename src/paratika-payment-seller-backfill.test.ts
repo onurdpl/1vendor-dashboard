@@ -50,17 +50,18 @@ function buildReply() {
   return reply;
 }
 
-function registerBackfillRoute() {
+function registerBackfillRoute(method: 'get' | 'post' = 'post') {
   let handler:
     | ((request: { authUser?: { role?: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
     | null = null;
+  const captureHandler = (path: string, ...args: unknown[]) => {
+    if (path === '/admin/probes/paratika/payment-seller-mappings/backfill') {
+      handler = args.at(-1) as typeof handler;
+    }
+  };
   const app = {
-    get: vi.fn(),
-    post: vi.fn((path: string, ...args: unknown[]) => {
-      if (path === '/admin/probes/paratika/payment-seller-mappings/backfill') {
-        handler = args.at(-1) as typeof handler;
-      }
-    }),
+    get: vi.fn(method === 'get' ? captureHandler : undefined),
+    post: vi.fn(method === 'post' ? captureHandler : undefined),
   };
 
   registerParatikaProbeRoutes(app as never, buildAppEnv());
@@ -140,6 +141,31 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(seedVendorPaymentSellerMappingsMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).not.toHaveBeenCalled();
+    expectNoSecrets(result);
+  });
+
+  it('allows the temporary GET backfill path for manual diagnostics', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    seedVendorPaymentSellerMappingsMock.mockResolvedValue(undefined);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerBackfillRoute('get');
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual({
+      ok: true,
+      writesPerformed: true,
+      provider: 'PARATIKA',
+      upserted: [
+        { vendorId: 'sporjinal', externalSellerId: '100003585', enabled: true },
+        { vendorId: 'yalispor', externalSellerId: '100003586', enabled: true },
+      ],
+    });
+    expect(seedVendorPaymentSellerMappingsMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
     expectNoSecrets(result);
   });
 
