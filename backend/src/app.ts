@@ -30,6 +30,7 @@ import { registerSupportRoutes } from './modules/support/support.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.routes.js';
+import { registerPaymentReturnRoutes } from './modules/payments/payment-return.routes.js';
 import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyzico-marketplace.routes.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
 import { registerRequestTimingHooks } from './lib/request-timing.js';
@@ -359,6 +360,7 @@ export function createApp() {
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
   registerVendorIntegrationRoutes(app, env);
+  registerPaymentReturnRoutes(app);
   registerParasutProbeRoutes(app, env);
   registerParatikaProbeRoutes(app, env);
   registerIyzicoMarketplaceDiagnosticsRoutes(app, env);

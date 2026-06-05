@@ -6,6 +6,7 @@ import { SectionSkeleton } from './components/OperationalPrimitives';
 import { DashboardPage } from './pages/DashboardPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { ParatikaPaymentReturnPage } from './pages/ParatikaPaymentReturnPage';
 import { RequirePermission } from './components/RequirePermission';
 import { RedirectIfAuthed } from './lib/RedirectIfAuthed';
 import { RequireAuth } from './lib/RequireAuth';
@@ -94,6 +95,7 @@ export default function App() {
       <Route element={<RedirectIfAuthed />}>
         <Route path="/login" element={<LoginPage />} />
       </Route>
+      <Route path="/payments/paratika/return" element={<ParatikaPaymentReturnPage />} />
       <Route element={<RequireAuth />}>
         <Route
           element={

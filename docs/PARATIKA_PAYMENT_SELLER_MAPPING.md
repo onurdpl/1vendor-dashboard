@@ -189,6 +189,37 @@ Live probe behavior:
 
 Remove or keep disabled after test-mode SESSIONTOKEN behavior is confirmed.
 
+## Payment Return Placeholder
+
+Externally shareable Paratika return URL:
+
+```text
+https://onevendor-dashboard.onrender.com/payments/paratika/return
+```
+
+Current behavior:
+
+- The frontend route displays: `Payment return received. Verification pending.`
+- No payment is completed.
+- No Shopify order is marked paid.
+- No Shopify payment API is called.
+- No Paratika API is called.
+- Query parameters are not trusted and are not displayed.
+
+Backend placeholder routes also exist for provider-side return/callback testing if Paratika requires the backend host instead of the frontend host:
+
+```text
+GET /payments/paratika/return
+POST /payments/paratika/return
+```
+
+Backend behavior:
+
+- Accepts the request and returns `202`.
+- Logs only sanitized metadata such as method, request id, parameter counts, and sensitive-key counts.
+- Does not log raw query/body values, card data, tokens, merchant credentials, or secrets.
+- Does not mutate order, payment, Shopify, settlement, payout, or accounting state.
+
 ## Temporary Production Backfill Probe
 
 Temporary admin-only endpoints:
