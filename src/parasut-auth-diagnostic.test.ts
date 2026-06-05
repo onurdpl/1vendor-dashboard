@@ -52,13 +52,18 @@ function buildReply() {
   return reply;
 }
 
-function registerRoute(pathToCapture = '/admin/probes/parasut/auth-me') {
+function registerRoute(pathToCapture = '/admin/probes/parasut/auth-me', method: 'get' | 'post' = 'get') {
   let handler:
     | ((request: { authUser?: { role?: string } }, reply: ReturnType<typeof buildReply>) => Promise<unknown>)
     | null = null;
   const app = {
     get: vi.fn((path: string, ...args: unknown[]) => {
-      if (path === pathToCapture) {
+      if (method === 'get' && path === pathToCapture) {
+        handler = args.at(-1) as typeof handler;
+      }
+    }),
+    post: vi.fn((path: string, ...args: unknown[]) => {
+      if (method === 'post' && path === pathToCapture) {
         handler = args.at(-1) as typeof handler;
       }
     }),
@@ -399,5 +404,185 @@ describe('Paraşüt auth/me diagnostic probe', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls.some((call) => /contacts|products|sales_invoices|payments/.test(String(call[0])))).toBe(false);
     expectNoSecrets(result.body);
+  });
+});
+
+describe('Paraşüt commission invoice test endpoint', () => {
+  const originalEnv = { ...process.env };
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    process.env = {
+      ...originalEnv,
+      ADMIN_PROBES_ENABLED: 'true',
+      NODE_ENV: 'test',
+      PARASUT_ENABLED: 'true',
+      PARASUT_TEST_MODE: 'true',
+      PARASUT_BASE_URL: 'https://api.heroku-staging.parasut.com',
+      PARASUT_COMPANY_ID: '35427',
+      PARASUT_CLIENT_ID: PARASUT_SECRET_VALUES.clientId,
+      PARASUT_CLIENT_SECRET: PARASUT_SECRET_VALUES.clientSecret,
+      PARASUT_REDIRECT_URI: 'urn:ietf:wg:oauth:2.0:oob',
+      PARASUT_USERNAME: PARASUT_SECRET_VALUES.username,
+      PARASUT_PASSWORD: PARASUT_SECRET_VALUES.password,
+      PARASUT_PROBE_CONFIRM: 'CREATE_COMMISSION_INVOICE_TEST',
+      PARASUT_PROBE_ALLOW_LIFECYCLE: 'true',
+    };
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    vi.restoreAllMocks();
+  });
+
+  function registerCommissionRoute() {
+    return registerRoute('/admin/probes/parasut/commission-invoice-test', 'post');
+  }
+
+  function buildCommissionProbeFetch() {
+    const calls: Array<{ method: string; url: string }> = [];
+    const fetchMock = vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      const requestUrl = String(url);
+      const method = init?.method ?? 'GET';
+      calls.push({ method, url: requestUrl });
+
+      if (/cancel|recover|archive/.test(requestUrl)) {
+        throw new Error('Lifecycle action should not be called.');
+      }
+
+      if (requestUrl.endsWith('/oauth/token')) {
+        return mockJsonResponse({
+          access_token: PARASUT_SECRET_VALUES.accessToken,
+          refresh_token: PARASUT_SECRET_VALUES.refreshToken,
+        });
+      }
+
+      if (requestUrl.endsWith('/v4/me')) {
+        return mockJsonResponse({ data: { id: '35427', type: 'companies' } });
+      }
+
+      if (requestUrl.endsWith('/v4/35427/contacts?page[size]=25')) {
+        return mockJsonResponse({ data: [] });
+      }
+
+      if (requestUrl.endsWith('/v4/35427/contacts')) {
+        return mockJsonResponse({ data: { id: 'contact-1', type: 'contacts' } });
+      }
+
+      if (requestUrl.endsWith('/v4/35427/products?page[size]=25')) {
+        return mockJsonResponse({ data: [] });
+      }
+
+      if (requestUrl.endsWith('/v4/35427/products')) {
+        return mockJsonResponse({ data: { id: 'product-1', type: 'products' } });
+      }
+
+      if (requestUrl.endsWith('/v4/35427/sales_invoices')) {
+        return mockJsonResponse({
+          data: {
+            id: 'invoice-1',
+            type: 'sales_invoices',
+            attributes: {
+              status: 'draft',
+            },
+          },
+        });
+      }
+
+      if (requestUrl.includes('/v4/35427/sales_invoices/invoice-1?include=')) {
+        return mockJsonResponse({
+          data: {
+            id: 'invoice-1',
+            type: 'sales_invoices',
+            attributes: {
+              status: 'draft',
+              payment_status: 'unpaid',
+            },
+          },
+        });
+      }
+
+      return mockJsonResponse({ error: 'unexpected_url' }, 500);
+    });
+
+    vi.stubGlobal('fetch', fetchMock);
+    return { fetchMock, calls };
+  }
+
+  it('requires admin auth', async () => {
+    const { fetchMock } = buildCommissionProbeFetch();
+    const handler = registerCommissionRoute();
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'vendor' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ message: 'Forbidden' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects when admin probes are disabled', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'false';
+    const { fetchMock } = buildCommissionProbeFetch();
+    const handler = registerCommissionRoute();
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(403);
+    expect(result).toEqual({ ok: false, message: 'Admin probe endpoints are disabled.' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects before Paraşüt calls when the create confirmation is missing', async () => {
+    process.env.PARASUT_PROBE_CONFIRM = '';
+    const { fetchMock } = buildCommissionProbeFetch();
+    const handler = registerCommissionRoute();
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        provider: 'PARASUT',
+        mode: 'commission_invoice_test',
+        warnings: ['PARASUT_PROBE_CONFIRM=CREATE_COMMISSION_INVOICE_TEST is required.'],
+      }),
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns a sanitized success response and keeps lifecycle disabled', async () => {
+    const { calls } = buildCommissionProbeFetch();
+    const handler = registerCommissionRoute();
+    const reply = buildReply();
+    const result = await handler?.({ authUser: { role: 'admin' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual({
+      ok: true,
+      provider: 'PARASUT',
+      mode: 'commission_invoice_test',
+      contactCreated: true,
+      productCreated: true,
+      invoiceCreated: true,
+      invoiceId: 'invoice-1',
+      invoiceStatus: 'draft',
+      warnings: [],
+    });
+    expect(calls.map((call) => [call.method, call.url])).toEqual([
+      ['POST', 'https://api.heroku-staging.parasut.com/oauth/token'],
+      ['GET', 'https://api.heroku-staging.parasut.com/v4/me'],
+      ['GET', 'https://api.heroku-staging.parasut.com/v4/35427/contacts?page[size]=25'],
+      ['POST', 'https://api.heroku-staging.parasut.com/v4/35427/contacts'],
+      ['GET', 'https://api.heroku-staging.parasut.com/v4/35427/products?page[size]=25'],
+      ['POST', 'https://api.heroku-staging.parasut.com/v4/35427/products'],
+      ['POST', 'https://api.heroku-staging.parasut.com/v4/35427/sales_invoices'],
+      [
+        'GET',
+        'https://api.heroku-staging.parasut.com/v4/35427/sales_invoices/invoice-1?include=contact%2Cdetails%2Cpayments%2Cpayments.transaction%2Ctags',
+      ],
+    ]);
+    expect(calls.some((call) => /cancel|recover|archive/.test(call.url))).toBe(false);
+    expectNoSecrets(result);
   });
 });
