@@ -132,6 +132,7 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
     expect(result.model).toBe('seller_commission_rate_based');
     expect(result.marketplaceModel).toBe('SELLER_COMMISSION_RATE');
     expect(result.shippingDeductionPolicy).toBe('deferred_not_applied');
+    expect(result.totalSellerCommissionPolicy).toBe('single_rate_included');
     expect(result.externalApiCallAttempted).toBe(false);
     expect(result.cardDataIncluded).toBe(false);
     expect(result.sessionTokenPayloadPreview).toMatchObject({
@@ -184,6 +185,45 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
     ]);
   });
 
+  it('allows mixed commission rates and omits the top-level total seller commission', async () => {
+    mockHappyPath();
+    prismaMock.vendorFinancialProfile.findFirst.mockImplementation(
+      async ({ where }: { where: { vendorId: string } }) => ({
+        commissionPercent: where.vendorId === 'yalispor' ? '15.00' : '10.00',
+        commissionVatPercent: '0.00',
+        deductShippingEnabled: false,
+        shippingMode: 'DISABLED',
+        fixedShippingFee: null,
+      }),
+    );
+
+    const result = await buildParatikaSessionTokenPayloadPreviewForOrder('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.totalSellerCommissionPolicy).toBe('mixed_rates_omitted');
+    expect(result.validationErrors).toEqual([]);
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERCOMMISSION');
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERPAYMENTAMOUNT');
+
+    const orderItems = JSON.parse(result.sessionTokenPayloadPreview?.ORDERITEMS ?? '[]');
+    expect(orderItems).toEqual([
+      expect.objectContaining({
+        sellerID: 'Sporjinal',
+        sellerCommission: '10',
+      }),
+      expect.objectContaining({
+        sellerID: 'Yalispor',
+        sellerCommission: '15',
+      }),
+    ]);
+    expect(orderItems).toEqual([
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything() }),
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything() }),
+    ]);
+  });
+
   it('keeps explicit seller payment amount mode available for comparison', async () => {
     mockHappyPath();
 
@@ -195,6 +235,7 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
     expect(result.ok).toBe(true);
     expect(result.model).toBe('seller_payment_amount_based');
     expect(result.marketplaceModel).toBe('SELLER_PAYMENT_AMOUNT');
+    expect(result.totalSellerCommissionPolicy).toBeNull();
     expect(result.sessionTokenPayloadPreview).toMatchObject({
       ACTION: 'SESSIONTOKEN',
       AMOUNT: '100.00',

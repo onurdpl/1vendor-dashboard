@@ -142,6 +142,7 @@ function buildSessionTokenPreviewResult() {
     model: 'seller_commission_rate_based',
     marketplaceModel: 'SELLER_COMMISSION_RATE',
     shippingDeductionPolicy: 'deferred_not_applied',
+    totalSellerCommissionPolicy: 'single_rate_included',
     paymentReference: 'SPORGYM-SHOPIFY-order-100',
     sessionTokenPayloadPreview: {
       ACTION: 'SESSIONTOKEN',
@@ -187,6 +188,7 @@ function buildSellerPaymentSessionTokenPreviewResult() {
     ...basePreview,
     model: 'seller_payment_amount_based',
     marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
+    totalSellerCommissionPolicy: null,
     sessionTokenPayloadPreview: {
       ...basePayload,
       ORDERITEMS: JSON.stringify([
@@ -338,6 +340,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
       model: 'seller_commission_rate_based',
       marketplaceModel: 'SELLER_COMMISSION_RATE',
       shippingDeductionPolicy: 'deferred_not_applied',
+      totalSellerCommissionPolicy: 'single_rate_included',
       paymentReference: 'SPORGYM-SHOPIFY-order-100',
       sessionTokenPayloadPreview: {
         RETURNURL: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
@@ -541,6 +544,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         action: 'SESSIONTOKEN',
         model: 'seller_commission_rate_based',
         marketplaceModel: 'SELLER_COMMISSION_RATE',
+        totalSellerCommissionPolicy: 'single_rate_included',
         externalApiCallAttempted: false,
         credentialValuesOmitted: true,
       }),
@@ -676,6 +680,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         action: 'SESSIONTOKEN',
         model: 'seller_commission_rate_based',
         marketplaceModel: 'SELLER_COMMISSION_RATE',
+        totalSellerCommissionPolicy: 'single_rate_included',
         httpStatus: 200,
         responseCode: '00',
         responseMsg: 'Approved',

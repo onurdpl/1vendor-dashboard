@@ -120,6 +120,24 @@ Required non-credential fields currently modeled:
 
 The selected top-level marketplace field is paired with the selected `ORDERITEMS` split field. The probe does not mix marketplace model fields in one payload.
 
+For `SELLER_COMMISSION_RATE`, every `ORDERITEMS` entry includes its own `sellerCommission` from the vendor financial profile. If every item has the same commission rate, the preview also includes top-level `TOTALSELLERCOMMISSION` and reports:
+
+```json
+{
+  "totalSellerCommissionPolicy": "single_rate_included"
+}
+```
+
+If vendors/items use different commission rates, the preview omits top-level `TOTALSELLERCOMMISSION`, keeps each item-level `sellerCommission`, and reports:
+
+```json
+{
+  "totalSellerCommissionPolicy": "mixed_rates_omitted"
+}
+```
+
+This avoids sending a misleading single top-level rate for multi-vendor orders such as Sporjinal `10` and Yalispor `15`.
+
 For preview/test payloads, shipping deduction is intentionally deferred and not applied. The preview response reports:
 
 ```json

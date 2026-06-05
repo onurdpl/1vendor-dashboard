@@ -28,6 +28,7 @@ type ParatikaOrderItemPreview = {
 type ParatikaPayloadPreview = Record<string, string>;
 
 const PARATIKA_SHIPPING_DEDUCTION_POLICY = 'deferred_not_applied' as const;
+type TotalSellerCommissionPolicy = 'single_rate_included' | 'mixed_rates_omitted';
 
 export type ParatikaSessionTokenPayloadPreview = {
   ok: boolean;
@@ -36,6 +37,7 @@ export type ParatikaSessionTokenPayloadPreview = {
   model: ParatikaMarketplaceModelName;
   marketplaceModel: ParatikaMarketplaceModel;
   shippingDeductionPolicy: typeof PARATIKA_SHIPPING_DEDUCTION_POLICY;
+  totalSellerCommissionPolicy: TotalSellerCommissionPolicy | null;
   paymentReference: string | null;
   sessionTokenPayloadPreview: ParatikaPayloadPreview | null;
   itemBreakdown: ParatikaOrderItemPreview[];
@@ -253,6 +255,7 @@ function buildEmptyResult(
     model: paratikaMarketplaceModelName(marketplaceModel),
     marketplaceModel,
     shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
+    totalSellerCommissionPolicy: null,
     paymentReference: null,
     sessionTokenPayloadPreview: null,
     itemBreakdown,
@@ -399,27 +402,47 @@ function buildMarketplaceTotalFields(
   marketplaceModel: ParatikaMarketplaceModel,
   items: ParatikaOrderItemPreview[],
   validationErrors: string[],
-): Record<string, string> {
+): { fields: Record<string, string>; totalSellerCommissionPolicy: TotalSellerCommissionPolicy | null } {
   if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
-    const commissionRates = [...new Set(items.map((item) => item.sellerCommission).filter((value): value is string => Boolean(value)))];
-    if (commissionRates.length !== 1) {
-      validationErrors.push('TOTALSELLERCOMMISSION requires a single commission rate across ORDERITEMS.');
-      return {};
+    const commissionRates = items.map((item) => item.sellerCommission).filter((value): value is string => Boolean(value));
+    if (commissionRates.length !== items.length) {
+      validationErrors.push('ORDERITEMS[].sellerCommission is required for commission rate mode.');
+      return {
+        fields: {},
+        totalSellerCommissionPolicy: null,
+      };
+    }
+
+    const uniqueCommissionRates = [...new Set(commissionRates)];
+    if (uniqueCommissionRates.length === 1) {
+      return {
+        fields: {
+          TOTALSELLERCOMMISSION: uniqueCommissionRates[0],
+        },
+        totalSellerCommissionPolicy: 'single_rate_included',
+      };
     }
 
     return {
-      TOTALSELLERCOMMISSION: commissionRates[0],
+      fields: {},
+      totalSellerCommissionPolicy: 'mixed_rates_omitted',
     };
   }
 
   const sellerPaymentTotalCents = sumItemMoney(items, 'sellerPaymentAmount');
   if (sellerPaymentTotalCents === null || sellerPaymentTotalCents < 0) {
     validationErrors.push('TOTALSELLERPAYMENTAMOUNT is invalid.');
-    return {};
+    return {
+      fields: {},
+      totalSellerCommissionPolicy: null,
+    };
   }
 
   return {
-    TOTALSELLERPAYMENTAMOUNT: centsToMoney(sellerPaymentTotalCents),
+    fields: {
+      TOTALSELLERPAYMENTAMOUNT: centsToMoney(sellerPaymentTotalCents),
+    },
+    totalSellerCommissionPolicy: null,
   };
 }
 
@@ -514,6 +537,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
   if (validationErrors.length) {
     return {
       ...buildEmptyResult(validationErrors, items, marketplaceModel),
+      totalSellerCommissionPolicy: marketplaceTotalFields.totalSellerCommissionPolicy,
       paymentReference: buildPaymentReference(order),
     };
   }
@@ -534,7 +558,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
     CUSTOMERUSERAGENT: requiredFields.customerUserAgent ?? '',
     CUSTOMERPHONE: requiredFields.customerPhone ?? '',
     ORDERITEMS: JSON.stringify(orderItems),
-    ...marketplaceTotalFields,
+    ...marketplaceTotalFields.fields,
     SESSIONTYPE: 'PAYMENTSESSION',
   };
 
@@ -545,6 +569,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
     model: paratikaMarketplaceModelName(marketplaceModel),
     marketplaceModel,
     shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
+    totalSellerCommissionPolicy: marketplaceTotalFields.totalSellerCommissionPolicy,
     paymentReference: buildPaymentReference(order),
     sessionTokenPayloadPreview,
     itemBreakdown: items,
