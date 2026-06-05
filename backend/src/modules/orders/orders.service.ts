@@ -195,6 +195,26 @@ function readString(value: Record<string, unknown> | null, keys: string[]) {
   return null;
 }
 
+function readStringOrNumber(value: Record<string, unknown> | null, keys: string[]) {
+  const text = readString(value, keys);
+  if (text) {
+    return text;
+  }
+
+  if (!value) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const raw = value[key];
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      return String(raw);
+    }
+  }
+
+  return null;
+}
+
 function readBoolean(value: Record<string, unknown> | null, keys: string[]) {
   if (!value) {
     return false;
@@ -790,6 +810,7 @@ function buildShipmentProviderResponseSummary(
             topLevelKeys: readStringArray(updatePostDiagnostics.responseShape.topLevelKeys),
           }
         : null;
+  const confirmShippingPriceDiagnostics = isRecord(snapshot?.confirmShippingPrice) ? snapshot.confirmShippingPrice : null;
   const providerValidationErrors = mergeUniqueStrings(
     readValidationStringArray(snapshot?.providerValidationErrors),
     readValidationStringArray(createPostDiagnostics?.providerValidationErrors),
@@ -823,6 +844,14 @@ function buildShipmentProviderResponseSummary(
     parsedBodyType: typeof snapshot?.parsedBodyType === 'string' ? snapshot.parsedBodyType : null,
     responseKeys,
     providerError: readString(snapshot, ['providerError', 'providerMessage', 'navlungoCancelProviderMessage', 'navlungoUpdateProviderMessage', 'error', 'message', 'reason']),
+    providerErrorMessage:
+      readString(snapshot, ['providerErrorMessage']) ?? readString(confirmShippingPriceDiagnostics, ['providerErrorMessage']),
+    providerErrorErrors: snapshot?.providerErrorErrors ?? confirmShippingPriceDiagnostics?.providerErrorErrors,
+    providerErrorBodyPreview: snapshot?.providerErrorBodyPreview ?? confirmShippingPriceDiagnostics?.providerErrorBodyPreview,
+    confirmShipmentId:
+      readStringOrNumber(confirmShippingPriceDiagnostics, ['shipmentId']) ?? readStringOrNumber(snapshot, ['shipmentId']),
+    confirmShippingProviderId:
+      readStringOrNumber(confirmShippingPriceDiagnostics, ['shippingProviderId']) ?? readStringOrNumber(snapshot, ['shippingProviderId']),
     dryRun: typeof snapshot?.dryRun === 'boolean' ? snapshot.dryRun : null,
     disabledGates,
     providerValidationErrors,

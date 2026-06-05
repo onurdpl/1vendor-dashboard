@@ -3179,8 +3179,22 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         providerResponseSummary: {
           ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
           providerApiCallAttempted: true,
-          lastProviderStage: 'create_shipment',
-          providerError: 'Kargonomi shipment draft creation failed before provider response: fetch failed.',
+          lastProviderStage: 'confirm_price',
+          confirmShipmentId: '123',
+          confirmShippingProviderId: '9',
+          providerError: 'Kargonomi shipping price confirmation failed with HTTP 422.',
+          providerErrorMessage: 'Shipping provider cannot be confirmed.',
+          providerErrorErrors: {
+            shipping_provider_id: ['Selected carrier quote is invalid.'],
+            phone: '[redacted]',
+          },
+          providerErrorBodyPreview: {
+            message: 'Shipping provider cannot be confirmed.',
+            errors: {
+              shipping_provider_id: ['Selected carrier quote is invalid.'],
+              phone: '[redacted]',
+            },
+          },
         },
         returnShipment: {
           provider: 'try_oto',
@@ -3215,8 +3229,60 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('should-not-render')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Add tracking information' })).not.toBeInTheDocument();
     expect(screen.getByText('Provider API call attempted')).toBeInTheDocument();
-    expect(screen.getAllByText('Create shipment').length).toBeGreaterThan(0);
-    expect(screen.getByText('Kargonomi shipment draft creation failed before provider response: fetch failed.')).toBeInTheDocument();
+    expect(screen.getAllByText('Confirm price').length).toBeGreaterThan(0);
+    expect(screen.getByText('Kargonomi shipping price confirmation failed with HTTP 422.')).toBeInTheDocument();
+  });
+
+  it('renders sanitized Kargonomi confirm-price diagnostics for admins', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'kargonomi',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Kargonomi',
+        warehouseId: '112668',
+        shipmentStatus: 'failed',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          providerApiCallAttempted: true,
+          lastProviderStage: 'confirm_price',
+          confirmShipmentId: '123',
+          confirmShippingProviderId: '9',
+          providerError: 'Kargonomi shipping price confirmation failed with HTTP 422.',
+          providerErrorMessage: 'Shipping provider cannot be confirmed.',
+          providerErrorErrors: {
+            shipping_provider_id: ['Selected carrier quote is invalid.'],
+            phone: '[redacted]',
+          },
+          providerErrorBodyPreview: {
+            message: 'Shipping provider cannot be confirmed.',
+            errors: {
+              shipping_provider_id: ['Selected carrier quote is invalid.'],
+              phone: '[redacted]',
+            },
+          },
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Kargonomi execution diagnostics')).toBeInTheDocument();
+    expect(screen.getByText(/shipment\s+123\s+·\s+shipping_provider_id\s+9/)).toBeInTheDocument();
+    expect(screen.getAllByText('Shipping provider cannot be confirmed.').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Selected carrier quote is invalid/).length).toBeGreaterThan(0);
+    expect(screen.queryByText('5551112233')).not.toBeInTheDocument();
   });
 
   it('keeps shipment actions available for vendor orders when Try OTO is the saved provider', async () => {

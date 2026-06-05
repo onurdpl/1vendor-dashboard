@@ -214,6 +214,90 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=9');
   });
 
+  it('persists sanitized Kargonomi confirm-price error diagnostics', async () => {
+    let callCount = 0;
+    const fetchImpl = (async (_url: RequestInfo | URL, _init?: RequestInit) => {
+      callCount += 1;
+      const responseBody = callCount === 1
+        ? { shipment: { id: 123, status: 'draft' } }
+        : callCount === 2
+          ? { shipping_provider_with_price: [{ shipping_provider_id: 9, price: '100' }] }
+          : {
+              message: 'Shipping provider cannot be confirmed.',
+              errors: {
+                shipping_provider_id: ['Selected carrier quote is invalid.'],
+                phone: '5551112233',
+                nested: {
+                  email: 'buyer@example.com',
+                  safe_code: 'QUOTE_INVALID',
+                },
+              },
+              api_key: 'secret-api-key',
+            };
+
+      return new Response(JSON.stringify(responseBody), {
+        status: callCount === 3 ? 422 : 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    await expect(
+      adapter.createShipment({
+        allocationId: 'alloc-1',
+        vendorId: 'vendor-1',
+        provider: 'kargonomi',
+        requestSnapshot: {
+          warehouseId: '112668',
+          shippingProviderId: 9,
+          buyer: {
+            buyer_name: 'Test Buyer',
+            buyer_phone: '5551112233',
+            buyer_address: 'Test Buyer Address',
+            buyer_state_id: '34',
+            buyer_city_id: '828',
+          },
+          packages: [{ desi: '3' }],
+        },
+      }),
+    ).rejects.toMatchObject({
+      name: 'ShippingProviderExecutionError',
+      responseSnapshot: {
+        lastProviderStage: 'confirm_price',
+        status: 422,
+        bodyKeys: ['message', 'errors', 'api_key'],
+        providerError: 'Kargonomi shipping price confirmation failed with HTTP 422.',
+        providerErrorMessage: 'Shipping provider cannot be confirmed.',
+        providerErrorErrors: {
+          shipping_provider_id: ['Selected carrier quote is invalid.'],
+          phone: '[redacted]',
+          nested: {
+            email: '[redacted]',
+            safe_code: 'QUOTE_INVALID',
+          },
+        },
+        providerErrorBodyPreview: {
+          message: 'Shipping provider cannot be confirmed.',
+          errors: {
+            shipping_provider_id: ['Selected carrier quote is invalid.'],
+            phone: '[redacted]',
+            nested: {
+              email: '[redacted]',
+              safe_code: 'QUOTE_INVALID',
+            },
+          },
+          api_key: '[redacted]',
+        },
+        confirmShippingPrice: {
+          httpStatus: 422,
+          providerErrorMessage: 'Shipping provider cannot be confirmed.',
+          shipmentId: '123',
+          shippingProviderId: '9',
+        },
+      },
+    } satisfies Partial<ShippingProviderExecutionError>);
+  });
+
   it('captures POST /shipments fetch failure as create_shipment diagnostics', async () => {
     const fetchMock = vi.fn(async () => {
       throw new TypeError('fetch failed');

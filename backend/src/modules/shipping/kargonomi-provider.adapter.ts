@@ -502,12 +502,93 @@ function parseKargonomiResponseBody(contentType: string, responseText: string): 
   }
 }
 
+const KARGONOMI_DIAGNOSTIC_REDACTED = '[redacted]';
+const KARGONOMI_DIAGNOSTIC_MAX_STRING_LENGTH = 500;
+const KARGONOMI_DIAGNOSTIC_MAX_ARRAY_ITEMS = 10;
+const KARGONOMI_DIAGNOSTIC_MAX_OBJECT_KEYS = 20;
+const KARGONOMI_DIAGNOSTIC_MAX_DEPTH = 3;
+const KARGONOMI_SENSITIVE_KEY_PATTERN = /token|authorization|api[_-]?key|password|secret|card|phone|email|address/i;
+
+function truncateKargonomiDiagnosticString(value: string) {
+  return value.length > KARGONOMI_DIAGNOSTIC_MAX_STRING_LENGTH
+    ? `${value.slice(0, KARGONOMI_DIAGNOSTIC_MAX_STRING_LENGTH)}...`
+    : value;
+}
+
+function sanitizeKargonomiDiagnosticValue(value: unknown, depth = 0): unknown {
+  if (value === null || value === undefined) {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    return truncateKargonomiDiagnosticString(value);
+  }
+
+  if (typeof value === 'number' || typeof value === 'boolean') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    if (depth >= KARGONOMI_DIAGNOSTIC_MAX_DEPTH) {
+      return '[array]';
+    }
+    return value
+      .slice(0, KARGONOMI_DIAGNOSTIC_MAX_ARRAY_ITEMS)
+      .map((item) => sanitizeKargonomiDiagnosticValue(item, depth + 1));
+  }
+
+  if (isRecord(value)) {
+    if (depth >= KARGONOMI_DIAGNOSTIC_MAX_DEPTH) {
+      return '[object]';
+    }
+
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, KARGONOMI_DIAGNOSTIC_MAX_OBJECT_KEYS)
+        .map(([key, item]) => [
+          key,
+          KARGONOMI_SENSITIVE_KEY_PATTERN.test(key)
+            ? KARGONOMI_DIAGNOSTIC_REDACTED
+            : sanitizeKargonomiDiagnosticValue(item, depth + 1),
+        ]),
+    );
+  }
+
+  return String(value);
+}
+
+function readKargonomiErrorMessage(body: unknown) {
+  if (!isRecord(body)) {
+    return typeof body === 'string' ? truncateKargonomiDiagnosticString(body) : null;
+  }
+
+  return readString(body, ['message', 'error', 'error_message', 'errorMessage', 'reason']);
+}
+
+function summarizeKargonomiFailureBody(response: KargonomiRawHttpResponse) {
+  if (response.ok) {
+    return {};
+  }
+
+  const sanitizedBody = sanitizeKargonomiDiagnosticValue(response.body);
+  const bodyRecord = isRecord(response.body) ? response.body : null;
+
+  return {
+    providerErrorMessage: readKargonomiErrorMessage(response.body),
+    providerErrorErrors: bodyRecord && Object.hasOwn(bodyRecord, 'errors')
+      ? sanitizeKargonomiDiagnosticValue(bodyRecord.errors)
+      : null,
+    providerErrorBodyPreview: sanitizedBody,
+  };
+}
+
 function summarizeResponse(response: KargonomiRawHttpResponse) {
   return {
     ok: response.ok,
     httpStatus: response.status,
     contentType: response.contentType,
     bodyKeys: isRecord(response.body) ? Object.keys(response.body) : [],
+    ...summarizeKargonomiFailureBody(response),
   };
 }
 
@@ -517,6 +598,9 @@ function mergePrimaryResponseSummary(responseSnapshot: Record<string, unknown>, 
   responseSnapshot.status = summary.httpStatus;
   responseSnapshot.contentType = summary.contentType;
   responseSnapshot.bodyKeys = summary.bodyKeys;
+  responseSnapshot.providerErrorMessage = summary.providerErrorMessage;
+  responseSnapshot.providerErrorErrors = summary.providerErrorErrors;
+  responseSnapshot.providerErrorBodyPreview = summary.providerErrorBodyPreview;
 }
 
 function summarizeKargonomiError(error: unknown) {
@@ -966,7 +1050,11 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
         error,
       );
     }
-    responseSnapshot.confirmShippingPrice = summarizeResponse(confirmResponse);
+    responseSnapshot.confirmShippingPrice = {
+      ...summarizeResponse(confirmResponse),
+      shipmentId,
+      shippingProviderId,
+    };
     if (!confirmResponse.ok) {
       mergePrimaryResponseSummary(responseSnapshot, confirmResponse);
       throwKargonomiExecutionError(

@@ -290,6 +290,11 @@ export type OrderShipmentExecutionDto = {
     parsedBodyType: string | null;
     responseKeys: string[];
     providerError: string | null;
+    providerErrorMessage?: string | null;
+    providerErrorErrors?: unknown;
+    providerErrorBodyPreview?: unknown;
+    confirmShipmentId?: string | null;
+    confirmShippingProviderId?: string | null;
     dryRun: boolean | null;
     disabledGates: string[];
     providerValidationErrors: string[];

@@ -888,6 +888,22 @@ function formatDiagnosticPresence(value: boolean | null | undefined) {
   return value ? 'yes' : 'no';
 }
 
+function formatDiagnosticValue(value: unknown) {
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function formatKargonomiProviderStage(value?: string | null) {
   switch (value) {
     case 'destination_resolution':
@@ -3116,6 +3132,28 @@ export function OrderDetailPage() {
             {formatDiagnosticPresence(summary.barcodeFetchCalled)}
           </strong>
         </div>
+        <div className="summary-row">
+          <span>Confirm request ids</span>
+          <strong>
+            shipment {summary.confirmShipmentId || '—'} · shipping_provider_id {summary.confirmShippingProviderId || '—'}
+          </strong>
+        </div>
+        {summary.providerErrorMessage || summary.providerErrorErrors || summary.providerErrorBodyPreview ? (
+          <>
+            <div className="summary-row">
+              <span>Provider error message</span>
+              <strong>{summary.providerErrorMessage || '—'}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Provider error errors</span>
+              <strong>{formatDiagnosticValue(summary.providerErrorErrors)}</strong>
+            </div>
+            <div className="summary-row">
+              <span>Provider error body preview</span>
+              <strong>{formatDiagnosticValue(summary.providerErrorBodyPreview)}</strong>
+            </div>
+          </>
+        ) : null}
       </details>
     );
   }
