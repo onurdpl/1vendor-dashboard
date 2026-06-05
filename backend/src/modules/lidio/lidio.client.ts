@@ -34,6 +34,50 @@ export type CreateSubsellerRequest = JsonRecord & {
   };
 };
 
+export type StartHostedMarketplacePaymentRequest = JsonRecord & {
+  orderId: string;
+  merchantProcessId?: string;
+  merchantCustomField?: string;
+  totalAmount: number;
+  currency: 'TRY' | 'EUR' | 'USD' | string;
+  customerInfo: {
+    email?: string;
+    customerId?: string;
+    name?: string;
+    phone?: string;
+  };
+  paymentInstruments: Array<'NewCard'>;
+  paymentInstrumentInfo: {
+    card: {
+      processType: 'sales' | 'preauth';
+      useInstallment: boolean;
+      useLoyaltyPoints: boolean;
+      noAmex?: boolean;
+      noForeignCard?: boolean;
+    };
+  };
+  basketItems: Array<{
+    name: string;
+    quantity: number;
+    unitPrice: number;
+    itemIdGivenByMerchant: string;
+    itemType: 'Virtual' | 'Physical';
+    marketplace: {
+      subsellerId: number;
+      itemTotalPrice: number;
+      subsellerPayoutAmount: number;
+    };
+  }>;
+  dontDistributeSubsellerPayout?: boolean;
+  returnUrl?: string;
+  notificationUrl?: string;
+  language?: string;
+  clientType?: 'Web' | 'Android' | 'IOS' | 'Unknown' | 'MobileWeb';
+  merchantUrl?: string;
+  clientIp?: string;
+  clientUserAgent?: string;
+};
+
 type LidioRequestOptions = {
   path: string;
   body?: JsonRecord;
@@ -136,6 +180,13 @@ export class LidioHttpClient {
   async createSubseller(body: CreateSubsellerRequest): Promise<LidioHttpResponse> {
     return this.request({
       path: '/CreateSubseller',
+      body,
+    });
+  }
+
+  async startHostedMarketplacePayment(body: StartHostedMarketplacePaymentRequest): Promise<LidioHttpResponse> {
+    return this.request({
+      path: '/StartHostedPaymentProcess',
       body,
     });
   }

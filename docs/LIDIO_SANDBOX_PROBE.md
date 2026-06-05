@@ -20,6 +20,7 @@ LIDIO_MERCHANT_KEY=<secret>
 LIDIO_API_PASSWORD=<secret>
 LIDIO_SUBSELLER_PROFILE_ID=3
 LIDIO_ALLOW_WRITE_PROBE=false
+LIDIO_ALLOW_PAYMENT_PROBE=false
 ```
 
 Notes:
@@ -37,6 +38,7 @@ Notes:
 - The first read-only probe validates only `LIDIO_ENABLED`, `LIDIO_BASE_URL`, `LIDIO_MERCHANT_CODE`, and `LIDIO_AUTHORIZATION_TOKEN`.
 - `LIDIO_MERCHANT_KEY` and `LIDIO_API_PASSWORD` may remain empty until ReturnURL and notification validation probes are approved.
 - `LIDIO_ALLOW_WRITE_PROBE=true` is required only for the opt-in `CreateSubseller` sandbox write probe.
+- `LIDIO_ALLOW_PAYMENT_PROBE=true` is required only for the opt-in hosted marketplace payment sandbox probe.
 
 ## Confirmed Read-Only Probe Result
 - Probe date: 2026-06-05.
@@ -87,6 +89,11 @@ Implications:
 - Any route, database, checkout, shipping, payout, or finance-ledger implementation
 
 ## Next Planned PoC: CreateSubseller Sandbox Probe
+- CreateSubseller is paused for the current PoC.
+- Lidio already provided the sandbox test subseller identifier to use for marketplace payment probes.
+- Use `subsellerId=3` for sandbox marketplace payment probes.
+- Do not run `CreateSubseller` again unless explicitly requested.
+- The previous live `CreateSubseller` attempt returned `SystemError`; this is non-blocking for the current payment PoC because the sandbox payment probe will use Lidio-provided `subsellerId=3`.
 - `CreateSubseller` is not read-only.
 - It must use test-only vendor data.
 - It must not create payments or payouts.
@@ -101,6 +108,22 @@ Implications:
 - Output must include the endpoint, HTTP status, Lidio `result` / `resultMessage`, returned `subsellerId` when present, and `writesPerformed=true` only if the request was actually sent.
 - It must not call `/ProcessPayment`, `/StartHostedPaymentProcess`, `/Release`, `/Unrelease`, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout`.
 - It should run only after an explicit approval for a mutating sandbox vendor-onboarding probe.
+
+## Prepared PoC: Hosted Marketplace Payment Sandbox Probe
+- Command: `npm run backend:lidio:marketplace-payment-probe`.
+- Do not execute this command against Lidio until explicitly requested.
+- The command exits before sending any request unless `LIDIO_ALLOW_PAYMENT_PROBE=true`.
+- Endpoint prepared: `POST /StartHostedPaymentProcess`.
+- Hosted flow is preferred over `ProcessPayment` so the backend does not collect or store card data.
+- The prepared request uses sandbox-only fake order/customer data.
+- It uses one basket item with `quantity=1`, `unitPrice=10`, and total payment amount `10`.
+- `basketItems[0].marketplace.subsellerId=3`.
+- `basketItems[0].marketplace.itemTotalPrice=10`, equal to the item total.
+- `basketItems[0].marketplace.subsellerPayoutAmount=8`, explicitly set for the first test.
+- It does not include card data; card entry is expected to occur only on Lidio-hosted payment pages if Lidio returns a hosted redirect URL.
+- It does not store the response in the database and is not connected to app runtime.
+- It must not call refund, release, unrelease, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout`.
+- Output is sanitized and redacts redirect URLs and customer/contact data.
 
 ## Unresolved Questions
 - What is the paymentNotification `parameterhash` formula?

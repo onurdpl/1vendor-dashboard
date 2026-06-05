@@ -307,6 +307,13 @@ Unknown: exact `MxS2S` token creation inputs, token lifetime, and rotation behav
 - Implication: sandbox base URL and read-only `MxS2S` authentication are confirmed for this account/scope.
 - The empty `subsellerList` only means no API-visible subsellers were returned in this account/scope. Do not infer that subseller creation failed or that marketplace is inactive.
 
+## Sandbox Subseller And Payment Probe Direction
+- CreateSubseller is not required for the current PoC because Lidio already provided the sandbox test subseller identifier to use.
+- Use `subsellerId=3` for sandbox marketplace payment probes.
+- Do not run `CreateSubseller` again unless explicitly requested.
+- The previous live `CreateSubseller` attempt returned `SystemError`; this remains documented as non-blocking for the current payment PoC.
+- The next prepared payment probe should use `POST /StartHostedPaymentProcess`, not `ProcessPayment`, so card collection remains on Lidio-hosted pages and no backend card data is collected or stored.
+
 ## Shopify Implications For Sporgym
 - Shopify variant/product mapping can map to Sporgym vendor/subseller records.
 - A future runtime payment request would need backend-resolved `basketItems[].marketplace.subsellerId`.
@@ -361,7 +368,7 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 
 | Capability | Status | Evidence | Remaining Gap |
 |---------|---------|---------|---------|
-| Vendor onboarding | PARTIALLY CONFIRMED | `/CreateSubseller`, `/UpdateSubseller`, `/GetSubsellerList`, Lidio-assigned `subsellerId`, merchant-provided `subsellerIdGivenByMerchant`, support-confirmed `SubsellerProfileId=3`, and successful read-only `/GetSubsellerList` auth probe. | Mutating `CreateSubseller` sandbox result, required production KYB fields, and activation rules. |
+| Vendor onboarding | PARTIALLY CONFIRMED | `/CreateSubseller`, `/UpdateSubseller`, `/GetSubsellerList`, Lidio-assigned `subsellerId`, merchant-provided `subsellerIdGivenByMerchant`, support-confirmed `SubsellerProfileId=3`, and successful read-only `/GetSubsellerList` auth probe. Lidio provided sandbox `subsellerId=3` for payment probes. | Required production KYB fields and activation rules. The previous `CreateSubseller` `SystemError` is non-blocking for the current payment PoC. |
 | Vendor mapping | PARTIALLY CONFIRMED | Lidio returns both `subsellerId` and `subsellerIdGivenByMerchant`; Sporgym backend can remain source of truth for vendor-to-subseller mapping. | No runtime mapping has been implemented; Shopify compatibility remains unknown. |
 | Basket item allocation | CONFIRMED | `PaymentRequest`, `StartHostedPaymentProcessRequest`, and `StartHostedPrePaymentRequest` accept `basketItems[]`; each `BasketItem` can include `marketplace`. | Production multi-subseller limits still need support confirmation. |
 | Split payment modeling | PARTIALLY CONFIRMED | `BasketItemMPDetails` requires `subsellerId` and `itemTotalPrice`, with optional `subsellerPayoutAmount`; FCPayback records expose marketplace commission fields. | Exact commission calculation formula remains unknown. |
@@ -381,7 +388,10 @@ Document only. No implementation is included in this discovery.
 - No payment execution endpoint was called.
 
 ## PoC-2: CreateSubseller
-- Planned next PoC.
+- Paused for current PoC.
+- Not required for current payment PoC because Lidio already provided sandbox `subsellerId=3`.
+- Do not run `CreateSubseller` again unless explicitly requested.
+- Previous live `CreateSubseller` attempt returned `SystemError`; this is non-blocking for the current payment PoC.
 - This is not read-only.
 - It must use test-only vendor data.
 - It must not create payments or payouts.
@@ -394,9 +404,13 @@ Document only. No implementation is included in this discovery.
 - After a separately approved `CreateSubseller` sandbox PoC, query `/GetSubsellerList` again and confirm the created sandbox subseller is returned with both Lidio and merchant identifiers.
 
 ## PoC-4: PaymentRequest With `BasketItem.marketplace`
-- In sandbox only, prepare a payment request containing multiple `basketItems[]`, each with `marketplace.subsellerId`, `marketplace.itemTotalPrice`, and optional `marketplace.subsellerPayoutAmount`.
-- Validate whether Lidio accepts item-level marketplace split in the intended hosted or server flow.
-- Do not execute production payment collection.
+- Prepared as an opt-in hosted marketplace payment probe using `POST /StartHostedPaymentProcess`.
+- Use sandbox-only fake order data and one basket item.
+- Use `basketItems[0].marketplace.subsellerId=3`.
+- Set `basketItems[0].marketplace.itemTotalPrice` equal to the item total.
+- Set `basketItems[0].marketplace.subsellerPayoutAmount` explicitly for the first test.
+- Do not include backend card data; hosted card collection should occur only on Lidio-hosted pages if a redirect URL is returned.
+- Do not execute the live sandbox payment probe until explicitly requested.
 
 ## PoC-5: Notification Validation
 - Capture a sandbox payment notification.
