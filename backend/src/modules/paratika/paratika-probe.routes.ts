@@ -119,6 +119,7 @@ function sanitizeParatikaText(value: unknown) {
 
   return value
     .replace(/((?:access|refresh|session)[_-]?token|token|password|secret|merchantpassword|merchantuser)\s*[:=]\s*[^&\s,}]+/gi, '$1=[redacted]')
+    .replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted]')
     .slice(0, 500);
 }
 
@@ -159,6 +160,9 @@ function sanitizeParatikaResponse(rawBody: string) {
   return {
     responseCode: sanitizeParatikaText(readCaseInsensitive(parsed, ['responseCode', 'RESPONSECODE', 'response_code'])),
     responseMsg: sanitizeParatikaText(readCaseInsensitive(parsed, ['responseMsg', 'RESPONSEMSG', 'response_msg'])),
+    errorCode: sanitizeParatikaText(readCaseInsensitive(parsed, ['errorCode', 'ERRORCODE', 'error_code'])),
+    errorMsg: sanitizeParatikaText(readCaseInsensitive(parsed, ['errorMsg', 'ERRORMSG', 'error_msg'])),
+    violatorParam: sanitizeParatikaText(readCaseInsensitive(parsed, ['violatorParam', 'VIOLATORPARAM', 'violator_param'])),
     sessionTokenReceived: Boolean(sessionToken),
     sessionTokenLength: typeof sessionToken === 'string' ? sessionToken.length : 0,
     rawBodyKeys: Object.keys(parsed),
@@ -327,6 +331,9 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           httpStatus: response.status,
           responseCode: sanitized.responseCode,
           responseMsg: sanitized.responseMsg,
+          errorCode: sanitized.errorCode,
+          errorMsg: sanitized.errorMsg,
+          violatorParam: sanitized.violatorParam,
           sessionTokenReceived: sanitized.sessionTokenReceived,
           sessionTokenLength: sanitized.sessionTokenLength,
           rawBodyKeys: sanitized.rawBodyKeys,

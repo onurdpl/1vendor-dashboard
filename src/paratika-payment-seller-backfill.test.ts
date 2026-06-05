@@ -508,4 +508,56 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(serializedResult).not.toContain('merchant-password-secret');
     expect(serializedResult).not.toContain('merchant-user-secret');
   });
+
+  it('returns safe Paratika error details without exposing tokens or credentials', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue(buildSessionTokenPreviewResult());
+    const sessionToken = 'secret-session-token-value';
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          responseCode: '99',
+          responseMsg: 'Declined',
+          errorCode: 'INVALID_REQUEST',
+          errorMsg: `Invalid request. sessionToken=${sessionToken} merchantPassword=merchant-password-secret`,
+          violatorParam: 'ORDERITEMS',
+          sessionToken,
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(
+      buildLiveProbeEnv({
+        PARATIKA_PROBE_DRY_RUN: false,
+        PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        writesPerformed: true,
+        responseCode: '99',
+        responseMsg: 'Declined',
+        errorCode: 'INVALID_REQUEST',
+        errorMsg: 'Invalid request. sessionToken=[redacted] merchantPassword=[redacted]',
+        violatorParam: 'ORDERITEMS',
+        sessionTokenReceived: true,
+        sessionTokenLength: sessionToken.length,
+        rawBodyKeys: ['responseCode', 'responseMsg', 'errorCode', 'errorMsg', 'violatorParam', 'sessionToken'],
+      }),
+    );
+
+    const serializedResult = JSON.stringify(result);
+    expect(serializedResult).not.toContain(sessionToken);
+    expect(serializedResult).not.toContain('merchant-password-secret');
+    expect(serializedResult).not.toContain('merchant-user-secret');
+    expect(serializedResult).not.toContain('MERCHANTPASSWORD');
+    expect(serializedResult).not.toContain('MERCHANTUSER');
+  });
 });
