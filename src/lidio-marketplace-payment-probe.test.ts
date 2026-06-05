@@ -78,6 +78,9 @@ describe('Lidio marketplace payment sandbox probe', () => {
       orderId: 'SPGMP20260605123456',
       totalAmount: 10,
       currency: 'TRY',
+      customerInfo: {
+        phone: '5555555555',
+      },
       paymentInstruments: ['NewCard'],
       paymentInstrumentInfo: {
         card: {

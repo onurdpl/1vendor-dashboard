@@ -62,7 +62,7 @@ function buildMarketplacePaymentRequest(now: Date): StartHostedMarketplacePaymen
       email: `lidio-marketplace-${runId}@example.invalid`,
       customerId: `LIDIO-CUSTOMER-${runId}`,
       name: 'Lidio Sandbox Customer',
-      phone: '5000000000',
+      phone: '5555555555',
     },
     paymentInstruments: ['NewCard'],
     paymentInstrumentInfo: {
