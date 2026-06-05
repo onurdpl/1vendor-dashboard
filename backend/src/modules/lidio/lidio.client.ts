@@ -54,6 +54,10 @@ export type StartHostedMarketplacePaymentRequest = JsonRecord & {
       useLoyaltyPoints: boolean;
       noAmex?: boolean;
       noForeignCard?: boolean;
+      newCard: {
+        threeDSecureMode: 'None' | 'Mandatory' | 'Optional' | 'Optional3DSelected';
+        useIVRForCardEntry: boolean;
+      };
     };
   };
   basketItems: Array<{

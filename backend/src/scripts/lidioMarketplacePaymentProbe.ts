@@ -72,6 +72,10 @@ function buildMarketplacePaymentRequest(now: Date): StartHostedMarketplacePaymen
         useLoyaltyPoints: false,
         noAmex: true,
         noForeignCard: true,
+        newCard: {
+          threeDSecureMode: 'Mandatory',
+          useIVRForCardEntry: false,
+        },
       },
     },
     basketItems: [

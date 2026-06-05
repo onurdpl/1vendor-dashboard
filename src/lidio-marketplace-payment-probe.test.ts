@@ -87,10 +87,19 @@ describe('Lidio marketplace payment sandbox probe', () => {
           processType: 'sales',
           useInstallment: false,
           useLoyaltyPoints: false,
+          newCard: {
+            threeDSecureMode: 'Mandatory',
+            useIVRForCardEntry: false,
+          },
         },
       },
     });
     expect(body.paymentInstrumentInfo.card.cardInfo).toBeUndefined();
+    expect(body.paymentInstrumentInfo.card.newCard.cardNumber).toBeUndefined();
+    expect(body.paymentInstrumentInfo.card.newCard.cardHolderName).toBeUndefined();
+    expect(body.paymentInstrumentInfo.card.newCard.lastMonth).toBeUndefined();
+    expect(body.paymentInstrumentInfo.card.newCard.lastYear).toBeUndefined();
+    expect(body.paymentInstrumentInfo.card.newCard.cvv).toBeUndefined();
     expect(body.basketItems).toHaveLength(1);
     expect(body.basketItems[0]).toMatchObject({
       quantity: 1,
