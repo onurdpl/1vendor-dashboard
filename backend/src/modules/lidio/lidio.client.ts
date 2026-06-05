@@ -2,6 +2,38 @@ import type { LidioReadOnlyConfig } from './lidio.config.js';
 
 type JsonRecord = Record<string, unknown>;
 
+export type CreateSubsellerRequest = JsonRecord & {
+  isActive?: boolean;
+  companyName: string;
+  companyType: 'Individual' | 'SoleProp' | 'Limited' | 'JointStock';
+  taxOffice?: string;
+  vkntckn?: string;
+  registeredCountry?: string;
+  registeredCity?: string;
+  registeredDistrict?: string;
+  registeredAddress?: string;
+  subsellerIdGivenByMerchant: string;
+  contactName?: string;
+  contactPhone?: string;
+  contactEmail?: string;
+  virtualProductPermission?: boolean;
+  merchantPanelUse?: boolean;
+  chargebacksOnSubseller?: boolean;
+  payOutNotAllowed?: boolean;
+  payOutPreventionReason?: 'NotBlocked' | 'InvalidSignature' | 'UnexpectedTotalAmount' | 'Manual' | 'MerchantRequest' | 'NegativeBalance' | 'NegativeMarketPlaceBalance';
+  payOutBlockageAmount?: number;
+  subsellerProfileId: number;
+  acceptExistingMatchWarning?: boolean;
+  clientType?: 'Web' | 'Android' | 'IOS' | 'Unknown' | 'MobileWeb';
+  merchantUrl?: string;
+  clientIp?: string;
+  clientUserAgent?: string;
+  subsellerContractApproval?: {
+    timestamp: string;
+    ipAddress: string;
+  };
+};
+
 type LidioRequestOptions = {
   path: string;
   body?: JsonRecord;
@@ -99,5 +131,12 @@ export class LidioHttpClient {
         bodyKeys: getBodyKeys(body),
       },
     };
+  }
+
+  async createSubseller(body: CreateSubsellerRequest): Promise<LidioHttpResponse> {
+    return this.request({
+      path: '/CreateSubseller',
+      body,
+    });
   }
 }

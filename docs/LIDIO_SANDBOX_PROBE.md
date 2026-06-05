@@ -19,6 +19,7 @@ LIDIO_AUTHORIZATION_TOKEN=<secret>
 LIDIO_MERCHANT_KEY=<secret>
 LIDIO_API_PASSWORD=<secret>
 LIDIO_SUBSELLER_PROFILE_ID=3
+LIDIO_ALLOW_WRITE_PROBE=false
 ```
 
 Notes:
@@ -35,6 +36,7 @@ Notes:
 - `LIDIO_SUBSELLER_PROFILE_ID=3` is support-confirmed.
 - The first read-only probe validates only `LIDIO_ENABLED`, `LIDIO_BASE_URL`, `LIDIO_MERCHANT_CODE`, and `LIDIO_AUTHORIZATION_TOKEN`.
 - `LIDIO_MERCHANT_KEY` and `LIDIO_API_PASSWORD` may remain empty until ReturnURL and notification validation probes are approved.
+- `LIDIO_ALLOW_WRITE_PROBE=true` is required only for the opt-in `CreateSubseller` sandbox write probe.
 
 ## Confirmed Read-Only Probe Result
 - Probe date: 2026-06-05.
@@ -89,6 +91,11 @@ Implications:
 - It must use test-only vendor data.
 - It must not create payments or payouts.
 - It must be implemented as a separate opt-in command.
+- Command: `npm run backend:lidio:create-subseller-probe`.
+- The command exits before sending any request unless `LIDIO_ALLOW_WRITE_PROBE=true`.
+- It creates only sandbox test subseller data and must not be used in production.
+- It does not store the returned subseller in the database.
+- Output must include the endpoint, HTTP status, Lidio `result` / `resultMessage`, returned `subsellerId` when present, and `writesPerformed=true` only if the request was actually sent.
 - It must not call `/ProcessPayment`, `/StartHostedPaymentProcess`, `/Release`, `/Unrelease`, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout`.
 - It should run only after an explicit approval for a mutating sandbox vendor-onboarding probe.
 
