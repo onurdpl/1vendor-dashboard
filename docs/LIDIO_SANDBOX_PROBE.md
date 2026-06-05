@@ -36,6 +36,23 @@ Notes:
 - The first read-only probe validates only `LIDIO_ENABLED`, `LIDIO_BASE_URL`, `LIDIO_MERCHANT_CODE`, and `LIDIO_AUTHORIZATION_TOKEN`.
 - `LIDIO_MERCHANT_KEY` and `LIDIO_API_PASSWORD` may remain empty until ReturnURL and notification validation probes are approved.
 
+## Confirmed Read-Only Probe Result
+- Probe date: 2026-06-05.
+- Base URL: `https://test.lidio.com/api`.
+- Endpoint called: `POST /GetSubsellerList`.
+- Request headers included `MerchantCode: SPORGYM` and `Authorization: MxS2S <token>`.
+- HTTP status: `200`.
+- Response shape: `{ result: "Success", resultMessage: null, subsellerList: [] }`.
+- `writesPerformed=false`.
+- No Lidio error message was returned.
+- MerchantCode plus `MxS2S` token authentication is confirmed for the read-only sandbox probe.
+- No payment, refund, release, unrelease, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout` call was made.
+
+Implications:
+- Sandbox base URL `https://test.lidio.com/api` is confirmed.
+- Read-only authentication probe passed.
+- Empty `subsellerList` means no API-visible subsellers were returned in this account/scope. Do not infer that subseller creation failed or that marketplace is inactive.
+
 ## Safe Read-Only Probe Order
 1. Validate environment presence only.
    - Confirm required variables exist.
@@ -67,11 +84,18 @@ Notes:
 - Any card data collection or card tokenization
 - Any route, database, checkout, shipping, payout, or finance-ledger implementation
 
+## Next Planned PoC: CreateSubseller Sandbox Probe
+- `CreateSubseller` is not read-only.
+- It must use test-only vendor data.
+- It must not create payments or payouts.
+- It must be implemented as a separate opt-in command.
+- It must not call `/ProcessPayment`, `/StartHostedPaymentProcess`, `/Release`, `/Unrelease`, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout`.
+- It should run only after an explicit approval for a mutating sandbox vendor-onboarding probe.
+
 ## Unresolved Questions
-- Does the active sandbox accept `POST /GetSubsellerList` with an empty `GetSubsellerListRequest` body exactly as the OpenAPI schema indicates?
 - What is the paymentNotification `parameterhash` formula?
 - What is the ReturnURL hash formula for Sporgym's configured flow?
 - Are sandbox marketplace APIs active for `SPORGYM`?
 
 ## Readiness Gate
-Only after the read-only `/GetSubsellerList` probe succeeds should later sandbox steps be considered. Any later mutating or payment-adjacent operation must be separately approved and documented before execution.
+The read-only `/GetSubsellerList` probe has succeeded. Any later mutating or payment-adjacent operation must be separately approved and documented before execution.

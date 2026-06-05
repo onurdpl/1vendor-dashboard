@@ -29,7 +29,8 @@ The schema includes these marketplace-related paths:
 - Lidio support confirmed `MerchantKey`, `ApiPassword`, and an authorization credential exist.
 - Lidio support confirmed `MerchantKey` validates ReturnURL hash.
 - Lidio support confirmed `ApiPassword` validates payment notification `parameterhash`.
-- Unknown: the exact sandbox base URL. The OpenAPI `servers` entry only contains `/api`.
+- Sandbox base URL `https://test.lidio.com/api` is confirmed by successful read-only sandbox probe.
+- `POST /GetSubsellerList` succeeded with `MerchantCode: SPORGYM` and `Authorization: MxS2S <token>`.
 - Unknown: the exact `MxS2S` token acquisition endpoint.
 - Unknown: token expiry and token rotation behavior.
 - Unknown: whether the provided authorization credential is a static token or an exchange credential.
@@ -287,10 +288,24 @@ Expected variables for a future sandbox probe:
 - `LIDIO_SUBSELLER_PROFILE_ID`
 
 Known values confirmed by Lidio support:
+- `LIDIO_BASE_URL=https://test.lidio.com/api`
 - `LIDIO_MERCHANT_CODE=SPORGYM`
 - `LIDIO_SUBSELLER_PROFILE_ID=3`
 
-Unknown: exact sandbox base URL and exact `MxS2S` token creation inputs until Lidio provides the sandbox credential contract.
+Unknown: exact `MxS2S` token creation inputs, token lifetime, and rotation behavior until Lidio provides the full sandbox credential contract.
+
+## Confirmed Read-Only Sandbox Probe
+- Probe date: 2026-06-05.
+- Base URL: `https://test.lidio.com/api`.
+- Endpoint: `POST /GetSubsellerList`.
+- Authentication: `MerchantCode: SPORGYM` plus `Authorization: MxS2S <token>`.
+- HTTP status: `200`.
+- Response shape: `{ result: "Success", resultMessage: null, subsellerList: [] }`.
+- `writesPerformed=false`.
+- No Lidio error message was returned.
+- No payment, refund, release, unrelease, `/DistributeSubsellerPayout`, `/BalanceTransfer`, or `/StartPayout` call was made.
+- Implication: sandbox base URL and read-only `MxS2S` authentication are confirmed for this account/scope.
+- The empty `subsellerList` only means no API-visible subsellers were returned in this account/scope. Do not infer that subseller creation failed or that marketplace is inactive.
 
 ## Shopify Implications For Sporgym
 - Shopify variant/product mapping can map to Sporgym vendor/subseller records.
@@ -321,7 +336,7 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 
 | Topic | Current Evidence | Risk | Blocking? | Required From Lidio |
 |---------|---------|---------|---------|---------|
-| Sandbox Base URL | OpenAPI `servers` only shows `/api`. Support confirmed Sporgym credentials exist, but not the base URL. | Cannot run deterministic sandbox probes. | Blocking | Exact sandbox base URL, production base URL, and whether `/api` is included in the base. |
+| Sandbox Base URL | Read-only probe confirmed `https://test.lidio.com/api`; `POST /GetSubsellerList` returned HTTP 200. | Production base URL still unknown. | Important | Production base URL and whether `/api` is included in the production base. |
 | MxS2S token creation flow | Support confirmed server-to-server token type and header format: `Authorization: MxS2S <token>`. OpenAPI descriptions mention `MxC2S` for `/CreateAPIKey` and `MxM2S` for `/CreateAuthKey`. | Wrong token acquisition flow could block all server-side calls. | Blocking | Exact token endpoint, request body, required headers, credential inputs, token lifetime, rotation behavior, and whether the authorization credential is static or exchange-based. |
 | `parameterhash` formula | Support confirmed `ApiPassword` validates payment notification `parameterhash`. OpenAPI confirms ReturnURL hash but not notification hash formula. | Notifications cannot be safely trusted without verification. | Blocking | Exact canonical string, included fields, ordering, separators, hash algorithm, encoding, and sample payload/hash. |
 | Notification signature model | `FCPaymentNotification` exists, but no signature field was confirmed in that schema. Support confirmed `parameterhash` exists for payment notifications. | Callback ingestion could accept forged or replayed events if verification is wrong. | Blocking | Whether `parameterhash` is the only notification signature, where it appears, replay protection guidance, and failure handling expectations. |
@@ -346,7 +361,7 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 
 | Capability | Status | Evidence | Remaining Gap |
 |---------|---------|---------|---------|
-| Vendor onboarding | PARTIALLY CONFIRMED | `/CreateSubseller`, `/UpdateSubseller`, `/GetSubsellerList`, Lidio-assigned `subsellerId`, merchant-provided `subsellerIdGivenByMerchant`, and support-confirmed `SubsellerProfileId=3`. | Sandbox base URL, `MxS2S` auth flow, required production KYB fields, and activation rules. |
+| Vendor onboarding | PARTIALLY CONFIRMED | `/CreateSubseller`, `/UpdateSubseller`, `/GetSubsellerList`, Lidio-assigned `subsellerId`, merchant-provided `subsellerIdGivenByMerchant`, support-confirmed `SubsellerProfileId=3`, and successful read-only `/GetSubsellerList` auth probe. | Mutating `CreateSubseller` sandbox result, required production KYB fields, and activation rules. |
 | Vendor mapping | PARTIALLY CONFIRMED | Lidio returns both `subsellerId` and `subsellerIdGivenByMerchant`; Sporgym backend can remain source of truth for vendor-to-subseller mapping. | No runtime mapping has been implemented; Shopify compatibility remains unknown. |
 | Basket item allocation | CONFIRMED | `PaymentRequest`, `StartHostedPaymentProcessRequest`, and `StartHostedPrePaymentRequest` accept `basketItems[]`; each `BasketItem` can include `marketplace`. | Production multi-subseller limits still need support confirmation. |
 | Split payment modeling | PARTIALLY CONFIRMED | `BasketItemMPDetails` requires `subsellerId` and `itemTotalPrice`, with optional `subsellerPayoutAmount`; FCPayback records expose marketplace commission fields. | Exact commission calculation formula remains unknown. |
@@ -360,18 +375,23 @@ Lidio OpenAPI schema confirms item-level marketplace primitives. The key schema 
 Document only. No implementation is included in this discovery.
 
 ## PoC-1: MxS2S Authentication
-- Confirm sandbox base URL.
-- Create or obtain an `MxS2S` token using the support-confirmed Sporgym credentials.
-- Verify sandbox accepts the support-confirmed `Authorization: MxS2S <token>` header without calling payment execution endpoints.
+- Status: PASSED for read-only sandbox authentication.
+- Confirmed sandbox base URL: `https://test.lidio.com/api`.
+- Verified sandbox accepts `MerchantCode: SPORGYM` and `Authorization: MxS2S <token>` on `POST /GetSubsellerList`.
+- No payment execution endpoint was called.
 
 ## PoC-2: CreateSubseller
-- Create one sandbox subseller using `CreateSubsellerRequest`.
-- Use support-confirmed `SubsellerProfileId=3`.
-- Record the Lidio-assigned `subsellerId` and merchant-provided `subsellerIdGivenByMerchant`.
+- Planned next PoC.
+- This is not read-only.
+- It must use test-only vendor data.
+- It must not create payments or payouts.
+- It must be implemented as a separate opt-in command.
+- If approved later, create one sandbox subseller using `CreateSubsellerRequest`, use support-confirmed `SubsellerProfileId=3`, and record the Lidio-assigned `subsellerId` plus merchant-provided `subsellerIdGivenByMerchant`.
 
 ## PoC-3: GetSubsellerList
-- Query `/GetSubsellerList`.
-- Confirm the created sandbox subseller is returned with both Lidio and merchant identifiers.
+- Status: PASSED for empty read-only list/auth probe.
+- `POST /GetSubsellerList` returned `{ result: "Success", resultMessage: null, subsellerList: [] }`.
+- After a separately approved `CreateSubseller` sandbox PoC, query `/GetSubsellerList` again and confirm the created sandbox subseller is returned with both Lidio and merchant identifiers.
 
 ## PoC-4: PaymentRequest With `BasketItem.marketplace`
 - In sandbox only, prepare a payment request containing multiple `basketItems[]`, each with `marketplace.subsellerId`, `marketplace.itemTotalPrice`, and optional `marketplace.subsellerPayoutAmount`.
@@ -391,7 +411,7 @@ Document only. No implementation is included in this discovery.
 
 # Questions To Send To Lidio
 
-1. What are the exact sandbox and production base URLs, and should requests append `/api`?
+1. What is the exact production base URL, and should production requests append `/api`?
 2. What is the exact `MxS2S` token acquisition flow, including endpoint, request body, required headers, credential inputs, token lifetime, rotation behavior, and whether the authorization credential is static or exchange-based?
 3. What is the exact payment notification `parameterhash` formula, including fields, ordering, separators, algorithm, encoding, and one sample payload/hash?
 4. Is `parameterhash` the complete notification signature model, and what replay protection or timestamp/idempotency checks should merchants apply?
