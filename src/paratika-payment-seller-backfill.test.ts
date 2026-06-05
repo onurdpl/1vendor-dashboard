@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppEnv } from '../backend/src/config/env.js';
 
 const seedVendorPaymentSellerMappingsMock = vi.hoisted(() => vi.fn());
@@ -30,6 +30,7 @@ function buildAppEnv(overrides: Partial<AppEnv> = {}) {
   return {
     JWT_SECRET: 'test-secret',
     JWT_EXPIRES_IN: '1h',
+    PARATIKA_MARKETPLACE_MODEL: 'SELLER_PAYMENT_AMOUNT',
     ...overrides,
   } as AppEnv;
 }
@@ -139,6 +140,7 @@ function buildSessionTokenPreviewResult() {
     writesPerformed: false,
     provider: 'PARATIKA',
     model: 'seller_payment_amount_based',
+    marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
     shippingDeductionPolicy: 'deferred_not_applied',
     paymentReference: 'SPORGYM-SHOPIFY-order-100',
     sessionTokenPayloadPreview: {
@@ -192,6 +194,12 @@ describe('Paratika payment seller mapping backfill probe', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
+    process.env = { ...originalEnv };
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
     process.env = { ...originalEnv };
   });
 
@@ -300,6 +308,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
       writesPerformed: false,
       provider: 'PARATIKA',
       model: 'seller_payment_amount_based',
+      marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
       shippingDeductionPolicy: 'deferred_not_applied',
       paymentReference: 'SPORGYM-SHOPIFY-order-100',
       sessionTokenPayloadPreview: {
@@ -328,6 +337,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
     );
     expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).toHaveBeenCalledWith('order-100', {
       returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
     });
     expect(seedVendorPaymentSellerMappingsMock).not.toHaveBeenCalled();
     expect(JSON.stringify(result).toLowerCase()).not.toContain('secret');
@@ -373,6 +383,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
     process.env.PARATIKA_TEST_MODE = 'true';
     process.env.PARATIKA_PROBE_DRY_RUN = 'false';
     process.env.PARATIKA_PROBE_CONFIRM = 'CREATE_SESSIONTOKEN_TEST';
+    process.env.PARATIKA_MARKETPLACE_MODEL = 'SELLER_PAYMENT_AMOUNT';
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const handler = registerEnvCheckRoute(
@@ -404,6 +415,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
           PARATIKA_TEST_MODE: true,
           PARATIKA_PROBE_DRY_RUN: true,
           PARATIKA_PROBE_CONFIRM: true,
+          PARATIKA_MARKETPLACE_MODEL: true,
         },
         apiUrlHost: 'vpos.paratika.example',
         merchant: '100000123',
@@ -411,6 +423,7 @@ describe('Paratika payment seller mapping backfill probe', () => {
         testMode: true,
         dryRun: false,
         confirmPresent: true,
+        marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
         runtime: expect.objectContaining({
           gitCommit: 'abcdef123456',
           nodeEnv: undefined,
@@ -498,6 +511,8 @@ describe('Paratika payment seller mapping backfill probe', () => {
         provider: 'PARATIKA',
         mode: 'sessiontoken_live_probe_dry_run',
         action: 'SESSIONTOKEN',
+        model: 'seller_payment_amount_based',
+        marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
         externalApiCallAttempted: false,
         credentialValuesOmitted: true,
       }),
@@ -517,6 +532,67 @@ describe('Paratika payment seller mapping backfill probe', () => {
     expect(JSON.stringify(result)).not.toContain('MERCHANTUSER');
     expect(JSON.stringify(result)).not.toContain('MERCHANTPASSWORD');
     expect(JSON.stringify(result)).not.toContain('merchant-password-secret');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('passes configured marketplace model to SESSIONTOKEN live probe preview', async () => {
+    process.env.ADMIN_PROBES_ENABLED = 'true';
+    const basePreview = buildSessionTokenPreviewResult();
+    buildParatikaSessionTokenPayloadPreviewForOrderMock.mockResolvedValue({
+      ...basePreview,
+      model: 'seller_commission_amount_based',
+      marketplaceModel: 'SELLER_COMMISSION_AMOUNT',
+      sessionTokenPayloadPreview: {
+        ACTION: basePreview.sessionTokenPayloadPreview.ACTION,
+        AMOUNT: basePreview.sessionTokenPayloadPreview.AMOUNT,
+        CURRENCY: basePreview.sessionTokenPayloadPreview.CURRENCY,
+        MERCHANTPAYMENTID: basePreview.sessionTokenPayloadPreview.MERCHANTPAYMENTID,
+        RETURNURL: basePreview.sessionTokenPayloadPreview.RETURNURL,
+        CUSTOMER: basePreview.sessionTokenPayloadPreview.CUSTOMER,
+        CUSTOMERNAME: basePreview.sessionTokenPayloadPreview.CUSTOMERNAME,
+        CUSTOMEREMAIL: basePreview.sessionTokenPayloadPreview.CUSTOMEREMAIL,
+        CUSTOMERIP: basePreview.sessionTokenPayloadPreview.CUSTOMERIP,
+        CUSTOMERUSERAGENT: basePreview.sessionTokenPayloadPreview.CUSTOMERUSERAGENT,
+        CUSTOMERPHONE: basePreview.sessionTokenPayloadPreview.CUSTOMERPHONE,
+        ORDERITEMS: JSON.stringify([
+          {
+            productCode: 'variant-sporjinal-1',
+            name: 'Sporjinal Shoe',
+            description: 'SPJ-SKU-1',
+            quantity: 1,
+            amount: '60.00',
+            sellerID: 'Sporjinal',
+            sellerCommissionAmount: '6.00',
+          },
+        ]),
+        TOTALSELLERCOMMISSIONAMOUNT: '6.00',
+        SESSIONTYPE: basePreview.sessionTokenPayloadPreview.SESSIONTYPE,
+      },
+    });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const handler = registerLiveProbeRoute(
+      buildLiveProbeEnv({
+        PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_AMOUNT',
+      }),
+    );
+    const reply = buildReply();
+
+    const result = await handler?.({ authUser: { role: 'admin' }, params: { orderId: 'order-100' } }, reply);
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        writesPerformed: false,
+        model: 'seller_commission_amount_based',
+        marketplaceModel: 'SELLER_COMMISSION_AMOUNT',
+      }),
+    );
+    expect(buildParatikaSessionTokenPayloadPreviewForOrderMock).toHaveBeenCalledWith('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      marketplaceModel: 'SELLER_COMMISSION_AMOUNT',
+    });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
@@ -599,6 +675,8 @@ describe('Paratika payment seller mapping backfill probe', () => {
         writesPerformed: true,
         provider: 'PARATIKA',
         action: 'SESSIONTOKEN',
+        model: 'seller_payment_amount_based',
+        marketplaceModel: 'SELLER_PAYMENT_AMOUNT',
         httpStatus: 200,
         responseCode: '00',
         responseMsg: 'Approved',

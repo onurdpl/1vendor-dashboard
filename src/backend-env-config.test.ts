@@ -56,6 +56,7 @@ describe('backend env shipping provider gates', () => {
       PARATIKA_TEST_MODE: 'true',
       PARATIKA_PROBE_DRY_RUN: 'false',
       PARATIKA_PROBE_CONFIRM: 'CREATE_SESSIONTOKEN_TEST',
+      PARATIKA_MARKETPLACE_MODEL: 'SELLER_COMMISSION_AMOUNT',
     });
 
     const env = loadEnv();
@@ -68,6 +69,27 @@ describe('backend env shipping provider gates', () => {
     expect(env.PARATIKA_TEST_MODE).toBe(true);
     expect(env.PARATIKA_PROBE_DRY_RUN).toBe(false);
     expect(env.PARATIKA_PROBE_CONFIRM).toBe('CREATE_SESSIONTOKEN_TEST');
+    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_COMMISSION_AMOUNT');
+  });
+
+  it('defaults Paratika marketplace model to seller payment amount', () => {
+    resetEnv({
+      PARATIKA_MARKETPLACE_MODEL: undefined,
+    });
+
+    const env = loadEnv();
+
+    expect(env.PARATIKA_MARKETPLACE_MODEL).toBe('SELLER_PAYMENT_AMOUNT');
+  });
+
+  it('rejects unsupported Paratika marketplace models', () => {
+    resetEnv({
+      PARATIKA_MARKETPLACE_MODEL: 'UNKNOWN_MODEL',
+    });
+
+    expect(() => loadEnv()).toThrow(
+      'Invalid PARATIKA_MARKETPLACE_MODEL value. Expected SELLER_PAYMENT_AMOUNT, SELLER_COMMISSION_AMOUNT, or SELLER_COMMISSION_RATE.',
+    );
   });
 
   it('enables live Kargo execution only when the global and provider gates are both true', () => {

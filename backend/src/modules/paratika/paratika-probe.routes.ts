@@ -81,6 +81,7 @@ function buildParatikaEnvDiagnostic(env: AppEnv) {
       PARATIKA_TEST_MODE: hasEnv('PARATIKA_TEST_MODE'),
       PARATIKA_PROBE_DRY_RUN: hasEnv('PARATIKA_PROBE_DRY_RUN'),
       PARATIKA_PROBE_CONFIRM: hasEnv('PARATIKA_PROBE_CONFIRM'),
+      PARATIKA_MARKETPLACE_MODEL: hasEnv('PARATIKA_MARKETPLACE_MODEL'),
     },
     apiUrlHost: getUrlHost(env.PARATIKA_API_URL),
     merchant: readConfiguredValue(env.PARATIKA_MERCHANT),
@@ -88,6 +89,7 @@ function buildParatikaEnvDiagnostic(env: AppEnv) {
     testMode: env.PARATIKA_TEST_MODE === true,
     dryRun: env.PARATIKA_PROBE_DRY_RUN !== false,
     confirmPresent: Boolean(readConfiguredValue(env.PARATIKA_PROBE_CONFIRM)),
+    marketplaceModel: env.PARATIKA_MARKETPLACE_MODEL,
     runtime: {
       uptimeSeconds: Math.max(0, Math.round(process.uptime())),
       gitCommit: getRuntimeCommit(),
@@ -299,6 +301,7 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
 
       const result = await buildParatikaSessionTokenPayloadPreviewForOrder(request.params.orderId, {
         returnUrl: env.PARATIKA_RETURN_URL,
+        marketplaceModel: env.PARATIKA_MARKETPLACE_MODEL,
       });
 
       return reply.code(result.ok ? 200 : 422).send(result);
@@ -346,6 +349,7 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
 
       const preview = await buildParatikaSessionTokenPayloadPreviewForOrder(request.params.orderId, {
         returnUrl: env.PARATIKA_RETURN_URL,
+        marketplaceModel: env.PARATIKA_MARKETPLACE_MODEL,
       });
 
       if (!preview.ok || !preview.sessionTokenPayloadPreview) {
@@ -355,6 +359,8 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           provider: 'PARATIKA',
           mode: 'sessiontoken_live_probe',
           previewOk: preview.ok,
+          model: preview.model,
+          marketplaceModel: preview.marketplaceModel,
           paymentReference: preview.paymentReference,
           shippingDeductionPolicy: preview.shippingDeductionPolicy,
           itemBreakdown: preview.itemBreakdown,
@@ -385,7 +391,8 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           provider: 'PARATIKA',
           mode: 'sessiontoken_live_probe_dry_run',
           action: 'SESSIONTOKEN',
-          model: 'seller_payment_amount_based',
+          model: preview.model,
+          marketplaceModel: preview.marketplaceModel,
           paymentReference: preview.paymentReference,
           payloadKeys: sanitizedPayloadKeys(outboundPayload),
           orderItemsPreview: parseOrderItemsPreview(preview.sessionTokenPayloadPreview.ORDERITEMS),
@@ -413,7 +420,8 @@ export function registerParatikaProbeRoutes(app: FastifyInstance, env: AppEnv) {
           provider: 'PARATIKA',
           mode: 'sessiontoken_live_probe',
           action: 'SESSIONTOKEN',
-          model: 'seller_payment_amount_based',
+          model: preview.model,
+          marketplaceModel: preview.marketplaceModel,
           paymentReference: preview.paymentReference,
           httpStatus: response.status,
           responseCode: sanitized.responseCode,

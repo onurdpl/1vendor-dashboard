@@ -2,6 +2,12 @@ import { PaymentProvider, type Prisma } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { calculateVendorPayout } from '../finance/payout-calculator.js';
 import { resolveVendorPaymentSellerId, VendorPaymentSellerMappingError } from '../payments/vendor-payment-seller.service.js';
+import {
+  DEFAULT_PARATIKA_MARKETPLACE_MODEL,
+  paratikaMarketplaceModelName,
+  type ParatikaMarketplaceModel,
+  type ParatikaMarketplaceModelName,
+} from './paratika-marketplace-model.js';
 
 type JsonRecord = Record<string, unknown>;
 
@@ -12,7 +18,9 @@ type ParatikaOrderItemPreview = {
   quantity: number;
   amount: string;
   sellerID: string;
-  sellerPaymentAmount: string;
+  sellerPaymentAmount?: string;
+  sellerCommissionAmount?: string;
+  sellerCommission?: string;
   sku: string | null;
   vendorId: string;
   shopifyLineItemId: string;
@@ -26,7 +34,8 @@ export type ParatikaSessionTokenPayloadPreview = {
   ok: boolean;
   writesPerformed: false;
   provider: 'PARATIKA';
-  model: 'seller_payment_amount_based';
+  model: ParatikaMarketplaceModelName;
+  marketplaceModel: ParatikaMarketplaceModel;
   shippingDeductionPolicy: typeof PARATIKA_SHIPPING_DEDUCTION_POLICY;
   paymentReference: string | null;
   sessionTokenPayloadPreview: ParatikaPayloadPreview | null;
@@ -39,6 +48,7 @@ export type ParatikaSessionTokenPayloadPreview = {
 
 type BuildPreviewOptions = {
   returnUrl?: string | null;
+  marketplaceModel?: ParatikaMarketplaceModel | null;
 };
 
 const MONEY_PATTERN = /^(0|[1-9]\d*)(\.\d{1,2})?$/;
@@ -223,12 +233,26 @@ function buildPaymentReference(order: SelectedOrder) {
   return `SPORGYM-SHOPIFY-${order.sourceShopifyOrderId}`;
 }
 
-function buildEmptyResult(validationErrors: string[], itemBreakdown: ParatikaOrderItemPreview[] = []): ParatikaSessionTokenPayloadPreview {
+function formatCommissionRate(value: number) {
+  if (!Number.isFinite(value) || value < 0) {
+    return null;
+  }
+
+  const rounded = Math.round(value * 100) / 100;
+  return Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(2).replace(/0+$/, '').replace(/\.$/, '');
+}
+
+function buildEmptyResult(
+  validationErrors: string[],
+  itemBreakdown: ParatikaOrderItemPreview[] = [],
+  marketplaceModel: ParatikaMarketplaceModel = DEFAULT_PARATIKA_MARKETPLACE_MODEL,
+): ParatikaSessionTokenPayloadPreview {
   return {
     ok: false,
     writesPerformed: false,
     provider: 'PARATIKA',
-    model: 'seller_payment_amount_based',
+    model: paratikaMarketplaceModelName(marketplaceModel),
+    marketplaceModel,
     shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
     paymentReference: null,
     sessionTokenPayloadPreview: null,
@@ -242,6 +266,7 @@ function buildEmptyResult(validationErrors: string[], itemBreakdown: ParatikaOrd
 
 async function buildOrderItemPreview(
   lineItem: SelectedOrder['lineItems'][number],
+  marketplaceModel: ParatikaMarketplaceModel,
   validationErrors: string[],
 ): Promise<ParatikaOrderItemPreview | null> {
   const vendorId = lineItem.originalVendorId?.trim().toLowerCase() ?? '';
@@ -306,25 +331,125 @@ async function buildOrderItemPreview(
       fixedShippingFee: null,
     },
   });
-  const sellerPaymentAmountCents = parseMoneyToCents(payout.estimatedPayout.toFixed(2));
-  if (sellerPaymentAmountCents === null || sellerPaymentAmountCents < 0) {
-    validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount.`);
-    return null;
-  }
 
   const fallbackName = lineItem.sku ?? productCode;
-  return {
+  const itemBase = {
     productCode,
     name: lineItem.title?.trim() || fallbackName,
     description: lineItem.sku?.trim() || productCode,
     quantity,
     amount: centsToMoney(amountCents),
     sellerID,
-    sellerPaymentAmount: centsToMoney(sellerPaymentAmountCents),
     sku: lineItem.sku,
     vendorId,
     shopifyLineItemId: lineItem.sourceLineItemId,
   };
+
+  if (marketplaceModel === 'SELLER_COMMISSION_AMOUNT') {
+    const sellerCommissionAmountCents = parseMoneyToCents((payout.commission + payout.commissionVat).toFixed(2));
+    if (sellerCommissionAmountCents === null || sellerCommissionAmountCents < 0) {
+      validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerCommissionAmount.`);
+      return null;
+    }
+
+    return {
+      ...itemBase,
+      sellerCommissionAmount: centsToMoney(sellerCommissionAmountCents),
+    };
+  }
+
+  if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
+    const sellerCommission = formatCommissionRate(commissionPercent);
+    if (!sellerCommission) {
+      validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerCommission.`);
+      return null;
+    }
+
+    return {
+      ...itemBase,
+      sellerCommission,
+    };
+  }
+
+  const sellerPaymentAmountCents = parseMoneyToCents(payout.estimatedPayout.toFixed(2));
+  if (sellerPaymentAmountCents === null || sellerPaymentAmountCents < 0) {
+    validationErrors.push(`Line item ${lineItem.sourceLineItemId} cannot compute sellerPaymentAmount.`);
+    return null;
+  }
+
+  return {
+    ...itemBase,
+    sellerPaymentAmount: centsToMoney(sellerPaymentAmountCents),
+  };
+}
+
+function sumItemMoney(items: ParatikaOrderItemPreview[], field: 'sellerPaymentAmount' | 'sellerCommissionAmount') {
+  let total = 0;
+  for (const item of items) {
+    const cents = parseMoneyToCents(item[field]);
+    if (cents === null) {
+      return null;
+    }
+    total += cents;
+  }
+
+  return total;
+}
+
+function buildMarketplaceTotalFields(
+  marketplaceModel: ParatikaMarketplaceModel,
+  items: ParatikaOrderItemPreview[],
+  validationErrors: string[],
+): Record<string, string> {
+  if (marketplaceModel === 'SELLER_COMMISSION_AMOUNT') {
+    const sellerCommissionAmountTotalCents = sumItemMoney(items, 'sellerCommissionAmount');
+    if (sellerCommissionAmountTotalCents === null || sellerCommissionAmountTotalCents < 0) {
+      validationErrors.push('TOTALSELLERCOMMISSIONAMOUNT is invalid.');
+      return {};
+    }
+
+    return {
+      TOTALSELLERCOMMISSIONAMOUNT: centsToMoney(sellerCommissionAmountTotalCents),
+    };
+  }
+
+  if (marketplaceModel === 'SELLER_COMMISSION_RATE') {
+    const commissionRates = [...new Set(items.map((item) => item.sellerCommission).filter((value): value is string => Boolean(value)))];
+    if (commissionRates.length !== 1) {
+      validationErrors.push('TOTALSELLERCOMMISSION requires a single commission rate across ORDERITEMS.');
+      return {};
+    }
+
+    return {
+      TOTALSELLERCOMMISSION: commissionRates[0],
+    };
+  }
+
+  const sellerPaymentTotalCents = sumItemMoney(items, 'sellerPaymentAmount');
+  if (sellerPaymentTotalCents === null || sellerPaymentTotalCents < 0) {
+    validationErrors.push('TOTALSELLERPAYMENTAMOUNT is invalid.');
+    return {};
+  }
+
+  return {
+    TOTALSELLERPAYMENTAMOUNT: centsToMoney(sellerPaymentTotalCents),
+  };
+}
+
+function buildOrderItemsPayload(items: ParatikaOrderItemPreview[], marketplaceModel: ParatikaMarketplaceModel) {
+  return items.map((item) => ({
+    productCode: item.productCode,
+    name: item.name,
+    description: item.description,
+    quantity: item.quantity,
+    amount: item.amount,
+    sellerID: item.sellerID,
+    ...(marketplaceModel === 'SELLER_COMMISSION_AMOUNT'
+      ? { sellerCommissionAmount: item.sellerCommissionAmount ?? '' }
+      : marketplaceModel === 'SELLER_COMMISSION_RATE'
+        ? { sellerCommission: item.sellerCommission ?? '' }
+        : { sellerPaymentAmount: item.sellerPaymentAmount ?? '' }),
+  }));
 }
 
 function validateRequiredCustomerFields(order: SelectedOrder, options: BuildPreviewOptions, validationErrors: string[]) {
@@ -373,9 +498,10 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
   orderId: string,
   options: BuildPreviewOptions = {},
 ): Promise<ParatikaSessionTokenPayloadPreview> {
+  const marketplaceModel = options.marketplaceModel ?? DEFAULT_PARATIKA_MARKETPLACE_MODEL;
   const order = await findOrder(orderId);
   if (!order) {
-    return buildEmptyResult([`Shopify order ${orderId} was not found.`]);
+    return buildEmptyResult([`Shopify order ${orderId} was not found.`], [], marketplaceModel);
   }
 
   const validationErrors: string[] = [];
@@ -383,7 +509,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
   const items: ParatikaOrderItemPreview[] = [];
 
   for (const lineItem of order.lineItems) {
-    const item = await buildOrderItemPreview(lineItem, validationErrors);
+    const item = await buildOrderItemPreview(lineItem, marketplaceModel, validationErrors);
     if (item) {
       items.push(item);
     }
@@ -394,32 +520,21 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
   }
 
   const orderItemsTotalCents = items.reduce((sum, item) => sum + (parseMoneyToCents(item.amount) ?? 0), 0);
-  const sellerPaymentTotalCents = items.reduce((sum, item) => sum + (parseMoneyToCents(item.sellerPaymentAmount) ?? 0), 0);
   const orderTotalCents = parseMoneyToCents(order.totalPrice);
   if (orderTotalCents !== null && orderTotalCents !== orderItemsTotalCents) {
     validationErrors.push('AMOUNT does not match sum of ORDERITEMS[].amount.');
   }
-  if (sellerPaymentTotalCents < 0) {
-    validationErrors.push('TOTALSELLERPAYMENTAMOUNT is invalid.');
-  }
+  const marketplaceTotalFields = buildMarketplaceTotalFields(marketplaceModel, items, validationErrors);
 
   if (validationErrors.length) {
     return {
-      ...buildEmptyResult(validationErrors, items),
+      ...buildEmptyResult(validationErrors, items, marketplaceModel),
       paymentReference: buildPaymentReference(order),
     };
   }
 
   const amount = centsToMoney(orderTotalCents ?? orderItemsTotalCents);
-  const orderItems = items.map((item) => ({
-    productCode: item.productCode,
-    name: item.name,
-    description: item.description,
-    quantity: item.quantity,
-    amount: item.amount,
-    sellerID: item.sellerID,
-    sellerPaymentAmount: item.sellerPaymentAmount,
-  }));
+  const orderItems = buildOrderItemsPayload(items, marketplaceModel);
 
   const sessionTokenPayloadPreview: ParatikaPayloadPreview = {
     ACTION: 'SESSIONTOKEN',
@@ -434,7 +549,7 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
     CUSTOMERUSERAGENT: requiredFields.customerUserAgent ?? '',
     CUSTOMERPHONE: requiredFields.customerPhone ?? '',
     ORDERITEMS: JSON.stringify(orderItems),
-    TOTALSELLERPAYMENTAMOUNT: centsToMoney(sellerPaymentTotalCents),
+    ...marketplaceTotalFields,
     SESSIONTYPE: 'PAYMENTSESSION',
   };
 
@@ -442,7 +557,8 @@ export async function buildParatikaSessionTokenPayloadPreviewForOrder(
     ok: true,
     writesPerformed: false,
     provider: 'PARATIKA',
-    model: 'seller_payment_amount_based',
+    model: paratikaMarketplaceModelName(marketplaceModel),
+    marketplaceModel,
     shippingDeductionPolicy: PARATIKA_SHIPPING_DEDUCTION_POLICY,
     paymentReference: buildPaymentReference(order),
     sessionTokenPayloadPreview,

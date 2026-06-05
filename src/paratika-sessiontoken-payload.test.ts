@@ -129,6 +129,8 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
 
     expect(result.ok).toBe(true);
     expect(result.writesPerformed).toBe(false);
+    expect(result.model).toBe('seller_payment_amount_based');
+    expect(result.marketplaceModel).toBe('SELLER_PAYMENT_AMOUNT');
     expect(result.shippingDeductionPolicy).toBe('deferred_not_applied');
     expect(result.externalApiCallAttempted).toBe(false);
     expect(result.cardDataIncluded).toBe(false);
@@ -150,6 +152,8 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
 
     expect(typeof result.sessionTokenPayloadPreview?.ORDERITEMS).toBe('string');
     const orderItems = JSON.parse(result.sessionTokenPayloadPreview?.ORDERITEMS ?? '[]');
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERCOMMISSIONAMOUNT');
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERCOMMISSION');
     expect(orderItems).toEqual([
       {
         productCode: 'variant-sporjinal-1',
@@ -170,9 +174,107 @@ describe('Paratika SESSIONTOKEN payload preview', () => {
         sellerPaymentAmount: '36.00',
       },
     ]);
+    expect(orderItems).toEqual([
+      expect.not.objectContaining({ sellerCommissionAmount: expect.anything(), sellerCommission: expect.anything() }),
+      expect.not.objectContaining({ sellerCommissionAmount: expect.anything(), sellerCommission: expect.anything() }),
+    ]);
     expect(result.itemBreakdown.map((item) => [item.vendorId, item.sellerID])).toEqual([
       ['sporjinal', 'Sporjinal'],
       ['yalispor', 'Yalispor'],
+    ]);
+  });
+
+  it('builds a commission amount based ORDERITEMS payload preview without seller payment fields', async () => {
+    mockHappyPath();
+
+    const result = await buildParatikaSessionTokenPayloadPreviewForOrder('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      marketplaceModel: 'SELLER_COMMISSION_AMOUNT',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('seller_commission_amount_based');
+    expect(result.marketplaceModel).toBe('SELLER_COMMISSION_AMOUNT');
+    expect(result.sessionTokenPayloadPreview).toMatchObject({
+      ACTION: 'SESSIONTOKEN',
+      AMOUNT: '100.00',
+      TOTALSELLERCOMMISSIONAMOUNT: '10.00',
+      SESSIONTYPE: 'PAYMENTSESSION',
+    });
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERPAYMENTAMOUNT');
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERCOMMISSION');
+
+    const orderItems = JSON.parse(result.sessionTokenPayloadPreview?.ORDERITEMS ?? '[]');
+    expect(orderItems).toEqual([
+      {
+        productCode: 'variant-sporjinal-1',
+        name: 'Sporjinal Shoe',
+        description: 'SPJ-SKU-1',
+        quantity: 1,
+        amount: '60.00',
+        sellerID: 'Sporjinal',
+        sellerCommissionAmount: '6.00',
+      },
+      {
+        productCode: 'variant-yalispor-1',
+        name: 'Yalispor Shirt',
+        description: 'YALI-SKU-1',
+        quantity: 2,
+        amount: '40.00',
+        sellerID: 'Yalispor',
+        sellerCommissionAmount: '4.00',
+      },
+    ]);
+    expect(orderItems).toEqual([
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything(), sellerCommission: expect.anything() }),
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything(), sellerCommission: expect.anything() }),
+    ]);
+  });
+
+  it('builds a commission rate based ORDERITEMS payload preview without seller payment fields', async () => {
+    mockHappyPath();
+
+    const result = await buildParatikaSessionTokenPayloadPreviewForOrder('order-100', {
+      returnUrl: 'https://onevendor-dashboard.onrender.com/payments/paratika/return',
+      marketplaceModel: 'SELLER_COMMISSION_RATE',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.model).toBe('seller_commission_rate_based');
+    expect(result.marketplaceModel).toBe('SELLER_COMMISSION_RATE');
+    expect(result.sessionTokenPayloadPreview).toMatchObject({
+      ACTION: 'SESSIONTOKEN',
+      AMOUNT: '100.00',
+      TOTALSELLERCOMMISSION: '10',
+      SESSIONTYPE: 'PAYMENTSESSION',
+    });
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERPAYMENTAMOUNT');
+    expect(result.sessionTokenPayloadPreview).not.toHaveProperty('TOTALSELLERCOMMISSIONAMOUNT');
+
+    const orderItems = JSON.parse(result.sessionTokenPayloadPreview?.ORDERITEMS ?? '[]');
+    expect(orderItems).toEqual([
+      {
+        productCode: 'variant-sporjinal-1',
+        name: 'Sporjinal Shoe',
+        description: 'SPJ-SKU-1',
+        quantity: 1,
+        amount: '60.00',
+        sellerID: 'Sporjinal',
+        sellerCommission: '10',
+      },
+      {
+        productCode: 'variant-yalispor-1',
+        name: 'Yalispor Shirt',
+        description: 'YALI-SKU-1',
+        quantity: 2,
+        amount: '40.00',
+        sellerID: 'Yalispor',
+        sellerCommission: '10',
+      },
+    ]);
+    expect(orderItems).toEqual([
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything(), sellerCommissionAmount: expect.anything() }),
+      expect.not.objectContaining({ sellerPaymentAmount: expect.anything(), sellerCommissionAmount: expect.anything() }),
     ]);
   });
 

@@ -52,9 +52,36 @@ No live payment construction is implemented yet.
 
 ## Confirmed Marketplace Contract
 
-Paratika marketplace will use the **Satıcı Ödeme Tutarı Bazlı** model.
+The default probe model remains **Satıcı Ödeme Tutarı Bazlı** / Seller Payment Amount Based.
 
-The prepared preview builder produces a form-style `ACTION=SESSIONTOKEN` payload preview for this model. It intentionally omits merchant credential fields from the response:
+The first live `ACTION=SESSIONTOKEN` probe using Seller Payment Amount Based reached Paratika and returned:
+
+```text
+responseCode=99
+errorCode=ERR10177
+errorMsg=Invalid Marketplace Integration Mode
+violatorParam=MERCHANT
+```
+
+That response indicates the request reached Paratika but the configured merchant may not match the selected marketplace model. The probe now supports the other documented marketplace models so the configured merchant mode can be tested without implementing production payment execution.
+
+The selected probe model is controlled by:
+
+```text
+PARATIKA_MARKETPLACE_MODEL=SELLER_PAYMENT_AMOUNT
+```
+
+Allowed values:
+
+| Env value | ORDERITEMS field | Top-level total field |
+| --- | --- | --- |
+| `SELLER_PAYMENT_AMOUNT` | `sellerPaymentAmount` | `TOTALSELLERPAYMENTAMOUNT` |
+| `SELLER_COMMISSION_AMOUNT` | `sellerCommissionAmount` | `TOTALSELLERCOMMISSIONAMOUNT` |
+| `SELLER_COMMISSION_RATE` | `sellerCommission` | `TOTALSELLERCOMMISSION` |
+
+`SELLER_PAYMENT_AMOUNT` is the default when `PARATIKA_MARKETPLACE_MODEL` is not configured.
+
+The prepared preview builder produces a form-style `ACTION=SESSIONTOKEN` payload preview for the selected model. It intentionally omits merchant credential fields from the response:
 
 - `MERCHANTUSER`
 - `MERCHANTPASSWORD`
@@ -76,7 +103,7 @@ Required non-credential fields currently modeled:
 - `CUSTOMERUSERAGENT`
 - `CUSTOMERPHONE`
 - `ORDERITEMS`
-- `TOTALSELLERPAYMENTAMOUNT`
+- selected marketplace total field
 - `SESSIONTYPE=PAYMENTSESSION`
 
 `ORDERITEMS` is emitted as a JSON array string. Each item uses:
@@ -87,9 +114,12 @@ Required non-credential fields currently modeled:
 - `quantity`: Shopify line quantity.
 - `amount`: gross VAT-included line amount.
 - `sellerID`: backend-resolved Paratika Satıcı Numarası.
-- `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
+- selected marketplace split field:
+  - `sellerPaymentAmount`: line gross amount minus commission and commission VAT for preview/test purposes.
+  - `sellerCommissionAmount`: merchant commission amount per line from the current vendor financial profile.
+  - `sellerCommission`: commission rate from the current vendor financial profile.
 
-`TOTALSELLERPAYMENTAMOUNT` is the sum of `ORDERITEMS[].sellerPaymentAmount`.
+The selected top-level marketplace field is paired with the selected `ORDERITEMS` split field. The probe does not mix marketplace model fields in one payload.
 
 For preview/test payloads, shipping deduction is intentionally deferred and not applied. The preview response reports:
 
@@ -101,7 +131,7 @@ For preview/test payloads, shipping deduction is intentionally deferred and not 
 
 This is because the current finance model stores shipping deductions at allocation level, not exact line-item level. Production payment execution must not guess a line-level shipping split, must not use proportional shipping deduction unless explicitly approved, and must continue to fail closed until the shipping deduction policy is confirmed.
 
-The preview fails closed instead of guessing when seller ID mapping, product code, customer context, return URL, amount, or seller payment amount cannot be proven from current backend data/configuration.
+The preview fails closed instead of guessing when seller ID mapping, product code, customer context, return URL, amount, seller payment amount, seller commission amount, or seller commission rate cannot be proven from current backend data/configuration.
 
 ## Preview Endpoint
 
@@ -118,7 +148,8 @@ Behavior:
 - Does not call Paratika.
 - Returns `writesPerformed=false`.
 - Returns `provider=PARATIKA`.
-- Returns `model=seller_payment_amount_based`.
+- Returns the selected `marketplaceModel`.
+- Returns `model` as the selected documented marketplace model name.
 - Returns validation errors when required data is missing.
 - Does not include card fields.
 - Does not include merchant credential values.
@@ -126,11 +157,13 @@ Behavior:
 Runtime configuration needed for a complete preview:
 
 - `PARATIKA_RETURN_URL`
+- `PARATIKA_MARKETPLACE_MODEL` optional, defaults to `SELLER_PAYMENT_AMOUNT`
 
 Example:
 
 ```text
 PARATIKA_RETURN_URL=https://onevendor-dashboard.onrender.com/payments/paratika/return
+PARATIKA_MARKETPLACE_MODEL=SELLER_PAYMENT_AMOUNT
 ```
 
 `RETURNURL` is required for `ACTION=SESSIONTOKEN` preview generation. The preview remains fail-closed when `PARATIKA_RETURN_URL` is missing.
@@ -169,6 +202,7 @@ Required runtime configuration:
 - `PARATIKA_TEST_MODE`
 - `PARATIKA_PROBE_DRY_RUN`
 - `PARATIKA_PROBE_CONFIRM`
+- `PARATIKA_MARKETPLACE_MODEL`
 
 Dry-run behavior:
 
@@ -176,6 +210,7 @@ Dry-run behavior:
 - Does not call Paratika.
 - Returns `writesPerformed=false`.
 - Returns sanitized payload keys and `ORDERITEMS` preview.
+- Returns selected `marketplaceModel` and `model`.
 - Does not return `MERCHANTUSER`, `MERCHANTPASSWORD`, merchant credential values, card fields, or a session token.
 
 Live probe behavior:
@@ -185,6 +220,7 @@ Live probe behavior:
 - Posts a form-encoded `ACTION=SESSIONTOKEN` payload to `PARATIKA_API_URL`.
 - Returns `writesPerformed=true` because an external SESSIONTOKEN request was made.
 - Returns `responseCode`, `responseMsg`, whether a session token was received, session token length only, and raw response body keys only.
+- Uses the selected `PARATIKA_MARKETPLACE_MODEL`.
 - Never returns the session token value or merchant credentials.
 
 Remove or keep disabled after test-mode SESSIONTOKEN behavior is confirmed.

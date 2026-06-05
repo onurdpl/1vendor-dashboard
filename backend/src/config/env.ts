@@ -1,3 +1,5 @@
+import { parseParatikaMarketplaceModel, type ParatikaMarketplaceModel } from '../modules/paratika/paratika-marketplace-model.js';
+
 type NodeEnv = 'development' | 'test' | 'production';
 
 export type AppEnv = {
@@ -77,6 +79,7 @@ export type AppEnv = {
   PARATIKA_TEST_MODE?: boolean;
   PARATIKA_PROBE_DRY_RUN?: boolean;
   PARATIKA_PROBE_CONFIRM?: string;
+  PARATIKA_MARKETPLACE_MODEL: ParatikaMarketplaceModel;
   LIDIO_ENABLED?: boolean;
   LIDIO_BASE_URL?: string;
   LIDIO_MERCHANT_CODE?: string;
@@ -268,6 +271,7 @@ export function loadEnv(): AppEnv {
   const paratikaTestMode = parseBoolean(process.env.PARATIKA_TEST_MODE, false);
   const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
   const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;
+  const paratikaMarketplaceModel = parseParatikaMarketplaceModel(process.env.PARATIKA_MARKETPLACE_MODEL);
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
@@ -422,6 +426,7 @@ export function loadEnv(): AppEnv {
     PARATIKA_TEST_MODE: paratikaTestMode,
     PARATIKA_PROBE_DRY_RUN: paratikaProbeDryRun,
     PARATIKA_PROBE_CONFIRM: paratikaProbeConfirm,
+    PARATIKA_MARKETPLACE_MODEL: paratikaMarketplaceModel,
     LIDIO_ENABLED: lidioEnabled,
     LIDIO_BASE_URL: lidioBaseUrl,
     LIDIO_MERCHANT_CODE: lidioMerchantCode,
