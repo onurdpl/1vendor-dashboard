@@ -853,6 +853,7 @@ function mapProviderResponseSummary(
                 bodyKeys: readStringArray(kargonomiBarcodeFetch.bodyKeys),
                 detectedFormat: readString(kargonomiBarcodeFetch, ['detectedFormat']),
                 pdfLikeValuePresent: readOptionalBoolean(kargonomiBarcodeFetch, ['pdfLikeValuePresent']),
+                labelUrlPresent: readOptionalBoolean(kargonomiBarcodeFetch, ['labelUrlPresent']),
               }
             : null,
         }

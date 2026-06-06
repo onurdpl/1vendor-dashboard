@@ -696,6 +696,31 @@ function findPotentialBarcodePdf(value: unknown): string | null {
   return null;
 }
 
+function normalizeKargonomiPdfLabelArtifact(value: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed.startsWith('data:application/pdf')) {
+    return trimmed;
+  }
+
+  if (/^https?:\/\//i.test(trimmed) || trimmed.endsWith('.pdf')) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith('JVBER')) {
+    return `data:application/pdf;base64,${trimmed}`;
+  }
+
+  return null;
+}
+
 function readTopLevelKeys(value: unknown) {
   return isRecord(value) ? Object.keys(value).sort() : [];
 }
@@ -757,12 +782,17 @@ function detectKargonomiBarcodeFetchFormat(body: unknown, contentType: string) {
   return body === null || body === undefined ? 'empty' : typeof body;
 }
 
-function summarizeKargonomiBarcodeFetchDiagnostics(response: KargonomiRawHttpResponse, pdfLikeValuePresent: boolean) {
+function summarizeKargonomiBarcodeFetchDiagnostics(
+  response: KargonomiRawHttpResponse,
+  pdfLikeValuePresent: boolean,
+  labelUrlPresent: boolean,
+) {
   return {
     ...summarizeResponse(response),
     topLevelKeys: readTopLevelKeys(response.body),
     detectedFormat: detectKargonomiBarcodeFetchFormat(response.body, response.contentType),
     pdfLikeValuePresent,
+    labelUrlPresent,
   };
 }
 
@@ -789,6 +819,7 @@ function buildKargonomiProviderResult(
   const providerShipmentId = parsed.id ?? fallbackShipmentId;
   const trackingNumber =
     parsed.shippingWebserviceTrackingCode ?? parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId ?? null;
+  const labelUrl = readString(responseSnapshot, ['labelUrl', 'barcode']);
   const shippingCost =
     parseMoney(parsed.pricing.realPrice) ??
     parseMoney(parsed.pricing.estimatedPrice) ??
@@ -798,7 +829,7 @@ function buildKargonomiProviderResult(
     providerShipmentId,
     trackingNumber,
     trackingUrl: null,
-    labelUrl: null,
+    labelUrl,
     shipmentStatus: parsed.internalStatus,
     shippingCost,
     shippingVat: null,
@@ -813,9 +844,9 @@ function buildKargonomiProviderResult(
       shippingProviderSlug: parsed.shippingProviderSlug,
       status: parsed.status,
       statusLabel: parsed.statusLabel,
-      barcodePresent: Boolean(parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId),
-      labelUrlPresent: false,
-      labelUnavailableReason: 'barcode_pdf_response_shape_unknown_or_unavailable',
+      barcodePresent: Boolean(labelUrl ?? parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId),
+      labelUrlPresent: Boolean(labelUrl),
+      labelUnavailableReason: labelUrl ? null : 'barcode_pdf_response_shape_unknown_or_unavailable',
       shippingCostPresent: shippingCost !== null,
     },
   };
@@ -1159,8 +1190,17 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       responseSnapshot.lastProviderStage = 'barcode_fetch';
       const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
       const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
+      const barcodeLabelUrl = normalizeKargonomiPdfLabelArtifact(barcodePdf);
       responseSnapshot.barcodeFetchCalled = true;
-      responseSnapshot.barcodeFetch = summarizeKargonomiBarcodeFetchDiagnostics(barcodeResponse, Boolean(barcodePdf));
+      responseSnapshot.barcodeFetch = summarizeKargonomiBarcodeFetchDiagnostics(
+        barcodeResponse,
+        Boolean(barcodePdf),
+        Boolean(barcodeLabelUrl),
+      );
+      if (barcodeLabelUrl) {
+        responseSnapshot.labelUrl = barcodeLabelUrl;
+        responseSnapshot.barcode = barcodeLabelUrl;
+      }
     } catch (error) {
       responseSnapshot.barcodeFetchCalled = true;
       responseSnapshot.barcodeFetch = {

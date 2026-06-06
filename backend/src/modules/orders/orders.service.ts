@@ -998,6 +998,10 @@ function buildShipmentProviderResponseSummary(
                 topLevelKeys: readStringArray(kargonomiBarcodeFetch.topLevelKeys),
                 bodyKeys: readStringArray(kargonomiBarcodeFetch.bodyKeys),
                 detectedFormat: readString(kargonomiBarcodeFetch, ['detectedFormat']),
+                labelUrlPresent:
+                  typeof kargonomiBarcodeFetch.labelUrlPresent === 'boolean'
+                    ? kargonomiBarcodeFetch.labelUrlPresent
+                    : null,
                 pdfLikeValuePresent:
                   typeof kargonomiBarcodeFetch.pdfLikeValuePresent === 'boolean'
                     ? kargonomiBarcodeFetch.pdfLikeValuePresent

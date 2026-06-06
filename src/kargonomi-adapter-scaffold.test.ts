@@ -139,7 +139,7 @@ describe('Kargonomi forward adapter scaffold', () => {
                     pricing: { real_price: '100' },
                   },
                 }
-              : { barcode_pdf_base64: 'JVBERi0xLjQ=' };
+              : { format: 'pdf', data: 'JVBERi0xLjQ=' };
 
       return new Response(JSON.stringify(responseBody), {
         status: 200,
@@ -176,6 +176,7 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(result).toMatchObject({
       providerShipmentId: '123',
       trackingNumber: 'KG-TRACK-1',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
       shipmentStatus: 'created',
       shippingCost: 100,
       currency: 'TRY',
@@ -183,7 +184,9 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(result.responseSnapshot).toMatchObject({
       automaticProviderSelection: true,
       getShipmentAfterConfirmCalled: true,
-      labelUrlPresent: false,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      labelUrlPresent: true,
     });
     expect(result.responseSnapshot.getShipmentAfterConfirm).toMatchObject({
       safeFields: {
@@ -201,8 +204,9 @@ describe('Kargonomi forward adapter scaffold', () => {
     });
     expect(result.responseSnapshot.barcodeFetch).toMatchObject({
       detectedFormat: 'pdf_like_value',
-      topLevelKeys: ['barcode_pdf_base64'],
+      topLevelKeys: ['data', 'format'],
       pdfLikeValuePresent: true,
+      labelUrlPresent: true,
     });
     expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('Secret Buyer');
     expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('5551112233');

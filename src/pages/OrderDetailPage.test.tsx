@@ -3372,6 +3372,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
               bodyKeys: ['barcode_pdf_base64'],
               detectedFormat: 'pdf_like_value',
               pdfLikeValuePresent: true,
+              labelUrlPresent: true,
             },
           },
         },

@@ -398,6 +398,7 @@ export type OrderShipmentExecutionDto = {
         bodyKeys: string[];
         detectedFormat: string | null;
         pdfLikeValuePresent: boolean | null;
+        labelUrlPresent: boolean | null;
       } | null;
     } | null;
     payloadDiagnostics?: {
