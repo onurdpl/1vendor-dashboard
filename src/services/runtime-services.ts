@@ -13,6 +13,7 @@ import {
 import * as backendAuth from './backend-auth';
 import * as realOrders from './real/orders';
 import * as realReturns from './real/returns';
+import * as realDashboard from './real/dashboard';
 import * as realFinance from './real/finance';
 import * as realAutomation from './real/automation';
 import * as realOperations from './real/operations';
@@ -26,6 +27,7 @@ import * as realVendorIntegration from './real/vendorIntegration';
 import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
+  DashboardOperationalSummary,
   OperationsQueueDashboard,
   OperationsQueueItem,
   SupportAnalytics,
@@ -63,6 +65,27 @@ function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQu
     refundAttention: items.filter((item) => item.type === 'refund_attention').length,
     operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
     automationActions: items.filter((item) => item.type === 'automation_action').length,
+  };
+}
+
+function buildMockDashboardOperationalSummary(vendorId: string): DashboardOperationalSummary {
+  const orders = listMockOrders(vendorId);
+  const returns = listMockReturns(vendorId);
+  const pendingReassignment = orders.filter((order) => order.allocationStatus === 'pending_reassignment').length;
+  const vendorBlocked = orders.filter((order) => order.allocationStatus === 'vendor_blocked').length;
+
+  return {
+    vendorId,
+    orders: {
+      total: orders.length,
+      awaitingShipment: orders.filter((order) => order.shippingStatus === 'Awaiting Shipment').length,
+      blocked: pendingReassignment + vendorBlocked,
+      pendingReassignment,
+      vendorBlocked,
+    },
+    returns: {
+      refundAttention: returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length,
+    },
   };
 }
 
@@ -362,6 +385,12 @@ export const runtimeServices = {
         await backendAuth.logout();
       }
     },
+  },
+  dashboard: {
+    summary: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realDashboard.getDashboardOperationalSummary({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(buildMockDashboardOperationalSummary(vendorId)),
   },
   orders: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>

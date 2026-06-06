@@ -11,6 +11,7 @@ import { createAuthMiddleware } from './modules/auth/auth.middleware.js';
 import { requireVendorAccess } from './modules/vendor-access/vendor-access.middleware.js';
 import { registerOrdersRoutes } from './modules/orders/orders.routes.js';
 import { registerReturnsRoutes } from './modules/returns/returns.routes.js';
+import { registerDashboardSummaryRoutes } from './modules/dashboard/dashboard-summary.routes.js';
 import { registerFinanceRoutes } from './modules/finance/finance.routes.js';
 import { registerOperationsRoutes } from './modules/operations/operations.routes.js';
 import { registerAutomationRoutes } from './modules/automation/automation.routes.js';
@@ -352,6 +353,7 @@ export function createApp() {
   registerAuthRoutes(app, env);
   registerOrdersRoutes(app, env);
   registerReturnsRoutes(app, env);
+  registerDashboardSummaryRoutes(app, env);
   registerFinanceRoutes(app, env);
   registerOperationsRoutes(app, env);
   registerAutomationRoutes(app, env);

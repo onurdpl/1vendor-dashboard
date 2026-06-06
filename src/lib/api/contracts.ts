@@ -1370,6 +1370,20 @@ export type DashboardPriorityItem = {
   description?: string;
 };
 
+export type DashboardOperationalSummary = {
+  vendorId: string;
+  orders: {
+    total: number;
+    awaitingShipment: number;
+    blocked: number;
+    pendingReassignment: number;
+    vendorBlocked: number;
+  };
+  returns: {
+    refundAttention: number;
+  };
+};
+
 export type DashboardFinanceSnapshot = {
   grossSales: string;
   refunds: string;

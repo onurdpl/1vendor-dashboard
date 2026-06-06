@@ -1,3 +1,10 @@
+import {
+  AllocationStatus,
+  AutomationActionStatus,
+  AutomationExecutionMode,
+  OperationalSignalSeverity,
+  OperationalSignalStatus,
+} from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import type {
   OperationsActivityDto,
@@ -20,6 +27,11 @@ import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '..
 const ONE_HOUR_MS = 60 * 60 * 1000;
 const UNRESOLVED_SUPPORT_STATUSES = new Set(['OPEN', 'IN_REVIEW', 'WAITING_FOR_VENDOR']);
 const CLOSED_RETURN_STATUSES = new Set(['processed', 'refunded', 'closed', 'cancelled', 'declined', 'rejected']);
+const ACTIVE_AUTOMATION_ACTION_STATUSES = [
+  AutomationActionStatus.PENDING,
+  AutomationActionStatus.SUGGESTED,
+  AutomationActionStatus.FAILED,
+];
 
 function hoursSince(value: Date, now = new Date()) {
   return Math.max(0, Math.round(((now.getTime() - value.getTime()) / ONE_HOUR_MS) * 10) / 10);
@@ -305,23 +317,119 @@ function isAwaitingShipment(fulfillmentStatus: string, shippingStatus: string) {
   );
 }
 
-function getSeverityCount(items: OperationsQueueItemDto[], severity: OperationsQueueSeverity) {
-  return items.filter((item) => item.severity === severity).length;
+function insensitiveEquals(value: string) {
+  return {
+    equals: value,
+    mode: 'insensitive' as const,
+  };
 }
 
-function createSummary(items: OperationsQueueItemDto[]): OperationsQueueDashboardDto['summary'] {
+function readSignalSeverityCount(
+  groups: Array<{ severity: OperationalSignalSeverity; _count: { _all: number } }>,
+  severity: OperationalSignalSeverity,
+) {
+  return groups.find((group) => group.severity === severity)?._count._all ?? 0;
+}
+
+async function getAdminOperationsQueueSummary(): Promise<OperationsQueueDashboardDto['summary']> {
+  const [
+    pendingReassignment,
+    vendorBlocked,
+    awaitingShipment,
+    refundAttention,
+    signalSeverityGroups,
+    automationActions,
+    automationAutoSafe,
+  ] = await Promise.all([
+    withDashboardTiming('operations.summary.pending_reassignment_count', () =>
+      prisma.vendorAllocation.count({
+        where: {
+          OR: [
+            { reassignmentRequired: true },
+            { allocationStatus: AllocationStatus.PENDING_REASSIGNMENT },
+          ],
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.vendor_blocked_count', () =>
+      prisma.vendorAllocation.count({
+        where: {
+          allocationStatus: AllocationStatus.VENDOR_BLOCKED,
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.awaiting_shipment_count', () =>
+      prisma.vendorAllocation.count({
+        where: {
+          OR: [
+            { fulfillmentStatus: insensitiveEquals('processing') },
+            { fulfillmentStatus: insensitiveEquals('pending') },
+            { shippingStatus: insensitiveEquals('awaiting shipment') },
+            { shippingStatus: insensitiveEquals('awaiting_shipment') },
+          ],
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.refund_attention_count', () =>
+      prisma.returnRecord.count({
+        where: {
+          status: {
+            in: ['pending', 'open', 'needs_review'],
+          },
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.operational_signal_group_count', () =>
+      prisma.operationalSignal.groupBy({
+        by: ['severity'],
+        where: {
+          status: OperationalSignalStatus.ACTIVE,
+        },
+        _count: {
+          _all: true,
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.automation_action_count', () =>
+      prisma.automationAction.count({
+        where: {
+          status: {
+            in: ACTIVE_AUTOMATION_ACTION_STATUSES,
+          },
+        },
+      }),
+    ),
+    withDashboardTiming('operations.summary.automation_auto_safe_count', () =>
+      prisma.automationAction.count({
+        where: {
+          status: {
+            in: ACTIVE_AUTOMATION_ACTION_STATUSES,
+          },
+          executionMode: AutomationExecutionMode.AUTO_SAFE,
+        },
+      }),
+    ),
+  ]);
+
+  const criticalSignals = readSignalSeverityCount(signalSeverityGroups, OperationalSignalSeverity.CRITICAL);
+  const highSignals = readSignalSeverityCount(signalSeverityGroups, OperationalSignalSeverity.HIGH);
+  const warningSignals = readSignalSeverityCount(signalSeverityGroups, OperationalSignalSeverity.WARNING);
+  const infoSignals = readSignalSeverityCount(signalSeverityGroups, OperationalSignalSeverity.INFO);
+  const operationalSignals = criticalSignals + highSignals + warningSignals + infoSignals;
+  const manualAutomationActions = Math.max(0, automationActions - automationAutoSafe);
+
   return {
-    total: items.length,
-    critical: getSeverityCount(items, 'critical'),
-    warning: getSeverityCount(items, 'warning'),
-    attention: getSeverityCount(items, 'attention'),
-    normal: getSeverityCount(items, 'normal'),
-    pendingReassignment: items.filter((item) => item.type === 'pending_reassignment').length,
-    vendorBlocked: items.filter((item) => item.type === 'vendor_blocked').length,
-    awaitingShipment: items.filter((item) => item.type === 'awaiting_shipment').length,
-    refundAttention: items.filter((item) => item.type === 'refund_attention').length,
-    operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
-    automationActions: items.filter((item) => item.type === 'automation_action').length,
+    total: pendingReassignment + vendorBlocked + awaitingShipment + refundAttention + operationalSignals + automationActions,
+    critical: pendingReassignment + criticalSignals,
+    warning: vendorBlocked + highSignals,
+    attention: awaitingShipment + refundAttention + warningSignals + automationAutoSafe,
+    normal: infoSignals + manualAutomationActions,
+    pendingReassignment,
+    vendorBlocked,
+    awaitingShipment,
+    refundAttention,
+    operationalSignals,
+    automationActions,
   };
 }
 
@@ -591,6 +699,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   logDashboardTiming('operations.automation_aggregation', automationAggregationStartedAt);
 
   const finalAggregationStartedAt = startDashboardTimer();
+  const summary = await getAdminOperationsQueueSummary();
   items.sort((a, b) => {
     const severityDelta = getSeverityRank(a.severity) - getSeverityRank(b.severity);
     if (severityDelta !== 0) {
@@ -600,7 +709,7 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   });
 
   const dashboard: OperationsQueueDashboardDto = {
-    summary: createSummary(items),
+    summary,
     items: items.slice(offset, offset + limit),
   };
   logDashboardTiming('operations.metrics_aggregation', finalAggregationStartedAt);

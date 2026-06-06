@@ -498,42 +498,43 @@ describe('DashboardPage command center', () => {
     expect(within(automationLabel.closest('article') as HTMLElement).getByText('4')).toBeInTheDocument();
   });
 
-  it('labels limited deferred action counts without rolling them into a total', async () => {
+  it('renders accurate primary action counts without sampled badge', async () => {
     getDashboardOverviewMock.mockResolvedValue({
       ...dashboardOverview,
       stats: [
-        { label: 'Vendor orders', value: 'Showing latest 10' },
-        { label: 'Awaiting shipment', value: '2 in latest 10' },
-        { label: 'Blocked / attention', value: '3 in latest slices' },
+        { label: 'Vendor orders', value: '30' },
+        { label: 'Awaiting shipment', value: '15' },
+        { label: 'Blocked / attention', value: '26' },
       ],
       priorityWork: [
         {
           label: 'Blocked allocations',
-          value: '1 in latest 10',
+          value: '12',
           tone: 'severity-warning',
-          description: 'Showing latest 10 order allocations; open Orders for the full scope.',
+          description: 'Latest 10 order allocations are loaded for recent activity and detail. Full blocked count comes from dashboard summary.',
         },
         {
           label: 'Awaiting shipment',
-          value: '2 in latest 10',
+          value: '15',
           tone: 'severity-attention',
-          description: 'Showing latest 10 order allocations; open Orders for the full shipment queue.',
+          description: 'Latest 10 order allocations are loaded for recent activity and detail. Full shipment queue count comes from dashboard summary.',
         },
         {
           label: 'Refund attention',
-          value: '1 in latest 10',
+          value: '14',
           tone: 'severity-warning',
-          description: 'Showing latest 10 return records; open Returns for the full review queue.',
+          description: 'Latest 10 return records are loaded for recent activity and detail. Full return/refund attention count comes from dashboard summary.',
         },
       ],
     });
 
     renderDashboardPage();
 
-    expect(await screen.findByText('Sampled actions')).toBeInTheDocument();
-    expect(screen.getByText('Action counts include deferred slices where full totals are unavailable.')).toBeInTheDocument();
-    expect(screen.queryByText('4 Actions')).not.toBeInTheDocument();
-    expect(screen.getAllByText('1 in latest 10').length).toBeGreaterThan(0);
+    expect(await screen.findByText('41 Actions')).toBeInTheDocument();
+    expect(screen.queryByText('Sampled actions')).not.toBeInTheDocument();
+    expect(screen.queryByText('Action counts include deferred slices where full totals are unavailable.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/in latest 10/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Latest 10 order allocations are loaded/i).length).toBeGreaterThan(0);
   });
 
   it('projects raw automation counts as grouped issue semantics', async () => {

@@ -3,6 +3,21 @@ import { queryKeys } from './queryKeys';
 
 function createRuntimeServices() {
   return {
+    dashboard: {
+      summary: vi.fn().mockResolvedValue({
+        vendorId: 'vendor-query-key',
+        orders: {
+          total: 1,
+          awaitingShipment: 1,
+          blocked: 0,
+          pendingReassignment: 0,
+          vendorBlocked: 0,
+        },
+        returns: {
+          refundAttention: 1,
+        },
+      }),
+    },
     orders: {
       list: vi.fn().mockResolvedValue([
         {
@@ -167,7 +182,7 @@ describe('dashboard real-mode loading', () => {
 
     const overview = await getDashboardDeferredOverview('demo-vendor-a');
 
-    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('Showing latest 1');
+    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('1');
     expect(overview.financeSnapshot).toBeUndefined();
     expect(overview.partialDataWarnings).toContain('Finance snapshot is temporarily unavailable.');
   });
@@ -191,6 +206,7 @@ describe('dashboard real-mode loading', () => {
 
     await getDashboardDeferredOverview('vendor-query-key');
 
+    expect(services.dashboard.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.finance.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
@@ -219,27 +235,65 @@ describe('dashboard real-mode loading', () => {
     const orderOptions = services.orders.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const returnOptions = services.returns.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const financeOptions = services.finance.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const summaryOptions = services.dashboard.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
 
     expect(orderOptions?.headers?.['X-Request-Id']).toEqual(expect.any(String));
     expect(orderOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(orderOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(summaryOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
+    expect(summaryOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(summaryOptions?.limit).toBeUndefined();
     expect(orderOptions?.limit).toBe(10);
     expect(returnOptions?.limit).toBe(10);
     expect(financeOptions?.limit).toBe(10);
   });
 
-  it('uses limited-slice wording for dashboard counts without accurate totals', async () => {
-    const { getDashboardDeferredOverview } = await importDashboardWithServices();
+  it('uses dashboard summary counts for primary metrics instead of limited arrays', async () => {
+    const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
+      runtimeServices.orders.list.mockResolvedValue(
+        Array.from({ length: 10 }, (_, index) => ({
+          id: `order-${index + 1}`,
+          sourceShopifyOrderNumber: `${1000 + index}`,
+          shippingStatus: 'Awaiting Shipment',
+          allocationStatus: 'active',
+        })),
+      );
+      runtimeServices.returns.list.mockResolvedValue(
+        Array.from({ length: 10 }, (_, index) => ({
+          id: `return-${index + 1}`,
+          sourceShopifyRefundId: `refund-${index + 1}`,
+          status: 'Pending',
+          amount: 'TRY 25.00',
+        })),
+      );
+      runtimeServices.dashboard.summary.mockResolvedValue({
+        vendorId: 'vendor-query-key',
+        orders: {
+          total: 30,
+          awaitingShipment: 15,
+          blocked: 12,
+          pendingReassignment: 7,
+          vendorBlocked: 5,
+        },
+        returns: {
+          refundAttention: 14,
+        },
+      });
+    });
 
     const overview = await getDashboardDeferredOverview('vendor-query-key');
 
-    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('Showing latest 1');
-    expect(overview.stats.find((stat) => stat.label === 'Awaiting shipment')?.value).toBe('1 in latest 1');
-    expect(overview.stats.find((stat) => stat.label === 'Blocked / attention')?.value).toBe('1 in latest slices');
-    expect(overview.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value).toBe('1 in latest 1');
-    expect(overview.priorityWork.find((item) => item.label === 'Refund attention')?.value).toBe('1 in latest 1');
+    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('30');
+    expect(overview.stats.find((stat) => stat.label === 'Awaiting shipment')?.value).toBe('15');
+    expect(overview.stats.find((stat) => stat.label === 'Blocked / attention')?.value).toBe('26');
+    expect(overview.priorityWork.find((item) => item.label === 'Blocked allocations')?.value).toBe('12');
+    expect(overview.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value).toBe('15');
+    expect(overview.priorityWork.find((item) => item.label === 'Refund attention')?.value).toBe('14');
+    expect(overview.priorityWork.map((item) => item.value).join(' ')).not.toContain('in latest');
+    expect(overview.stats.map((stat) => stat.value).join(' ')).not.toContain('latest');
+    expect(overview.priorityWork.find((item) => item.label === 'Awaiting shipment')?.description).toContain('Latest 10 order allocations');
     expect(overview.normalizedOperationalCounts?.financeReviewItemCount).toBeNull();
-    expect(overview.workspaceStatus).toContain('showing latest 1 order allocation');
+    expect(overview.workspaceStatus).toContain('30 vendor allocations');
   });
 
   it('uses the existing operations summary total instead of limited operation items', async () => {

@@ -10,6 +10,7 @@ import type {
   DashboardFinanceSnapshot,
   DashboardNormalizedOperationalCounts,
   DashboardNotificationSummary,
+  DashboardOperationalSummary,
   DashboardOverview,
   DashboardObservabilitySummary,
   DashboardPriorityItem,
@@ -152,12 +153,16 @@ function formatCount(value: number) {
   return value.toString();
 }
 
-function formatLatestSlice(count: number) {
-  return `Showing latest ${count}`;
+function formatOptionalCount(value: number | null) {
+  return typeof value === 'number' ? formatCount(value) : 'Unknown';
 }
 
-function formatCountInLatestSlice(count: number, sliceCount: number) {
-  return sliceCount > 0 ? `${count} in latest ${sliceCount}` : 'Showing latest 0';
+function hasPositiveCount(value: number | null) {
+  return typeof value === 'number' && value > 0;
+}
+
+function formatRecentListDescription(count: number, label: string) {
+  return `Latest ${count} ${label}${count === 1 ? '' : 's'} are loaded for recent activity and detail.`;
 }
 
 function normalizeIssueKeyPart(value: string | null | undefined) {
@@ -387,9 +392,9 @@ function buildRealDashboardShellOverview(vendorId?: VendorId): DashboardOverview
 }
 
 function createPriorityWork(input: {
-  blockedCount: number;
-  awaitingShipmentCount: number;
-  refundAttentionCount: number;
+  blockedCount: number | null;
+  awaitingShipmentCount: number | null;
+  refundAttentionCount: number | null;
   automationIssueGroupCount: number;
   blockedValue?: string;
   awaitingShipmentValue?: string;
@@ -401,21 +406,21 @@ function createPriorityWork(input: {
   return [
     {
       label: 'Blocked allocations',
-      value: input.blockedValue ?? formatCount(input.blockedCount),
-      tone: input.blockedCount > 0 ? 'severity-warning' : 'severity-normal',
-      description: input.blockedDescription ?? (input.blockedCount > 0 ? 'Allocations waiting for reassignment or vendor recovery.' : 'No blocked allocations right now.'),
+      value: input.blockedValue ?? formatOptionalCount(input.blockedCount),
+      tone: hasPositiveCount(input.blockedCount) ? 'severity-warning' : 'severity-normal',
+      description: input.blockedDescription ?? (input.blockedCount === null ? 'Blocked allocation count is unavailable.' : input.blockedCount > 0 ? 'Allocations waiting for reassignment or vendor recovery.' : 'No blocked allocations right now.'),
     },
     {
       label: 'Awaiting shipment',
-      value: input.awaitingShipmentValue ?? formatCount(input.awaitingShipmentCount),
-      tone: input.awaitingShipmentCount > 0 ? 'severity-attention' : 'severity-normal',
-      description: input.awaitingShipmentDescription ?? (input.awaitingShipmentCount > 0 ? 'Allocations still waiting for shipment progress.' : 'No allocations are awaiting shipment.'),
+      value: input.awaitingShipmentValue ?? formatOptionalCount(input.awaitingShipmentCount),
+      tone: hasPositiveCount(input.awaitingShipmentCount) ? 'severity-attention' : 'severity-normal',
+      description: input.awaitingShipmentDescription ?? (input.awaitingShipmentCount === null ? 'Awaiting shipment count is unavailable.' : input.awaitingShipmentCount > 0 ? 'Allocations still waiting for shipment progress.' : 'No allocations are awaiting shipment.'),
     },
     {
       label: 'Refund attention',
-      value: input.refundAttentionValue ?? formatCount(input.refundAttentionCount),
-      tone: input.refundAttentionCount > 0 ? 'severity-warning' : 'severity-normal',
-      description: input.refundAttentionDescription ?? (input.refundAttentionCount > 0 ? 'Refund records still need review or reconciliation.' : 'No active refund attention items.'),
+      value: input.refundAttentionValue ?? formatOptionalCount(input.refundAttentionCount),
+      tone: hasPositiveCount(input.refundAttentionCount) ? 'severity-warning' : 'severity-normal',
+      description: input.refundAttentionDescription ?? (input.refundAttentionCount === null ? 'Refund attention count is unavailable.' : input.refundAttentionCount > 0 ? 'Refund records still need review or reconciliation.' : 'No active refund attention items.'),
     },
     {
       label: 'Automation issue groups',
@@ -464,65 +469,76 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   logDashboardClientTiming({ requestId, step: 'dashboard.deferred.route.start', loadPhase: 'deferred', durationMs: 0 });
 
   try {
-  const currentVendorId = resolveVendorId(vendorId);
-  const currentVendor = getCurrentVendorContext();
-  const currentUser = getCurrentUser();
-  const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
-  const dashboardReadOptions = {
-    signal: options.signal,
-    headers: createDashboardRequestHeaders(requestId, 'deferred'),
-    limit: DASHBOARD_DEFERRED_LIST_LIMIT,
-    offset: 0,
-  };
-  const dashboardOperationsReadOptions = {
-    signal: options.signal,
-    headers: createDashboardRequestHeaders(requestId, 'deferred'),
-    limit: DASHBOARD_DEFERRED_OPERATIONS_LIMIT,
-    offset: 0,
-  };
+    const currentVendorId = resolveVendorId(vendorId);
+    const currentVendor = getCurrentVendorContext();
+    const currentUser = getCurrentUser();
+    const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
+    const dashboardSummaryReadOptions = {
+      signal: options.signal,
+      headers: createDashboardRequestHeaders(requestId, 'deferred'),
+    };
+    const dashboardReadOptions = {
+      signal: options.signal,
+      headers: createDashboardRequestHeaders(requestId, 'deferred'),
+      limit: DASHBOARD_DEFERRED_LIST_LIMIT,
+      offset: 0,
+    };
+    const dashboardOperationsReadOptions = {
+      signal: options.signal,
+      headers: createDashboardRequestHeaders(requestId, 'deferred'),
+      limit: DASHBOARD_DEFERRED_OPERATIONS_LIMIT,
+      offset: 0,
+    };
 
-  const partialDataWarnings: string[] = [];
-  const dashboardRequests = await Promise.allSettled([
-    withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
-    withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
-    withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
-    withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
-    currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.operations.dashboard', () => runtimeServices.operations.dashboard(dashboardOperationsReadOptions), 'deferred')
-      : Promise.resolve(null),
-    withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
-    withDashboardClientTiming(requestId, 'client.notifications.list', () =>
-      runtimeServices.notifications.list(notificationScopeVendorId, dashboardReadOptions),
-      'deferred',
-    ),
-    currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
-      : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
-    currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
-          runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
-          'deferred',
-        )
-      : Promise.resolve(null),
-    currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
-      : Promise.resolve(null),
-  ]);
+    const partialDataWarnings: string[] = [];
+    const dashboardRequests = await Promise.allSettled([
+      withDashboardClientTiming(requestId, 'client.dashboard.summary', () => runtimeServices.dashboard.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
+      currentUser?.role === 'admin'
+        ? withDashboardClientTiming(requestId, 'client.operations.dashboard', () => runtimeServices.operations.dashboard(dashboardOperationsReadOptions), 'deferred')
+        : Promise.resolve(null),
+      withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.notifications.list', () =>
+        runtimeServices.notifications.list(notificationScopeVendorId, dashboardReadOptions),
+        'deferred',
+      ),
+      currentUser?.role === 'admin'
+        ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
+        : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
+      currentUser?.role === 'admin'
+        ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
+            runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
+            'deferred',
+          )
+        : Promise.resolve(null),
+      currentUser?.role === 'admin'
+        ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
+        : Promise.resolve(null),
+    ]);
 
-  throwDashboardAuthError(dashboardRequests);
+    throwDashboardAuthError(dashboardRequests);
 
-  const [
-    ordersResult,
-    returnsResult,
-    financeResult,
-    automationResult,
-    operationsResult,
-    signalsResult,
-    notificationsResult,
-    supportResult,
-    diagnosticsResult,
-    observabilityResult,
-  ] = dashboardRequests;
+    const [
+      summaryResult,
+      ordersResult,
+      returnsResult,
+      financeResult,
+      automationResult,
+      operationsResult,
+      signalsResult,
+      notificationsResult,
+      supportResult,
+      diagnosticsResult,
+      observabilityResult,
+    ] = dashboardRequests;
+
+    const dashboardSummary: DashboardOperationalSummary | null = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
+    if (summaryResult.status === 'rejected') {
+      partialDataWarnings.push('Dashboard summary counts are temporarily unavailable.');
+    }
 
   const orders = ordersResult.status === 'fulfilled' ? ordersResult.value : [];
   if (ordersResult.status === 'rejected') {
@@ -575,11 +591,14 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   }
 
   const aggregationStartedAt = getDashboardNow();
-  const awaitingShipmentCount = orders.filter((order) => order.shippingStatus === 'Awaiting Shipment').length;
-  const blockedCount = orders.filter(
-    (order) => order.allocationStatus === 'pending_reassignment' || order.allocationStatus === 'vendor_blocked',
-  ).length;
-  const activeRefundCount = returns.filter((item) => item.status === 'Pending' || item.status === 'In Review').length;
+  const totalOrderCount = dashboardSummary?.orders.total ?? null;
+  const awaitingShipmentCount = dashboardSummary?.orders.awaitingShipment ?? null;
+  const blockedCount = dashboardSummary?.orders.blocked ?? null;
+  const activeRefundCount = dashboardSummary?.returns.refundAttention ?? null;
+  const blockedAndAttentionCount =
+    blockedCount === null || activeRefundCount === null
+      ? null
+      : blockedCount + activeRefundCount;
   const automationIssueGroups = countAutomationIssueGroups(automation?.alerts ?? [], signals?.signals ?? []);
   const normalizedOperationalCounts = buildNormalizedOperationalCounts({
     support: supportTickets ? countOpenSupportIssues(supportTickets, currentVendorId) : { rawCount: null, groupedCount: null },
@@ -591,18 +610,24 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
   const operations = operationsDashboard?.items ?? null;
   const operationsTotal = operationsDashboard?.summary.total ?? null;
+  const blockedSummaryDescription = dashboardSummary
+    ? 'Full blocked count comes from dashboard summary.'
+    : 'Full blocked count is temporarily unavailable.';
+  const awaitingShipmentSummaryDescription = dashboardSummary
+    ? 'Full shipment queue count comes from dashboard summary.'
+    : 'Full shipment queue count is temporarily unavailable.';
+  const refundAttentionSummaryDescription = dashboardSummary
+    ? 'Full return/refund attention count comes from dashboard summary.'
+    : 'Full return/refund attention count is temporarily unavailable.';
 
   const priorityWork = createPriorityWork({
     blockedCount,
     awaitingShipmentCount,
     refundAttentionCount: activeRefundCount,
     automationIssueGroupCount,
-    blockedValue: formatCountInLatestSlice(blockedCount, orders.length),
-    awaitingShipmentValue: formatCountInLatestSlice(awaitingShipmentCount, orders.length),
-    refundAttentionValue: formatCountInLatestSlice(activeRefundCount, returns.length),
-    blockedDescription: `Showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}; open Orders for the full scope.`,
-    awaitingShipmentDescription: `Showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}; open Orders for the full shipment queue.`,
-    refundAttentionDescription: `Showing latest ${returns.length} return record${returns.length === 1 ? '' : 's'}; open Returns for the full review queue.`,
+    blockedDescription: `${formatRecentListDescription(orders.length, 'order allocation')} ${blockedSummaryDescription}`,
+    awaitingShipmentDescription: `${formatRecentListDescription(orders.length, 'order allocation')} ${awaitingShipmentSummaryDescription}`,
+    refundAttentionDescription: `${formatRecentListDescription(returns.length, 'return record')} ${refundAttentionSummaryDescription}`,
   });
 
   const recentActivity = [
@@ -618,7 +643,9 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     )),
   ];
 
-  let workspaceStatus = `${currentVendor.vendorName} is showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}, latest ${returns.length} return record${returns.length === 1 ? '' : 's'}, and ${automationIssueGroupCount} grouped automation/rules issues.`;
+  let workspaceStatus = dashboardSummary
+    ? `${currentVendor.vendorName} has ${totalOrderCount} vendor allocation${totalOrderCount === 1 ? '' : 's'}, ${awaitingShipmentCount} awaiting shipment, ${blockedCount} blocked, ${activeRefundCount} return/refund attention item${activeRefundCount === 1 ? '' : 's'}, and ${automationIssueGroupCount} grouped automation/rules issues. ${formatRecentListDescription(orders.length, 'order allocation')} ${formatRecentListDescription(returns.length, 'return record')}`
+    : `${currentVendor.vendorName} dashboard summary counts are unavailable; ${formatRecentListDescription(orders.length, 'order allocation')} ${formatRecentListDescription(returns.length, 'return record')}`;
   if (currentUser?.role === 'admin' && operations) {
     workspaceStatus = operationsTotal === null
       ? `${workspaceStatus} Admin queue is showing latest ${operations.length} operational item${operations.length === 1 ? '' : 's'} for the selected vendor scope.`
@@ -682,9 +709,9 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     description: `Monitor backend-derived operational state for ${currentVendor.vendorName} from one workspace.`,
     loadPhase: 'deferred',
     stats: [
-      { label: 'Vendor orders', value: formatLatestSlice(orders.length) },
-      { label: 'Awaiting shipment', value: formatCountInLatestSlice(awaitingShipmentCount, orders.length) },
-      { label: 'Blocked / attention', value: `${blockedCount + activeRefundCount} in latest slices` },
+      { label: 'Vendor orders', value: formatOptionalCount(totalOrderCount) },
+      { label: 'Awaiting shipment', value: formatOptionalCount(awaitingShipmentCount) },
+      { label: 'Blocked / attention', value: formatOptionalCount(blockedAndAttentionCount) },
       { label: 'Payout estimate', value: payoutEstimate },
       { label: 'Refund amount', value: finance?.summary.refunds ?? '—' },
     ],
