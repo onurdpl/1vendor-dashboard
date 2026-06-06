@@ -728,6 +728,11 @@ function mapProviderResponseSummary(
     shopifyFulfillmentSyncAttempted: readOptionalBoolean(snapshot, ['shopifyFulfillmentSyncAttempted']),
     shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
     shopifyFulfillmentSynced: readOptionalBoolean(snapshot, ['shopifyFulfillmentSynced']),
+    autoSyncAttempted: readOptionalBoolean(snapshot, ['autoSyncAttempted']),
+    autoSyncSucceeded: readOptionalBoolean(snapshot, ['autoSyncSucceeded']),
+    autoSyncSkippedReason: readString(snapshot, ['autoSyncSkippedReason']),
+    shopifyFulfillmentId: readString(snapshot, ['shopifyFulfillmentId']),
+    shopifyFulfillmentOrderId: readString(snapshot, ['shopifyFulfillmentOrderId']),
     shopifyFulfillmentCancelSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentCancelSyncSkippedReason']),
     fulfillmentTrackingNumberPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingNumberPresent']),
     fulfillmentTrackingUrlPresent: readOptionalBoolean(snapshot, ['fulfillmentTrackingUrlPresent']),
@@ -3781,8 +3786,11 @@ async function persistProviderShipmentResult(input: {
     assignedVendorId: string;
     sourceShopifyOrderId: string;
     fulfillmentStatus: string;
+    allocationStatus?: string | null;
+    cancellationReason?: string | null;
     fulfillment: {
       shopifyFulfillmentId: string | null;
+      shopifyFulfillmentOrderId?: string | null;
       shipmentCreatedAt: Date | null;
     } | null;
   };
@@ -3924,12 +3932,12 @@ async function persistProviderShipmentResult(input: {
     return execution;
   });
 
-  const shopifyFulfillmentSyncDiagnostics = await maybeSyncNavlungoShipmentToShopify({
-    allocationId: allocation.id,
-    vendorId: allocation.assignedVendorId,
+  const shopifyFulfillmentSyncDiagnostics = await maybeSyncProviderShipmentToShopify({
+    allocation,
     provider,
     result,
     env: input.env,
+    persistedShipmentStatus: status,
   });
 
   if (shopifyFulfillmentSyncDiagnostics) {
@@ -3955,37 +3963,92 @@ async function persistProviderShipmentResult(input: {
   return mapShipmentExecution(updated);
 }
 
-async function maybeSyncNavlungoShipmentToShopify(input: {
-  allocationId: string;
-  vendorId: string;
+async function maybeSyncProviderShipmentToShopify(input: {
+  allocation: {
+    id: string;
+    assignedVendorId: string;
+    allocationStatus?: string | null;
+    cancellationReason?: string | null;
+    fulfillment: {
+      shopifyFulfillmentId: string | null;
+      shopifyFulfillmentOrderId?: string | null;
+    } | null;
+  };
   provider: ShippingProvider;
   result: Awaited<ReturnType<ShippingProviderAdapter['createShipment']>>;
   env: AppEnv;
+  persistedShipmentStatus: ShipmentExecutionStatus;
 }) {
-  if (input.provider !== ShippingProvider.NAVLUNGO) {
+  if (input.provider !== ShippingProvider.NAVLUNGO && input.provider !== ShippingProvider.KARGONOMI) {
     return null;
   }
 
-  const trackingNumber = input.result.trackingNumber?.trim() || input.result.providerShipmentId?.trim() || null;
+  const isKargonomi = input.provider === ShippingProvider.KARGONOMI;
+  const trackingNumber = isKargonomi
+    ? input.result.trackingNumber?.trim() || null
+    : input.result.trackingNumber?.trim() || input.result.providerShipmentId?.trim() || null;
   const trackingUrl = input.result.trackingUrl?.trim() || null;
-  const carrier =
-    readString(input.result.responseSnapshot, ['carrierName', 'shippingProviderName', 'providerName']) ??
-    'Navlungo';
+  const carrier = isKargonomi
+    ? readString(input.result.responseSnapshot, ['shippingProviderName', 'carrierName', 'providerName'])
+    : readString(input.result.responseSnapshot, ['carrierName', 'shippingProviderName', 'providerName']) ?? 'Navlungo';
 
-  if (!trackingNumber) {
+  function buildSkippedDiagnostics(reason: string, extra: Record<string, unknown> = {}) {
     return {
       shopifyFulfillmentSyncAttempted: false,
-      shopifyFulfillmentSyncSkippedReason: 'missing_tracking_number',
+      shopifyFulfillmentSyncSkippedReason: reason,
       shopifyFulfillmentSynced: false,
-      fulfillmentTrackingNumberPresent: false,
+      autoSyncAttempted: false,
+      autoSyncSucceeded: false,
+      autoSyncSkippedReason: reason,
+      shopifyFulfillmentId: input.allocation.fulfillment?.shopifyFulfillmentId ?? null,
+      shopifyFulfillmentOrderId: input.allocation.fulfillment?.shopifyFulfillmentOrderId ?? null,
+      fulfillmentTrackingNumberPresent: Boolean(trackingNumber),
       fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
+      ...extra,
     };
+  }
+
+  if (isKargonomi) {
+    if (input.allocation.fulfillment?.shopifyFulfillmentId) {
+      return buildSkippedDiagnostics('already_fulfilled', {
+        shopifyFulfillmentSyncAttempted: true,
+        shopifyFulfillmentSynced: true,
+        autoSyncAttempted: true,
+        autoSyncSucceeded: true,
+        shopifyFulfillmentIdPresent: true,
+        shopifyFulfillmentOrderIdPresent: Boolean(input.allocation.fulfillment.shopifyFulfillmentOrderId),
+      });
+    }
+
+    if (!input.result.providerShipmentId?.trim()) {
+      return buildSkippedDiagnostics('provider_shipment_missing');
+    }
+
+    if (input.persistedShipmentStatus !== ShipmentExecutionStatus.CREATED) {
+      return buildSkippedDiagnostics('shipment_not_created');
+    }
+
+    if (input.allocation.cancellationReason) {
+      return buildSkippedDiagnostics('order_cancelled');
+    }
+
+    if (input.allocation.allocationStatus && input.allocation.allocationStatus !== 'ACTIVE') {
+      return buildSkippedDiagnostics('allocation_not_active');
+    }
+  }
+
+  if (!trackingNumber) {
+    return buildSkippedDiagnostics(isKargonomi ? 'tracking_missing' : 'missing_tracking_number');
+  }
+
+  if (!carrier) {
+    return buildSkippedDiagnostics('carrier_missing');
   }
 
   try {
     const fulfillmentService = createFulfillmentService(input.env);
     const syncResult = await fulfillmentService.updateAllocationTracking({
-      allocationId: input.allocationId,
+      allocationId: input.allocation.id,
       body: {
         trackingNumber,
         carrier,
@@ -3993,15 +4056,15 @@ async function maybeSyncNavlungoShipmentToShopify(input: {
         notifyCustomer: false,
       },
       authUser: {
-        id: 'system-navlungo-fulfillment-sync',
+        id: `system-${mapProvider(input.provider)}-fulfillment-sync`,
         email: 'system@local',
         name: 'System',
         role: 'admin',
         status: 'active',
       },
       vendorContext: {
-        vendorId: input.vendorId,
-        vendorName: input.vendorId,
+        vendorId: input.allocation.assignedVendorId,
+        vendorName: input.allocation.assignedVendorId,
         role: 'vendor',
         accessScope: 'vendor',
       },
@@ -4013,14 +4076,25 @@ async function maybeSyncNavlungoShipmentToShopify(input: {
       shopifyFulfillmentSynced: syncResult.ok,
       shopifyFulfillmentIdPresent: syncResult.ok ? syncResult.shopifyFulfillmentIdPresent : false,
       shopifyFulfillmentOrderIdPresent: syncResult.ok ? syncResult.shopifyFulfillmentOrderIdPresent : false,
+      shopifyFulfillmentId: syncResult.ok ? syncResult.shopifyFulfillmentId ?? null : null,
+      shopifyFulfillmentOrderId: syncResult.ok ? syncResult.shopifyFulfillmentOrderId ?? null : null,
+      autoSyncAttempted: true,
+      autoSyncSucceeded: syncResult.ok,
+      autoSyncSkippedReason: syncResult.ok ? syncResult.shopifyFulfillmentSkippedReason ?? null : syncResult.message,
       fulfillmentTrackingNumberPresent: true,
       fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
     };
   } catch (error) {
+    const message = error instanceof Error ? error.message : 'Shopify fulfillment sync failed.';
     return {
       shopifyFulfillmentSyncAttempted: true,
-      shopifyFulfillmentSyncSkippedReason: error instanceof Error ? error.message : 'Shopify fulfillment sync failed.',
+      shopifyFulfillmentSyncSkippedReason: message,
       shopifyFulfillmentSynced: false,
+      autoSyncAttempted: true,
+      autoSyncSucceeded: false,
+      autoSyncSkippedReason: message,
+      shopifyFulfillmentId: null,
+      shopifyFulfillmentOrderId: null,
       fulfillmentTrackingNumberPresent: true,
       fulfillmentTrackingUrlPresent: Boolean(trackingUrl),
     };
@@ -5646,6 +5720,37 @@ export async function refreshKargonomiShipmentProviderData(
 
       return execution;
     });
+
+    const shopifyFulfillmentSyncDiagnostics = await maybeSyncProviderShipmentToShopify({
+      allocation: {
+        id: existing.allocationId,
+        assignedVendorId: existing.vendorId,
+        allocationStatus: existing.allocation.allocationStatus,
+        cancellationReason: existing.allocation.cancellationReason,
+        fulfillment: existing.allocation.fulfillment,
+      },
+      provider: existing.provider,
+      result,
+      env: options.env,
+      persistedShipmentStatus: status,
+    });
+
+    if (shopifyFulfillmentSyncDiagnostics) {
+      const updatedSnapshot = {
+        ...mergedSnapshot,
+        ...shopifyFulfillmentSyncDiagnostics,
+      };
+      const syncedExecution = await prisma.shipmentExecution.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          responseSnapshot: updatedSnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      return mapShipmentExecution(syncedExecution);
+    }
 
     return mapShipmentExecution(updated);
   } catch (error) {

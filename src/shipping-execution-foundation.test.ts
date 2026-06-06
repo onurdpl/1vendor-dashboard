@@ -146,6 +146,35 @@ function buildNavlungoProviderMetadata(overrides: Record<string, unknown> = {}) 
   };
 }
 
+function buildKargonomiShippingConfig(overrides: Record<string, unknown> = {}) {
+  return {
+    vendorId: 'sporjinal',
+    preferredProvider: 'KARGONOMI',
+    shippingEnabled: true,
+    defaultDesi: 3,
+    cargoIntegrationId: null,
+    defaultWarehouseId: '112668',
+    shippingVatPercent: 18,
+    warehouses: [
+      {
+        id: 'warehouse-sporjinal-112668',
+        configId: 'shipping-config-sporjinal',
+        vendorId: 'sporjinal',
+        provider: 'KARGONOMI',
+        warehouseId: '112668',
+        name: 'Sporjinal Kargonomi warehouse',
+        address: null,
+        isDefault: true,
+        metadata: null,
+        createdAt: new Date('2026-05-15T10:00:00.000Z'),
+        updatedAt: new Date('2026-05-15T10:00:00.000Z'),
+      },
+    ],
+    providerMetadata: null,
+    ...overrides,
+  };
+}
+
 function buildNavlungoReturnRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: 'return-request-1',
@@ -304,6 +333,9 @@ function buildAllocationWithShopifyFulfillmentData(overrides: Record<string, unk
       shippingCity: 'Istanbul',
       shippingDistrict: 'Kartal',
       shippingAddress: 'Test Mahallesi 1. Sokak No: 1',
+      shippingAddress1: 'Test Mahallesi 1. Sokak No: 1',
+      shippingStateId: '34',
+      shippingCityId: '828',
     },
     lineItems: [
       {
@@ -528,7 +560,7 @@ describe('shipping execution foundation', () => {
         createShipmentCalled: true,
         confirmShippingPriceCalled: true,
       },
-      allocation: buildAllocation({
+      allocation: buildAllocationWithShopifyFulfillmentData({
         fulfillment: {
           shopifyFulfillmentId: null,
           shipmentCreatedAt: new Date('2026-05-15T10:00:00.000Z'),
@@ -567,6 +599,7 @@ describe('shipping execution foundation', () => {
       }),
     });
     prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
     storedExecution = existing as typeof storedExecution;
 
     const result = await refreshKargonomiShipmentProviderData(existing.id, {
@@ -589,6 +622,21 @@ describe('shipping execution foundation', () => {
       trackingNumber: 'KSUR2653543SKDXP',
       labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
       barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+    });
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allocationId: 'alloc-1',
+        trackingNumber: 'KSUR2653543SKDXP',
+        carrier: 'Sürat Kargo',
+        trackingUrl: null,
+        notifyCustomer: false,
+      }),
+    );
+    expect(result.providerResponseSummary).toMatchObject({
+      autoSyncAttempted: true,
+      autoSyncSucceeded: true,
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
     });
     expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -3097,6 +3145,264 @@ describe('shipping execution foundation', () => {
       shopifyFulfillmentSyncAttempted: false,
       shopifyFulfillmentSynced: false,
       shopifyFulfillmentSyncSkippedReason: 'missing_tracking_number',
+    });
+  });
+
+  it('syncs successful Kargonomi shipment tracking to Shopify fulfillment automatically', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'kargonomi',
+        shippingProviderName: 'Sürat Kargo',
+        barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).toHaveBeenCalledWith(
+      expect.objectContaining({
+        allocationId: 'alloc-1',
+        shopifyOrderId: 'gid://shopify/Order/1055',
+        trackingNumber: 'KSUR2653543SKDXP',
+        carrier: 'Sürat Kargo',
+        trackingUrl: null,
+        notifyCustomer: false,
+      }),
+    );
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
+      autoSyncAttempted: true,
+      autoSyncSucceeded: true,
+      shopifyFulfillmentId: 'gid://shopify/Fulfillment/fulfillment-1055',
+      shopifyFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/fo-1055',
+      fulfillmentTrackingNumberPresent: true,
+    });
+  });
+
+  it('skips automatic Kargonomi Shopify sync when tracking is missing', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'kargonomi',
+        shippingProviderName: 'Sürat Kargo',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: false,
+      shopifyFulfillmentSynced: false,
+      shopifyFulfillmentSyncSkippedReason: 'tracking_missing',
+      autoSyncSkippedReason: 'tracking_missing',
+    });
+  });
+
+  it('skips automatic Kargonomi Shopify sync when carrier is missing', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'kargonomi',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: false,
+      shopifyFulfillmentSynced: false,
+      shopifyFulfillmentSyncSkippedReason: 'carrier_missing',
+      autoSyncSkippedReason: 'carrier_missing',
+    });
+  });
+
+  it('does not duplicate automatic Kargonomi Shopify sync when fulfillment already exists', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData({
+      fulfillment: {
+        shopifyFulfillmentId: 'gid://shopify/Fulfillment/existing-1055',
+        shopifyFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/fo-1055',
+        shipmentCreatedAt: new Date('2026-05-18T09:55:00.000Z'),
+      },
+    }));
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'kargonomi',
+        shippingProviderName: 'Sürat Kargo',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.fetchFulfillmentOrders).not.toHaveBeenCalled();
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: true,
+      shopifyFulfillmentSyncSkippedReason: 'already_fulfilled',
+      autoSyncSkippedReason: 'already_fulfilled',
+      shopifyFulfillmentId: 'gid://shopify/Fulfillment/existing-1055',
+      shopifyFulfillmentOrderId: 'gid://shopify/FulfillmentOrder/fo-1055',
+    });
+  });
+
+  it('persists automatic Kargonomi Shopify sync errors safely', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(buildKargonomiShippingConfig());
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    shopifyAdminMock.fetchFulfillmentOrders.mockResolvedValueOnce({ fulfillmentOrders: [] });
+    const adapter = buildAdapter({ provider: 'KARGONOMI' as const });
+    adapter.createShipment.mockResolvedValue({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        ok: true,
+        provider: 'kargonomi',
+        shippingProviderName: 'Sürat Kargo',
+      },
+    });
+
+    const result = await createShipmentExecution(
+      {
+        allocationId: 'alloc-1',
+        provider: 'kargonomi',
+      },
+      {
+        env: {
+          ...env,
+          SHIPPING_PROVIDER: 'kargonomi',
+          SHIPPING_EXECUTION_ENABLED: true,
+          KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+          KARGONOMI_API_TOKEN: 'test-token',
+        },
+        vendorId: 'sporjinal',
+        adapter,
+      },
+    );
+
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(result.providerResponseSummary).toMatchObject({
+      shopifyFulfillmentSyncAttempted: true,
+      shopifyFulfillmentSynced: false,
+      autoSyncAttempted: true,
+      autoSyncSucceeded: false,
+      autoSyncSkippedReason: 'Shopify fulfillment order data is missing; cannot sync tracking automatically.',
     });
   });
 

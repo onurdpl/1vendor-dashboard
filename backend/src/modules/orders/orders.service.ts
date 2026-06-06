@@ -922,6 +922,13 @@ function buildShipmentProviderResponseSummary(
     shopifyFulfillmentSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentSyncSkippedReason']),
     shopifyFulfillmentSynced:
       typeof snapshot?.shopifyFulfillmentSynced === 'boolean' ? snapshot.shopifyFulfillmentSynced : null,
+    autoSyncAttempted:
+      typeof snapshot?.autoSyncAttempted === 'boolean' ? snapshot.autoSyncAttempted : null,
+    autoSyncSucceeded:
+      typeof snapshot?.autoSyncSucceeded === 'boolean' ? snapshot.autoSyncSucceeded : null,
+    autoSyncSkippedReason: readString(snapshot, ['autoSyncSkippedReason']),
+    shopifyFulfillmentId: readString(snapshot, ['shopifyFulfillmentId']),
+    shopifyFulfillmentOrderId: readString(snapshot, ['shopifyFulfillmentOrderId']),
     shopifyFulfillmentCancelSyncSkippedReason: readString(snapshot, ['shopifyFulfillmentCancelSyncSkippedReason']),
     fulfillmentTrackingNumberPresent:
       typeof snapshot?.fulfillmentTrackingNumberPresent === 'boolean' ? snapshot.fulfillmentTrackingNumberPresent : null,

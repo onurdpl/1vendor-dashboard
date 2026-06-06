@@ -306,6 +306,11 @@ export type ShipmentExecution = {
     shopifyFulfillmentSyncAttempted?: boolean | null;
     shopifyFulfillmentSyncSkippedReason?: string | null;
     shopifyFulfillmentSynced?: boolean | null;
+    autoSyncAttempted?: boolean | null;
+    autoSyncSucceeded?: boolean | null;
+    autoSyncSkippedReason?: string | null;
+    shopifyFulfillmentId?: string | null;
+    shopifyFulfillmentOrderId?: string | null;
     shopifyFulfillmentCancelSyncSkippedReason?: string | null;
     fulfillmentTrackingNumberPresent?: boolean | null;
     fulfillmentTrackingUrlPresent?: boolean | null;

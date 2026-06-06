@@ -3859,6 +3859,20 @@ export function OrderDetailPage() {
             {summary.shopifyFulfillmentSyncSkippedReason ? ` · ${summary.shopifyFulfillmentSyncSkippedReason}` : ''}
           </strong>
         </div>
+        <div className="summary-row">
+          <span>Auto Shopify sync</span>
+          <strong>
+            attempted {formatDiagnosticPresence(summary.autoSyncAttempted)} · succeeded{' '}
+            {formatDiagnosticPresence(summary.autoSyncSucceeded)}
+            {summary.autoSyncSkippedReason ? ` · ${summary.autoSyncSkippedReason}` : ''}
+          </strong>
+        </div>
+        <div className="summary-row">
+          <span>Shopify fulfillment ids</span>
+          <strong>
+            fulfillment {summary.shopifyFulfillmentId || '—'} · order {summary.shopifyFulfillmentOrderId || '—'}
+          </strong>
+        </div>
         {hasValidationDiagnostics ? (
           <>
             <div className="summary-row">
