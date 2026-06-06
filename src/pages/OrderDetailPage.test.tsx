@@ -692,6 +692,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ],
       providerMetadata: {
         packageType: 'box',
+        kargonomiShippingProviderId: '44',
         kargonomiBuyerStateId: '34',
         kargonomiBuyerCityId: '828',
       },
@@ -2792,12 +2793,17 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
     const buyerStateInput = await screen.findByLabelText('Fallback Kargonomi buyer state ID (PoC override)');
     const buyerCityInput = await screen.findByLabelText('Fallback Kargonomi buyer city ID (PoC override)');
+    expect(carrierInput).toHaveValue('44');
+    expect(screen.getByText(/-1 means automatic cheapest provider selection/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     await user.clear(warehouseInput);
     await user.type(warehouseInput, '112668');
+    await user.clear(carrierInput);
+    await user.type(carrierInput, '9');
     await user.clear(buyerStateInput);
     await user.type(buyerStateInput, '34');
     await user.clear(buyerCityInput);
@@ -2813,6 +2819,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
           defaultWarehouseId: '112668',
           defaultDesi: 3,
           providerMetadata: expect.objectContaining({
+            kargonomiShippingProviderId: '9',
             kargonomiBuyerStateId: '34',
             kargonomiBuyerCityId: '828',
           }),
@@ -2828,6 +2835,76 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+  });
+
+  it('preserves Kargonomi automatic carrier selection when carrier id is empty', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string }) =>
+      Promise.resolve({
+        provider: options?.provider ?? 'kargonomi',
+        supportedProviders: ['kargonomi', 'kargo_entegrator'],
+        executionReady: true,
+        sandboxModeEnabled: false,
+        shippingExecutionEnabled: true,
+        providerSelected: options?.provider === 'kargonomi',
+        providerEnabled: true,
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: false,
+        warehouseIdConfigured: true,
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: true,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: [],
+        deprecatedEnvFallbacks: [],
+        warnings: [],
+      }),
+    );
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'kargo_entegrator',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: '9999',
+      defaultWarehouseId: '1774',
+      shippingVatPercent: '18.00',
+      warehouses: [],
+      providerMetadata: {
+        packageType: 'box',
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+
+    renderOrderDetail();
+
+    await user.selectOptions(await screen.findByLabelText('Provider'), 'kargonomi');
+    const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
+    const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
+    expect(carrierInput).toHaveValue('');
+    await user.clear(warehouseInput);
+    await user.type(warehouseInput, '112668');
+    await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
+
+    await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalled());
+    const savedPayload = updateVendorShippingConfigMock.mock.calls.at(-1)?.[1] as { providerMetadata?: Record<string, unknown> };
+    expect(savedPayload.providerMetadata).not.toHaveProperty('kargonomiShippingProviderId');
   });
 
   it('shows Navlungo diagnostics config and allows live provider save', async () => {

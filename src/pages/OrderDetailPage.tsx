@@ -948,6 +948,7 @@ type ShippingConfigDraft = {
   packageType: 'box' | 'document';
   tryOtoPickupLocationCode: string;
   tryOtoOriginCity: string;
+  kargonomiShippingProviderId: string;
   kargonomiBuyerStateId: string;
   kargonomiBuyerCityId: string;
   navlungoSenderAddressId: string;
@@ -1000,6 +1001,16 @@ function readKargonomiBuyerStateId(config?: VendorShippingConfig | null) {
   const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
   const raw = metadata.kargonomiBuyerStateId ?? metadata.buyerStateId ?? metadata.buyer_state_id;
   return typeof raw === 'string' ? raw : '';
+}
+
+function readKargonomiShippingProviderId(config?: VendorShippingConfig | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  const raw =
+    metadata.kargonomiShippingProviderId ??
+    metadata.kargonomi_shipping_provider_id ??
+    metadata.shippingProviderId ??
+    metadata.shipping_provider_id;
+  return typeof raw === 'string' ? raw : typeof raw === 'number' && Number.isFinite(raw) ? String(raw) : '';
 }
 
 function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
@@ -1158,6 +1169,7 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     packageType: readPackageType(config),
     tryOtoPickupLocationCode: readTryOtoPickupLocationCode(config),
     tryOtoOriginCity: readTryOtoOriginCity(config),
+    kargonomiShippingProviderId: readKargonomiShippingProviderId(config),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
     navlungoSenderAddressId: readNavlungoSenderAddressId(config) || '55574',
@@ -1237,6 +1249,13 @@ function validateShippingConfigDraft(draft: ShippingConfigDraft) {
   }
   if (
     draft.preferredProvider === 'kargonomi' &&
+    draft.kargonomiShippingProviderId.trim() &&
+    !/^-?\d+$/.test(draft.kargonomiShippingProviderId.trim())
+  ) {
+    errors.push('Kargonomi carrier/provider ID must be numeric, or -1 for automatic selection.');
+  }
+  if (
+    draft.preferredProvider === 'kargonomi' &&
     draft.kargonomiBuyerStateId.trim() &&
     !/^\d+$/.test(draft.kargonomiBuyerStateId.trim())
   ) {
@@ -1293,8 +1312,16 @@ function buildShippingConfigUpdate(
     delete providerMetadata.buyerCityId;
     delete providerMetadata.buyer_state_id;
     delete providerMetadata.buyer_city_id;
+    delete providerMetadata.kargonomiShippingProviderId;
+    delete providerMetadata.kargonomi_shipping_provider_id;
+    delete providerMetadata.shippingProviderId;
+    delete providerMetadata.shipping_provider_id;
+    const kargonomiShippingProviderId = draft.kargonomiShippingProviderId.trim();
     const fallbackBuyerStateId = draft.kargonomiBuyerStateId.trim();
     const fallbackBuyerCityId = draft.kargonomiBuyerCityId.trim();
+    if (kargonomiShippingProviderId) {
+      providerMetadata.kargonomiShippingProviderId = kargonomiShippingProviderId;
+    }
     if (fallbackBuyerStateId) {
       providerMetadata.kargonomiBuyerStateId = fallbackBuyerStateId;
     }
@@ -4803,6 +4830,7 @@ export function OrderDetailPage() {
     Boolean(kargonomiOptionDiagnostics?.providerEnabled);
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
+  const kargonomiShippingProviderId = readKargonomiShippingProviderId(vendorShippingConfig);
   const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
   const kargonomiBuyerCityId = readKargonomiBuyerCityId(vendorShippingConfig);
 
@@ -4875,6 +4903,23 @@ export function OrderDetailPage() {
             </label>
             {isKargonomiConfigDraft ? (
               <>
+                <label className="field">
+                  <span>Kargonomi carrier/provider ID</span>
+                  <input
+                    inputMode="numeric"
+                    pattern="-?[0-9]*"
+                    value={shippingConfigDraft.kargonomiShippingProviderId}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiShippingProviderId: event.target.value,
+                      }))
+                    }
+                  />
+                  <small>
+                    -1 means automatic cheapest provider selection. Use a specific Kargonomi carrier ID from price comparison to force a carrier.
+                  </small>
+                </label>
                 <label className="field">
                   <span>Fallback Kargonomi buyer state ID (PoC override)</span>
                   <input
@@ -6934,6 +6979,10 @@ export function OrderDetailPage() {
                               <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
                             </div>
                             <div className="summary-row">
+                              <span>Kargonomi carrier/provider ID</span>
+                              <strong>{kargonomiShippingProviderId || '-1 automatic'}</strong>
+                            </div>
+                            <div className="summary-row">
                               <span>Kargonomi fallback buyer state ID</span>
                               <strong>{kargonomiBuyerStateId || '—'}</strong>
                             </div>
@@ -8127,6 +8176,10 @@ export function OrderDetailPage() {
                         <div className="summary-row">
                           <span>Kargonomi warehouse configured</span>
                           <strong>{(kargonomiOptionDiagnostics ?? shippingProviderDiagnostics).warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                        </div>
+                        <div className="summary-row">
+                          <span>Kargonomi carrier/provider ID</span>
+                          <strong>{kargonomiShippingProviderId || '-1 automatic'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Kargonomi fallback buyer state ID</span>
