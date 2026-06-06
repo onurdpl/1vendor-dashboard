@@ -714,6 +714,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       warehouses: [],
       providerMetadata: {
         packageType: 'box',
+        kargonomiReturnReceiverName: 'Sporjinal return warehouse',
+        kargonomiReturnReceiverPhone: '+902121112233',
+        kargonomiReturnReceiverAddress: 'Return warehouse address',
         kargonomiBuyerStateId: '34',
         kargonomiBuyerCityId: '828',
       },
@@ -2811,8 +2814,15 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
     const buyerStateInput = await screen.findByLabelText('Fallback Kargonomi buyer state ID (PoC override)');
     const buyerCityInput = await screen.findByLabelText('Fallback Kargonomi buyer city ID (PoC override)');
+    const returnReceiverNameInput = await screen.findByLabelText('Return receiver name');
+    const returnReceiverPhoneInput = await screen.findByLabelText('Return receiver phone');
+    const returnReceiverAddressInput = await screen.findByLabelText('Return receiver address');
     expect(carrierInput).toHaveValue('44');
+    expect(returnReceiverNameInput).toHaveValue('Sporjinal warehouse');
+    expect(returnReceiverPhoneInput).toHaveValue('');
+    expect(returnReceiverAddressInput).toHaveValue('');
     expect(screen.getByText(/-1 means automatic cheapest provider selection/)).toBeInTheDocument();
+    expect(screen.getAllByText('Used as the warehouse/receiver destination for customer return shipments.')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     await user.clear(warehouseInput);
@@ -2823,6 +2833,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await user.type(buyerStateInput, '34');
     await user.clear(buyerCityInput);
     await user.type(buyerCityInput, '828');
+    fireEvent.change(returnReceiverNameInput, { target: { value: 'Yalispor return depot' } });
+    fireEvent.change(returnReceiverPhoneInput, { target: { value: '+902122223344' } });
+    fireEvent.change(returnReceiverAddressInput, { target: { value: 'Yalispor return address' } });
     await user.click(screen.getByRole('button', { name: 'Save shipping config' }));
 
     await waitFor(() =>
@@ -2837,6 +2850,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
             kargonomiShippingProviderId: '9',
             kargonomiBuyerStateId: '34',
             kargonomiBuyerCityId: '828',
+            kargonomiReturnReceiverName: 'Yalispor return depot',
+            kargonomiReturnReceiverPhone: '+902122223344',
+            kargonomiReturnReceiverAddress: 'Yalispor return address',
           }),
           warehouses: [
             expect.objectContaining({

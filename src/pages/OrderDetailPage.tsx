@@ -952,6 +952,9 @@ type ShippingConfigDraft = {
   kargonomiShippingProviderId: string;
   kargonomiBuyerStateId: string;
   kargonomiBuyerCityId: string;
+  kargonomiReturnReceiverName: string;
+  kargonomiReturnReceiverPhone: string;
+  kargonomiReturnReceiverAddress: string;
   navlungoSenderAddressId: string;
   navlungoSenderName: string;
   navlungoSenderPhone: string;
@@ -1018,6 +1021,17 @@ function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
   const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
   const raw = metadata.kargonomiBuyerCityId ?? metadata.buyerCityId ?? metadata.buyer_city_id;
   return typeof raw === 'string' ? raw : '';
+}
+
+function readKargonomiReturnReceiverField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
+  const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
+  for (const key of keys) {
+    const raw = metadata[key];
+    if (typeof raw === 'string' && raw.trim()) {
+      return raw;
+    }
+  }
+  return fallback ?? '';
 }
 
 function readNavlungoSenderAddressId(config?: VendorShippingConfig | null) {
@@ -1173,6 +1187,23 @@ function buildShippingConfigDraft(config?: VendorShippingConfig | null): Shippin
     kargonomiShippingProviderId: readKargonomiShippingProviderId(config),
     kargonomiBuyerStateId: readKargonomiBuyerStateId(config),
     kargonomiBuyerCityId: readKargonomiBuyerCityId(config),
+    kargonomiReturnReceiverName: readKargonomiReturnReceiverField(
+      config,
+      ['kargonomiReturnReceiverName', 'returnReceiverName'],
+      config?.warehouses.find((warehouse) => warehouse.isDefault)?.name ?? config?.warehouses[0]?.name,
+    ),
+    kargonomiReturnReceiverPhone: readKargonomiReturnReceiverField(config, [
+      'kargonomiReturnReceiverPhone',
+      'returnReceiverPhone',
+      'receiverPhone',
+      'warehousePhone',
+      'phone',
+    ]),
+    kargonomiReturnReceiverAddress: readKargonomiReturnReceiverField(
+      config,
+      ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress'],
+      config?.warehouses.find((warehouse) => warehouse.isDefault)?.address ?? config?.warehouses[0]?.address,
+    ),
     navlungoSenderAddressId: readNavlungoSenderAddressId(config) || '55574',
     navlungoSenderName: readNavlungoSenderField(config, ['navlungoSenderName', 'senderName', 'sender_name'], config?.warehouses.find((warehouse) => warehouse.isDefault)?.name ?? config?.warehouses[0]?.name),
     navlungoSenderPhone: readNavlungoSenderField(config, ['navlungoSenderPhone', 'senderPhone', 'sender_phone']),
@@ -1317,9 +1348,15 @@ function buildShippingConfigUpdate(
     delete providerMetadata.kargonomi_shipping_provider_id;
     delete providerMetadata.shippingProviderId;
     delete providerMetadata.shipping_provider_id;
+    delete providerMetadata.kargonomiReturnReceiverName;
+    delete providerMetadata.kargonomiReturnReceiverPhone;
+    delete providerMetadata.kargonomiReturnReceiverAddress;
     const kargonomiShippingProviderId = draft.kargonomiShippingProviderId.trim();
     const fallbackBuyerStateId = draft.kargonomiBuyerStateId.trim();
     const fallbackBuyerCityId = draft.kargonomiBuyerCityId.trim();
+    const returnReceiverName = draft.kargonomiReturnReceiverName.trim();
+    const returnReceiverPhone = draft.kargonomiReturnReceiverPhone.trim();
+    const returnReceiverAddress = draft.kargonomiReturnReceiverAddress.trim();
     if (kargonomiShippingProviderId) {
       providerMetadata.kargonomiShippingProviderId = kargonomiShippingProviderId;
     }
@@ -1328,6 +1365,15 @@ function buildShippingConfigUpdate(
     }
     if (fallbackBuyerCityId) {
       providerMetadata.kargonomiBuyerCityId = fallbackBuyerCityId;
+    }
+    if (returnReceiverName) {
+      providerMetadata.kargonomiReturnReceiverName = returnReceiverName;
+    }
+    if (returnReceiverPhone) {
+      providerMetadata.kargonomiReturnReceiverPhone = returnReceiverPhone;
+    }
+    if (returnReceiverAddress) {
+      providerMetadata.kargonomiReturnReceiverAddress = returnReceiverAddress;
     }
 
     return {
@@ -5053,6 +5099,49 @@ export function OrderDetailPage() {
                       }))
                     }
                   />
+                </label>
+                <label className="field">
+                  <span>Return receiver name</span>
+                  <input
+                    aria-label="Return receiver name"
+                    value={shippingConfigDraft.kargonomiReturnReceiverName}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiReturnReceiverName: event.target.value,
+                      }))
+                    }
+                  />
+                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
+                </label>
+                <label className="field">
+                  <span>Return receiver phone</span>
+                  <input
+                    aria-label="Return receiver phone"
+                    value={shippingConfigDraft.kargonomiReturnReceiverPhone}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiReturnReceiverPhone: event.target.value,
+                      }))
+                    }
+                  />
+                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
+                </label>
+                <label className="field field-full">
+                  <span>Return receiver address</span>
+                  <textarea
+                    aria-label="Return receiver address"
+                    rows={3}
+                    value={shippingConfigDraft.kargonomiReturnReceiverAddress}
+                    onChange={(event) =>
+                      setShippingConfigDraft((current) => ({
+                        ...current,
+                        kargonomiReturnReceiverAddress: event.target.value,
+                      }))
+                    }
+                  />
+                  <small>Used as the warehouse/receiver destination for customer return shipments.</small>
                 </label>
               </>
             ) : null}

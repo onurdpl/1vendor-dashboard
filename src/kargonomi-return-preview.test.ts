@@ -168,4 +168,51 @@ describe('Kargonomi return preview', () => {
     expect(serializedPreview).not.toContain('+905551112233');
     expect(serializedPreview).not.toContain('+902121112233');
   });
+
+  it('uses Kargonomi return receiver metadata for receiver phone and address readiness', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        providerMetadata: {
+          fallbackBuyerStateId: '34',
+          fallbackBuyerCityId: '828',
+          kargonomiReturnReceiverName: 'Metadata warehouse',
+          kargonomiReturnReceiverPhone: '+902122223344',
+          kargonomiReturnReceiverAddress: 'Metadata return address',
+        },
+        warehouses: [
+          {
+            warehouseId: '112668',
+            provider: 'KARGONOMI',
+            isDefault: true,
+            name: null,
+            address: null,
+            metadata: null,
+          },
+        ],
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
+      role: 'vendor',
+      vendorId: 'yalispor',
+    });
+
+    expect(preview.ready).toBe(true);
+    expect(preview.missingFields).not.toContain('receiver.phone');
+    expect(preview.missingFields).not.toContain('receiver.address');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        receiver: {
+          warehouseId: '112668',
+          namePresent: true,
+          phonePresent: true,
+          addressPresent: true,
+        },
+      },
+    });
+    const serializedPreview = JSON.stringify(preview.previewPayload);
+    expect(serializedPreview).not.toContain('+902122223344');
+    expect(serializedPreview).not.toContain('Metadata return address');
+  });
 });
