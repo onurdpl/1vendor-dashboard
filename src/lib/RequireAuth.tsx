@@ -1,17 +1,22 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { useEffect, useState } from 'react';
-import { clearToken, isAuthenticated, onSessionReset } from './auth';
+import { clearToken, isAuthenticated, onSessionReset, setSession } from './auth';
 import { runtimeConfig } from '../config/runtime';
 import { runtimeServices } from '../services/runtime-services';
 
 type AuthGateStatus = 'checking' | 'authenticated' | 'unauthenticated';
+const AUTH_RESTORE_TIMEOUT_MS = 10000;
 
 function getInitialAuthGateStatus(): AuthGateStatus {
+  if (runtimeConfig.apiMode === 'real') {
+    return 'checking';
+  }
+
   if (!isAuthenticated()) {
     return 'unauthenticated';
   }
 
-  return runtimeConfig.apiMode === 'real' ? 'checking' : 'authenticated';
+  return 'authenticated';
 }
 
 function getCurrentRouteForAuthRedirect() {
@@ -23,15 +28,71 @@ function getCurrentRouteForAuthRedirect() {
   return `${pathname || '/'}${search || ''}${hash || ''}`;
 }
 
+function getSafeRouteDiagnostics() {
+  if (typeof window === 'undefined') {
+    return {
+      pathname: '/',
+      hash: '',
+    };
+  }
+
+  return {
+    pathname: window.location.pathname || '/',
+    hash: window.location.hash || '',
+  };
+}
+
+function logAuthRestoreInfo(event: string, details: Record<string, unknown> = {}) {
+  console.info({
+    event,
+    ...getSafeRouteDiagnostics(),
+    ...details,
+  });
+}
+
+function logAuthRestoreWarn(event: string, details: Record<string, unknown> = {}) {
+  console.warn({
+    event,
+    ...getSafeRouteDiagnostics(),
+    ...details,
+  });
+}
+
+function withRestoreTimeout<T>(action: (signal: AbortSignal) => Promise<T>) {
+  const controller = new AbortController();
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  let didTimeout = false;
+
+  const timeout = new Promise<T>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+      reject(new Error('Session restore timed out.'));
+    }, AUTH_RESTORE_TIMEOUT_MS);
+  });
+
+  return {
+    promise: Promise.race([action(controller.signal), timeout]).finally(() => {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+    }),
+    didTimeout: () => didTimeout,
+  };
+}
+
 export function RequireAuth() {
   const location = useLocation();
   const [authGateStatus, setAuthGateStatus] = useState<AuthGateStatus>(getInitialAuthGateStatus);
 
   useEffect(() => {
     let cancelled = false;
+    let restoreSequence = 0;
+    let suppressNextSessionReset = false;
 
     async function restoreSession() {
-      if (!isAuthenticated()) {
+      const restoreId = ++restoreSequence;
+      if (runtimeConfig.apiMode !== 'real' && !isAuthenticated()) {
         setAuthGateStatus('unauthenticated');
         return;
       }
@@ -42,13 +103,26 @@ export function RequireAuth() {
       }
 
       setAuthGateStatus('checking');
+      logAuthRestoreInfo('AUTH_RESTORE_START', { restoreId });
+      const restore = withRestoreTimeout((signal) => runtimeServices.auth.me({ signal }));
       try {
-        await runtimeServices.auth.me();
+        const user = await restore.promise;
         if (!cancelled) {
+          if (!user) {
+            throw new Error('Session restore did not return a user.');
+          }
+          suppressNextSessionReset = true;
+          setSession(null, user);
+          logAuthRestoreInfo('AUTH_RESTORE_SUCCESS', { restoreId });
           setAuthGateStatus('authenticated');
         }
-      } catch {
+      } catch (error) {
         if (!cancelled) {
+          logAuthRestoreWarn(restore.didTimeout() ? 'AUTH_RESTORE_TIMEOUT' : 'AUTH_RESTORE_FAILURE', {
+            restoreId,
+            message: error instanceof Error ? error.message : 'Session restore failed.',
+          });
+          suppressNextSessionReset = true;
           clearToken({ reason: 'expired', intendedPath: getCurrentRouteForAuthRedirect() });
           setAuthGateStatus('unauthenticated');
         }
@@ -57,6 +131,10 @@ export function RequireAuth() {
 
     void restoreSession();
     const unsubscribeSession = onSessionReset(() => {
+      if (suppressNextSessionReset) {
+        suppressNextSessionReset = false;
+        return;
+      }
       void restoreSession();
     });
 

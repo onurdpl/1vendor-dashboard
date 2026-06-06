@@ -33,9 +33,10 @@ export async function login(
   return response;
 }
 
-export async function me() {
+export async function me(options: { signal?: AbortSignal } = {}) {
   const response = await apiClient.get<{ user: BackendAuthUser; csrfToken?: string | null }>('/auth/me', {
     vendorId: null,
+    signal: options.signal,
   });
   setCsrfToken(response.csrfToken);
 

@@ -1,5 +1,5 @@
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-router-dom';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RequireAuth } from './RequireAuth';
 import { clearToken, setCurrentUser, setToken } from './auth';
@@ -29,12 +29,25 @@ function buildTestUser() {
   };
 }
 
+function RouteProbe() {
+  const location = useLocation();
+  const params = useParams();
+  return (
+    <div>
+      <span data-testid="current-route">{`${location.pathname}${location.search}${location.hash}`}</span>
+      {params.orderId ? <span data-testid="order-id">{params.orderId}</span> : null}
+    </div>
+  );
+}
+
 afterEach(() => {
   cleanup();
   vi.doUnmock('../config/runtime');
   vi.doUnmock('../services/runtime-services');
   vi.resetModules();
+  vi.useRealTimers();
   window.localStorage.clear();
+  window.history.replaceState({}, '', '/');
 });
 
 describe('RequireAuth', () => {
@@ -69,8 +82,8 @@ describe('RequireAuth', () => {
         apiMode: 'real',
       },
     }));
-    let resolveMe: (() => void) | null = null;
-    const meMock = vi.fn(() => new Promise<void>((resolve) => {
+    let resolveMe: ((user: ReturnType<typeof buildTestUser>) => void) | null = null;
+    const meMock = vi.fn(() => new Promise<ReturnType<typeof buildTestUser>>((resolve) => {
       resolveMe = resolve;
     }));
     vi.doMock('../services/runtime-services', () => ({
@@ -102,10 +115,109 @@ describe('RequireAuth', () => {
     expect(meMock).toHaveBeenCalledTimes(1);
 
     await act(async () => {
-      resolveMe?.();
+      resolveMe?.(buildTestUser());
     });
 
     expect(screen.getByText('Orders workspace')).toBeInTheDocument();
+    expect(auth.getCurrentUser()?.email).toBe('vendor@example.com');
+  });
+
+  it('restores a real-mode cookie session on a hard refresh normal route without local user state', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi.fn().mockResolvedValue(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+
+    render(
+      <MemoryRouter initialEntries={['/orders']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders" element={<div>Orders workspace</div>} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
+    await waitFor(() => expect(screen.getByText('Orders workspace')).toBeInTheDocument());
+    expect(meMock).toHaveBeenCalledWith({ signal: expect.any(AbortSignal) });
+  });
+
+  it('preserves a deep order URL after real-mode session restore', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi.fn().mockResolvedValue(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+
+    render(
+      <MemoryRouter initialEntries={['/orders/alloc-yalispor-7709129507153']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders/:orderId" element={<RouteProbe />} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent('/orders/alloc-yalispor-7709129507153');
+    expect(screen.getByTestId('order-id')).toHaveTextContent('alloc-yalispor-7709129507153');
+  });
+
+  it('preserves a hash fragment after real-mode session restore', async () => {
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi.fn().mockResolvedValue(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+
+    render(
+      <MemoryRouter initialEntries={['/orders/alloc-yalispor-7709129507153#provider-response-summary']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders/:orderId" element={<RouteProbe />} />
+          </Route>
+          <Route path="/login" element={<div>Login screen</div>} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent(
+      '/orders/alloc-yalispor-7709129507153#provider-response-summary',
+    );
   });
 
   it('redirects real-mode sessions to login when /auth/me cannot restore the cookie session', async () => {
@@ -143,5 +255,46 @@ describe('RequireAuth', () => {
     expect(screen.queryByText('Orders workspace')).not.toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('Login screen')).toBeInTheDocument());
     expect(meMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hang forever when real-mode session restore never resolves', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi.fn(() => new Promise<never>(() => undefined));
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+    window.history.replaceState({}, '', '/orders/alloc-yalispor-7709129507153#provider-response-summary');
+
+    render(
+      <MemoryRouter initialEntries={['/orders/alloc-yalispor-7709129507153#provider-response-summary']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders/:orderId" element={<div>Order detail</div>} />
+          </Route>
+          <Route path="/login" element={<RouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole('status')).toHaveTextContent('Restoring session...');
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => expect(screen.getByTestId('current-route')).toHaveTextContent('/login'));
+    expect(screen.queryByRole('status')).not.toBeInTheDocument();
   });
 });

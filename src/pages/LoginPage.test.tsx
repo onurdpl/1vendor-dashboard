@@ -129,6 +129,47 @@ describe('LoginPage expired session flow', () => {
     expect(window.localStorage.getItem('vendor-dashboard.current-vendor-id')).toBe('sporjinal');
   });
 
+  it('returns to the intended deep route with hash after login', async () => {
+    seedSession();
+
+    render(
+      <MemoryRouter initialEntries={['/orders/alloc-yalispor-7709129507153#provider-response-summary']}>
+        <Routes>
+          <Route element={<RequireAuth />}>
+            <Route
+              path="/orders/:orderId"
+              element={
+                <>
+                  <div>Order detail</div>
+                  <RouteProbe />
+                </>
+              }
+            />
+          </Route>
+          <Route path="/login" element={<LoginPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText('Order detail')).toBeInTheDocument();
+
+    await act(async () => {
+      clearToken({
+        reason: 'expired',
+        intendedPath: '/orders/alloc-yalispor-7709129507153#provider-response-summary',
+      });
+    });
+
+    expect(screen.getByText(EXPIRED_SESSION_MESSAGE)).toBeInTheDocument();
+
+    fillAndSubmitLogin();
+
+    expect(await screen.findByText('Order detail')).toBeInTheDocument();
+    expect(screen.getByTestId('current-route')).toHaveTextContent(
+      '/orders/alloc-yalispor-7709129507153#provider-response-summary',
+    );
+  });
+
   it('shows invalid credential errors without changing the login flow', async () => {
     loginMock.mockRejectedValueOnce(new Error('Invalid email or password.'));
     renderStandaloneLogin();

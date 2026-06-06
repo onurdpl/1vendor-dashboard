@@ -312,7 +312,7 @@ export const runtimeServices = {
           authAttemptId: options.authAttemptId,
           signal: options.signal,
         });
-        const user = await backendAuth.me();
+        const user = await backendAuth.me({ signal: options.signal });
         return {
           token: null,
           user: createCurrentUserFromVendorAccess({
@@ -343,9 +343,9 @@ export const runtimeServices = {
         },
       };
     },
-    async me(_token?: string | null) {
+    async me(options: { signal?: AbortSignal } = {}) {
       if (runtimeConfig.apiMode === 'real') {
-        const user = await backendAuth.me();
+        const user = await backendAuth.me({ signal: options.signal });
         return createCurrentUserFromVendorAccess({
           email: user.email,
           name: user.name,
