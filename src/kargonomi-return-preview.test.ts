@@ -19,6 +19,37 @@ const { createKargonomiReturnShipmentForReturn, previewKargonomiReturnShipmentFo
   '../backend/src/modules/returns/returns.service.js'
 );
 
+function buildKargonomiDestinationClient() {
+  return {
+    listStates: vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      contentType: 'application/json',
+      body: {
+        data: [
+          {
+            id: '34',
+            name: 'Istanbul',
+          },
+        ],
+      },
+    }),
+    listCities: vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      contentType: 'application/json',
+      body: {
+        data: [
+          {
+            id: '828',
+            name: 'Kadikoy',
+          },
+        ],
+      },
+    }),
+  };
+}
+
 function baseReturnRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: 'return-1',
@@ -63,8 +94,10 @@ function baseReturnRecord(overrides: Record<string, unknown> = {}) {
         billingFullName: null,
         customerPhone: '+905551112233',
         billingPhone: null,
+        shippingCity: 'Istanbul',
         shippingAddress: 'Customer full address',
         shippingDistrict: 'Kadikoy',
+        webhookEvents: [],
       },
       lineItems: [
         {
@@ -200,6 +233,13 @@ describe('Kargonomi return preview', () => {
           cityId: '828',
           stateId: '34',
         },
+        senderDestinationResolution: {
+          source: 'metadata_or_order_ids',
+          lookupAttempted: false,
+          senderCityIdPresent: true,
+          senderStateIdPresent: true,
+          senderDistrictPresent: true,
+        },
         receiver: {
           warehouseId: '112668',
           namePresent: true,
@@ -213,6 +253,147 @@ describe('Kargonomi return preview', () => {
     expect(serializedPreview).not.toContain('Vendor full address');
     expect(serializedPreview).not.toContain('+905551112233');
     expect(serializedPreview).not.toContain('+902121112233');
+  });
+
+  it('resolves sender city and state from order shipping text when metadata is missing', async () => {
+    const destinationClient = buildKargonomiDestinationClient();
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        providerMetadata: {},
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'vendor',
+        vendorId: 'yalispor',
+      },
+      {
+        kargonomiDestinationClient: destinationClient,
+      },
+    );
+
+    expect(preview.missingFields).not.toContain('sender.cityId');
+    expect(preview.missingFields).not.toContain('sender.stateId');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        sender: {
+          cityId: '828',
+          stateId: '34',
+          districtPresent: true,
+        },
+        senderDestinationResolution: {
+          source: 'order_shipping_address_lookup',
+          lookupAttempted: true,
+          senderCityIdPresent: true,
+          senderStateIdPresent: true,
+          senderDistrictPresent: true,
+        },
+      },
+    });
+    expect(destinationClient.listStates).toHaveBeenCalled();
+    expect(destinationClient.listCities).toHaveBeenCalledWith('34');
+  });
+
+  it('uses stored webhook district fallback for sender destination lookup', async () => {
+    const destinationClient = buildKargonomiDestinationClient();
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      baseReturnRecord({
+        vendorAllocation: {
+          assignedVendorId: 'yalispor',
+          order: {
+            customerName: 'Customer Name',
+            customerEmail: 'customer@example.test',
+            billingFullName: null,
+            customerPhone: '+905551112233',
+            billingPhone: null,
+            shippingCity: 'Istanbul',
+            shippingAddress: 'Customer full address',
+            shippingDistrict: null,
+            webhookEvents: [
+              {
+                rawPayload: JSON.stringify({
+                  shipping_address: {
+                    province: 'Istanbul',
+                    city: 'Istanbul',
+                    county: 'Kadikoy',
+                  },
+                }),
+              },
+            ],
+          },
+          lineItems: [{ id: 'allocation-line-1', shopifyOrderLineItem: { sku: 'SKU-1' } }],
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        providerMetadata: {},
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'vendor',
+        vendorId: 'yalispor',
+      },
+      {
+        kargonomiDestinationClient: destinationClient,
+      },
+    );
+
+    expect(preview.missingFields).not.toContain('sender.district');
+    expect(preview.missingFields).not.toContain('sender.cityId');
+    expect(preview.missingFields).not.toContain('sender.stateId');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        senderDestinationResolution: {
+          source: 'order_shipping_address_lookup',
+          senderDistrictPresent: true,
+        },
+      },
+    });
+    expect(JSON.stringify(preview.previewPayload)).not.toContain('Customer full address');
+  });
+
+  it('keeps provider metadata sender id overrides without destination lookup', async () => {
+    const destinationClient = buildKargonomiDestinationClient();
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        providerMetadata: {
+          kargonomiReturnSenderStateId: '34',
+          kargonomiReturnSenderCityId: '828',
+        },
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'vendor',
+        vendorId: 'yalispor',
+      },
+      {
+        kargonomiDestinationClient: destinationClient,
+      },
+    );
+
+    expect(preview.missingFields).not.toContain('sender.cityId');
+    expect(preview.missingFields).not.toContain('sender.stateId');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        senderDestinationResolution: {
+          source: 'metadata_or_order_ids',
+          lookupAttempted: false,
+        },
+      },
+    });
+    expect(destinationClient.listStates).not.toHaveBeenCalled();
+    expect(destinationClient.listCities).not.toHaveBeenCalled();
   });
 
   it('uses Kargonomi return receiver metadata for receiver phone and address readiness', async () => {

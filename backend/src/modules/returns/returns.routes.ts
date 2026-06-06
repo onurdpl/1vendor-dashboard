@@ -307,7 +307,7 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
       }
 
       try {
-        return await previewKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor);
+        return await previewKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor, { env });
       } catch (error) {
         return sendReviewError(error, reply);
       }
