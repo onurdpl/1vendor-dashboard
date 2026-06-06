@@ -12,6 +12,7 @@ export {
   probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
+  refreshShipmentProviderData,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,

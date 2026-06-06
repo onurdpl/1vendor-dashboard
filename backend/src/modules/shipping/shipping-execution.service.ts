@@ -5502,6 +5502,184 @@ export async function refreshShipmentExecutionStatus(
   return refreshTryOtoShipmentStatus(shipmentExecutionId, options);
 }
 
+export async function refreshKargonomiShipmentProviderData(
+  shipmentExecutionId: string,
+  options: {
+    env: AppEnv;
+    vendorId: string;
+    adapter?: ShippingProviderAdapter;
+  },
+): Promise<ShipmentExecutionDto> {
+  const existing = await prisma.shipmentExecution.findUnique({
+    where: {
+      id: shipmentExecutionId,
+    },
+    include: {
+      allocation: {
+        include: {
+          fulfillment: true,
+        },
+      },
+    },
+  });
+
+  if (!existing || existing.vendorId !== options.vendorId) {
+    throw new Error('Shipment execution not found.');
+  }
+
+  if (existing.provider !== ShippingProvider.KARGONOMI) {
+    throw new Error('Provider data refresh is available only for Kargonomi shipments.');
+  }
+
+  const providerShipmentId = existing.providerShipmentId?.trim();
+  if (!providerShipmentId) {
+    throw new Error('Kargonomi provider data refresh requires a stored provider shipment id.');
+  }
+
+  const adapter = options.adapter ?? createShippingProviderAdapter(options.env, 'kargonomi');
+  if (!adapter.refreshProviderData) {
+    throw new Error('Kargonomi provider data refresh is not available.');
+  }
+
+  const attemptSnapshot = appendTimelineEvent(
+    {
+      ...readSnapshot(existing),
+      providerDataRefreshAttempted: true,
+      providerDataRefreshSucceeded: false,
+      providerDataRefreshEndpointUsed: '/shipments/:id/refresh-provider-data',
+      createShipmentCalled: false,
+      createShipmentDraftCalled: false,
+      confirmShippingPriceCalled: false,
+      lastProviderStage: 'provider_data_refresh',
+    },
+    {
+      label: 'Provider data refresh attempted',
+      status: 'pending',
+    },
+  );
+
+  await prisma.shipmentExecution.update({
+    where: {
+      id: existing.id,
+    },
+    data: {
+      responseSnapshot: attemptSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const result = await adapter.refreshProviderData(providerShipmentId);
+    const carrier =
+      readString(result.responseSnapshot, ['shippingProviderName', 'carrierName', 'providerName']) ??
+      mapProvider(existing.provider);
+    const mergedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...result.responseSnapshot,
+        providerDataRefreshAttempted: true,
+        providerDataRefreshSucceeded: true,
+        providerDataRefreshEndpointUsed: '/shipments/:id/refresh-provider-data',
+        refreshedProviderShipmentId: providerShipmentId,
+        createShipmentCalled: false,
+        createShipmentDraftCalled: false,
+        confirmShippingPriceCalled: false,
+        persistedProviderShipmentIdPresent: true,
+        persistedTrackingUrlPresent: Boolean(result.trackingUrl),
+        persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
+      },
+      {
+        label: 'Provider data refreshed',
+        status: result.shipmentStatus,
+      },
+    );
+    const status = mapProviderStatus(result.shipmentStatus);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const execution = await tx.shipmentExecution.update({
+        where: {
+          id: existing.id,
+        },
+        data: {
+          providerShipmentId: result.providerShipmentId ?? providerShipmentId,
+          trackingNumber: result.trackingNumber,
+          trackingUrl: result.trackingUrl,
+          labelUrl: result.labelUrl,
+          shipmentStatus: status,
+          responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+        },
+      });
+
+      await tx.vendorAllocation.update({
+        where: {
+          id: existing.allocationId,
+        },
+        data: {
+          shippingStatus: allocationShippingStatus(mapStatus(status)),
+          trackingNumber: result.trackingNumber,
+          carrier,
+        },
+      });
+
+      await tx.fulfillment.upsert({
+        where: {
+          vendorAllocationId: existing.allocationId,
+        },
+        update: {
+          trackingNumber: result.trackingNumber,
+          carrier,
+          trackingUrl: result.trackingUrl,
+          shipmentUpdatedAt: new Date(),
+          syncStatus: 'carrier_refreshed',
+          errorMessage: null,
+        },
+        create: {
+          vendorAllocationId: existing.allocationId,
+          fulfillmentStatus: 'shipment_created',
+          trackingNumber: result.trackingNumber,
+          carrier,
+          trackingUrl: result.trackingUrl,
+          shipmentCreatedAt: existing.allocation.fulfillment?.shipmentCreatedAt ?? new Date(),
+          shipmentUpdatedAt: new Date(),
+          syncStatus: 'carrier_refreshed',
+        },
+      });
+
+      return execution;
+    });
+
+    return mapShipmentExecution(updated);
+  } catch (error) {
+    const providerSnapshot = error instanceof ShippingProviderExecutionError
+      ? error.responseSnapshot
+      : {
+          providerError: error instanceof Error ? error.message : 'Unknown Kargonomi provider data refresh error.',
+        };
+    const failedSnapshot = appendTimelineEvent(
+      {
+        ...attemptSnapshot,
+        ...providerSnapshot,
+        providerDataRefreshAttempted: true,
+        providerDataRefreshSucceeded: false,
+        providerDataRefreshEndpointUsed: '/shipments/:id/refresh-provider-data',
+      },
+      {
+        label: 'Provider data refresh failed',
+        status: 'failed',
+      },
+    );
+    const failed = await prisma.shipmentExecution.update({
+      where: {
+        id: existing.id,
+      },
+      data: {
+        responseSnapshot: failedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+
+    return mapShipmentExecution(failed);
+  }
+}
+
 export async function cancelNavlungoShipmentExecution(
   shipmentExecutionId: string,
   options: {

@@ -17,6 +17,7 @@ const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
 const refreshShipmentExecutionStatusMock = vi.fn();
+const refreshShipmentProviderDataMock = vi.fn();
 const cancelShipmentExecutionMock = vi.fn();
 const updateNavlungoShipmentExecutionMock = vi.fn();
 const createReturnShipmentLabelMock = vi.fn();
@@ -81,6 +82,8 @@ vi.mock('../features/orders/api', async () => {
     ) => retryFailedShipmentExecutionMock(shipmentExecutionId, options),
     refreshShipmentExecutionStatus: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       refreshShipmentExecutionStatusMock(shipmentExecutionId, options),
+    refreshShipmentProviderData: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
+      refreshShipmentProviderDataMock(shipmentExecutionId, options),
     cancelShipmentExecution: (shipmentExecutionId: string, options?: { vendorId?: string | null }) =>
       cancelShipmentExecutionMock(shipmentExecutionId, options),
     updateNavlungoShipmentExecution: (
@@ -750,6 +753,18 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       trackingNumber: 'OTO-TRACK-1028',
       barcode: 'OTO-BARCODE-1028',
       labelUrl: 'https://app.tryoto.example/label-1028.pdf',
+      updatedAt: '2026-05-15T19:46:00.000Z',
+    });
+    refreshShipmentProviderDataMock.mockReset();
+    refreshShipmentProviderDataMock.mockResolvedValue({
+      ...orderWithShipmentSummary.shipmentExecution,
+      provider: 'kargonomi',
+      providerCarrierName: 'Sürat Kargo',
+      shipmentStatus: 'created',
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
       updatedAt: '2026-05-15T19:46:00.000Z',
     });
     cancelShipmentExecutionMock.mockReset();
@@ -3308,6 +3323,48 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText('Provider API call attempted')).toBeInTheDocument();
     expect(screen.getAllByText('Confirm price').length).toBeGreaterThan(0);
     expect(screen.getByText('Kargonomi shipping price confirmation failed with HTTP 422.')).toBeInTheDocument();
+  });
+
+  it('lets admins refresh existing Kargonomi provider shipment data without retrying creation', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'kargonomi',
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Sürat Kargo',
+        warehouseId: '112668',
+        providerShipmentId: '2653543',
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        barcode: null,
+        shipmentStatus: 'created',
+      },
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Refresh provider data' }));
+
+    expect(refreshShipmentProviderDataMock).toHaveBeenCalledWith('shipment-kargonomi-alloc-sporjinal-7621783322961', {
+      vendorId: 'sporjinal',
+    });
+    expect(createShipmentExecutionMock).not.toHaveBeenCalled();
+    expect(retryFailedShipmentExecutionMock).not.toHaveBeenCalled();
+    expect((await screen.findAllByText('Provider shipment data refreshed.')).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Endpoint:\s*POST \/shipments\/shipment-kargonomi-alloc-sporjinal-7621783322961\/refresh-provider-data/)).toBeInTheDocument();
   });
 
   it('renders sanitized Kargonomi confirm-price diagnostics for admins', async () => {

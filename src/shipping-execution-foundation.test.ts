@@ -64,6 +64,7 @@ const {
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   previewShipmentExecution,
+  refreshKargonomiShipmentProviderData,
   refreshShipmentExecutionStatus,
   refreshTryOtoShipmentStatus,
   retryDryRunShipmentExecution,
@@ -510,6 +511,118 @@ describe('shipping execution foundation', () => {
           shippingVatAmount: 21.6,
           status: 'CONFIRMED',
           sourceType: 'EXTERNAL_PROVIDER',
+        }),
+      }),
+    );
+  });
+
+  it('refreshes existing Kargonomi provider data without creating a new shipment', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargonomi-alloc-1',
+      provider: 'KARGONOMI',
+      providerShipmentId: '2653543',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        shipmentId: '2653543',
+        createShipmentCalled: true,
+        confirmShippingPriceCalled: true,
+      },
+      allocation: buildAllocation({
+        fulfillment: {
+          shopifyFulfillmentId: null,
+          shipmentCreatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      }),
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+      refreshProviderData: vi.fn().mockResolvedValue({
+        providerShipmentId: '2653543',
+        trackingNumber: 'KSUR2653543SKDXP',
+        trackingUrl: null,
+        labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        shipmentStatus: 'created',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          provider: 'kargonomi',
+          flow: 'provider_data_refresh',
+          providerShipmentId: '2653543',
+          trackingNumberPresent: true,
+          shippingProviderName: 'Sürat Kargo',
+          barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+          labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+          barcodeFetchCalled: true,
+          barcodeFetch: {
+            ok: true,
+            httpStatus: 200,
+            topLevelKeys: ['data', 'format'],
+            detectedFormat: 'pdf_like_value',
+            pdfLikeValuePresent: true,
+            labelUrlPresent: true,
+          },
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    storedExecution = existing as typeof storedExecution;
+
+    const result = await refreshKargonomiShipmentProviderData(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'test-token',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(adapter.refreshProviderData).toHaveBeenCalledWith('2653543');
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      id: 'shipment-kargonomi-alloc-1',
+      provider: 'kargonomi',
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+    });
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'shipment-kargonomi-alloc-1' },
+        data: expect.objectContaining({
+          providerShipmentId: '2653543',
+          trackingNumber: 'KSUR2653543SKDXP',
+          labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+          responseSnapshot: expect.objectContaining({
+            providerDataRefreshSucceeded: true,
+            providerDataRefreshEndpointUsed: '/shipments/:id/refresh-provider-data',
+            createShipmentCalled: false,
+            confirmShippingPriceCalled: false,
+            persistedBarcodePresent: true,
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.vendorAllocation.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'alloc-1' },
+        data: expect.objectContaining({
+          trackingNumber: 'KSUR2653543SKDXP',
+          carrier: 'Sürat Kargo',
+        }),
+      }),
+    );
+    expect(prismaMock.fulfillment.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { vendorAllocationId: 'alloc-1' },
+        update: expect.objectContaining({
+          trackingNumber: 'KSUR2653543SKDXP',
+          carrier: 'Sürat Kargo',
+          syncStatus: 'carrier_refreshed',
         }),
       }),
     );

@@ -79,6 +79,7 @@ export class ShippingProviderExecutionError extends Error {
 export interface ShippingProviderAdapter {
   provider: 'HEPSIJET' | 'KARGO_ENTEGRATOR' | 'TRY_OTO' | 'KARGONOMI' | 'NAVLUNGO';
   createShipment(input: ShippingProviderCreateInput): Promise<ShippingProviderCreateResult>;
+  refreshProviderData?(providerShipmentId: string): Promise<ShippingProviderCreateResult>;
   createReturnShipment?(input: ShippingProviderReturnCreateInput): Promise<ShippingProviderReturnCreateResult>;
   probeReturnDetails?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;
   probeReturnLink?(orderId: string): Promise<ShippingProviderReturnDetailsProbeResult>;

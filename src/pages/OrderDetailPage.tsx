@@ -17,6 +17,7 @@ import {
   probeTryOtoReturnAwbPrint,
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
+  refreshShipmentProviderData,
   refreshShipmentExecutionStatus,
   retryFailedShipmentExecution,
   retryShipmentExecution,
@@ -1810,6 +1811,15 @@ export function OrderDetailPage() {
       invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
     },
   );
+  const { mutateAsync: refreshShipmentProviderDataMutation, isPending: isRefreshingShipmentProviderData } = useMutationAction(
+    async (shipmentExecutionId: string) =>
+      refreshShipmentProviderData(shipmentExecutionId, {
+        vendorId: currentVendor.vendorId,
+      }),
+    {
+      invalidateQueryKeys: [queryKeys.orders.list(currentVendor.vendorId), orderId ? queryKeys.orders.detail(orderId, currentVendor.vendorId) : queryKeys.orders.list(currentVendor.vendorId)],
+    },
+  );
   const { mutateAsync: cancelShipmentMutation, isPending: isCancellingShipment } = useMutationAction(
     async (shipmentExecutionId: string) =>
       cancelShipmentExecution(shipmentExecutionId, {
@@ -2122,6 +2132,10 @@ export function OrderDetailPage() {
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'navlungo' &&
     Boolean(visibleShipmentExecution.providerShipmentId);
+  const canRefreshKargonomiProviderData =
+    isAdmin &&
+    visibleShipmentExecution?.provider === 'kargonomi' &&
+    Boolean(visibleShipmentExecution.providerShipmentId);
   const canCancelNavlungoShipment =
     (isAdmin || canUseFulfillmentActions) &&
     visibleShipmentExecution?.provider === 'navlungo' &&
@@ -2339,6 +2353,49 @@ export function OrderDetailPage() {
           message: errorMessage,
           diagnostics,
           endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh`,
+        });
+        showFeedback(errorMessage, 'error');
+      });
+  }
+
+  function handleRefreshShipmentProviderData() {
+    if (!visibleShipmentExecution) {
+      return;
+    }
+
+    setShipmentActionState({
+      tone: 'info',
+      message: 'Refreshing provider shipment data...',
+      endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh-provider-data`,
+    });
+
+    void refreshShipmentProviderDataMutation(visibleShipmentExecution.id)
+      .then((shipment) => {
+        const hasNewShipmentEvidence = Boolean(shipment.trackingNumber || shipment.labelUrl || shipment.barcode);
+        setShipmentActionState({
+          tone: hasNewShipmentEvidence ? 'success' : 'info',
+          message: hasNewShipmentEvidence
+            ? 'Provider shipment data refreshed.'
+            : 'Provider data refreshed. Tracking or label is still pending.',
+          shipment,
+          endpoint: `POST /shipments/${visibleShipmentExecution.id}/refresh-provider-data`,
+        });
+        showFeedback(
+          hasNewShipmentEvidence
+            ? 'Provider shipment data refreshed.'
+            : 'Provider data refreshed. Tracking or label is still pending.',
+          hasNewShipmentEvidence ? 'success' : 'info',
+        );
+        void refetch();
+      })
+      .catch((mutationError) => {
+        const diagnostics = getApiErrorDiagnostics(mutationError);
+        const errorMessage = mutationError instanceof Error ? mutationError.message : 'Provider shipment data could not be refreshed.';
+        setShipmentActionState({
+          tone: 'error',
+          message: errorMessage,
+          diagnostics,
+          endpoint: diagnostics?.endpoint ?? `POST /shipments/${visibleShipmentExecution.id}/refresh-provider-data`,
         });
         showFeedback(errorMessage, 'error');
       });
@@ -6737,6 +6794,22 @@ export function OrderDetailPage() {
                             </div>
                           </div>
                         ) : null}
+                        {canRefreshKargonomiProviderData ? (
+                          <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
+                            <strong>Kargonomi provider data refresh</strong>
+                            <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                            <div className="order-inline-actions">
+                              <button
+                                type="button"
+                                className="button button-secondary"
+                                disabled={isRefreshingShipmentProviderData}
+                                onClick={handleRefreshShipmentProviderData}
+                              >
+                                {isRefreshingShipmentProviderData ? 'Refreshing...' : 'Refresh provider data'}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
                         {canSyncShipmentTrackingToShopify ? (
                           <div className="shipment-recovery-actions" aria-label="Shopify tracking sync">
                             <strong>Shopify fulfillment sync</strong>
@@ -7768,6 +7841,22 @@ export function OrderDetailPage() {
                             onClick={handleRefreshShipmentStatus}
                           >
                             {isRefreshingShipmentStatus ? 'Refreshing...' : 'Refresh shipment status'}
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {canRefreshKargonomiProviderData ? (
+                      <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
+                        <strong>Kargonomi provider data refresh</strong>
+                        <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                        <div className="order-inline-actions">
+                          <button
+                            type="button"
+                            className="button button-secondary"
+                            disabled={isRefreshingShipmentProviderData}
+                            onClick={handleRefreshShipmentProviderData}
+                          >
+                            {isRefreshingShipmentProviderData ? 'Refreshing...' : 'Refresh provider data'}
                           </button>
                         </div>
                       </div>

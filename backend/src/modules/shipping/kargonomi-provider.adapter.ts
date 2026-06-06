@@ -796,6 +796,35 @@ function summarizeKargonomiBarcodeFetchDiagnostics(
   };
 }
 
+async function fetchAndAttachKargonomiBarcode(
+  client: KargonomiClient,
+  shipmentId: string | number,
+  responseSnapshot: Record<string, unknown>,
+) {
+  try {
+    responseSnapshot.lastProviderStage = 'barcode_fetch';
+    const barcodeResponse = await client.getShipmentBarcodePdf(shipmentId);
+    const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
+    const barcodeLabelUrl = normalizeKargonomiPdfLabelArtifact(barcodePdf);
+    responseSnapshot.barcodeFetchCalled = true;
+    responseSnapshot.barcodeFetch = summarizeKargonomiBarcodeFetchDiagnostics(
+      barcodeResponse,
+      Boolean(barcodePdf),
+      Boolean(barcodeLabelUrl),
+    );
+    if (barcodeLabelUrl) {
+      responseSnapshot.labelUrl = barcodeLabelUrl;
+      responseSnapshot.barcode = barcodeLabelUrl;
+    }
+  } catch (error) {
+    responseSnapshot.barcodeFetchCalled = true;
+    responseSnapshot.barcodeFetch = {
+      ok: false,
+      error: error instanceof Error ? error.message : 'Unknown barcode fetch error.',
+    };
+  }
+}
+
 function parseMoney(value: string | null) {
   if (!value) {
     return null;
@@ -1186,31 +1215,48 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       };
     }
 
-    try {
-      responseSnapshot.lastProviderStage = 'barcode_fetch';
-      const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
-      const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
-      const barcodeLabelUrl = normalizeKargonomiPdfLabelArtifact(barcodePdf);
-      responseSnapshot.barcodeFetchCalled = true;
-      responseSnapshot.barcodeFetch = summarizeKargonomiBarcodeFetchDiagnostics(
-        barcodeResponse,
-        Boolean(barcodePdf),
-        Boolean(barcodeLabelUrl),
-      );
-      if (barcodeLabelUrl) {
-        responseSnapshot.labelUrl = barcodeLabelUrl;
-        responseSnapshot.barcode = barcodeLabelUrl;
-      }
-    } catch (error) {
-      responseSnapshot.barcodeFetchCalled = true;
-      responseSnapshot.barcodeFetch = {
-        ok: false,
-        error: error instanceof Error ? error.message : 'Unknown barcode fetch error.',
-      };
-    }
+    await fetchAndAttachKargonomiBarcode(this.client, shipmentId, responseSnapshot);
 
     responseSnapshot.lastProviderStage = 'completed';
     return buildKargonomiProviderResult(responseBodyForNormalization, shipmentId, responseSnapshot);
+  }
+
+  async refreshProviderData(providerShipmentId: string): Promise<ShippingProviderCreateResult> {
+    const responseSnapshot: Record<string, unknown> = {
+      provider: KARGONOMI_PROVIDER_KEY,
+      flow: 'provider_data_refresh',
+      providerApiCallAttempted: true,
+      createShipmentCalled: false,
+      createShipmentDraftCalled: false,
+      priceComparisonCalled: false,
+      confirmShippingPriceCalled: false,
+      getShipmentCalled: false,
+      getShipmentAfterConfirmCalled: false,
+      barcodeFetchCalled: false,
+      providerShipmentId,
+      lastProviderStage: 'get_shipment',
+    };
+
+    const shipmentResponse = await this.client.getShipment(providerShipmentId);
+    responseSnapshot.getShipmentCalled = true;
+    responseSnapshot.getShipmentAfterConfirmCalled = true;
+    responseSnapshot.getShipmentAfterConfirm = {
+      ...summarizeResponse(shipmentResponse),
+      safeFields: summarizeKargonomiShipmentSafeFields(shipmentResponse.body),
+    };
+    if (!shipmentResponse.ok) {
+      mergePrimaryResponseSummary(responseSnapshot, shipmentResponse);
+      throwKargonomiExecutionError(
+        'get_shipment',
+        responseSnapshot,
+        `Kargonomi shipment detail refresh failed with HTTP ${shipmentResponse.status}.`,
+      );
+    }
+
+    await fetchAndAttachKargonomiBarcode(this.client, providerShipmentId, responseSnapshot);
+
+    responseSnapshot.lastProviderStage = 'completed';
+    return buildKargonomiProviderResult(shipmentResponse.body, providerShipmentId, responseSnapshot);
   }
 
   async getShipmentStatus(providerShipmentId: string): Promise<ShippingProviderCreateResult> {

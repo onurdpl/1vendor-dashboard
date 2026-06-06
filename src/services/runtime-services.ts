@@ -591,6 +591,38 @@ export const runtimeServices = {
         updatedAt: submittedAt,
       };
     },
+    async refreshShipmentProviderData(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.refreshShipmentProviderData(shipmentExecutionId, { vendorId });
+      }
+
+      const submittedAt = new Date().toISOString();
+      return {
+        id: shipmentExecutionId,
+        allocationId: shipmentExecutionId.replace(/^mock-shipment-kargonomi-/, ''),
+        vendorId,
+        sourceShopifyOrderId: null,
+        sourceShopifyOrderNumber: null,
+        sourceShopifyFulfillmentId: null,
+        provider: 'kargonomi' as const,
+        providerShipmentId: `mock-kargonomi-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingNumber: `KAR-${shipmentExecutionId.slice(-6).toUpperCase()}`,
+        trackingUrl: null,
+        labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        shipmentStatus: 'created' as const,
+        desi: '1.00',
+        cargoIntegrationId: null,
+        warehouseId: '112668',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        shippingCostLinked: false,
+        providerCarrierName: 'Sürat Kargo',
+        barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        createdAt: submittedAt,
+        updatedAt: submittedAt,
+      };
+    },
     async cancelShipmentExecution(shipmentExecutionId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realOrders.cancelShipmentExecution(shipmentExecutionId, { vendorId });

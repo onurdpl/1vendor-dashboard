@@ -71,6 +71,16 @@ export async function refreshShipmentExecutionStatus(
   );
 }
 
+export async function refreshShipmentProviderData(
+  shipmentExecutionId: string,
+  options: { vendorId?: string | null } = {},
+) {
+  return runtimeServices.orders.refreshShipmentProviderData(
+    shipmentExecutionId,
+    options.vendorId ?? undefined,
+  );
+}
+
 export async function cancelShipmentExecution(
   shipmentExecutionId: string,
   options: { vendorId?: string | null } = {},

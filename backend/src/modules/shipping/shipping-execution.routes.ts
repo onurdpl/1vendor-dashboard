@@ -19,6 +19,7 @@ import {
   probeTryOtoReturnDetails,
   probeTryOtoReturnLink,
   previewShipmentExecution,
+  refreshKargonomiShipmentProviderData,
   refreshShipmentExecutionStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
@@ -318,6 +319,33 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Shipment status could not be refreshed.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/shipments/:id/refresh-provider-data',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      try {
+        return await refreshKargonomiShipmentProviderData(request.params.id, {
+          env,
+          vendorId,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Shipment provider data could not be refreshed.';
         return reply.code(400).send({ message });
       }
     },

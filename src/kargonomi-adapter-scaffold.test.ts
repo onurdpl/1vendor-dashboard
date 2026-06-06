@@ -699,6 +699,64 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(String(calls[2].init.body)).toBe('shipment_id=123&shipping_provider_id=5');
   });
 
+  it('refreshes existing Kargonomi shipment details and barcode without creating a shipment', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      const responseBody = calls.length === 1
+        ? {
+            shipment: {
+              id: 2653543,
+              status: 'webservice_order_created',
+              status_label: 'Kargo Oluşturuldu',
+              shipping_provider_name: 'Sürat Kargo',
+              shipping_provider_slug: 'surat',
+              shipping_webservice_barcode: 'KSUR2653543SKDXP',
+              shipment_packages: [{ barcode: 'PKG-BAR-1', buyer_phone: '5551112233' }],
+            },
+          }
+        : { format: 'pdf', data: 'JVBERi0xLjQ=' };
+
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    const result = await adapter.refreshProviderData('2653543');
+
+    expect(calls.map((call) => [call.init.method, call.url])).toEqual([
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/2653543'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/2653543/barcode?format=pdf'],
+    ]);
+    expect(calls.some((call) => call.url.endsWith('/shipments') && call.init.method === 'POST')).toBe(false);
+    expect(result).toMatchObject({
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+    });
+    expect(result.responseSnapshot).toMatchObject({
+      flow: 'provider_data_refresh',
+      createShipmentCalled: false,
+      createShipmentDraftCalled: false,
+      confirmShippingPriceCalled: false,
+      getShipmentCalled: true,
+      barcodeFetchCalled: true,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+    });
+    expect(result.responseSnapshot.getShipmentAfterConfirm).toMatchObject({
+      safeFields: {
+        shipping_provider_name: 'Sürat Kargo',
+        shipping_webservice_barcode: 'KSUR2653543SKDXP',
+        shipment_packages: [{ barcode: 'PKG-BAR-1' }],
+      },
+    });
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('5551112233');
+  });
+
   it('resolves Turkish destination state and district IDs with case and diacritic normalization', async () => {
     clearKargonomiLocationLookupCache();
     const client = {
