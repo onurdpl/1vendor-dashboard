@@ -2162,7 +2162,7 @@ export function OrderDetailPage() {
       : null;
   const canSyncShipmentTrackingToShopify =
     (isAdmin || canUseFulfillmentActions) &&
-    visibleShipmentExecution?.provider === 'try_oto' &&
+    (visibleShipmentExecution?.provider === 'try_oto' || visibleShipmentExecution?.provider === 'kargonomi') &&
     Boolean(shipmentShopifyTrackingNumber) &&
     Boolean(shipmentShopifyCarrier) &&
     !order?.fulfilledAt;

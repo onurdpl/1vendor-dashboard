@@ -6178,6 +6178,102 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(await screen.findByText('Tracking OTO-TRACK-1028 synced to Shopify.')).toBeInTheDocument();
   });
 
+  it('syncs Kargonomi shipment tracking to Shopify with the refreshed carrier and tracking values', async () => {
+    const user = userEvent.setup();
+    submitFulfillmentTrackingMock.mockResolvedValueOnce({
+      ok: true,
+      allocationId: 'alloc-sporjinal-7621783322961',
+      trackingNumber: 'KSUR2653543SKDXP',
+      carrier: 'Sürat Kargo',
+      trackingUrl: null,
+      notifyCustomer: false,
+      fulfillmentStatus: 'fulfillment_submitted',
+      shippingStatus: 'shipped',
+      shopifySyncSource: 'shopify_admin',
+      shopifyFulfillmentId: 'gid://shopify/Fulfillment/2653543',
+      fulfilledAt: '2026-05-15T19:47:00.000Z',
+      shipmentCreatedAt: '2026-05-15T19:46:00.000Z',
+      shipmentUpdatedAt: '2026-05-15T19:47:00.000Z',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: null,
+      trackingUrl: null,
+      fulfilledAt: undefined,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Sürat Kargo',
+        shipmentStatus: 'created',
+        providerShipmentId: '2653543',
+        trackingNumber: 'KSUR2653543SKDXP',
+        trackingUrl: null,
+        barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await user.click(await screen.findByRole('button', { name: 'Sync tracking to Shopify' }));
+
+    expect(submitFulfillmentTrackingMock).toHaveBeenCalledWith('alloc-sporjinal-7621783322961', {
+      trackingNumber: 'KSUR2653543SKDXP',
+      carrier: 'Sürat Kargo',
+      trackingUrl: undefined,
+      notifyCustomer: false,
+    });
+    expect(await screen.findByText('Tracking KSUR2653543SKDXP synced to Shopify.')).toBeInTheDocument();
+  });
+
+  it('does not show Shopify sync action for Kargonomi when tracking is missing', async () => {
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'Sürat Kargo',
+      trackingNumber: null,
+      fulfilledAt: undefined,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Sürat Kargo',
+        shipmentStatus: 'created',
+        providerShipmentId: '2653543',
+        trackingNumber: null,
+        trackingUrl: null,
+        barcode: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        providerResponseSummary: null,
+      },
+    });
+    setCurrentUser({
+      email: 'vendor@example.com',
+      name: 'Vendor User',
+      role: 'vendor',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: false,
+      defaultVendorId: 'sporjinal',
+    });
+
+    renderOrderDetail();
+
+    await screen.findByRole('heading', { name: /Order #1028/i });
+    expect(screen.queryByRole('button', { name: 'Sync tracking to Shopify' })).not.toBeInTheDocument();
+  });
+
   it('falls back to Try OTO as the Shopify carrier when delivery company is unavailable', async () => {
     const user = userEvent.setup();
     getOrderMock.mockResolvedValue({
