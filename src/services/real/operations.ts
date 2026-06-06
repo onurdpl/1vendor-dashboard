@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { OperationsAttentionDashboard, OperationsQueueItem } from '../../lib/api/contracts';
+import type { OperationsAttentionDashboard, OperationsQueueDashboard, OperationsQueueItem } from '../../lib/api/contracts';
 
 type OperationsResponseDto = {
   summary: {
@@ -47,30 +47,50 @@ function mapSeverity(severity: OperationsResponseDto['items'][number]['severity'
   return 'critical';
 }
 
-export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {
+function buildOperationsQueuePath(options: { limit?: number; offset?: number }) {
   const params = new URLSearchParams();
   if (options.limit) params.set('limit', String(options.limit));
   if (options.offset) params.set('offset', String(options.offset));
-  const response = await apiClient.get<OperationsResponseDto>(`/admin/operations${params.size ? `?${params.toString()}` : ''}`, {
+
+  return `/admin/operations${params.size ? `?${params.toString()}` : ''}`;
+}
+
+function mapOperationsResponse(response: OperationsResponseDto): OperationsQueueDashboard {
+  return {
+    summary: {
+      ...response.summary,
+      operationalSignals: response.summary.operationalSignals ?? 0,
+      automationActions: response.summary.automationActions ?? 0,
+    },
+    items: response.items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      severity: mapSeverity(item.severity),
+      title: item.title,
+      description: item.description,
+      vendorId: item.vendorId,
+      vendorName: item.vendorName,
+      relatedOrderId: item.relatedOrderId ?? undefined,
+      relatedShopifyOrderId: item.relatedShopifyOrderId ?? undefined,
+      status: item.status,
+      createdAt: item.createdAt,
+      actionLabel: item.actionLabel,
+      actionTo: item.destinationPath ?? undefined,
+    })),
+  };
+}
+
+export async function getAdminOperationsQueueDashboard(options: { limit?: number; offset?: number; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueDashboard> {
+  const response = await apiClient.get<OperationsResponseDto>(buildOperationsQueuePath(options), {
     signal: options.signal,
     headers: options.headers,
   });
 
-  return response.items.map((item) => ({
-    id: item.id,
-    type: item.type,
-    severity: mapSeverity(item.severity),
-    title: item.title,
-    description: item.description,
-    vendorId: item.vendorId,
-    vendorName: item.vendorName,
-    relatedOrderId: item.relatedOrderId ?? undefined,
-    relatedShopifyOrderId: item.relatedShopifyOrderId ?? undefined,
-    status: item.status,
-    createdAt: item.createdAt,
-    actionLabel: item.actionLabel,
-    actionTo: item.destinationPath ?? undefined,
-  }));
+  return mapOperationsResponse(response);
+}
+
+export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {
+  return (await getAdminOperationsQueueDashboard(options)).items;
 }
 
 export async function getAdminOperationsAttention(options: { signal?: AbortSignal } = {}): Promise<OperationsAttentionDashboard> {

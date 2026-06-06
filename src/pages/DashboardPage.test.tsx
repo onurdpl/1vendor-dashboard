@@ -498,6 +498,44 @@ describe('DashboardPage command center', () => {
     expect(within(automationLabel.closest('article') as HTMLElement).getByText('4')).toBeInTheDocument();
   });
 
+  it('labels limited deferred action counts without rolling them into a total', async () => {
+    getDashboardOverviewMock.mockResolvedValue({
+      ...dashboardOverview,
+      stats: [
+        { label: 'Vendor orders', value: 'Showing latest 10' },
+        { label: 'Awaiting shipment', value: '2 in latest 10' },
+        { label: 'Blocked / attention', value: '3 in latest slices' },
+      ],
+      priorityWork: [
+        {
+          label: 'Blocked allocations',
+          value: '1 in latest 10',
+          tone: 'severity-warning',
+          description: 'Showing latest 10 order allocations; open Orders for the full scope.',
+        },
+        {
+          label: 'Awaiting shipment',
+          value: '2 in latest 10',
+          tone: 'severity-attention',
+          description: 'Showing latest 10 order allocations; open Orders for the full shipment queue.',
+        },
+        {
+          label: 'Refund attention',
+          value: '1 in latest 10',
+          tone: 'severity-warning',
+          description: 'Showing latest 10 return records; open Returns for the full review queue.',
+        },
+      ],
+    });
+
+    renderDashboardPage();
+
+    expect(await screen.findByText('Sampled actions')).toBeInTheDocument();
+    expect(screen.getByText('Action counts include deferred slices where full totals are unavailable.')).toBeInTheDocument();
+    expect(screen.queryByText('4 Actions')).not.toBeInTheDocument();
+    expect(screen.getAllByText('1 in latest 10').length).toBeGreaterThan(0);
+  });
+
   it('projects raw automation counts as grouped issue semantics', async () => {
     getDashboardOverviewMock.mockResolvedValue({
       ...dashboardOverview,

@@ -42,8 +42,17 @@ function parseDashboardCount(value: string | number | null | undefined) {
     return null;
   }
 
+  if (isLimitedSliceValue(trimmed)) {
+    return null;
+  }
+
   const parsed = Number.parseInt(trimmed.replace(/,/g, ''), 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isLimitedSliceValue(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase() ?? '';
+  return normalized.includes('latest') || normalized.includes('slice') || normalized.includes('showing');
 }
 
 function getHealthTone(health: string): 'success' | 'warning' | 'danger' | 'attention' {
@@ -400,6 +409,7 @@ type DashboardActionProjection = {
   label: string;
   value: string;
   count: number | null;
+  isLimited: boolean;
   tone: string;
   description: string;
   sourceLabel: string;
@@ -408,14 +418,16 @@ type DashboardActionProjection = {
 function normalizePriorityWork(items: Array<{ label: string; value: string; tone: string; description?: string }>): DashboardActionProjection[] {
   return items.map((item) => {
     const normalized = normalizeGroupKey(item.label);
+    const isLimited = isLimitedSliceValue(item.value);
     const count = parseDashboardCount(item.value);
 
     if (normalized.includes('automation')) {
       return {
         id: 'automation-issue-groups',
         label: 'Automation issue groups',
-        value: count === null ? 'Unknown' : item.value,
+        value: isLimited || count !== null ? item.value : 'Unknown',
         count,
+        isLimited,
         tone: item.tone,
         description:
           count && count > 0
@@ -429,8 +441,9 @@ function normalizePriorityWork(items: Array<{ label: string; value: string; tone
       return {
         id: 'finance-review',
         label: 'Finance review',
-        value: count === null ? 'Review pending' : item.value,
+        value: isLimited || count !== null ? item.value : 'Review pending',
         count,
+        isLimited,
         tone: item.tone,
         description: item.description ?? 'Settlement review workload.',
         sourceLabel: item.label,
@@ -441,8 +454,9 @@ function normalizePriorityWork(items: Array<{ label: string; value: string; tone
       return {
         id: 'open-support-issues',
         label: 'Open support issues',
-        value: count === null ? item.value : String(count),
+        value: isLimited || count === null ? item.value : String(count),
         count,
+        isLimited,
         tone: item.tone,
         description: item.description ?? 'Grouped support issues that need follow-up.',
         sourceLabel: item.label,
@@ -455,11 +469,16 @@ function normalizePriorityWork(items: Array<{ label: string; value: string; tone
       label: projection.title,
       value: item.value,
       count,
+      isLimited,
       tone: item.tone,
       description: projection.description,
       sourceLabel: item.label,
     };
   });
+}
+
+function isDashboardActionActive(item: DashboardActionProjection) {
+  return item.isLimited ? item.tone !== 'severity-normal' : (item.count ?? 0) > 0;
 }
 
 function getDashboardActionRoute(label: string) {
@@ -692,7 +711,13 @@ export function DashboardPage() {
   const actionProjections = normalizePriorityWork(priorityWork);
   const visibleNotificationGroups = groupedNotifications.slice(0, 2);
   const collapsedNotificationCount = Math.max(0, groupedNotifications.length - visibleNotificationGroups.length);
-  const operationalActionTotal = actionProjections.reduce((sum, item) => sum + (item.count ?? 0), 0);
+  const hasLimitedActionCounts = actionProjections.some((item) => item.isLimited);
+  const hasActiveOperationalActions = actionProjections.some(isDashboardActionActive);
+  const operationalActionTotal = actionProjections.reduce((sum, item) => sum + (item.isLimited ? 0 : item.count ?? 0), 0);
+  const operationalActionLabel = hasLimitedActionCounts ? 'Sampled actions' : `${operationalActionTotal} Actions`;
+  const needsAttentionDescription = hasLimitedActionCounts
+    ? 'Action counts include deferred slices where full totals are unavailable.'
+    : `${operationalActionTotal} grouped actionable issues across fulfillment, returns, refunds, and automation.`;
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
   const dashboardKpis = dashboardStats.slice(0, 5);
   const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !initialDashboard);
@@ -812,11 +837,11 @@ export function DashboardPage() {
             <span>Last sync</span>
             <strong>—</strong>
           </div>
-          <StatusBadge tone={operationalActionTotal > 0 ? 'warning' : 'success'}>{operationalActionTotal} Actions</StatusBadge>
+          <StatusBadge tone={hasActiveOperationalActions ? 'warning' : 'success'}>{operationalActionLabel}</StatusBadge>
         </div>
       </header>
 
-      <OperationalSection title="Needs attention" description={`${operationalActionTotal} grouped actionable issues across fulfillment, returns, refunds, and automation.`}>
+      <OperationalSection title="Needs attention" description={needsAttentionDescription}>
         {isError && !dashboard ? (
           <SectionErrorRetry
             title="Operational overview unavailable"
@@ -838,7 +863,7 @@ export function DashboardPage() {
         ) : (
           <div className="dashboard-action-grid">
             {actionProjections.map((item) => {
-              const isActive = (item.count ?? 0) > 0;
+              const isActive = isDashboardActionActive(item);
               const guidance = getDashboardWorkflowAction(item.label);
 
               return (

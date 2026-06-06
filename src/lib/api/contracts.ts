@@ -1541,6 +1541,25 @@ export type OperationsQueueItem = {
   actionTo?: string;
 };
 
+export type OperationsQueueSummary = {
+  total: number;
+  critical: number;
+  warning: number;
+  attention: number;
+  normal: number;
+  pendingReassignment: number;
+  vendorBlocked: number;
+  awaitingShipment: number;
+  refundAttention: number;
+  operationalSignals: number;
+  automationActions: number;
+};
+
+export type OperationsQueueDashboard = {
+  summary: OperationsQueueSummary;
+  items: OperationsQueueItem[];
+};
+
 export type OperationsAttentionSeverity = 'info' | 'warning' | 'critical';
 export type OperationsAttentionType =
   | 'support'

@@ -26,6 +26,8 @@ import * as realVendorIntegration from './real/vendorIntegration';
 import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
+  OperationsQueueDashboard,
+  OperationsQueueItem,
   SupportAnalytics,
   SupportTicket,
   SupportTicketCategory,
@@ -47,6 +49,22 @@ function getCurrentVendorId() {
 type ReadRequestOptions = { signal?: AbortSignal; headers?: HeadersInit; limit?: number; offset?: number };
 
 const mockSupportTickets: SupportTicket[] = [];
+
+function buildOperationsQueueSummary(items: OperationsQueueItem[]): OperationsQueueDashboard['summary'] {
+  return {
+    total: items.length,
+    critical: items.filter((item) => item.severity === 'critical').length,
+    warning: items.filter((item) => item.severity === 'high').length,
+    attention: items.filter((item) => item.severity === 'medium').length,
+    normal: items.filter((item) => item.severity === 'low').length,
+    pendingReassignment: items.filter((item) => item.type === 'pending_reassignment').length,
+    vendorBlocked: items.filter((item) => item.type === 'vendor_blocked').length,
+    awaitingShipment: items.filter((item) => item.type === 'awaiting_shipment').length,
+    refundAttention: items.filter((item) => item.type === 'refund_attention').length,
+    operationalSignals: items.filter((item) => item.type === 'operational_signal').length,
+    automationActions: items.filter((item) => item.type === 'automation_action').length,
+  };
+}
 
 function getMockVendorIntegrationProviderManagement(): VendorIntegrationProviderManagement {
   const now = new Date().toISOString();
@@ -1609,6 +1627,22 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realOperations.listAdminOperationsQueue({ signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(listMockAdminOperationsQueue()),
+    dashboard: (options: ReadRequestOptions = {}) => {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOperations.getAdminOperationsQueueDashboard({
+          signal: options.signal,
+          headers: options.headers,
+          limit: options.limit,
+          offset: options.offset,
+        });
+      }
+
+      const items = listMockAdminOperationsQueue();
+      return Promise.resolve({
+        summary: buildOperationsQueueSummary(items),
+        items,
+      });
+    },
     attention: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realOperations.getAdminOperationsAttention({ signal: options.signal })

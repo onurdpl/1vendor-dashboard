@@ -38,6 +38,22 @@ function createRuntimeServices() {
     },
     operations: {
       list: vi.fn().mockResolvedValue([]),
+      dashboard: vi.fn().mockResolvedValue({
+        summary: {
+          total: 0,
+          critical: 0,
+          warning: 0,
+          attention: 0,
+          normal: 0,
+          pendingReassignment: 0,
+          vendorBlocked: 0,
+          awaitingShipment: 0,
+          refundAttention: 0,
+          operationalSignals: 0,
+          automationActions: 0,
+        },
+        items: [],
+      }),
     },
     signals: {
       list: vi.fn().mockResolvedValue({
@@ -151,7 +167,7 @@ describe('dashboard real-mode loading', () => {
 
     const overview = await getDashboardDeferredOverview('demo-vendor-a');
 
-    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('1');
+    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('Showing latest 1');
     expect(overview.financeSnapshot).toBeUndefined();
     expect(overview.partialDataWarnings).toContain('Finance snapshot is temporarily unavailable.');
   });
@@ -192,6 +208,7 @@ describe('dashboard real-mode loading', () => {
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
     expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
+    expect(services.operations.dashboard).toHaveBeenCalledWith(expect.any(Object));
   });
 
   it('marks deferred dashboard subrequests with deferred headers and small list limits', async () => {
@@ -209,6 +226,45 @@ describe('dashboard real-mode loading', () => {
     expect(orderOptions?.limit).toBe(10);
     expect(returnOptions?.limit).toBe(10);
     expect(financeOptions?.limit).toBe(10);
+  });
+
+  it('uses limited-slice wording for dashboard counts without accurate totals', async () => {
+    const { getDashboardDeferredOverview } = await importDashboardWithServices();
+
+    const overview = await getDashboardDeferredOverview('vendor-query-key');
+
+    expect(overview.stats.find((stat) => stat.label === 'Vendor orders')?.value).toBe('Showing latest 1');
+    expect(overview.stats.find((stat) => stat.label === 'Awaiting shipment')?.value).toBe('1 in latest 1');
+    expect(overview.stats.find((stat) => stat.label === 'Blocked / attention')?.value).toBe('1 in latest slices');
+    expect(overview.priorityWork.find((item) => item.label === 'Awaiting shipment')?.value).toBe('1 in latest 1');
+    expect(overview.priorityWork.find((item) => item.label === 'Refund attention')?.value).toBe('1 in latest 1');
+    expect(overview.normalizedOperationalCounts?.financeReviewItemCount).toBeNull();
+    expect(overview.workspaceStatus).toContain('showing latest 1 order allocation');
+  });
+
+  it('uses the existing operations summary total instead of limited operation items', async () => {
+    const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
+      runtimeServices.operations.dashboard.mockResolvedValue({
+        summary: {
+          total: 37,
+          critical: 0,
+          warning: 0,
+          attention: 0,
+          normal: 37,
+          pendingReassignment: 0,
+          vendorBlocked: 0,
+          awaitingShipment: 0,
+          refundAttention: 0,
+          operationalSignals: 0,
+          automationActions: 0,
+        },
+        items: [],
+      });
+    }, 'admin');
+
+    const overview = await getDashboardDeferredOverview('vendor-query-key');
+
+    expect(overview.workspaceStatus).toContain('Admin queue currently tracks 37 operational items');
   });
 
   it('returns normalized dashboard operational counts from existing backend payloads', async () => {
@@ -431,7 +487,7 @@ describe('dashboard real-mode loading', () => {
     expect(overview.normalizedOperationalCounts?.metadata.openSupportIssueCount.rawCount).toBe(2);
     expect(overview.normalizedOperationalCounts?.groupedAutomationIssueCount).toBe(2);
     expect(overview.normalizedOperationalCounts?.metadata.groupedAutomationIssueCount.rawCount).toBe(4);
-    expect(overview.normalizedOperationalCounts?.financeReviewItemCount).toBe(1);
+    expect(overview.normalizedOperationalCounts?.financeReviewItemCount).toBeNull();
     expect(overview.normalizedOperationalCounts?.staleFulfillmentGroupCount).toBe(1);
     expect(overview.workspaceStatus).toContain('2 grouped automation/rules issues');
   });

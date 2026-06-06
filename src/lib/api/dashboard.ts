@@ -152,6 +152,14 @@ function formatCount(value: number) {
   return value.toString();
 }
 
+function formatLatestSlice(count: number) {
+  return `Showing latest ${count}`;
+}
+
+function formatCountInLatestSlice(count: number, sliceCount: number) {
+  return sliceCount > 0 ? `${count} in latest ${sliceCount}` : 'Showing latest 0';
+}
+
 function normalizeIssueKeyPart(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/\s+/g, ' ') || 'unknown';
 }
@@ -378,35 +386,36 @@ function buildRealDashboardShellOverview(vendorId?: VendorId): DashboardOverview
   };
 }
 
-function toMoneyValue(value: string) {
-  const parsed = Number.parseFloat(value.replace(/[^0-9.-]/g, '') || '0');
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
 function createPriorityWork(input: {
   blockedCount: number;
   awaitingShipmentCount: number;
   refundAttentionCount: number;
   automationIssueGroupCount: number;
+  blockedValue?: string;
+  awaitingShipmentValue?: string;
+  refundAttentionValue?: string;
+  blockedDescription?: string;
+  awaitingShipmentDescription?: string;
+  refundAttentionDescription?: string;
 }): DashboardPriorityItem[] {
   return [
     {
       label: 'Blocked allocations',
-      value: formatCount(input.blockedCount),
+      value: input.blockedValue ?? formatCount(input.blockedCount),
       tone: input.blockedCount > 0 ? 'severity-warning' : 'severity-normal',
-      description: input.blockedCount > 0 ? 'Allocations waiting for reassignment or vendor recovery.' : 'No blocked allocations right now.',
+      description: input.blockedDescription ?? (input.blockedCount > 0 ? 'Allocations waiting for reassignment or vendor recovery.' : 'No blocked allocations right now.'),
     },
     {
       label: 'Awaiting shipment',
-      value: formatCount(input.awaitingShipmentCount),
+      value: input.awaitingShipmentValue ?? formatCount(input.awaitingShipmentCount),
       tone: input.awaitingShipmentCount > 0 ? 'severity-attention' : 'severity-normal',
-      description: input.awaitingShipmentCount > 0 ? 'Allocations still waiting for shipment progress.' : 'No allocations are awaiting shipment.',
+      description: input.awaitingShipmentDescription ?? (input.awaitingShipmentCount > 0 ? 'Allocations still waiting for shipment progress.' : 'No allocations are awaiting shipment.'),
     },
     {
       label: 'Refund attention',
-      value: formatCount(input.refundAttentionCount),
+      value: input.refundAttentionValue ?? formatCount(input.refundAttentionCount),
       tone: input.refundAttentionCount > 0 ? 'severity-warning' : 'severity-normal',
-      description: input.refundAttentionCount > 0 ? 'Refund records still need review or reconciliation.' : 'No active refund attention items.',
+      description: input.refundAttentionDescription ?? (input.refundAttentionCount > 0 ? 'Refund records still need review or reconciliation.' : 'No active refund attention items.'),
     },
     {
       label: 'Automation issue groups',
@@ -479,7 +488,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
     withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
     currentUser?.role === 'admin'
-      ? withDashboardClientTiming(requestId, 'client.operations.list', () => runtimeServices.operations.list(dashboardOperationsReadOptions), 'deferred')
+      ? withDashboardClientTiming(requestId, 'client.operations.dashboard', () => runtimeServices.operations.dashboard(dashboardOperationsReadOptions), 'deferred')
       : Promise.resolve(null),
     withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
     withDashboardClientTiming(requestId, 'client.notifications.list', () =>
@@ -535,7 +544,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     partialDataWarnings.push('Automation issue groups are temporarily unavailable.');
   }
 
-  const operations = operationsResult.status === 'fulfilled' ? operationsResult.value : null;
+  const operationsDashboard = operationsResult.status === 'fulfilled' ? operationsResult.value : null;
   if (operationsResult.status === 'rejected') {
     partialDataWarnings.push('Operations queue context is temporarily unavailable.');
   }
@@ -575,18 +584,25 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   const normalizedOperationalCounts = buildNormalizedOperationalCounts({
     support: supportTickets ? countOpenSupportIssues(supportTickets, currentVendorId) : { rawCount: null, groupedCount: null },
     automation: automationIssueGroups,
-    finance: countFinanceReviewItems(finance),
+    finance: { rawCount: null, groupedCount: null },
     staleFulfillment: countStaleFulfillmentGroups(signals?.signals),
   });
   const automationIssueGroupCount = normalizedOperationalCounts.groupedAutomationIssueCount ?? 0;
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
-  const refundAmount = returns.reduce((total, item) => total + toMoneyValue(item.amount), 0);
+  const operations = operationsDashboard?.items ?? null;
+  const operationsTotal = operationsDashboard?.summary.total ?? null;
 
   const priorityWork = createPriorityWork({
     blockedCount,
     awaitingShipmentCount,
     refundAttentionCount: activeRefundCount,
     automationIssueGroupCount,
+    blockedValue: formatCountInLatestSlice(blockedCount, orders.length),
+    awaitingShipmentValue: formatCountInLatestSlice(awaitingShipmentCount, orders.length),
+    refundAttentionValue: formatCountInLatestSlice(activeRefundCount, returns.length),
+    blockedDescription: `Showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}; open Orders for the full scope.`,
+    awaitingShipmentDescription: `Showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}; open Orders for the full shipment queue.`,
+    refundAttentionDescription: `Showing latest ${returns.length} return record${returns.length === 1 ? '' : 's'}; open Returns for the full review queue.`,
   });
 
   const recentActivity = [
@@ -602,9 +618,11 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     )),
   ];
 
-  let workspaceStatus = `${currentVendor.vendorName} has ${orders.length} vendor-scoped orders, ${activeRefundCount} refunds needing attention, and ${automationIssueGroupCount} grouped automation/rules issues.`;
+  let workspaceStatus = `${currentVendor.vendorName} is showing latest ${orders.length} order allocation${orders.length === 1 ? '' : 's'}, latest ${returns.length} return record${returns.length === 1 ? '' : 's'}, and ${automationIssueGroupCount} grouped automation/rules issues.`;
   if (currentUser?.role === 'admin' && operations) {
-    workspaceStatus = `${workspaceStatus} Admin queue currently tracks ${operations.length} operational items for the selected vendor scope.`;
+    workspaceStatus = operationsTotal === null
+      ? `${workspaceStatus} Admin queue is showing latest ${operations.length} operational item${operations.length === 1 ? '' : 's'} for the selected vendor scope.`
+      : `${workspaceStatus} Admin queue currently tracks ${operationsTotal} operational item${operationsTotal === 1 ? '' : 's'} for the selected vendor scope.`;
   }
 
   const diagnosticsSummary: DashboardDiagnosticsSummary | undefined =
@@ -664,11 +682,11 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     description: `Monitor backend-derived operational state for ${currentVendor.vendorName} from one workspace.`,
     loadPhase: 'deferred',
     stats: [
-      { label: 'Vendor orders', value: formatCount(orders.length) },
-      { label: 'Awaiting shipment', value: formatCount(awaitingShipmentCount) },
-      { label: 'Blocked / attention', value: formatCount(blockedCount + activeRefundCount) },
+      { label: 'Vendor orders', value: formatLatestSlice(orders.length) },
+      { label: 'Awaiting shipment', value: formatCountInLatestSlice(awaitingShipmentCount, orders.length) },
+      { label: 'Blocked / attention', value: `${blockedCount + activeRefundCount} in latest slices` },
       { label: 'Payout estimate', value: payoutEstimate },
-      { label: 'Refund amount', value: finance?.summary.refunds ?? `-$${refundAmount.toFixed(2)}` },
+      { label: 'Refund amount', value: finance?.summary.refunds ?? '—' },
     ],
     recentActivity: recentActivity.length > 0 ? recentActivity : [`No recent backend activity for ${currentVendor.vendorName}.`],
     workspaceStatus,
