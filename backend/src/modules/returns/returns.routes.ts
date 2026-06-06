@@ -10,6 +10,7 @@ import {
   createNavlungoReturnPickupForReturn,
   listVendorReturns,
   markReturnReceived,
+  previewKargonomiReturnShipmentForReturn,
   type ReturnActorScope,
   ReturnReviewError,
   reviewReturn,
@@ -287,6 +288,25 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
           endpointPathOverride: request.body?.endpointPathOverride,
           diagnosticConfirm: request.body?.diagnosticConfirm,
         });
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.get<{ Params: { returnId: string } }>(
+    '/returns/:returnId/kargonomi-return-preview',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await previewKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor);
       } catch (error) {
         return sendReviewError(error, reply);
       }

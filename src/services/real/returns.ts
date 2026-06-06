@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
+import type { KargonomiReturnPreview, ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
@@ -368,6 +368,16 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
     ],
   };
   return detail;
+}
+
+export async function getKargonomiReturnPreview(
+  returnId: string,
+  options: { vendorId?: string | null; signal?: AbortSignal } = {},
+): Promise<KargonomiReturnPreview> {
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<KargonomiReturnPreview>(`/returns/${returnId}/kargonomi-return-preview`, requestOptions)
+    : apiClient.get<KargonomiReturnPreview>(`/returns/${returnId}/kargonomi-return-preview`);
 }
 
 export async function createNavlungoReturnPickup(

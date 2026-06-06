@@ -1,5 +1,6 @@
 export {
   getReturn,
+  getKargonomiReturnPreview,
   listReturns,
   markReturnReceived,
   reviewReturn,
@@ -7,4 +8,4 @@ export {
   saveNavlungoReturnPickupAddressCompletion,
   syncNavlungoReturnStatus,
 } from '../../lib/api/returns';
-export type { ReturnDetail, ReturnLineItem, ReturnSummary } from '../../lib/api/contracts';
+export type { KargonomiReturnPreview, ReturnDetail, ReturnLineItem, ReturnSummary } from '../../lib/api/contracts';

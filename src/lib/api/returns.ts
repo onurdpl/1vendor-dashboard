@@ -8,6 +8,10 @@ export async function getReturn(returnId: string, options: { vendorId?: string |
   return runtimeServices.returns.detail(returnId, options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export async function getKargonomiReturnPreview(returnId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.returns.kargonomiPreview(returnId, options.vendorId ?? undefined, { signal: options.signal });
+}
+
 export async function markReturnReceived(returnId: string, options: { vendorId?: string | null } = {}) {
   return runtimeServices.returns.markReceived(returnId, options.vendorId ?? undefined);
 }

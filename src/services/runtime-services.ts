@@ -28,6 +28,7 @@ import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
   DashboardOperationalSummary,
+  KargonomiReturnPreview,
   OperationsQueueDashboard,
   OperationsQueueItem,
   SupportAnalytics,
@@ -1377,6 +1378,49 @@ export const runtimeServices = {
         throw new ApiError('Return not found.', 'server', { status: 404 });
       }
       return returnRecord;
+    },
+    async kargonomiPreview(returnId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.getKargonomiReturnPreview(returnId, { vendorId, signal: options.signal });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+
+      return {
+        ok: true,
+        provider: 'KARGONOMI',
+        mode: 'return_preview',
+        returnId,
+        ready: false,
+        missingFields: ['sender.cityId', 'sender.stateId', 'receiver.phone'],
+        direction: 'CUSTOMER_TO_VENDOR',
+        senderSource: 'CUSTOMER_ORDER_ADDRESS',
+        receiverSource: 'VENDOR_KARGONOMI_WAREHOUSE',
+        previewPayload: {
+          shipment: {
+            sender: {
+              source: 'CUSTOMER_ORDER_ADDRESS',
+              namePresent: true,
+              phonePresent: false,
+              addressPresent: true,
+              districtPresent: true,
+              cityId: null,
+              stateId: null,
+            },
+            receiver: {
+              source: 'VENDOR_KARGONOMI_WAREHOUSE',
+              warehouseId: null,
+              namePresent: true,
+              phonePresent: false,
+              addressPresent: true,
+            },
+          },
+        },
+        notes: ['Mock preview only. No Kargonomi API call was made.'],
+      } satisfies KargonomiReturnPreview;
     },
     async markReceived(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {

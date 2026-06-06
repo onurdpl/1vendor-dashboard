@@ -9,10 +9,12 @@ import { useMutationAction } from '../hooks/useMutationAction';
 import {
   getReturn,
   createNavlungoReturnPickup,
+  getKargonomiReturnPreview,
   markReturnReceived,
   reviewReturn,
   saveNavlungoReturnPickupAddressCompletion,
   syncNavlungoReturnStatus,
+  type KargonomiReturnPreview,
   type ReturnDetail,
   type ReturnLineItem,
 } from '../features/returns/api';
@@ -194,6 +196,16 @@ function formatDiagnosticJson(value: unknown) {
     return null;
   }
   return JSON.stringify(value, null, 2);
+}
+
+function readKargonomiPreviewShipment(preview: KargonomiReturnPreview | null) {
+  const shipment = isRecord(preview?.previewPayload.shipment) ? preview.previewPayload.shipment : null;
+  return {
+    sender: isRecord(shipment?.sender) ? shipment.sender : {},
+    receiver: isRecord(shipment?.receiver) ? shipment.receiver : {},
+    package: isRecord(shipment?.package) ? shipment.package : {},
+    reference: isRecord(shipment?.reference) ? shipment.reference : {},
+  };
 }
 
 function isRenderableReturnDetail(value: unknown): value is ReturnDetail {
@@ -488,6 +500,7 @@ export function ReturnDetailPage() {
     useState<'/post/create' | '/post/return'>('/post/return');
   const [returnPickupCompletion, setReturnPickupCompletion] = useState<Record<string, string>>({});
   const [retainedReturnPickupMissingFields, setRetainedReturnPickupMissingFields] = useState<string[]>([]);
+  const [kargonomiReturnPreview, setKargonomiReturnPreview] = useState<KargonomiReturnPreview | null>(null);
   const returnDetailQueryEnabled = authContextReady && Boolean(returnId);
   const returnDetailEndpoint = returnId ? `/returns/${returnId}` : '/returns/:returnId';
   const returnDetailQueryKey = returnId
@@ -672,7 +685,26 @@ export function ReturnDetailPage() {
       },
     },
   );
+  const kargonomiReturnPreviewMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return getKargonomiReturnPreview(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: (data) => {
+        setKargonomiReturnPreview(data);
+        showFeedback(data.ready ? 'Kargonomi return preview is ready.' : 'Kargonomi return preview needs configuration.', data.ready ? 'success' : 'info');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Kargonomi return preview could not be generated.', 'error');
+      },
+    },
+  );
   const currentReturnProviderSnapshot = returnRequest?.returnProviderSnapshot ?? {};
+  const kargonomiPreviewShipment = readKargonomiPreviewShipment(kargonomiReturnPreview);
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
@@ -681,6 +713,7 @@ export function ReturnDetailPage() {
   useEffect(() => {
     setRetainedReturnPickupMissingFields([]);
     setReturnPickupCompletion({});
+    setKargonomiReturnPreview(null);
     setLoadingTimedOut(false);
   }, [returnId]);
 
@@ -1852,6 +1885,73 @@ export function ReturnDetailPage() {
                 ) : null}
               </div>
             </details>
+          ) : null}
+
+          {returnRequest.sourceType === 'shopify_return_request' ? (
+            <article className="return-review-card">
+              <div className="return-review-card-header">
+                <div>
+                  <p className="eyebrow">Kargonomi return preview</p>
+                  <h3>Customer to warehouse readiness</h3>
+                </div>
+                <button
+                  type="button"
+                  className="button button-secondary"
+                  disabled={kargonomiReturnPreviewMutation.isPending}
+                  onClick={() => void kargonomiReturnPreviewMutation.mutateAsync(undefined)}
+                >
+                  {kargonomiReturnPreviewMutation.isPending ? 'Previewing...' : 'Kargonomi return preview'}
+                </button>
+              </div>
+              <div className="return-review-summary-list">
+                <div>
+                  <span>Status</span>
+                  <strong>
+                    {kargonomiReturnPreview ? (kargonomiReturnPreview.ready ? 'Ready' : 'Not ready') : 'Not checked'}
+                  </strong>
+                </div>
+                <div>
+                  <span>Direction</span>
+                  <strong>{kargonomiReturnPreview?.direction.replace(/_/g, ' ') ?? 'Customer to vendor'}</strong>
+                </div>
+                <div>
+                  <span>City / state IDs</span>
+                  <strong>
+                    {kargonomiReturnPreview
+                      ? [
+                          kargonomiPreviewShipment.sender.cityId ? `city ${String(kargonomiPreviewShipment.sender.cityId)}` : 'city missing',
+                          kargonomiPreviewShipment.sender.stateId ? `state ${String(kargonomiPreviewShipment.sender.stateId)}` : 'state missing',
+                        ].join(', ')
+                      : 'Not checked'}
+                  </strong>
+                </div>
+                <div>
+                  <span>Warehouse</span>
+                  <strong>
+                    {kargonomiReturnPreview
+                      ? [
+                          kargonomiPreviewShipment.receiver.warehouseId
+                            ? `warehouse ${String(kargonomiPreviewShipment.receiver.warehouseId)}`
+                            : 'warehouse missing',
+                          kargonomiPreviewShipment.receiver.namePresent === true ? 'name ready' : 'name missing',
+                          kargonomiPreviewShipment.receiver.phonePresent === true ? 'phone ready' : 'phone missing',
+                          kargonomiPreviewShipment.receiver.addressPresent === true ? 'address ready' : 'address missing',
+                        ].join(', ')
+                      : 'Not checked'}
+                  </strong>
+                </div>
+                <div>
+                  <span>Missing fields</span>
+                  <strong>{kargonomiReturnPreview ? formatDiagnosticList(kargonomiReturnPreview.missingFields) : 'Not checked'}</strong>
+                </div>
+                {kargonomiReturnPreview?.notes.length ? (
+                  <div>
+                    <span>Notes</span>
+                    <strong>{kargonomiReturnPreview.notes.join(' ')}</strong>
+                  </div>
+                ) : null}
+              </div>
+            </article>
           ) : null}
 
           {isAdmin && returnRequest.sourceType === 'shopify_return_request' ? (

@@ -59,3 +59,17 @@ export type ReturnDetailDto = ReturnSummaryDto & {
   returnProviderSnapshot: Record<string, unknown> | null;
   refundedItems: RefundedItemDto[];
 };
+
+export type KargonomiReturnPreviewDto = {
+  ok: true;
+  provider: 'KARGONOMI';
+  mode: 'return_preview';
+  returnId: string;
+  ready: boolean;
+  missingFields: string[];
+  direction: 'CUSTOMER_TO_VENDOR';
+  senderSource: 'CUSTOMER_ORDER_ADDRESS';
+  receiverSource: 'VENDOR_KARGONOMI_WAREHOUSE';
+  previewPayload: Record<string, unknown>;
+  notes: string[];
+};

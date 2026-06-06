@@ -996,6 +996,20 @@ export type ReturnDetail = ReturnSummary & {
   timeline: Array<{ label: string; at: string }>;
 };
 
+export type KargonomiReturnPreview = {
+  ok: true;
+  provider: 'KARGONOMI';
+  mode: 'return_preview';
+  returnId: string;
+  ready: boolean;
+  missingFields: string[];
+  direction: 'CUSTOMER_TO_VENDOR';
+  senderSource: 'CUSTOMER_ORDER_ADDRESS';
+  receiverSource: 'VENDOR_KARGONOMI_WAREHOUSE';
+  previewPayload: Record<string, unknown>;
+  notes: string[];
+};
+
 export type SupportTicketPriority = 'low' | 'normal' | 'high';
 export type SupportTicketStatus = 'OPEN' | 'IN_REVIEW' | 'WAITING_FOR_VENDOR' | 'RESOLVED' | 'CLOSED';
 export type SupportTicketCategory = 'ORDER' | 'RETURN' | 'REFUND' | 'SHIPMENT' | 'TRACKING' | 'PAYOUT' | 'INVOICE' | 'OTHER';

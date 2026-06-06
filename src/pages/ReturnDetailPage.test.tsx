@@ -4,7 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnDetailPage } from './ReturnDetailPage';
-import type { ReturnDetail } from '../features/returns/api';
+import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/api';
 import { clearToken, setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
 
@@ -53,6 +53,7 @@ const saveNavlungoReturnPickupAddressCompletionMock = vi.fn<
   (returnId: string, input: { customerOverrides?: Record<string, string | undefined> }) => Promise<ReturnDetail>
 >();
 const syncNavlungoReturnStatusMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const getKargonomiReturnPreviewMock = vi.fn<(returnId: string) => Promise<KargonomiReturnPreview>>();
 const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -85,6 +86,7 @@ vi.mock('../features/returns/api', async () => {
       input: { customerOverrides?: Record<string, string | undefined> },
     ) => saveNavlungoReturnPickupAddressCompletionMock(returnId, input),
     syncNavlungoReturnStatus: (returnId: string) => syncNavlungoReturnStatusMock(returnId),
+    getKargonomiReturnPreview: (returnId: string) => getKargonomiReturnPreviewMock(returnId),
   };
 });
 
@@ -233,6 +235,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     createNavlungoReturnPickupMock.mockReset();
     saveNavlungoReturnPickupAddressCompletionMock.mockReset();
     syncNavlungoReturnStatusMock.mockReset();
+    getKargonomiReturnPreviewMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -1527,6 +1530,53 @@ describe('ReturnDetailPage vendor review screen', () => {
       }),
     }));
     expect((await screen.findAllByText('Support ticket created.')).length).toBeGreaterThan(0);
+  });
+
+  it('renders Kargonomi return readiness preview without exposing PII fields', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue(returnDetail);
+    getKargonomiReturnPreviewMock.mockResolvedValueOnce({
+      ok: true,
+      provider: 'KARGONOMI',
+      mode: 'return_preview',
+      returnId: returnDetail.id,
+      ready: false,
+      missingFields: ['sender.phone', 'receiver.phone'],
+      direction: 'CUSTOMER_TO_VENDOR',
+      senderSource: 'CUSTOMER_ORDER_ADDRESS',
+      receiverSource: 'VENDOR_KARGONOMI_WAREHOUSE',
+      previewPayload: {
+        shipment: {
+          sender: {
+            namePresent: true,
+            phonePresent: false,
+            addressPresent: true,
+            districtPresent: true,
+            cityId: '828',
+            stateId: '34',
+          },
+          receiver: {
+            warehouseId: '112668',
+            namePresent: true,
+            phonePresent: false,
+            addressPresent: true,
+          },
+        },
+      },
+      notes: ['Preview only. No Kargonomi API call was made.'],
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Kargonomi return preview' }));
+
+    expect(getKargonomiReturnPreviewMock).toHaveBeenCalledWith(returnDetail.id);
+    expect(await screen.findByText('Not ready')).toBeInTheDocument();
+    expect(screen.getByText('sender.phone, receiver.phone')).toBeInTheDocument();
+    expect(screen.getByText('city 828, state 34')).toBeInTheDocument();
+    expect(screen.getByText('warehouse 112668, name ready, phone missing, address ready')).toBeInTheDocument();
+    expect(screen.queryByText('+905551112233')).not.toBeInTheDocument();
+    expect(screen.queryByText('Customer full address')).not.toBeInTheDocument();
   });
 
   it('hides vendor review actions from a vendor outside the assigned return scope', async () => {
