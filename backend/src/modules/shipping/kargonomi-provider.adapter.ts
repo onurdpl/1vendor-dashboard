@@ -847,7 +847,11 @@ function buildKargonomiProviderResult(
   const parsed = parseKargonomiShipment(extractShipmentBody(responseBody));
   const providerShipmentId = parsed.id ?? fallbackShipmentId;
   const trackingNumber =
-    parsed.shippingWebserviceTrackingCode ?? parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId ?? null;
+    parsed.shippingWebserviceTrackingCode ??
+    parsed.shippingWebserviceOrderId ??
+    parsed.shippingWebserviceBarcode ??
+    parsed.barcodeOfOrderId ??
+    null;
   const labelUrl = readString(responseSnapshot, ['labelUrl', 'barcode']);
   const shippingCost =
     parseMoney(parsed.pricing.realPrice) ??

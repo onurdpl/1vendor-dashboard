@@ -757,6 +757,39 @@ describe('Kargonomi forward adapter scaffold', () => {
     expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('5551112233');
   });
 
+  it('uses Kargonomi shipping webservice order id as tracking fallback when tracking code is missing', async () => {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const fetchImpl = (async (url: RequestInfo | URL, init?: RequestInit) => {
+      calls.push({ url: String(url), init: init ?? {} });
+      const responseBody = calls.length === 1
+        ? {
+            shipment: {
+              id: 2653543,
+              status: 'webservice_order_created',
+              shipping_webservice_order_id: 'KSUR2653543SKDXP',
+              shipping_webservice_barcode: 'BARCODE-FALLBACK',
+              barcode_of_order_id: 'ORDER-BARCODE-FALLBACK',
+            },
+          }
+        : { format: 'pdf', data: 'JVBERi0xLjQ=' };
+
+      return new Response(JSON.stringify(responseBody), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const adapter = new KargonomiAdapter(buildEnv(), new KargonomiHttpClient(buildEnv(), { fetchImpl }));
+
+    const result = await adapter.refreshProviderData('2653543');
+
+    expect(result.trackingNumber).toBe('KSUR2653543SKDXP');
+    expect(result.responseSnapshot).toMatchObject({
+      trackingNumberPresent: true,
+      shippingProviderName: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+    });
+  });
+
   it('resolves Turkish destination state and district IDs with case and diacritic normalization', async () => {
     clearKargonomiLocationLookupCache();
     const client = {
