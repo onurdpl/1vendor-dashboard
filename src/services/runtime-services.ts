@@ -1422,6 +1422,32 @@ export const runtimeServices = {
         notes: ['Mock preview only. No Kargonomi API call was made.'],
       } satisfies KargonomiReturnPreview;
     },
+    async createKargonomiReturnShipment(returnId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.createKargonomiReturnShipment(returnId, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      return {
+        ...returnRecord,
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: 'MOCK-KARGO-RETURN-1',
+        returnReferenceId: 'RET-MOCK-KARGO-1',
+        returnCarrierName: 'Kargonomi',
+        returnTrackingNumber: 'MOCK-KARGO-TRACK-1',
+        returnTrackingUrl: null,
+        returnLabel: 'mock-kargonomi-label',
+        returnProviderSnapshot: {
+          provider: 'kargonomi',
+          flow: 'return_shipment',
+          kargonomiReturnShipmentSucceeded: true,
+          shopifyReturnSyncSkippedReason: 'not_implemented',
+        },
+      };
+    },
     async markReceived(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.markReturnReceived(returnId, { vendorId });

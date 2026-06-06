@@ -12,6 +12,10 @@ export async function getKargonomiReturnPreview(returnId: string, options: { ven
   return runtimeServices.returns.kargonomiPreview(returnId, options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export async function createKargonomiReturnShipment(returnId: string, options: { vendorId?: string | null } = {}) {
+  return runtimeServices.returns.createKargonomiReturnShipment(returnId, options.vendorId ?? undefined);
+}
+
 export async function markReturnReceived(returnId: string, options: { vendorId?: string | null } = {}) {
   return runtimeServices.returns.markReceived(returnId, options.vendorId ?? undefined);
 }

@@ -8,6 +8,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import {
   getReturn,
+  createKargonomiReturnShipment,
   createNavlungoReturnPickup,
   getKargonomiReturnPreview,
   markReturnReceived,
@@ -700,6 +701,26 @@ export function ReturnDetailPage() {
       },
       onError: (error) => {
         showFeedback(error instanceof Error ? error.message : 'Kargonomi return preview could not be generated.', 'error');
+      },
+    },
+  );
+  const kargonomiReturnCreateMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return createKargonomiReturnShipment(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: (data) => {
+        queryClient.setQueryData(returnDetailQueryKey, data);
+        setKargonomiReturnPreview(null);
+        showFeedback('Kargonomi return shipment created.', 'success');
+      },
+      onError: async (error) => {
+        await refetch();
+        showFeedback(error instanceof Error ? error.message : 'Kargonomi return shipment could not be created.', 'error');
       },
     },
   );
@@ -1902,6 +1923,16 @@ export function ReturnDetailPage() {
                 >
                   {kargonomiReturnPreviewMutation.isPending ? 'Previewing...' : 'Kargonomi return preview'}
                 </button>
+                {isAdmin && !returnRequest.returnProviderShipmentId ? (
+                  <button
+                    type="button"
+                    className="button button-primary"
+                    disabled={kargonomiReturnCreateMutation.isPending}
+                    onClick={() => void kargonomiReturnCreateMutation.mutateAsync(undefined)}
+                  >
+                    {kargonomiReturnCreateMutation.isPending ? 'Creating...' : 'Create Kargonomi Return Shipment'}
+                  </button>
+                ) : null}
               </div>
               <div className="return-review-summary-list">
                 <div>
@@ -1940,6 +1971,26 @@ export function ReturnDetailPage() {
                       : 'Not checked'}
                   </strong>
                 </div>
+                {returnRequest.returnProvider?.toLowerCase() === 'kargonomi' && returnRequest.returnProviderShipmentId ? (
+                  <>
+                    <div>
+                      <span>Return shipment id</span>
+                      <strong>{returnRequest.returnProviderShipmentId}</strong>
+                    </div>
+                    <div>
+                      <span>Carrier</span>
+                      <strong>{returnRequest.returnCarrierName ?? 'Kargonomi'}</strong>
+                    </div>
+                    <div>
+                      <span>Tracking</span>
+                      <strong>{returnRequest.returnTrackingNumber ?? 'pending'}</strong>
+                    </div>
+                    <div>
+                      <span>Label</span>
+                      <strong>{returnRequest.returnLabel ? 'available' : 'pending'}</strong>
+                    </div>
+                  </>
+                ) : null}
                 <div>
                   <span>Missing fields</span>
                   <strong>{kargonomiReturnPreview ? formatDiagnosticList(kargonomiReturnPreview.missingFields) : 'Not checked'}</strong>

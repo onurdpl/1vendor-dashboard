@@ -12,6 +12,7 @@ import {
   type NavlungoCreatePostPayload,
   type NavlungoCreatePostEndpointPath,
 } from '../shipping/navlungo-provider.adapter.js';
+import type { KargonomiShipmentCreatePayloadInput } from '../shipping/kargonomi-provider.adapter.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type { KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 import {
@@ -58,6 +59,10 @@ export type NavlungoReturnPickupInput = {
 };
 
 export type NavlungoReturnStatusSyncInput = {
+  adapter?: ShippingProviderAdapter;
+};
+
+export type KargonomiReturnShipmentCreateInput = {
   adapter?: ShippingProviderAdapter;
 };
 
@@ -1338,6 +1343,44 @@ function readKargonomiLocationId(source: unknown, keys: string[]) {
   return value;
 }
 
+function readKargonomiReceiverStateId(warehouseMetadata: unknown, configMetadata: unknown) {
+  return (
+    readKargonomiLocationId(warehouseMetadata, [
+      'kargonomiReturnReceiverStateId',
+      'returnReceiverStateId',
+      'receiverStateId',
+      'warehouseStateId',
+      'stateId',
+    ]) ??
+    readKargonomiLocationId(configMetadata, [
+      'kargonomiReturnReceiverStateId',
+      'returnReceiverStateId',
+      'receiverStateId',
+      'warehouseStateId',
+      'stateId',
+    ])
+  );
+}
+
+function readKargonomiReceiverCityId(warehouseMetadata: unknown, configMetadata: unknown) {
+  return (
+    readKargonomiLocationId(warehouseMetadata, [
+      'kargonomiReturnReceiverCityId',
+      'returnReceiverCityId',
+      'receiverCityId',
+      'warehouseCityId',
+      'cityId',
+    ]) ??
+    readKargonomiLocationId(configMetadata, [
+      'kargonomiReturnReceiverCityId',
+      'returnReceiverCityId',
+      'receiverCityId',
+      'warehouseCityId',
+      'cityId',
+    ])
+  );
+}
+
 export async function previewKargonomiReturnShipmentForReturn(
   returnId: string,
   actor: ReturnActorScope,
@@ -1385,6 +1428,8 @@ export async function previewKargonomiReturnShipmentForReturn(
   const receiverAddress =
     warehouse?.address?.trim() ||
     readString(configMetadata, ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress']);
+  const receiverStateId = readKargonomiReceiverStateId(warehouse?.metadata ?? null, configMetadata);
+  const receiverCityId = readKargonomiReceiverCityId(warehouse?.metadata ?? null, configMetadata);
   const defaultDesi = Number(config?.defaultDesi ?? 0);
   const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
   const senderPhone = order.customerPhone?.trim() || order.billingPhone?.trim() || null;
@@ -1425,6 +1470,8 @@ export async function previewKargonomiReturnShipmentForReturn(
   if (!receiverName) missingFields.push('receiver.name');
   if (!receiverPhone) missingFields.push('receiver.phone');
   if (!receiverAddress) missingFields.push('receiver.address');
+  if (!receiverCityId) missingFields.push('receiver.cityId');
+  if (!receiverStateId) missingFields.push('receiver.stateId');
   if (!Number.isFinite(defaultDesi) || defaultDesi <= 0) missingFields.push('package.defaultDesi');
   if (!hasReturnItemsOrReference) missingFields.push('return.itemsOrReference');
 
@@ -1463,6 +1510,8 @@ export async function previewKargonomiReturnShipmentForReturn(
           namePresent: Boolean(receiverName),
           phonePresent: Boolean(receiverPhone),
           addressPresent: Boolean(receiverAddress),
+          cityId: receiverCityId,
+          stateId: receiverStateId,
         },
         package: {
           defaultDesi: Number.isFinite(defaultDesi) && defaultDesi > 0 ? defaultDesi : null,
@@ -1476,6 +1525,316 @@ export async function previewKargonomiReturnShipmentForReturn(
     },
     notes,
   };
+}
+
+function buildKargonomiReturnReferenceId(record: {
+  id: string;
+  sourceShopifyOrderNumber: string;
+  vendorAllocation: { assignedVendorId: string };
+}) {
+  return [
+    'RET',
+    sanitizeNavlungoReferencePart(record.vendorAllocation.assignedVendorId, 'VENDOR', 24),
+    sanitizeNavlungoReferencePart(record.sourceShopifyOrderNumber, 'ORDER', 24),
+    sanitizeNavlungoReferencePart(record.id, 'RETURN', 24),
+  ].join('-');
+}
+
+function buildKargonomiReturnShipmentPayload(input: {
+  record: {
+    id: string;
+    sourceShopifyOrderNumber: string;
+    sourceShopifyReturnId: string | null;
+    sourceShopifyReturnGid: string | null;
+    returnReferenceId: string | null;
+    vendorAllocation: {
+      assignedVendorId: string;
+      order: {
+        customerName: string | null;
+        billingFullName: string | null;
+        customerEmail: string | null;
+        customerPhone: string | null;
+        billingPhone: string | null;
+        shippingAddress: string | null;
+        shippingDistrict: string | null;
+      };
+      lineItems: Array<{
+        id: string;
+        shopifyOrderLineItem: {
+          sku: string | null;
+          title?: string | null;
+          variantTitle?: string | null;
+        } | null;
+      }>;
+    };
+  };
+  config: {
+    defaultDesi: Prisma.Decimal | number | string | null;
+    defaultWarehouseId: string | null;
+    providerMetadata: Prisma.JsonValue | null;
+    warehouses: Array<{
+      warehouseId: string;
+      provider: unknown;
+      isDefault: boolean;
+      name: string | null;
+      address: string | null;
+      metadata: Prisma.JsonValue | null;
+    }>;
+  } | null;
+}) {
+  const order = input.record.vendorAllocation.order;
+  const configMetadata = input.config?.providerMetadata ?? null;
+  const kargonomiWarehouses = (input.config?.warehouses ?? []).filter(
+    (warehouse) => warehouse.provider?.toString().toLowerCase() === 'kargonomi',
+  );
+  const warehouse =
+    kargonomiWarehouses.find((item) => item.warehouseId === input.config?.defaultWarehouseId) ??
+    kargonomiWarehouses.find((item) => item.isDefault) ??
+    kargonomiWarehouses[0] ??
+    null;
+  const warehouseMetadata = warehouse?.metadata ?? null;
+  const receiverName = warehouse?.name?.trim() || readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName']);
+  const receiverPhone = readKargonomiWarehousePhone(warehouseMetadata, configMetadata);
+  const receiverAddress =
+    warehouse?.address?.trim() ||
+    readString(configMetadata, ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress']);
+  const receiverStateId = readKargonomiReceiverStateId(warehouseMetadata, configMetadata);
+  const receiverCityId = readKargonomiReceiverCityId(warehouseMetadata, configMetadata);
+  const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
+  const senderPhone = order.customerPhone?.trim() || order.billingPhone?.trim() || null;
+  const senderAddress = readOrderAddress(order);
+  const senderCityId = readKargonomiLocationId(configMetadata, [
+    'kargonomiReturnSenderCityId',
+    'returnSenderCityId',
+    'fallbackBuyerCityId',
+    'buyerCityId',
+    'buyer_city_id',
+  ]);
+  const senderStateId = readKargonomiLocationId(configMetadata, [
+    'kargonomiReturnSenderStateId',
+    'returnSenderStateId',
+    'fallbackBuyerStateId',
+    'buyerStateId',
+    'buyer_state_id',
+  ]);
+  const defaultDesi = Number(input.config?.defaultDesi ?? 0);
+  const content =
+    input.record.vendorAllocation.lineItems
+      .map((line) => line.shopifyOrderLineItem?.sku ?? line.shopifyOrderLineItem?.title ?? line.shopifyOrderLineItem?.variantTitle)
+      .filter((item): item is string => Boolean(item?.trim()))
+      .join(', ')
+      .slice(0, 240) || `Return ${input.record.sourceShopifyOrderNumber}`;
+  const referenceId = input.record.returnReferenceId ?? buildKargonomiReturnReferenceId(input.record);
+  const packageBarcode = referenceId.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64) || input.record.id;
+  const missingFields = [
+    !senderName ? 'sender.name' : null,
+    !senderPhone ? 'sender.phone' : null,
+    !senderAddress ? 'sender.address' : null,
+    !senderStateId ? 'sender.stateId' : null,
+    !senderCityId ? 'sender.cityId' : null,
+    !receiverName ? 'receiver.name' : null,
+    !receiverPhone ? 'receiver.phone' : null,
+    !receiverAddress ? 'receiver.address' : null,
+    !receiverStateId ? 'receiver.stateId' : null,
+    !receiverCityId ? 'receiver.cityId' : null,
+    !Number.isFinite(defaultDesi) || defaultDesi <= 0 ? 'package.defaultDesi' : null,
+  ].filter((field): field is string => Boolean(field));
+
+  const payload: KargonomiShipmentCreatePayloadInput = {
+    sender: {
+      sender_name: senderName,
+      sender_email: order.customerEmail,
+      sender_phone: senderPhone,
+      sender_address: senderAddress,
+      sender_state_id: senderStateId,
+      sender_city_id: senderCityId,
+    },
+    buyer: {
+      buyer_name: receiverName ?? '',
+      buyer_phone: receiverPhone ?? '',
+      buyer_address: receiverAddress ?? '',
+      buyer_state_id: receiverStateId ?? '',
+      buyer_city_id: receiverCityId ?? '',
+    },
+    packages: [
+      {
+        content,
+        barcode: packageBarcode,
+        desi: Number.isFinite(defaultDesi) && defaultDesi > 0 ? defaultDesi : 1,
+      },
+    ],
+  };
+
+  return {
+    payload,
+    missingFields,
+    referenceId,
+    warehouseId: warehouse?.warehouseId ?? input.config?.defaultWarehouseId ?? null,
+    senderStateId,
+    senderCityId,
+    receiverStateId,
+    receiverCityId,
+  };
+}
+
+function isReturnClosedOrCancelled(record: { status: string; returnLifecycleStatus: string | null }) {
+  const normalized = `${record.status ?? ''} ${record.returnLifecycleStatus ?? ''}`.toLowerCase();
+  return /\b(closed|cancelled|canceled)\b/.test(normalized);
+}
+
+export async function createKargonomiReturnShipmentForReturn(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  input: KargonomiReturnShipmentCreateInput = {},
+): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: {
+        include: {
+          order: true,
+          lineItems: {
+            include: {
+              shopifyOrderLineItem: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for Kargonomi return shipment creation.', 403);
+  }
+
+  if (record.returnProviderShipmentId) {
+    throw new ReturnReviewError('Return shipment already exists for this return.', 400);
+  }
+
+  if (isReturnClosedOrCancelled(record)) {
+    throw new ReturnReviewError('Closed or cancelled returns cannot create Kargonomi return shipments.', 400);
+  }
+
+  const preview = await previewKargonomiReturnShipmentForReturn(returnId, actor);
+  if (!preview.ready) {
+    throw new ReturnReviewError(
+      [
+        'Kargonomi return shipment is not ready.',
+        ...preview.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before create call.',
+      ].join('\n'),
+      400,
+    );
+  }
+
+  const config = await prisma.vendorShippingConfig.findUnique({
+    where: { vendorId: record.vendorAllocation.assignedVendorId },
+    include: {
+      warehouses: true,
+    },
+  });
+  const built = buildKargonomiReturnShipmentPayload({ record, config });
+  if (built.missingFields.length > 0) {
+    throw new ReturnReviewError(
+      [
+        'Kargonomi return shipment is not ready.',
+        ...built.missingFields.map((field) => `- ${field}`),
+        '',
+        'Provider request blocked before create call.',
+      ].join('\n'),
+      400,
+    );
+  }
+
+  const attemptedAt = new Date().toISOString();
+  const diagnostics = {
+    provider: 'kargonomi',
+    flow: 'return_shipment',
+    direction: 'CUSTOMER_TO_VENDOR',
+    kargonomiReturnShipmentAttempted: true,
+    kargonomiReturnShipmentSucceeded: false,
+    kargonomiReturnMissingFields: built.missingFields,
+    warehouseId: built.warehouseId,
+    senderStateIdPresent: Boolean(built.senderStateId),
+    senderCityIdPresent: Boolean(built.senderCityId),
+    receiverStateIdPresent: Boolean(built.receiverStateId),
+    receiverCityIdPresent: Boolean(built.receiverCityId),
+    attemptedAt,
+    shopifyReturnSyncSkippedReason: 'not_implemented',
+    shopifyReturnTrackingSyncSkippedReason: 'not_implemented',
+  };
+
+  try {
+    const adapter = input.adapter ?? createShippingProviderAdapter(env, 'kargonomi');
+    const result = await adapter.createShipment({
+      allocationId: record.vendorAllocationId,
+      vendorId: record.vendorAllocation.assignedVendorId,
+      provider: 'kargonomi',
+      requestSnapshot: {
+        ...built.payload,
+        reference: {
+          return_id: record.id,
+          allocation_id: record.vendorAllocationId,
+          shopify_order_number: record.sourceShopifyOrderNumber,
+          vendor_id: record.vendorAllocation.assignedVendorId,
+        },
+      } as unknown as Record<string, unknown>,
+    });
+    const providerSnapshot = {
+      ...diagnostics,
+      kargonomiReturnShipmentSucceeded: Boolean(result.providerShipmentId),
+      returnProviderIdPresent: Boolean(result.providerShipmentId),
+      returnTrackingPresent: Boolean(result.trackingNumber || result.trackingUrl),
+      returnLabelPresent: Boolean(result.labelUrl),
+      returnStatus: result.shipmentStatus,
+      carrierName: readString(result.responseSnapshot, ['shippingProviderName']) ?? null,
+      responseKeys: Object.keys(result.responseSnapshot),
+      rawResponseSummary: result.responseSnapshot,
+    };
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: result.providerShipmentId,
+        returnTrackingNumber: result.trackingNumber,
+        returnTrackingUrl: result.trackingUrl,
+        returnLabel: result.labelUrl,
+        returnCarrierName: readString(result.responseSnapshot, ['shippingProviderName']) ?? 'Kargonomi',
+        returnReferenceId: built.referenceId,
+        returnProviderSnapshot: providerSnapshot as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    if (error instanceof ShippingProviderExecutionError) {
+      await prisma.returnRecord.update({
+        where: { id: returnId },
+        data: {
+          returnProviderSnapshot: {
+            ...diagnostics,
+            kargonomiReturnShipmentSucceeded: false,
+            providerMessage: readString(error.responseSnapshot, ['providerErrorMessage', 'providerError', 'error', 'message']),
+            httpStatus: readNumber(error.responseSnapshot, ['httpStatus']),
+            responseKeys: Object.keys(error.responseSnapshot),
+            rawResponseSummary: error.responseSnapshot,
+          } as Prisma.InputJsonValue,
+        },
+      });
+      throw new ReturnReviewError(error.message, 400);
+    }
+    throw new ReturnReviewError(error instanceof Error ? error.message : 'Kargonomi return shipment could not be created.', 400);
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+  return updated;
 }
 
 function normalizeNavlungoReturnPickupCompletion(input: NavlungoReturnPickupCompletionInput | undefined) {

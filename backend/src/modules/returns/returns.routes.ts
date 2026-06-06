@@ -7,6 +7,7 @@ import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.j
 import { resolveRequestVendorContext } from '../vendor-access/vendor-access.service.js';
 import {
   getVendorReturnById,
+  createKargonomiReturnShipmentForReturn,
   createNavlungoReturnPickupForReturn,
   listVendorReturns,
   markReturnReceived,
@@ -307,6 +308,25 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
 
       try {
         return await previewKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor);
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { returnId: string } }>(
+    '/returns/:returnId/kargonomi-create-shipment',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await createKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor, env);
       } catch (error) {
         return sendReviewError(error, reply);
       }

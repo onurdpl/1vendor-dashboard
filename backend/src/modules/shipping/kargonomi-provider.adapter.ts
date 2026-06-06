@@ -886,10 +886,22 @@ function buildKargonomiProviderResult(
 }
 
 function ensureKargonomiPayload(value: Record<string, unknown>): KargonomiShipmentCreatePayloadInput {
+  const sender = isRecord(value.sender) ? value.sender : {};
   const buyer = isRecord(value.buyer) ? value.buyer : {};
   const packages = Array.isArray(value.packages) ? value.packages.filter(isRecord) : [];
+  const warehouseId = value.warehouseId;
+  const hasWarehouseSender = Boolean(warehouseId);
+  const senderMissing = hasWarehouseSender
+    ? []
+    : [
+        !readString(sender, ['sender_name']) ? 'sender.sender_name' : null,
+        !readString(sender, ['sender_phone']) ? 'sender.sender_phone' : null,
+        !readString(sender, ['sender_address']) ? 'sender.sender_address' : null,
+        !readString(sender, ['sender_state_id']) ? 'sender.sender_state_id' : null,
+        !readString(sender, ['sender_city_id']) ? 'sender.sender_city_id' : null,
+      ];
   const missing = [
-    !value.warehouseId ? 'warehouseId' : null,
+    ...senderMissing,
     !readString(buyer, ['buyer_name']) ? 'buyer.buyer_name' : null,
     !readString(buyer, ['buyer_phone']) ? 'buyer.buyer_phone' : null,
     !readString(buyer, ['buyer_address']) ? 'buyer.buyer_address' : null,
@@ -903,7 +915,19 @@ function ensureKargonomiPayload(value: Record<string, unknown>): KargonomiShipme
   }
 
   return {
-    warehouseId: value.warehouseId as string | number,
+    warehouseId: hasWarehouseSender ? (warehouseId as string | number) : null,
+    sender: hasWarehouseSender
+      ? undefined
+      : {
+          sender_name: readString(sender, ['sender_name']),
+          sender_email: readString(sender, ['sender_email']),
+          sender_phone: readString(sender, ['sender_phone']),
+          sender_address: readString(sender, ['sender_address']),
+          sender_state_id: readString(sender, ['sender_state_id']),
+          sender_city_id: readString(sender, ['sender_city_id']),
+          sender_tax_number: readString(sender, ['sender_tax_number']),
+          sender_tax_place: readString(sender, ['sender_tax_place']),
+        },
     buyer: {
       buyer_name: readString(buyer, ['buyer_name']) as string,
       buyer_email: readString(buyer, ['buyer_email']),

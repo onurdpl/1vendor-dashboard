@@ -1,5 +1,6 @@
 export {
   getReturn,
+  createKargonomiReturnShipment,
   getKargonomiReturnPreview,
   listReturns,
   markReturnReceived,

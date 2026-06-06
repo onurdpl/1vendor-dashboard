@@ -54,6 +54,7 @@ const saveNavlungoReturnPickupAddressCompletionMock = vi.fn<
 >();
 const syncNavlungoReturnStatusMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const getKargonomiReturnPreviewMock = vi.fn<(returnId: string) => Promise<KargonomiReturnPreview>>();
+const createKargonomiReturnShipmentMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -87,6 +88,7 @@ vi.mock('../features/returns/api', async () => {
     ) => saveNavlungoReturnPickupAddressCompletionMock(returnId, input),
     syncNavlungoReturnStatus: (returnId: string) => syncNavlungoReturnStatusMock(returnId),
     getKargonomiReturnPreview: (returnId: string) => getKargonomiReturnPreviewMock(returnId),
+    createKargonomiReturnShipment: (returnId: string) => createKargonomiReturnShipmentMock(returnId),
   };
 });
 
@@ -236,6 +238,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     saveNavlungoReturnPickupAddressCompletionMock.mockReset();
     syncNavlungoReturnStatusMock.mockReset();
     getKargonomiReturnPreviewMock.mockReset();
+    createKargonomiReturnShipmentMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -1577,6 +1580,58 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('warehouse 112668, name ready, phone missing, address ready')).toBeInTheDocument();
     expect(screen.queryByText('+905551112233')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer full address')).not.toBeInTheDocument();
+  });
+
+  it('lets admins create a Kargonomi return shipment and displays provider evidence', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: null,
+    });
+    appReadinessOverride.value = {
+      status: 'ready',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+      },
+      currentVendor: { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', scope: 'admin' },
+      sessionReady: true,
+      vendorReady: true,
+      ready: true,
+      unauthorized: false,
+    };
+    const createdReturn = {
+      ...returnDetail,
+      returnProvider: 'kargonomi',
+      returnProviderShipmentId: '2654001',
+      returnCarrierName: 'Sürat Kargo',
+      returnTrackingNumber: 'KSUR2654001RET',
+      returnLabel: 'data:application/pdf;base64,JVBER',
+      returnProviderSnapshot: {
+        provider: 'kargonomi',
+        flow: 'return_shipment',
+        kargonomiReturnShipmentSucceeded: true,
+      },
+    } satisfies ReturnDetail;
+    getReturnMock.mockResolvedValue(returnDetail);
+    createKargonomiReturnShipmentMock.mockResolvedValue(createdReturn);
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Create Kargonomi Return Shipment' }));
+
+    expect(createKargonomiReturnShipmentMock).toHaveBeenCalledWith(returnDetail.id);
+    expect((await screen.findAllByText('2654001')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Sürat Kargo').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('KSUR2654001RET').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('available').length).toBeGreaterThan(0);
   });
 
   it('hides vendor review actions from a vendor outside the assigned return scope', async () => {
