@@ -836,6 +836,10 @@ function buildShipmentProviderResponseSummary(
     readStringArray(snapshot?.navlungoUpdateValidationFields),
     readStringArray(updatePostDiagnostics?.failedFieldNames),
   );
+  const kargonomiGetShipmentAfterConfirm = isRecord(snapshot?.getShipmentAfterConfirm)
+    ? snapshot.getShipmentAfterConfirm
+    : null;
+  const kargonomiBarcodeFetch = isRecord(snapshot?.barcodeFetch) ? snapshot.barcodeFetch : null;
 
   return {
     httpStatus: readNumber(snapshot, ['status', 'httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
@@ -977,6 +981,31 @@ function buildShipmentProviderResponseSummary(
           : null,
     barcodeFetchCalled:
       typeof snapshot?.barcodeFetchCalled === 'boolean' ? snapshot.barcodeFetchCalled : null,
+    kargonomiPostCreateDiagnostics: kargonomiGetShipmentAfterConfirm || kargonomiBarcodeFetch
+      ? {
+          getShipmentAfterConfirm: kargonomiGetShipmentAfterConfirm
+            ? {
+                httpStatus: readNumber(kargonomiGetShipmentAfterConfirm, ['httpStatus', 'status']),
+                contentType: readString(kargonomiGetShipmentAfterConfirm, ['contentType']),
+                bodyKeys: readStringArray(kargonomiGetShipmentAfterConfirm.bodyKeys),
+                safeFields: kargonomiGetShipmentAfterConfirm.safeFields ?? null,
+              }
+            : null,
+          barcodeFetch: kargonomiBarcodeFetch
+            ? {
+                httpStatus: readNumber(kargonomiBarcodeFetch, ['httpStatus', 'status']),
+                contentType: readString(kargonomiBarcodeFetch, ['contentType']),
+                topLevelKeys: readStringArray(kargonomiBarcodeFetch.topLevelKeys),
+                bodyKeys: readStringArray(kargonomiBarcodeFetch.bodyKeys),
+                detectedFormat: readString(kargonomiBarcodeFetch, ['detectedFormat']),
+                pdfLikeValuePresent:
+                  typeof kargonomiBarcodeFetch.pdfLikeValuePresent === 'boolean'
+                    ? kargonomiBarcodeFetch.pdfLikeValuePresent
+                    : null,
+              }
+            : null,
+        }
+      : null,
     payloadDiagnostics: payloadDiagnostics
       ? {
           topLevelKeys: Array.isArray(payloadDiagnostics.topLevelKeys)

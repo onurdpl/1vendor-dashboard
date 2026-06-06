@@ -123,8 +123,19 @@ describe('Kargonomi forward adapter scaffold', () => {
                   shipment: {
                     id: 123,
                     status: 'webservice_order_created',
+                    status_label: 'Kargo Oluşturuldu',
+                    shipping_webservice_order_id: 'WS-1',
+                    shipping_webservice_barcode: 'KSUR2653543SKDXP',
                     shipping_webservice_tracking_code: 'KG-TRACK-1',
-                    shipping_provider_name: 'Test Carrier',
+                    shipping_provider_name: 'Sürat Kargo',
+                    shipping_provider_slug: 'surat',
+                    barcode_of_order_id: 'ORDER-BAR-1',
+                    buyer_name: 'Secret Buyer',
+                    buyer_phone: '5551112233',
+                    buyer_email: 'buyer@example.com',
+                    buyer_address: 'Secret Buyer Address',
+                    buyer_tax_number: '1111111111',
+                    shipment_packages: [{ barcode: 'PKG-BAR-1', content: 'Shoes' }],
                     pricing: { real_price: '100' },
                   },
                 }
@@ -174,6 +185,30 @@ describe('Kargonomi forward adapter scaffold', () => {
       getShipmentAfterConfirmCalled: true,
       labelUrlPresent: false,
     });
+    expect(result.responseSnapshot.getShipmentAfterConfirm).toMatchObject({
+      safeFields: {
+        id: '123',
+        status: 'webservice_order_created',
+        status_label: 'Kargo Oluşturuldu',
+        shipping_provider_name: 'Sürat Kargo',
+        shipping_provider_slug: 'surat',
+        shipping_webservice_order_id: 'WS-1',
+        shipping_webservice_barcode: 'KSUR2653543SKDXP',
+        shipping_webservice_tracking_code: 'KG-TRACK-1',
+        barcode_of_order_id: 'ORDER-BAR-1',
+        shipment_packages: [{ barcode: 'PKG-BAR-1' }],
+      },
+    });
+    expect(result.responseSnapshot.barcodeFetch).toMatchObject({
+      detectedFormat: 'pdf_like_value',
+      topLevelKeys: ['barcode_pdf_base64'],
+      pdfLikeValuePresent: true,
+    });
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('Secret Buyer');
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('5551112233');
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('buyer@example.com');
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('Secret Buyer Address');
+    expect(JSON.stringify(result.responseSnapshot.getShipmentAfterConfirm)).not.toContain('1111111111');
   });
 
   it('uses preferred Kargonomi shipping provider id when configured in the request snapshot', async () => {

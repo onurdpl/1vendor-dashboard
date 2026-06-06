@@ -641,6 +641,10 @@ function mapProviderResponseSummary(
     actionResult: event.actionResult,
     createdAt: event.createdAt,
   }));
+  const kargonomiGetShipmentAfterConfirm = isRecord(snapshot.getShipmentAfterConfirm)
+    ? snapshot.getShipmentAfterConfirm
+    : null;
+  const kargonomiBarcodeFetch = isRecord(snapshot.barcodeFetch) ? snapshot.barcodeFetch : null;
 
   return {
     httpStatus: readNumber(snapshot, ['httpStatus', 'createPostHttpStatus', 'providerCallHttpStatus', 'navlungoCancelHttpStatus', 'navlungoUpdateHttpStatus', 'statusCode']),
@@ -831,6 +835,28 @@ function mapProviderResponseSummary(
       readOptionalBoolean(snapshot, ['getShipmentCalled']) ??
       readOptionalBoolean(snapshot, ['getShipmentAfterConfirmCalled']),
     barcodeFetchCalled: readOptionalBoolean(snapshot, ['barcodeFetchCalled']),
+    kargonomiPostCreateDiagnostics: kargonomiGetShipmentAfterConfirm || kargonomiBarcodeFetch
+      ? {
+          getShipmentAfterConfirm: kargonomiGetShipmentAfterConfirm
+            ? {
+                httpStatus: readNumber(kargonomiGetShipmentAfterConfirm, ['httpStatus', 'status']),
+                contentType: readString(kargonomiGetShipmentAfterConfirm, ['contentType']),
+                bodyKeys: readStringArray(kargonomiGetShipmentAfterConfirm.bodyKeys),
+                safeFields: kargonomiGetShipmentAfterConfirm.safeFields ?? null,
+              }
+            : null,
+          barcodeFetch: kargonomiBarcodeFetch
+            ? {
+                httpStatus: readNumber(kargonomiBarcodeFetch, ['httpStatus', 'status']),
+                contentType: readString(kargonomiBarcodeFetch, ['contentType']),
+                topLevelKeys: readStringArray(kargonomiBarcodeFetch.topLevelKeys),
+                bodyKeys: readStringArray(kargonomiBarcodeFetch.bodyKeys),
+                detectedFormat: readString(kargonomiBarcodeFetch, ['detectedFormat']),
+                pdfLikeValuePresent: readOptionalBoolean(kargonomiBarcodeFetch, ['pdfLikeValuePresent']),
+              }
+            : null,
+        }
+      : null,
   };
 }
 

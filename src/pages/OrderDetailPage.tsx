@@ -3165,6 +3165,41 @@ export function OrderDetailPage() {
             shipment {summary.confirmShipmentId || '—'} · shipping_provider_id {summary.confirmShippingProviderId || '—'}
           </strong>
         </div>
+        {summary.kargonomiPostCreateDiagnostics?.getShipmentAfterConfirm ? (
+          <>
+            <div className="summary-row">
+              <span>Post-create shipment response</span>
+              <strong>
+                HTTP {summary.kargonomiPostCreateDiagnostics.getShipmentAfterConfirm.httpStatus ?? '—'} ·{' '}
+                {summary.kargonomiPostCreateDiagnostics.getShipmentAfterConfirm.contentType || 'unknown content type'}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>Post-create safe fields</span>
+              <strong>{formatDiagnosticValue(summary.kargonomiPostCreateDiagnostics.getShipmentAfterConfirm.safeFields)}</strong>
+            </div>
+          </>
+        ) : null}
+        {summary.kargonomiPostCreateDiagnostics?.barcodeFetch ? (
+          <>
+            <div className="summary-row">
+              <span>Barcode fetch response</span>
+              <strong>
+                HTTP {summary.kargonomiPostCreateDiagnostics.barcodeFetch.httpStatus ?? '—'} ·{' '}
+                {summary.kargonomiPostCreateDiagnostics.barcodeFetch.detectedFormat || 'unknown format'} · PDF-like{' '}
+                {formatDiagnosticPresence(summary.kargonomiPostCreateDiagnostics.barcodeFetch.pdfLikeValuePresent)}
+              </strong>
+            </div>
+            <div className="summary-row">
+              <span>Barcode fetch keys</span>
+              <strong>
+                {summary.kargonomiPostCreateDiagnostics.barcodeFetch.topLevelKeys.length
+                  ? summary.kargonomiPostCreateDiagnostics.barcodeFetch.topLevelKeys.join(', ')
+                  : summary.kargonomiPostCreateDiagnostics.barcodeFetch.bodyKeys.join(', ') || '—'}
+              </strong>
+            </div>
+          </>
+        ) : null}
         {summary.providerErrorMessage || summary.providerErrorErrors || summary.providerErrorBodyPreview ? (
           <>
             <div className="summary-row">

@@ -696,6 +696,76 @@ function findPotentialBarcodePdf(value: unknown): string | null {
   return null;
 }
 
+function readTopLevelKeys(value: unknown) {
+  return isRecord(value) ? Object.keys(value).sort() : [];
+}
+
+function summarizeKargonomiShipmentSafeFields(body: unknown) {
+  const shipment = extractShipmentBody(body);
+  const shipmentRecord = isRecord(shipment) ? shipment : {};
+  const packages = Array.isArray(shipmentRecord.shipment_packages) ? shipmentRecord.shipment_packages.filter(isRecord) : [];
+
+  return compactRecord({
+    topLevelKeys: readTopLevelKeys(body),
+    shipmentKeys: readTopLevelKeys(shipment),
+    id: readString(shipmentRecord, ['id', 'shipment_id', 'shipmentId']),
+    status: readString(shipmentRecord, ['status']),
+    status_label: readString(shipmentRecord, ['status_label', 'statusLabel']),
+    shipping_provider_name: readString(shipmentRecord, ['shipping_provider_name', 'shippingProviderName']),
+    shipping_provider_slug: readString(shipmentRecord, ['shipping_provider_slug', 'shippingProviderSlug']),
+    shipping_webservice_order_id: readString(shipmentRecord, [
+      'shipping_webservice_order_id',
+      'shippingWebserviceOrderId',
+    ]),
+    shipping_webservice_barcode: readString(shipmentRecord, [
+      'shipping_webservice_barcode',
+      'shippingWebserviceBarcode',
+    ]),
+    shipping_webservice_tracking_code: readString(shipmentRecord, [
+      'shipping_webservice_tracking_code',
+      'shippingWebserviceTrackingCode',
+    ]),
+    barcode_of_order_id: readString(shipmentRecord, ['barcode_of_order_id', 'barcodeOfOrderId']),
+    shipment_packages: packages.map((shipmentPackage) =>
+      compactRecord({
+        barcode: readString(shipmentPackage, ['barcode']),
+      }),
+    ),
+  });
+}
+
+function detectKargonomiBarcodeFetchFormat(body: unknown, contentType: string) {
+  if (contentType.includes('application/pdf')) {
+    return 'pdf';
+  }
+  if (typeof body === 'string') {
+    const trimmed = body.trim();
+    if (trimmed.startsWith('JVBER')) return 'base64_pdf';
+    if (trimmed.startsWith('data:application/pdf')) return 'data_url_pdf';
+    if (trimmed.endsWith('.pdf')) return 'pdf_url';
+    return 'string';
+  }
+  if (findPotentialBarcodePdf(body)) {
+    return 'pdf_like_value';
+  }
+  if (isRecord(body)) {
+    return 'json';
+  }
+  if (Array.isArray(body)) {
+    return 'array';
+  }
+  return body === null || body === undefined ? 'empty' : typeof body;
+}
+
+function summarizeKargonomiBarcodeFetchDiagnostics(response: KargonomiRawHttpResponse, pdfLikeValuePresent: boolean) {
+  return {
+    ...summarizeResponse(response),
+    topLevelKeys: readTopLevelKeys(response.body),
+    detectedFormat: detectKargonomiBarcodeFetchFormat(response.body, response.contentType),
+    pdfLikeValuePresent,
+  };
+}
+
 function parseMoney(value: string | null) {
   if (!value) {
     return null;
@@ -1070,7 +1140,10 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       responseSnapshot.getShipmentCalled = true;
       const shipmentResponse = await this.client.getShipment(shipmentId);
       responseSnapshot.getShipmentAfterConfirmCalled = true;
-      responseSnapshot.getShipmentAfterConfirm = summarizeResponse(shipmentResponse);
+      responseSnapshot.getShipmentAfterConfirm = {
+        ...summarizeResponse(shipmentResponse),
+        safeFields: summarizeKargonomiShipmentSafeFields(shipmentResponse.body),
+      };
       if (shipmentResponse.ok) {
         responseBodyForNormalization = shipmentResponse.body;
       }
@@ -1087,10 +1160,7 @@ export class KargonomiAdapter implements ShippingProviderAdapter {
       const barcodeResponse = await this.client.getShipmentBarcodePdf(shipmentId);
       const barcodePdf = findPotentialBarcodePdf(barcodeResponse.body);
       responseSnapshot.barcodeFetchCalled = true;
-      responseSnapshot.barcodeFetch = {
-        ...summarizeResponse(barcodeResponse),
-        pdfLikeValuePresent: Boolean(barcodePdf),
-      };
+      responseSnapshot.barcodeFetch = summarizeKargonomiBarcodeFetchDiagnostics(barcodeResponse, Boolean(barcodePdf));
     } catch (error) {
       responseSnapshot.barcodeFetchCalled = true;
       responseSnapshot.barcodeFetch = {

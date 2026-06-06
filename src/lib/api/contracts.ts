@@ -418,6 +418,22 @@ export type ShipmentExecution = {
     confirmShippingPriceCalled?: boolean | null;
     getShipmentCalled?: boolean | null;
     barcodeFetchCalled?: boolean | null;
+    kargonomiPostCreateDiagnostics?: {
+      getShipmentAfterConfirm: {
+        httpStatus: number | null;
+        contentType: string | null;
+        bodyKeys: string[];
+        safeFields: unknown;
+      } | null;
+      barcodeFetch: {
+        httpStatus: number | null;
+        contentType: string | null;
+        topLevelKeys: string[];
+        bodyKeys: string[];
+        detectedFormat: string | null;
+        pdfLikeValuePresent: boolean | null;
+      } | null;
+    } | null;
     payloadDiagnostics?: {
       topLevelKeys: string[];
       customerKeys: string[];

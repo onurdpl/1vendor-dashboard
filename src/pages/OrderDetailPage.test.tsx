@@ -3349,6 +3349,31 @@ describe('OrderDetailPage shipment provider response visibility', () => {
               phone: '[redacted]',
             },
           },
+          kargonomiPostCreateDiagnostics: {
+            getShipmentAfterConfirm: {
+              httpStatus: 200,
+              contentType: 'application/json',
+              bodyKeys: ['shipment'],
+              safeFields: {
+                id: '2653543',
+                status: 'webservice_order_created',
+                status_label: 'Kargo Oluşturuldu',
+                shipping_provider_name: 'Sürat Kargo',
+                shipping_provider_slug: 'surat',
+                shipping_webservice_order_id: 'WS-1',
+                shipping_webservice_barcode: 'KSUR2653543SKDXP',
+                shipment_packages: [{ barcode: 'PKG-BAR-1' }],
+              },
+            },
+            barcodeFetch: {
+              httpStatus: 200,
+              contentType: 'application/json',
+              topLevelKeys: ['barcode_pdf_base64'],
+              bodyKeys: ['barcode_pdf_base64'],
+              detectedFormat: 'pdf_like_value',
+              pdfLikeValuePresent: true,
+            },
+          },
         },
       },
     });
@@ -3357,6 +3382,11 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     expect(await screen.findByLabelText('Kargonomi execution diagnostics')).toBeInTheDocument();
     expect(screen.getByText(/shipment\s+123\s+·\s+shipping_provider_id\s+9/)).toBeInTheDocument();
+    expect(screen.getByText('Post-create safe fields')).toBeInTheDocument();
+    expect(screen.getByText(/KSUR2653543SKDXP/)).toBeInTheDocument();
+    expect(screen.getByText(/Sürat Kargo/)).toBeInTheDocument();
+    expect(screen.getByText('Barcode fetch response')).toBeInTheDocument();
+    expect(screen.getByText(/pdf_like_value/)).toBeInTheDocument();
     expect(screen.getAllByText('Shipping provider cannot be confirmed.').length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Selected carrier quote is invalid/).length).toBeGreaterThan(0);
     expect(screen.queryByText('5551112233')).not.toBeInTheDocument();
