@@ -1235,7 +1235,6 @@ export async function listVendorOrders(
 export async function getVendorOrderById(
   vendorId: string,
   orderId: string,
-  options: { shopifyAdminService?: ShopifyLineItemImageLookupService } = {},
 ): Promise<OrderDetailDto | null> {
   const allocation = await prisma.vendorAllocation.findFirst({
     where: {
@@ -1269,7 +1268,6 @@ export async function getVendorOrderById(
   }
 
   const totalAmount = computeTotalAmount(allocation.lineItems);
-  const lineItemImageOverrides = await backfillMissingLineItemImages(allocation, options.shopifyAdminService);
   const shopifyReturnSignal = await getLatestShopifyReturnSignalForOrder(allocation.order.id);
 
   return {
@@ -1341,7 +1339,7 @@ export async function getVendorOrderById(
       sourceVariantId: item.shopifyOrderLineItem.sourceVariantId,
       sku: item.shopifyOrderLineItem.sku,
       title: item.shopifyOrderLineItem.title,
-      imageUrl: lineItemImageOverrides.get(item.shopifyOrderLineItem.id) ?? item.shopifyOrderLineItem.imageUrl,
+      imageUrl: item.shopifyOrderLineItem.imageUrl,
       quantity: item.quantity,
       lineAmount: toAmountString(Number(item.lineAmount ?? 0)),
       shopifyProductId: item.shopifyOrderLineItem.shopifyProductId,
@@ -1368,12 +1366,9 @@ export async function getVendorOrderByIdForUser(
   options: {
     includeShipmentProviderResponseSummary?: boolean;
     includeFinanceLedgerPreview?: boolean;
-    shopifyAdminService?: ShopifyLineItemImageLookupService;
   } = {},
 ): Promise<OrderDetailDto | null> {
-  const order = await getVendorOrderById(vendorId, orderId, {
-    shopifyAdminService: options.shopifyAdminService,
-  });
+  const order = await getVendorOrderById(vendorId, orderId);
   if (!order) {
     return order;
   }

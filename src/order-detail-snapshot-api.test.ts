@@ -180,4 +180,41 @@ describe('order detail snapshot API mapping', () => {
     expect(result?.orderSnapshot.billingAddress.company).toBeNull();
     expect(result?.lineItems[0].unitPriceVatIncluded).toBe('600.00');
   });
+
+  it('returns order detail with missing stored image data without backfilling during the read', async () => {
+    prismaMock.vendorAllocation.findFirst.mockResolvedValue(
+      buildAllocation({
+        lineItems: [
+          {
+            id: 'allocation-line-1',
+            quantity: 2,
+            lineAmount: '1200.00',
+            shopifyOrderLineItem: {
+              id: 'shopify-line-db-1',
+              sourceLineItemId: 'gid://shopify/LineItem/1',
+              sourceVariantId: 'gid://shopify/ProductVariant/1',
+              sku: 'SKU-1001',
+              title: 'Snapshot Shoe',
+              imageUrl: null,
+              shopifyProductId: 'gid://shopify/Product/1',
+              unitPriceVatIncluded: '600.00',
+              lineTotalVatIncluded: '1200.00',
+              lineTaxAmount: '109.09',
+              vatRate: '10.00',
+            },
+          },
+        ],
+      }),
+    );
+
+    const result = await getVendorOrderById('sporjinal', 'alloc-sporjinal-1001');
+
+    expect(result?.lineItems[0]).toEqual(
+      expect.objectContaining({
+        title: 'Snapshot Shoe',
+        imageUrl: null,
+      }),
+    );
+    expect(prismaMock.shopifyOrderLineItem.updateMany).not.toHaveBeenCalled();
+  });
 });
