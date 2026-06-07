@@ -343,14 +343,16 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    expect(await screen.findByText(/notification history/i)).toBeInTheDocument();
-    expect(await screen.findByText('Shipping cost review needed')).toBeInTheDocument();
-    expect(await screen.findByText('External-provider shipping cost is missing from the operational record.')).toBeInTheDocument();
-    expect(screen.getByText('shipping cost')).toBeInTheDocument();
-    expect(screen.getByText('Internal reference')).toBeInTheDocument();
-    expect(screen.getByText('Signal signal-1')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
+    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalled());
+    const notificationCenter = getNotificationCenter();
+    expect(notificationCenter.getByText(/notification history/i)).toBeInTheDocument();
+    expect(await notificationCenter.findByText('Shipping cost review needed')).toBeInTheDocument();
+    expect(await notificationCenter.findByText('External-provider shipping cost is missing from the operational record.')).toBeInTheDocument();
+    expect(notificationCenter.getByText('shipping cost')).toBeInTheDocument();
+    expect(notificationCenter.getByText('Internal reference')).toBeInTheDocument();
+    expect(notificationCenter.getByText('Signal signal-1')).toBeInTheDocument();
+    expect(notificationCenter.getByRole('button', { name: /mark as read/i })).toBeInTheDocument();
+    expect(notificationCenter.getByRole('button', { name: /dismiss/i })).toBeInTheDocument();
   });
 
   it('renders recent activity as a compact title and description feed', async () => {

@@ -16,6 +16,7 @@ const prismaMock = vi.hoisted(() => ({
 }));
 
 const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
+const generateAutomationActionsForSignalsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
@@ -26,10 +27,10 @@ vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
 }));
 
 vi.mock('../backend/src/modules/automation/automation-actions.service.js', () => ({
-  generateAutomationActionsForSignals: vi.fn(),
+  generateAutomationActionsForSignals: generateAutomationActionsForSignalsMock,
 }));
 
-const { listNotificationsForUser, updateNotificationLifecycle } = await import(
+const { generateNotificationsForUser, listNotificationsForUser, updateNotificationLifecycle } = await import(
   '../backend/src/modules/notifications/notifications.service.js'
 );
 
@@ -96,8 +97,10 @@ describe('notification foundation', () => {
     prismaMock.operationalSignal.findMany.mockReset();
     prismaMock.userVendorAccess.findMany.mockReset();
     listOperationalSignalsMock.mockReset();
+    generateAutomationActionsForSignalsMock.mockReset();
 
     listOperationalSignalsMock.mockResolvedValue({ summary: { total: 0 }, signals: [] });
+    generateAutomationActionsForSignalsMock.mockResolvedValue([]);
     prismaMock.notificationIntent.findMany.mockResolvedValue([]);
     prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
     prismaMock.notificationIntent.upsert.mockImplementation(async ({ create, update, where }) =>
@@ -115,11 +118,36 @@ describe('notification foundation', () => {
     );
   });
 
-  it('creates one duplicate-safe in-app notification for an active vendor-safe signal', async () => {
+  it('returns existing notifications without running signal generation during dashboard deferred reads', async () => {
+    prismaMock.notificationIntent.findMany.mockResolvedValue([
+      buildNotification({
+        id: 'notif-existing',
+        status: 'DELIVERED',
+      }),
+    ]);
+
+    const response = await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
+
+    expect(response.summary).toMatchObject({
+      total: 1,
+      unread: 1,
+      warning: 1,
+    });
+    expect(response.notifications[0]).toMatchObject({
+      id: 'notif-existing',
+      recipientRole: 'vendor',
+    });
+    expect(listOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('creates one duplicate-safe in-app notification for an active vendor-safe signal through explicit generation', async () => {
     prismaMock.operationalSignal.findMany.mockResolvedValue([buildSignal({ id: 'signal-1' })]);
 
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
+    await generateNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
+    await generateNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
 
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledTimes(2);
     expect(prismaMock.notificationIntent.upsert).toHaveBeenLastCalledWith(
@@ -131,7 +159,7 @@ describe('notification foundation', () => {
     );
   });
 
-  it('keeps vendor notifications scoped and skips internal diagnostics signals for vendors', async () => {
+  it('keeps explicit vendor generation scoped and skips internal diagnostics signals for vendors', async () => {
     prismaMock.operationalSignal.findMany.mockResolvedValue([
       buildSignal({
         id: 'signal-diagnostics',
@@ -147,7 +175,7 @@ describe('notification foundation', () => {
       }),
     ]);
 
-    await listNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
+    await generateNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal', env: testEnv });
 
     expect(prismaMock.operationalSignal.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -173,7 +201,7 @@ describe('notification foundation', () => {
     );
   });
 
-  it('lets admins receive high or critical internal signal notifications', async () => {
+  it('lets explicit admin generation create high or critical internal signal notifications', async () => {
     prismaMock.operationalSignal.findMany.mockResolvedValue([
       buildSignal({
         id: 'signal-job',
@@ -183,7 +211,7 @@ describe('notification foundation', () => {
       }),
     ]);
 
-    await listNotificationsForUser({ role: 'admin', env: testEnv });
+    await generateNotificationsForUser({ role: 'admin', env: testEnv });
 
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -208,7 +236,7 @@ describe('notification foundation', () => {
     );
   });
 
-  it('creates vendor email intents only for vendor-safe high or critical signals', async () => {
+  it('creates vendor email intents only for vendor-safe high or critical signals through explicit generation', async () => {
     prismaMock.userVendorAccess.findMany.mockResolvedValue([
       {
         user: {
@@ -237,7 +265,7 @@ describe('notification foundation', () => {
       }),
     ]);
 
-    await listNotificationsForUser({
+    await generateNotificationsForUser({
       role: 'vendor',
       vendorId: 'sporjinal',
       env: {

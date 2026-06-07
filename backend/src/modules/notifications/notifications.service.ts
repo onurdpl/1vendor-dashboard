@@ -302,8 +302,6 @@ export async function listNotificationsForUser(input: {
   vendorId?: string | null;
   env: EmailDeliveryConfig;
 }): Promise<NotificationsResponseDto> {
-  await withDashboardTiming('notifications.generate_for_signals_service', () => generateNotificationsForSignals(input));
-
   const notifications = await withDashboardTiming('notifications.notification_fetch', () => prisma.notificationIntent.findMany({
     where:
       input.role === 'admin'
@@ -328,6 +326,15 @@ export async function listNotificationsForUser(input: {
   };
   logDashboardTiming('notifications.metrics_aggregation', aggregationStartedAt);
   return response;
+}
+
+export async function generateNotificationsForUser(input: {
+  role: AuthRole;
+  vendorId?: string | null;
+  env: EmailDeliveryConfig;
+}): Promise<NotificationsResponseDto> {
+  await withDashboardTiming('notifications.generate_for_signals_service', () => generateNotificationsForSignals(input));
+  return listNotificationsForUser(input);
 }
 
 export async function updateNotificationLifecycle(input: {
