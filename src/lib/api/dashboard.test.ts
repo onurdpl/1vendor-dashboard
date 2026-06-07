@@ -39,6 +39,14 @@ function createRuntimeServices() {
       ]),
     },
     finance: {
+      summary: vi.fn().mockResolvedValue({
+        summary: {
+          grossSales: 'TRY 100.00',
+          refunds: 'TRY 25.00',
+          netRevenue: 'TRY 75.00',
+          payoutEstimate: 'TRY 67.50',
+        },
+      }),
       dashboard: vi.fn().mockResolvedValue({
         summary: {
           grossSales: 'TRY 100.00',
@@ -178,7 +186,7 @@ describe('dashboard real-mode loading', () => {
 
   it('propagates 403 failures from finance instead of returning a partial finance snapshot', async () => {
     const { getDashboardDeferredOverview, ApiError } = await importDashboardWithServices((runtimeServices, ApiErrorClass) => {
-      runtimeServices.finance.dashboard.mockRejectedValue(
+      runtimeServices.finance.summary.mockRejectedValue(
         new ApiErrorClass('You do not have access to this workspace.', 'server', { status: 403 }),
       );
     });
@@ -190,7 +198,7 @@ describe('dashboard real-mode loading', () => {
 
   it('keeps partial dashboard warnings for non-auth subrequest failures', async () => {
     const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
-      runtimeServices.finance.dashboard.mockRejectedValue(new Error('Finance backend timed out.'));
+      runtimeServices.finance.summary.mockRejectedValue(new Error('Finance backend timed out.'));
     });
 
     const overview = await getDashboardDeferredOverview('demo-vendor-a');
@@ -209,6 +217,7 @@ describe('dashboard real-mode loading', () => {
     expect(overview.title).toBe('Stored Vendor command center');
     expect(services.orders.list).not.toHaveBeenCalled();
     expect(services.returns.list).not.toHaveBeenCalled();
+    expect(services.finance.summary).not.toHaveBeenCalled();
     expect(services.finance.dashboard).not.toHaveBeenCalled();
     expect(services.diagnostics.reconciliation).not.toHaveBeenCalled();
     expect(services.observability.summary).not.toHaveBeenCalled();
@@ -222,7 +231,8 @@ describe('dashboard real-mode loading', () => {
     expect(services.dashboard.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
-    expect(services.finance.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.finance.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.finance.dashboard).not.toHaveBeenCalled();
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).not.toHaveBeenCalled();
@@ -252,7 +262,7 @@ describe('dashboard real-mode loading', () => {
 
     const orderOptions = services.orders.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const returnOptions = services.returns.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
-    const financeOptions = services.finance.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const financeOptions = services.finance.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const summaryOptions = services.dashboard.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const signalOptions = services.signals.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
 
@@ -266,7 +276,9 @@ describe('dashboard real-mode loading', () => {
     expect(summaryOptions?.limit).toBeUndefined();
     expect(orderOptions?.limit).toBe(10);
     expect(returnOptions?.limit).toBe(10);
-    expect(financeOptions?.limit).toBe(10);
+    expect(financeOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
+    expect(financeOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(financeOptions?.limit).toBeUndefined();
     expect(signalOptions?.limit).toBe(10);
   });
 
@@ -342,53 +354,13 @@ describe('dashboard real-mode loading', () => {
 
   it('returns normalized dashboard operational counts from existing backend payloads', async () => {
     const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
-      runtimeServices.finance.dashboard.mockResolvedValue({
+      runtimeServices.finance.summary.mockResolvedValue({
         summary: {
           grossSales: 'TRY 100.00',
           refunds: 'TRY 25.00',
           netRevenue: 'TRY 75.00',
           payoutEstimate: 'TRY 67.50',
         },
-        transactions: [
-          {
-            id: 'finance-1',
-            date: '2026-05-13T10:00:00.000Z',
-            description: 'Pending settlement',
-            counterparty: 'Platform ledger',
-            category: 'Invoice',
-            amount: 'TRY 100.00',
-            status: 'Pending',
-            settlement: {
-              status: 'pending',
-              payoutReady: false,
-              eligibleAt: null,
-              accruedAt: null,
-              payableAt: null,
-              settledAt: null,
-              holdReason: null,
-              note: 'Pending review',
-            },
-          },
-          {
-            id: 'finance-2',
-            date: '2026-05-13T11:00:00.000Z',
-            description: 'Completed settlement',
-            counterparty: 'Platform ledger',
-            category: 'Invoice',
-            amount: 'TRY 50.00',
-            status: 'Completed',
-            settlement: {
-              status: 'settled',
-              payoutReady: false,
-              eligibleAt: null,
-              accruedAt: null,
-              payableAt: null,
-              settledAt: '2026-05-13T11:30:00.000Z',
-              holdReason: null,
-              note: 'Settled',
-            },
-          },
-        ],
       });
       runtimeServices.automation.dashboard.mockResolvedValue({
         alerts: [

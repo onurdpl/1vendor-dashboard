@@ -7,6 +7,7 @@ import {
   cancelPayoutBatch,
   getPayoutBatch,
   getVendorFinanceDashboard,
+  getVendorFinanceSummary,
   getVendorFinancialProfile,
   listPayoutBatches,
   markPayoutBatchReview,
@@ -46,6 +47,23 @@ function validateVendorFinancialShippingMode(body: unknown) {
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
+
+  app.get(
+    '/finance/summary',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      return withDashboardRouteTiming('GET /finance/summary', () =>
+        withSlowEndpointTiming('GET /finance/summary', () => getVendorFinanceSummary(vendorId)),
+      );
+    },
+  );
 
   app.get(
     '/finance',

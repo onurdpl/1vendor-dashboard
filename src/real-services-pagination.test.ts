@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
-import { getFinanceDashboard } from './services/real/finance';
+import { getFinanceDashboard, getFinanceSummary } from './services/real/finance';
 import { listOrders } from './services/real/orders';
 import { listAdminOperationsQueue } from './services/real/operations';
 import { listReturns } from './services/real/returns';
@@ -51,5 +51,36 @@ describe('real service pagination plumbing', () => {
     await getFinanceDashboard({ limit: 50 });
 
     expect(apiClientGet).toHaveBeenCalledWith('/finance?limit=50');
+  });
+
+  it('reads dashboard finance summary without calling the full finance dashboard endpoint', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      summary: {
+        grossSales: '100.00',
+        refunds: '25.00',
+        netRevenue: '75.00',
+        payoutEstimate: '67.50',
+      },
+    });
+
+    const summary = await getFinanceSummary({
+      vendorId: 'vendor-1',
+      headers: { 'X-Dashboard-Deferred-Load': 'true' },
+    });
+
+    expect(apiClientGet).toHaveBeenCalledWith(
+      '/finance/summary',
+      expect.objectContaining({
+        vendorId: 'vendor-1',
+        headers: { 'X-Dashboard-Deferred-Load': 'true' },
+      }),
+    );
+    expect(apiClientGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/finance(?:\?|$)/), expect.anything());
+    expect(summary.summary).toEqual({
+      grossSales: 'TRY\u00a0100.00',
+      refunds: 'TRY\u00a025.00',
+      netRevenue: 'TRY\u00a075.00',
+      payoutEstimate: 'TRY\u00a067.50',
+    });
   });
 });

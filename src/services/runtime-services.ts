@@ -1671,6 +1671,19 @@ export const runtimeServices = {
     },
   },
   finance: {
+    summary: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) => {
+      const finance = getMockFinanceDashboard(vendorId);
+      return runtimeConfig.apiMode === 'real'
+        ? realFinance.getFinanceSummary({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve({
+            summary: {
+              grossSales: finance.summary.grossSales,
+              refunds: finance.summary.refunds,
+              netRevenue: finance.summary.netRevenue,
+              payoutEstimate: finance.summary.payoutEstimate,
+            },
+          });
+    },
     dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })

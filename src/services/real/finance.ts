@@ -1,6 +1,7 @@
 import { apiClient } from '../../lib/api-client';
 import type {
   FinanceDashboard,
+  FinanceDashboardSummary,
   FinanceTransaction,
   InvoiceExecutionReference,
   InvoiceExecutionResponseSummary,
@@ -43,6 +44,10 @@ type FinanceDashboardDto = {
     payoutBatch?: FinanceTransaction['payoutBatch'];
     invoiceExecution?: FinanceTransaction['invoiceExecution'];
   }>;
+};
+
+type FinanceDashboardSummaryDto = {
+  summary: Pick<FinanceDashboardDto['summary'], 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
 };
 
 function mapTransactionCategory(type: string): FinanceTransaction['category'] {
@@ -206,6 +211,22 @@ export async function getFinanceDashboard(options: { limit?: number; offset?: nu
           }
         : null,
     })),
+  };
+}
+
+export async function getFinanceSummary(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<FinanceDashboardSummary> {
+  const requestOptions = readVendorRequestOptions(options);
+  const response = await (requestOptions
+    ? apiClient.get<FinanceDashboardSummaryDto>('/finance/summary', requestOptions)
+    : apiClient.get<FinanceDashboardSummaryDto>('/finance/summary'));
+
+  return {
+    summary: {
+      grossSales: formatCurrency(response.summary.grossSales),
+      refunds: formatCurrency(response.summary.refunds),
+      netRevenue: formatCurrency(response.summary.netRevenue),
+      payoutEstimate: formatCurrency(response.summary.payoutEstimate),
+    },
   };
 }
 

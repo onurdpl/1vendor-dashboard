@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerFinanceRoutes } from '../backend/src/modules/finance/finance.routes.js';
 
 const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
+const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
   getPayoutBatch: vi.fn(),
   getVendorFinanceDashboard: vi.fn(),
+  getVendorFinanceSummary: getVendorFinanceSummaryMock,
   getVendorFinancialProfile: vi.fn(),
   listPayoutBatches: vi.fn(),
   markPayoutBatchReview: vi.fn(),
@@ -34,6 +36,16 @@ type PutHandler = (
     authUser?: { role?: string };
     params?: Record<string, string>;
     body?: unknown;
+  },
+  reply: ReturnType<typeof createReply>,
+) => unknown;
+
+type GetHandler = (
+  request: {
+    authUser?: { role?: string };
+    vendorContext?: { vendorId?: string };
+    params?: Record<string, string>;
+    query?: unknown;
   },
   reply: ReturnType<typeof createReply>,
 ) => unknown;
@@ -72,6 +84,20 @@ function createRegisteredPutRoutes() {
   return puts;
 }
 
+function createRegisteredGetRoutes() {
+  const gets = new Map<string, GetHandler>();
+  const app = {
+    get: vi.fn((path: string, _options: unknown, handler: GetHandler) => {
+      gets.set(path, handler);
+    }),
+    post: vi.fn(),
+    put: vi.fn(),
+  };
+
+  registerFinanceRoutes(app as never, {} as never);
+  return gets;
+}
+
 async function updateFinancialProfile(body: unknown) {
   const puts = createRegisteredPutRoutes();
   const reply = createReply();
@@ -103,6 +129,55 @@ describe('finance route validation', () => {
       active: true,
       source: 'configured',
     });
+    getVendorFinanceSummaryMock.mockResolvedValue({
+      summary: {
+        grossSales: '100.00',
+        refunds: '25.00',
+        netRevenue: '75.00',
+        payoutEstimate: '67.50',
+      },
+    });
+  });
+
+  it('returns only dashboard finance summary fields', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/summary')?.(
+      {
+        vendorContext: { vendorId: 'sporjinal' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      summary: {
+        grossSales: '100.00',
+        refunds: '25.00',
+        netRevenue: '75.00',
+        payoutEstimate: '67.50',
+      },
+    });
+    expect(getVendorFinanceSummaryMock).toHaveBeenCalledWith('sporjinal');
+    expect(result).not.toHaveProperty('records');
+    expect(result).not.toHaveProperty('profile');
+    expect(result).not.toHaveProperty('payoutBatchSummary');
+    expect(result).not.toHaveProperty('settlements');
+    expect(result).not.toHaveProperty('invoiceExecutions');
+    expect(result).not.toHaveProperty('vendorBalance');
+  });
+
+  it('rejects finance summary requests without resolved vendor context', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/summary')?.({}, reply);
+
+    expect(result).toEqual({
+      status: 400,
+      body: { message: 'Vendor context could not be resolved.' },
+    });
+    expect(getVendorFinanceSummaryMock).not.toHaveBeenCalled();
   });
 
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {

@@ -486,7 +486,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
       withDashboardClientTiming(requestId, 'client.dashboard.summary', () => runtimeServices.dashboard.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
-      withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.finance.summary', () => runtimeServices.finance.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
       currentUser?.role === 'admin'
         ? withDashboardClientTiming(requestId, 'client.operations.summary', () => runtimeServices.operations.summary(dashboardSummaryReadOptions), 'deferred')

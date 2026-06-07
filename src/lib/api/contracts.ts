@@ -1432,6 +1432,10 @@ export type FinanceDashboard = {
   transactions: FinanceTransaction[];
 };
 
+export type FinanceDashboardSummary = {
+  summary: Pick<FinanceSummary, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+};
+
 export type AutomationAlertType = 'Info' | 'Warning' | 'Critical';
 export type AutomationAlertStatus = 'New' | 'In Progress' | 'Resolved';
 

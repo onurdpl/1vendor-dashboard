@@ -175,6 +175,10 @@ export type FinanceDashboardDto = {
   records: FinanceRecordDto[];
 };
 
+export type FinanceDashboardSummaryDto = {
+  summary: Pick<FinanceSummaryDto, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+};
+
 export type VendorFinancialProfileUpdateDto = {
   commissionPercent?: number;
   commissionVatPercent?: number;

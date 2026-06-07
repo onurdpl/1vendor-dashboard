@@ -208,6 +208,15 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
+    expect(screen.getByText('Finance snapshot')).toBeInTheDocument();
+    expect(screen.getByText('Gross sales')).toBeInTheDocument();
+    expect(screen.getByText('$2,000.00')).toBeInTheDocument();
+    expect(screen.getByText('Refunds')).toBeInTheDocument();
+    expect(screen.getByText('$300.00')).toBeInTheDocument();
+    expect(screen.getByText('Net revenue')).toBeInTheDocument();
+    expect(screen.getByText('$1,700.00')).toBeInTheDocument();
+    expect(screen.getAllByText('Payout estimate').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('$1,530.00').length).toBeGreaterThan(0);
   });
 
   it('renders the dashboard shell and skeleton cards while overview data loads', () => {

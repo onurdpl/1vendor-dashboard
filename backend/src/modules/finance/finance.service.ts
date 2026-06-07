@@ -7,6 +7,7 @@ import {
 } from './payout-calculator.js';
 import type {
   FinanceDashboardDto,
+  FinanceDashboardSummaryDto,
   InvoiceExecutionReferenceDto,
   FinanceRecordDto,
   PayoutBatchDto,
@@ -973,6 +974,18 @@ export async function getVendorFinanceDashboard(
   };
   logDashboardTiming('finance.metrics_aggregation', aggregationStartedAt);
   return dashboard;
+}
+
+export async function getVendorFinanceSummary(vendorId: string): Promise<FinanceDashboardSummaryDto> {
+  const dashboard = await getVendorFinanceDashboard(vendorId, { limit: 0, offset: 0 });
+  return {
+    summary: {
+      grossSales: dashboard.summary.grossSales,
+      refunds: dashboard.summary.refunds,
+      netRevenue: dashboard.summary.netRevenue,
+      payoutEstimate: dashboard.summary.payoutEstimate,
+    },
+  };
 }
 
 export async function getVendorFinancialProfile(vendorId: string): Promise<VendorFinancialProfileDto> {

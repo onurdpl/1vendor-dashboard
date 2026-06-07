@@ -7,6 +7,7 @@ const TIMED_ROUTE_NAMES = new Set([
   'GET /returns',
   'GET /returns/:returnId',
   'GET /finance',
+  'GET /finance/summary',
   'GET /automation',
   'GET /signals',
   'GET /notifications',
