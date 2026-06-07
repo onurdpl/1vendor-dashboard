@@ -35,10 +35,53 @@ function assert(condition, message) {
   }
 }
 
-function bearerHeaders(token, extraHeaders = {}) {
+function getSetCookieHeaders(response) {
+  if (typeof response.headers.getSetCookie === 'function') {
+    return response.headers.getSetCookie();
+  }
+
+  const header = response.headers.get('set-cookie');
+  return header ? [header] : [];
+}
+
+function extractSessionCookie(response) {
+  const sessionCookie = getSetCookieHeaders(response)
+    .map((header) => header.split(';')[0]?.trim() ?? '')
+    .find((cookie) => cookie.startsWith('sporgym_session='));
+
+  assert(sessionCookie, '/auth/login session cookie missing');
+  return sessionCookie;
+}
+
+function authHeaders(session, extraHeaders = {}) {
   return {
-    Authorization: `Bearer ${token}`,
+    Cookie: session.cookie,
+    'X-CSRF-Token': session.csrfToken,
     ...extraHeaders,
+  };
+}
+
+async function loginSession(email, password) {
+  const { response, json } = await requestJson(`${DEFAULT_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  });
+
+  assert(response.ok, `/auth/login returned ${response.status}`);
+  assert(isObject(json?.user), '/auth/login user missing');
+  assert(typeof json?.csrfToken === 'string' && json.csrfToken.length > 0, '/auth/login csrfToken missing');
+  assert(json?.token === undefined, '/auth/login should not return a JSON token');
+
+  return {
+    cookie: extractSessionCookie(response),
+    csrfToken: json.csrfToken,
+    user: json.user,
   };
 }
 
@@ -47,24 +90,10 @@ async function run() {
   assert(healthResponse.ok, `/health returned ${healthResponse.status}`);
   assert(healthJson?.ok === true, '/health payload missing ok=true');
 
-  const { response: loginResponse, json: loginJson } = await requestJson(`${DEFAULT_BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-    },
-    body: JSON.stringify({
-      email: 'admin@demo.com',
-      password: 'demo123',
-    }),
-  });
-
-  assert(loginResponse.ok, `/auth/login returned ${loginResponse.status}`);
-  assert(typeof loginJson?.token === 'string' && loginJson.token.length > 0, '/auth/login token missing');
-
-  const token = loginJson.token;
+  const session = await loginSession('admin@demo.com', 'demo123');
 
   const { response: ordersResponse, json: ordersJson } = await requestJson(`${DEFAULT_BASE_URL}/orders`, {
-    headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+    headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
   });
   assert(ordersResponse.ok, `/orders returned ${ordersResponse.status}`);
   assert(Array.isArray(ordersJson), '/orders payload is not an array');
@@ -76,7 +105,7 @@ async function run() {
   const { response: orderDetailResponse, json: orderDetailJson } = await requestJson(
     `${DEFAULT_BASE_URL}/orders/${firstOrderId}`,
     {
-      headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+      headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
     },
   );
   assert(orderDetailResponse.ok, `/orders/:orderId returned ${orderDetailResponse.status}`);
@@ -84,7 +113,7 @@ async function run() {
   assert(Array.isArray(orderDetailJson?.lineItems), '/orders/:orderId missing lineItems array');
 
   const { response: returnsResponse, json: returnsJson } = await requestJson(`${DEFAULT_BASE_URL}/returns`, {
-    headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+    headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
   });
   assert(returnsResponse.ok, `/returns returned ${returnsResponse.status}`);
   assert(Array.isArray(returnsJson), '/returns payload is not an array');
@@ -96,7 +125,7 @@ async function run() {
     const { response: returnDetailResponse, json: returnDetailJson } = await requestJson(
       `${DEFAULT_BASE_URL}/returns/${firstReturnId}`,
       {
-        headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+        headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
       },
     );
     assert(returnDetailResponse.ok, `/returns/:returnId returned ${returnDetailResponse.status}`);
@@ -104,7 +133,7 @@ async function run() {
   }
 
   const { response: financeResponse, json: financeJson } = await requestJson(`${DEFAULT_BASE_URL}/finance`, {
-    headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+    headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
   });
   assert(financeResponse.ok, `/finance returned ${financeResponse.status}`);
   assert(isObject(financeJson?.summary), '/finance missing summary object');
@@ -113,7 +142,7 @@ async function run() {
   const { response: automationResponse, json: automationJson } = await requestJson(
     `${DEFAULT_BASE_URL}/automation`,
     {
-      headers: bearerHeaders(token, { 'X-Vendor-Id': 'yalispor' }),
+      headers: authHeaders(session, { 'X-Vendor-Id': 'yalispor' }),
     },
   );
   assert(automationResponse.ok, `/automation returned ${automationResponse.status}`);
@@ -123,7 +152,7 @@ async function run() {
   const { response: operationsResponse, json: operationsJson } = await requestJson(
     `${DEFAULT_BASE_URL}/admin/operations`,
     {
-      headers: bearerHeaders(token),
+      headers: authHeaders(session),
     },
   );
   assert(operationsResponse.ok, `/admin/operations returned ${operationsResponse.status}`);
@@ -133,7 +162,7 @@ async function run() {
   const { response: adminOrderResponse, json: adminOrderJson } = await requestJson(
     `${DEFAULT_BASE_URL}/admin/orders/1001`,
     {
-      headers: bearerHeaders(token),
+      headers: authHeaders(session),
     },
   );
   assert(adminOrderResponse.ok, `/admin/orders/1001 returned ${adminOrderResponse.status}`);

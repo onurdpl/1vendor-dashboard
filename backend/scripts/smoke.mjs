@@ -78,6 +78,64 @@ async function waitForReady(url, timeoutMs = 15000) {
   throw new Error(`Timed out waiting for backend readiness at ${url}.`);
 }
 
+function getSetCookieHeaders(response) {
+  if (typeof response.headers.getSetCookie === 'function') {
+    return response.headers.getSetCookie();
+  }
+
+  const header = response.headers.get('set-cookie');
+  return header ? [header] : [];
+}
+
+function extractSessionCookie(response) {
+  const sessionCookie = getSetCookieHeaders(response)
+    .map((header) => header.split(';')[0]?.trim() ?? '')
+    .find((cookie) => cookie.startsWith('sporgym_session='));
+
+  if (!sessionCookie) {
+    throw new Error('/auth/login session cookie missing.');
+  }
+
+  return sessionCookie;
+}
+
+function authHeaders(session, extraHeaders = {}) {
+  return {
+    Cookie: session.cookie,
+    'X-CSRF-Token': session.csrfToken,
+    ...extraHeaders,
+  };
+}
+
+async function loginSession(email, password) {
+  const response = await fetch(`${baseUrl}/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      email,
+      password,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`/auth/login failed with ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (!payload?.user || typeof payload.csrfToken !== 'string' || !payload.csrfToken) {
+    throw new Error('/auth/login cookie session payload missing user or csrfToken.');
+  }
+  if (payload.token !== undefined) {
+    throw new Error('/auth/login should not return a JSON token.');
+  }
+
+  return {
+    cookie: extractSessionCookie(response),
+    csrfToken: payload.csrfToken,
+    user: payload.user,
+  };
+}
+
 async function runSmoke() {
   const runId = Date.now().toString();
   const smokeOrderId = String(9000000000 + Number(runId.slice(-6)));
@@ -341,7 +399,7 @@ async function runSmoke() {
       headers: {
         Origin: 'http://127.0.0.1:5173',
         'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'authorization,content-type,x-vendor-id',
+        'Access-Control-Request-Headers': 'content-type,x-csrf-token,x-vendor-id',
       },
     });
     if (!corsPreflightResponse.ok) {
@@ -357,8 +415,8 @@ async function runSmoke() {
       throw new Error(`/auth/login preflight missing allow methods: ${allowMethods}`);
     }
     if (
-      !allowHeaders.toLowerCase().includes('authorization') ||
       !allowHeaders.toLowerCase().includes('content-type') ||
+      !allowHeaders.toLowerCase().includes('x-csrf-token') ||
       !allowHeaders.toLowerCase().includes('x-vendor-id')
     ) {
       throw new Error(`/auth/login preflight missing allow headers: ${allowHeaders}`);
@@ -369,7 +427,7 @@ async function runSmoke() {
       headers: {
         Origin: 'http://127.0.0.1:5173',
         'Access-Control-Request-Method': 'PUT',
-        'Access-Control-Request-Headers': 'authorization,content-type,x-vendor-id',
+        'Access-Control-Request-Headers': 'content-type,x-csrf-token,x-vendor-id',
       },
     });
     if (!financeProfilePreflightResponse.ok) {
@@ -513,18 +571,11 @@ async function runSmoke() {
       throw new Error(`/webhooks/shopify/orders-create first delivery payload invalid: ${JSON.stringify(validWebhookJson)}`);
     }
 
+    const ingestionAdminSession = await loginSession('admin@demo.com', 'demo123');
     const ingestedOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/${smokeOrderId}`, {
-      headers: {
+      headers: authHeaders(ingestionAdminSession, {
         'content-type': 'application/json',
-        Authorization: `Bearer ${(await (await fetch(`${baseUrl}/auth/login`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            email: 'admin@demo.com',
-            password: 'demo123',
-          }),
-        })).json()).token}`,
-      },
+      }),
     });
     if (!ingestedOrderBreakdownResponse.ok) {
       throw new Error(`/admin/orders/${smokeOrderId} after ingestion failed with ${ingestedOrderBreakdownResponse.status}`);
@@ -812,30 +863,13 @@ async function runSmoke() {
       );
     }
 
-    const adminLoginResponse = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        email: 'admin@demo.com',
-        password: 'demo123',
-      }),
-    });
-
-    if (!adminLoginResponse.ok) {
-      throw new Error(`/auth/login admin failed with ${adminLoginResponse.status}`);
-    }
-
-    const adminLoginJson = await adminLoginResponse.json();
-    const adminToken = adminLoginJson?.token;
-    if (!adminToken) {
-      throw new Error('Admin login token missing in /auth/login response.');
-    }
+    const adminSession = await loginSession('admin@demo.com', 'demo123');
 
     const returnVisibilityDiagnosticResponse = await fetch(
       `${baseUrl}/admin/diagnostics/returns/order/${smokeOrderId}`,
       {
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -857,7 +891,7 @@ async function runSmoke() {
 
     const adminVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -866,24 +900,7 @@ async function runSmoke() {
       throw new Error(`/debug/vendor-context admin check failed with ${adminVendorContextResponse.status}`);
     }
 
-    const vendorLoginResponse = await fetch(`${baseUrl}/auth/login`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        email: 'yalispor@demo.com',
-        password: 'demo123',
-      }),
-    });
-
-    if (!vendorLoginResponse.ok) {
-      throw new Error(`/auth/login vendor failed with ${vendorLoginResponse.status}`);
-    }
-
-    const vendorLoginJson = await vendorLoginResponse.json();
-    const vendorToken = vendorLoginJson?.token;
-    if (!vendorToken) {
-      throw new Error('Vendor login token missing in /auth/login response.');
-    }
+    const vendorSession = await loginSession('yalispor@demo.com', 'demo123');
 
     const legacyMissingPayloadEventId = `legacy-missing-payload-${runId}`;
     const recoverableReceivedEventId = `recoverable-received-${runId}`;
@@ -917,7 +934,7 @@ async function runSmoke() {
 
     const allowedVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -930,7 +947,7 @@ async function runSmoke() {
 
     const forbiddenVendorContextResponse = await fetch(`${baseUrl}/debug/vendor-context`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -943,7 +960,7 @@ async function runSmoke() {
 
     const adminOrdersYaliResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -964,7 +981,7 @@ async function runSmoke() {
 
     const adminOrdersSporjinalResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -982,7 +999,7 @@ async function runSmoke() {
 
     const missingFailedOrderResponse = await fetch(`${baseUrl}/admin/orders/9002`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (missingFailedOrderResponse.status !== 404) {
@@ -1195,7 +1212,7 @@ async function runSmoke() {
 
     const yalisporAfterInboundResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1220,7 +1237,7 @@ async function runSmoke() {
 
     const sporjinalAfterInboundResponse = await fetch(`${baseUrl}/orders/${ingestedSporjinalAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1281,7 +1298,7 @@ async function runSmoke() {
 
     const sporjinalDeliveredResponse = await fetch(`${baseUrl}/orders/${ingestedSporjinalAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1293,7 +1310,7 @@ async function runSmoke() {
     }
     const yalisporAfterDeliveredEventResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1414,7 +1431,7 @@ async function runSmoke() {
 
     const cancellationAdminYaliResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1425,7 +1442,7 @@ async function runSmoke() {
     }
     const cancelledYaliDetailResponse = await fetch(`${baseUrl}/orders/${cancelledYaliAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1444,7 +1461,7 @@ async function runSmoke() {
 
     const cancellationAdminSporResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1455,7 +1472,7 @@ async function runSmoke() {
     }
     const activeSporDetailResponse = await fetch(`${baseUrl}/orders/${activeSporAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1513,7 +1530,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -1535,7 +1552,7 @@ async function runSmoke() {
 
     const reconciledCancelledDetailResponse = await fetch(`${baseUrl}/orders/${cancelledYaliAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1575,7 +1592,7 @@ async function runSmoke() {
     const reconcileTrackingResponse = await fetch(`${baseUrl}/admin/reconciliation/orders/alloc-sporjinal-${smokeOrderId}`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (reconcileTrackingResponse.status !== 200) {
@@ -1593,7 +1610,7 @@ async function runSmoke() {
 
     const reconciledTrackingDetailResponse = await fetch(`${baseUrl}/orders/alloc-sporjinal-${smokeOrderId}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1624,7 +1641,7 @@ async function runSmoke() {
     const reconcileOrderResponse = await fetch(`${baseUrl}/admin/reconciliation/shopify-order/${smokeOrderId}`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (reconcileOrderResponse.status !== 200) {
@@ -1645,7 +1662,7 @@ async function runSmoke() {
     const vendorReconcileResponse = await fetch(`${baseUrl}/admin/reconciliation/orders/alloc-yalispor-${smokeOrderId}`, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorReconcileResponse.status !== 403) {
@@ -1674,7 +1691,7 @@ async function runSmoke() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          Authorization: `Bearer ${vendorToken}`,
+          ...authHeaders(vendorSession),
           'X-Vendor-Id': 'yalispor',
         },
         body: JSON.stringify({
@@ -1695,7 +1712,7 @@ async function runSmoke() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
           'X-Vendor-Id': 'sporjinal',
         },
         body: JSON.stringify({
@@ -1724,7 +1741,7 @@ async function runSmoke() {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
       body: JSON.stringify({
@@ -1742,7 +1759,7 @@ async function runSmoke() {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
       body: JSON.stringify({
@@ -1758,7 +1775,7 @@ async function runSmoke() {
 
     const vendorOrdersYaliResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1776,7 +1793,7 @@ async function runSmoke() {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          Authorization: `Bearer ${vendorToken}`,
+          ...authHeaders(vendorSession),
           'X-Vendor-Id': 'yalispor',
         },
         body: JSON.stringify({
@@ -1804,7 +1821,7 @@ async function runSmoke() {
 
     const updatedVendorOrderResponse = await fetch(`${baseUrl}/orders/${ingestedYalisporAllocation.id}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1824,7 +1841,7 @@ async function runSmoke() {
 
     const vendorOrdersForbiddenResponse = await fetch(`${baseUrl}/orders`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1838,7 +1855,7 @@ async function runSmoke() {
     }
     const ownOrderResponse = await fetch(`${baseUrl}/orders/${ownOrderId}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1852,7 +1869,7 @@ async function runSmoke() {
     }
     const nonOwnedOrderResponse = await fetch(`${baseUrl}/orders/${nonOwnedOrderId}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1862,7 +1879,7 @@ async function runSmoke() {
 
     const adminReturnsYaliResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1879,7 +1896,7 @@ async function runSmoke() {
 
     const adminReturnsSporjinalResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1896,7 +1913,7 @@ async function runSmoke() {
 
     const vendorReturnsYaliResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1926,7 +1943,7 @@ async function runSmoke() {
 
     const vendorReturnsForbiddenResponse = await fetch(`${baseUrl}/returns`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -1940,7 +1957,7 @@ async function runSmoke() {
     }
     const ownReturnResponse = await fetch(`${baseUrl}/returns/${ownReturnId}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1949,7 +1966,7 @@ async function runSmoke() {
     }
     const yalisporReturnRequestDetailResponse = await fetch(`${baseUrl}/returns/${yalisporReturnRequest.id}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -1982,7 +1999,7 @@ async function runSmoke() {
     }
     const sporjinalReturnRequestDetailResponse = await fetch(`${baseUrl}/returns/${sporjinalReturnRequest.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -2004,7 +2021,7 @@ async function runSmoke() {
 
     const wrongVendorReturnRequestResponse = await fetch(`${baseUrl}/returns/${yalisporReturnRequest.id}`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -2020,7 +2037,7 @@ async function runSmoke() {
     }
     const nonOwnedReturnResponse = await fetch(`${baseUrl}/returns/${nonOwnedReturnId}`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -2030,7 +2047,7 @@ async function runSmoke() {
 
     const adminFinanceYaliResponse = await fetch(`${baseUrl}/finance`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -2047,7 +2064,7 @@ async function runSmoke() {
 
     const adminFinanceSporjinalResponse = await fetch(`${baseUrl}/finance`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -2061,7 +2078,7 @@ async function runSmoke() {
 
     const vendorFinanceYaliResponse = await fetch(`${baseUrl}/finance`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -2075,7 +2092,7 @@ async function runSmoke() {
 
     const vendorFinanceForbiddenResponse = await fetch(`${baseUrl}/finance`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -2085,7 +2102,7 @@ async function runSmoke() {
 
     const adminAutomationYaliResponse = await fetch(`${baseUrl}/automation`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -2099,7 +2116,7 @@ async function runSmoke() {
 
     const vendorAutomationYaliResponse = await fetch(`${baseUrl}/automation`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'yalispor',
       },
     });
@@ -2113,7 +2130,7 @@ async function runSmoke() {
 
     const vendorAutomationForbiddenResponse = await fetch(`${baseUrl}/automation`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
         'X-Vendor-Id': 'sporjinal',
       },
     });
@@ -2123,7 +2140,7 @@ async function runSmoke() {
 
     const adminOperationsResponse = await fetch(`${baseUrl}/admin/operations`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (!adminOperationsResponse.ok) {
@@ -2142,7 +2159,7 @@ async function runSmoke() {
 
     const vendorOperationsResponse = await fetch(`${baseUrl}/admin/operations`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorOperationsResponse.status !== 403) {
@@ -2151,7 +2168,7 @@ async function runSmoke() {
 
     const adminWebhookDiagnosticsResponse = await fetch(`${baseUrl}/admin/diagnostics/webhooks`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (!adminWebhookDiagnosticsResponse.ok) {
@@ -2200,7 +2217,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2223,7 +2240,7 @@ async function runSmoke() {
       `${baseUrl}/admin/diagnostics/webhooks/${processedWebhookEvent.id}`,
       {
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2248,7 +2265,7 @@ async function runSmoke() {
       `${baseUrl}/admin/diagnostics/webhooks/${processedWebhookEvent.id}`,
       {
         headers: {
-          Authorization: `Bearer ${vendorToken}`,
+          ...authHeaders(vendorSession),
         },
       },
     );
@@ -2260,7 +2277,7 @@ async function runSmoke() {
 
     const adminSyncEventsResponse = await fetch(`${baseUrl}/admin/diagnostics/sync-events`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (!adminSyncEventsResponse.ok) {
@@ -2281,7 +2298,7 @@ async function runSmoke() {
 
     const adminReconciliationResponse = await fetch(`${baseUrl}/admin/diagnostics/reconciliation`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (!adminReconciliationResponse.ok) {
@@ -2299,7 +2316,7 @@ async function runSmoke() {
 
     const vendorWebhookDiagnosticsResponse = await fetch(`${baseUrl}/admin/diagnostics/webhooks`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorWebhookDiagnosticsResponse.status !== 403) {
@@ -2310,7 +2327,7 @@ async function runSmoke() {
 
     const vendorSyncEventsResponse = await fetch(`${baseUrl}/admin/diagnostics/sync-events`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorSyncEventsResponse.status !== 403) {
@@ -2321,7 +2338,7 @@ async function runSmoke() {
 
     const vendorReconciliationResponse = await fetch(`${baseUrl}/admin/diagnostics/reconciliation`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorReconciliationResponse.status !== 403) {
@@ -2335,7 +2352,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2359,7 +2376,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2388,7 +2405,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${vendorToken}`,
+          ...authHeaders(vendorSession),
         },
       },
     );
@@ -2403,7 +2420,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2418,7 +2435,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2443,7 +2460,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2467,7 +2484,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2488,7 +2505,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${adminToken}`,
+          ...authHeaders(adminSession),
         },
       },
     );
@@ -2516,7 +2533,7 @@ async function runSmoke() {
       {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${vendorToken}`,
+          ...authHeaders(vendorSession),
         },
       },
     );
@@ -2528,7 +2545,7 @@ async function runSmoke() {
 
     const adminOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/1001`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (!adminOrderBreakdownResponse.ok) {
@@ -2548,7 +2565,7 @@ async function runSmoke() {
 
     const vendorOrderBreakdownResponse = await fetch(`${baseUrl}/admin/orders/1001`, {
       headers: {
-        Authorization: `Bearer ${vendorToken}`,
+        ...authHeaders(vendorSession),
       },
     });
     if (vendorOrderBreakdownResponse.status !== 403) {
@@ -2559,7 +2576,7 @@ async function runSmoke() {
 
     const adminOrderMissingResponse = await fetch(`${baseUrl}/admin/orders/does-not-exist`, {
       headers: {
-        Authorization: `Bearer ${adminToken}`,
+        ...authHeaders(adminSession),
       },
     });
     if (adminOrderMissingResponse.status !== 404) {

@@ -10,7 +10,7 @@ describe('runtimeServices real-mode auth', () => {
     vi.resetModules();
   });
 
-  it('confirms login with /auth/me before returning a real-mode cookie session', async () => {
+  it('uses the cookie-session login response without requiring a JSON token or duplicate /auth/me call', async () => {
     vi.doMock('../config/runtime', () => ({
       runtimeConfig: {
         apiMode: 'real',
@@ -47,12 +47,12 @@ describe('runtimeServices real-mode auth', () => {
       authAttemptId: 'auth-test123',
       signal: undefined,
     });
-    expect(backendMeMock).toHaveBeenCalledTimes(1);
+    expect(backendMeMock).not.toHaveBeenCalled();
     expect(result).toEqual({
       token: null,
       user: expect.objectContaining({
-        email: 'vendor@example.com',
-        name: 'Vendor User',
+        email: 'login-response@example.com',
+        name: 'Login Response',
         role: 'vendor',
         vendorAccess: ['sporjinal'],
         defaultVendorId: 'sporjinal',

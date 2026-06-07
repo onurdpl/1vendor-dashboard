@@ -76,6 +76,36 @@ function getRequestCredentials(): RequestCredentials {
   return runtimeConfig.apiMode === 'real' ? 'include' : 'same-origin';
 }
 
+function getSafeAuthRouteDiagnostics() {
+  if (typeof window === 'undefined') {
+    return {
+      pathname: '/',
+      hash: '',
+    };
+  }
+
+  return {
+    pathname: window.location.pathname || '/',
+    hash: window.location.hash || '',
+  };
+}
+
+function logAuthClientInfo(event: string, details: Record<string, unknown> = {}) {
+  console.info({
+    event,
+    ...getSafeAuthRouteDiagnostics(),
+    ...details,
+  });
+}
+
+function logAuthClientWarn(event: string, details: Record<string, unknown> = {}) {
+  console.warn({
+    event,
+    ...getSafeAuthRouteDiagnostics(),
+    ...details,
+  });
+}
+
 function requiresCsrf(method: HttpMethod, path: string) {
   if (runtimeConfig.apiMode !== 'real' || method === 'GET') {
     return false;
@@ -86,14 +116,32 @@ function requiresCsrf(method: HttpMethod, path: string) {
 }
 
 async function fetchCsrfToken(signal?: AbortSignal) {
-  const response = await fetch(buildUrl('/auth/csrf'), {
-    method: 'GET',
-    credentials: getRequestCredentials(),
-    signal,
-  });
+  const startedAt = Date.now();
+  logAuthClientInfo('AUTH_CSRF_START');
+  let response: Response;
+
+  try {
+    response = await fetch(buildUrl('/auth/csrf'), {
+      method: 'GET',
+      credentials: getRequestCredentials(),
+      signal,
+    });
+  } catch (error) {
+    logAuthClientWarn('AUTH_CSRF_FAILURE', {
+      durationMs: Date.now() - startedAt,
+      status: null,
+      requestId: null,
+    });
+    throw error;
+  }
 
   if (!response.ok) {
     clearCsrfToken();
+    logAuthClientWarn('AUTH_CSRF_FAILURE', {
+      durationMs: Date.now() - startedAt,
+      status: response.status,
+      requestId: response.headers.get('x-request-id'),
+    });
     throw new ApiError('Unauthorized request.', 'unauthorized', {
       status: response.status,
       diagnostics: {
@@ -111,6 +159,12 @@ async function fetchCsrfToken(signal?: AbortSignal) {
   const payload = await response.json() as { csrfToken?: unknown };
   if (typeof payload.csrfToken !== 'string' || !payload.csrfToken.trim()) {
     clearCsrfToken();
+    logAuthClientWarn('AUTH_CSRF_FAILURE', {
+      durationMs: Date.now() - startedAt,
+      status: response.status,
+      requestId: response.headers.get('x-request-id'),
+      reason: 'invalid-response',
+    });
     throw new ApiError('CSRF token is unavailable.', 'invalid-response', {
       status: response.status,
       diagnostics: {
@@ -126,6 +180,11 @@ async function fetchCsrfToken(signal?: AbortSignal) {
   }
 
   setCsrfToken(payload.csrfToken);
+  logAuthClientInfo('AUTH_CSRF_SUCCESS', {
+    durationMs: Date.now() - startedAt,
+    status: response.status,
+    requestId: response.headers.get('x-request-id'),
+  });
   return csrfToken;
 }
 

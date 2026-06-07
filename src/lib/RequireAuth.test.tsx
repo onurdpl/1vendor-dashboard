@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from 'react-route
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RequireAuth } from './RequireAuth';
 import { clearToken, setCurrentUser, setToken } from './auth';
+import { ApiError } from './api/errors';
 
 function seedSession() {
   setToken('test-token');
@@ -227,7 +228,7 @@ describe('RequireAuth', () => {
         apiMode: 'real',
       },
     }));
-    const meMock = vi.fn().mockRejectedValue(new Error('Unauthorized request.'));
+    const meMock = vi.fn().mockRejectedValue(new ApiError('Unauthorized request.', 'unauthorized', { status: 401 }));
     vi.doMock('../services/runtime-services', () => ({
       runtimeServices: {
         auth: {
@@ -257,7 +258,7 @@ describe('RequireAuth', () => {
     expect(meMock).toHaveBeenCalledTimes(1);
   });
 
-  it('does not hang forever when real-mode session restore never resolves', async () => {
+  it('does not hang forever or mark the session expired when real-mode session restore times out', async () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.doMock('../config/runtime', () => ({
@@ -273,7 +274,10 @@ describe('RequireAuth', () => {
         },
       },
     }));
-    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+    const [{ RequireAuth: RealModeRequireAuth }, auth] = await Promise.all([
+      import('./RequireAuth'),
+      import('./auth'),
+    ]);
     window.history.replaceState({}, '', '/orders/alloc-yalispor-7709129507153#provider-response-summary');
 
     render(
@@ -294,7 +298,60 @@ describe('RequireAuth', () => {
     });
     vi.useRealTimers();
 
-    await waitFor(() => expect(screen.getByTestId('current-route')).toHaveTextContent('/login'));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeEnabled();
+    expect(auth.peekExpiredSessionNotice()).toBeNull();
     expect(screen.queryByRole('status')).not.toBeInTheDocument();
+  });
+
+  it('retries a timed-out real-mode restore and preserves the deep link hash', async () => {
+    vi.useFakeTimers();
+    vi.resetModules();
+    vi.doMock('../config/runtime', () => ({
+      runtimeConfig: {
+        apiMode: 'real',
+      },
+    }));
+    const meMock = vi
+      .fn()
+      .mockImplementationOnce(() => new Promise<never>(() => undefined))
+      .mockResolvedValueOnce(buildTestUser());
+    vi.doMock('../services/runtime-services', () => ({
+      runtimeServices: {
+        auth: {
+          me: meMock,
+        },
+      },
+    }));
+    const { RequireAuth: RealModeRequireAuth } = await import('./RequireAuth');
+    window.history.replaceState({}, '', '/orders/alloc-yalispor-7709129507153#provider-response-summary');
+
+    render(
+      <MemoryRouter initialEntries={['/orders/alloc-yalispor-7709129507153#provider-response-summary']}>
+        <Routes>
+          <Route element={<RealModeRequireAuth />}>
+            <Route path="/orders/:orderId" element={<RouteProbe />} />
+          </Route>
+          <Route path="/login" element={<RouteProbe />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10000);
+    });
+    vi.useRealTimers();
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Session restore needs attention'));
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'Retry' }).click();
+    });
+
+    expect(await screen.findByTestId('current-route')).toHaveTextContent(
+      '/orders/alloc-yalispor-7709129507153#provider-response-summary',
+    );
+    expect(meMock).toHaveBeenCalledTimes(2);
   });
 });
