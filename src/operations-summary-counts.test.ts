@@ -10,25 +10,27 @@ const prismaMock = vi.hoisted(() => ({
     count: vi.fn(),
   },
   operationalSignal: {
+    findMany: vi.fn(),
     groupBy: vi.fn(),
   },
   automationAction: {
+    findMany: vi.fn(),
     count: vi.fn(),
   },
 }));
-const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
-const listAutomationActionsMock = vi.hoisted(() => vi.fn());
+const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
+const generateAutomationActionsForSignalsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
 vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
-  listOperationalSignals: listOperationalSignalsMock,
+  evaluateOperationalSignals: evaluateOperationalSignalsMock,
 }));
 
 vi.mock('../backend/src/modules/automation/automation-actions.service.js', () => ({
-  listAutomationActions: listAutomationActionsMock,
+  generateAutomationActionsForSignals: generateAutomationActionsForSignalsMock,
 }));
 
 vi.mock('../backend/src/modules/support/support.service.js', () => ({
@@ -41,7 +43,11 @@ vi.mock('../backend/src/lib/dashboard-timing.js', () => ({
   withDashboardTiming: vi.fn((_step: string, action: () => unknown) => action()),
 }));
 
-const { getAdminOperationsQueue } = await import('../backend/src/modules/operations/operations.service.js');
+const {
+  generateAdminOperationsAutomationActions,
+  generateAdminOperationsSignals,
+  getAdminOperationsQueue,
+} = await import('../backend/src/modules/operations/operations.service.js');
 
 describe('admin operations summary counts', () => {
   beforeEach(() => {
@@ -49,15 +55,102 @@ describe('admin operations summary counts', () => {
     prismaMock.vendorAllocation.count.mockReset();
     prismaMock.returnRecord.findMany.mockReset();
     prismaMock.returnRecord.count.mockReset();
+    prismaMock.operationalSignal.findMany.mockReset();
     prismaMock.operationalSignal.groupBy.mockReset();
+    prismaMock.automationAction.findMany.mockReset();
     prismaMock.automationAction.count.mockReset();
-    listOperationalSignalsMock.mockReset();
-    listAutomationActionsMock.mockReset();
+    evaluateOperationalSignalsMock.mockReset();
+    generateAutomationActionsForSignalsMock.mockReset();
 
     prismaMock.vendorAllocation.findMany.mockResolvedValue([]);
     prismaMock.returnRecord.findMany.mockResolvedValue([]);
-    listOperationalSignalsMock.mockResolvedValue({ summary: { total: 0 }, signals: [] });
-    listAutomationActionsMock.mockResolvedValue({ summary: { total: 0 }, actions: [] });
+    prismaMock.operationalSignal.findMany.mockResolvedValue([]);
+    prismaMock.automationAction.findMany.mockResolvedValue([]);
+    evaluateOperationalSignalsMock.mockResolvedValue([]);
+    generateAutomationActionsForSignalsMock.mockResolvedValue([]);
+  });
+
+  it('returns existing operation rows without running read-time signal or action generation', async () => {
+    prismaMock.vendorAllocation.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0);
+    prismaMock.returnRecord.count.mockResolvedValueOnce(0);
+    prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([
+      { severity: 'HIGH', _count: { _all: 1 } },
+    ]);
+    prismaMock.automationAction.count
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(1);
+    prismaMock.operationalSignal.findMany.mockResolvedValueOnce([
+      {
+        id: 'signal-1',
+        type: 'stale_fulfillment',
+        severity: 'HIGH',
+        sourceArea: 'FULFILLMENT',
+        vendorId: 'yalispor',
+        allocationId: 'alloc-1',
+        financeLedgerEntryId: null,
+        payoutBatchId: null,
+        operationalJobId: null,
+        title: 'Fulfillment is stale',
+        description: 'Allocation alloc-1 has not moved.',
+        suggestedAction: 'Review signal',
+        status: 'ACTIVE',
+        ruleKey: 'fulfillment.stale_awaiting_shipment',
+        metadata: {
+          sourceShopifyOrderId: '7709129507153',
+        },
+        triggeredAt: new Date('2026-05-13T10:00:00.000Z'),
+        resolvedAt: null,
+        createdAt: new Date('2026-05-13T10:00:00.000Z'),
+        updatedAt: new Date('2026-05-13T10:00:00.000Z'),
+      },
+    ]);
+    prismaMock.automationAction.findMany.mockResolvedValueOnce([
+      {
+        id: 'action-1',
+        signalId: 'signal-1',
+        type: 'AUTO_PRIORITIZE_STALE_QUEUE_ITEM',
+        status: 'SUGGESTED',
+        executionMode: 'AUTO_SAFE',
+        vendorId: 'yalispor',
+        allocationId: 'alloc-1',
+        financeLedgerEntryId: null,
+        payoutBatchId: null,
+        operationalJobId: null,
+        title: 'Prioritize operations queue item',
+        description: 'Keep this signal high in the operations queue.',
+        resultSummary: null,
+        executedAt: null,
+        metadata: {},
+        createdAt: new Date('2026-05-13T10:01:00.000Z'),
+        updatedAt: new Date('2026-05-13T10:01:00.000Z'),
+      },
+    ]);
+
+    const dashboard = await getAdminOperationsQueue({ limit: 20, offset: 0 });
+
+    expect(dashboard.items).toEqual([
+      expect.objectContaining({
+        id: 'op-signal-signal-1',
+        type: 'operational_signal',
+        severity: 'warning',
+        destinationPath: '/admin/orders/7709129507153',
+      }),
+      expect.objectContaining({
+        id: 'op-automation-action-1',
+        type: 'automation_action',
+        severity: 'attention',
+      }),
+    ]);
+    expect(dashboard.summary).toMatchObject({
+      total: 2,
+      operationalSignals: 1,
+      automationActions: 1,
+    });
+    expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
   });
 
   it('computes operations summary counts before candidate slicing', async () => {
@@ -93,5 +186,31 @@ describe('admin operations summary counts', () => {
       automationActions: 9,
     });
     expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
+    expect(prismaMock.operationalSignal.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+    expect(prismaMock.automationAction.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+    expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps signal generation explicit', async () => {
+    evaluateOperationalSignalsMock.mockResolvedValueOnce([{ id: 'signal-1' }]);
+
+    await expect(generateAdminOperationsSignals()).resolves.toEqual({
+      generated: 1,
+      signals: [{ id: 'signal-1' }],
+    });
+
+    expect(evaluateOperationalSignalsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps automation action generation explicit', async () => {
+    generateAutomationActionsForSignalsMock.mockResolvedValueOnce([{ id: 'action-1' }]);
+
+    await expect(generateAdminOperationsAutomationActions()).resolves.toEqual({
+      generated: 1,
+      actions: [{ id: 'action-1' }],
+    });
+
+    expect(generateAutomationActionsForSignalsMock).toHaveBeenCalledTimes(1);
   });
 });

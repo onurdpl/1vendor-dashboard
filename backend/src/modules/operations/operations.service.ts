@@ -1,7 +1,9 @@
 import {
   AllocationStatus,
+  type AutomationAction,
   AutomationActionStatus,
   AutomationExecutionMode,
+  type OperationalSignal,
   OperationalSignalSeverity,
   OperationalSignalStatus,
 } from '@prisma/client';
@@ -18,9 +20,9 @@ import type {
   OperationsQueueSeverity,
   OperationsVendorRiskDto,
 } from './operations.types.js';
-import { listOperationalSignals } from '../rules/rules.service.js';
+import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import type { OperationalSignalSeverityDto } from '../rules/rules.types.js';
-import { listAutomationActions } from '../automation/automation-actions.service.js';
+import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import { deriveSupportSlaState } from '../support/support.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
@@ -459,6 +461,71 @@ function mapSignalSeverity(severity: OperationalSignalSeverityDto): OperationsQu
   return 'normal';
 }
 
+function getSignalRelatedShopifyOrderId(signal: OperationalSignal) {
+  if (typeof signal.metadata !== 'object' || signal.metadata === null || Array.isArray(signal.metadata)) {
+    return null;
+  }
+
+  if (!('sourceShopifyOrderId' in signal.metadata)) {
+    return null;
+  }
+
+  const sourceShopifyOrderId = signal.metadata.sourceShopifyOrderId;
+  return sourceShopifyOrderId === null || sourceShopifyOrderId === undefined
+    ? null
+    : String(sourceShopifyOrderId);
+}
+
+function mapPersistedSignalToQueueItem(signal: OperationalSignal): OperationsQueueItemDto {
+  const relatedShopifyOrderId = getSignalRelatedShopifyOrderId(signal);
+
+  return {
+    id: `op-signal-${signal.id}`,
+    type: 'operational_signal',
+    severity: mapSignalSeverity(signal.severity.trim().toLowerCase() as OperationalSignalSeverityDto),
+    title: signal.title,
+    description: signal.description,
+    vendorId: signal.vendorId ?? 'platform',
+    vendorName: signal.vendorId ?? 'Platform',
+    relatedOrderId: signal.allocationId,
+    relatedShopifyOrderId,
+    relatedReturnId: null,
+    relatedRefundId: null,
+    status: signal.status.trim().toLowerCase(),
+    createdAt: signal.triggeredAt.toISOString(),
+    actionLabel: signal.suggestedAction ? 'Review signal' : 'Inspect signal',
+    destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
+  };
+}
+
+function mapPersistedAutomationActionToQueueItem(action: AutomationAction): OperationsQueueItemDto | null {
+  if (
+    action.status !== AutomationActionStatus.SUGGESTED &&
+    action.status !== AutomationActionStatus.PENDING &&
+    action.status !== AutomationActionStatus.FAILED
+  ) {
+    return null;
+  }
+
+  return {
+    id: `op-automation-${action.id}`,
+    type: 'automation_action',
+    severity: action.executionMode === AutomationExecutionMode.AUTO_SAFE ? 'attention' : 'normal',
+    title: action.title,
+    description: action.description,
+    vendorId: action.vendorId ?? 'platform',
+    vendorName: action.vendorId ?? 'Platform',
+    relatedOrderId: action.allocationId,
+    relatedShopifyOrderId: null,
+    relatedReturnId: null,
+    relatedRefundId: null,
+    status: action.status.trim().toLowerCase(),
+    createdAt: action.createdAt.toISOString(),
+    actionLabel: action.executionMode === AutomationExecutionMode.AUTO_SAFE ? 'Review safe action' : 'Review suggestion',
+    destinationPath: '/admin/operations',
+  };
+}
+
 export async function getAdminOperationsQueue(options: { limit?: number; offset?: number } = {}): Promise<OperationsQueueDashboardDto> {
   const offset = options.offset ?? 0;
   const limit = options.limit ?? 100;
@@ -641,60 +708,45 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   }
   logDashboardTiming('operations.return_aggregation', returnAggregationStartedAt);
 
-  const signalDashboard = await withDashboardTiming('operations.operational_signals_service', () => listOperationalSignals({
-    includeInternal: true,
-    limit: 100,
+  const signals = await withDashboardTiming('operations.operational_signals_fetch', () => prisma.operationalSignal.findMany({
+    where: {
+      status: OperationalSignalStatus.ACTIVE,
+    },
+    orderBy: [
+      {
+        severity: 'desc',
+      },
+      {
+        triggeredAt: 'desc',
+      },
+    ],
+    take: 100,
   }));
   const signalAggregationStartedAt = startDashboardTimer();
-  for (const signal of signalDashboard.signals) {
-    const relatedShopifyOrderId =
-      typeof signal.metadata === 'object' && signal.metadata !== null && 'sourceShopifyOrderId' in signal.metadata
-        ? String(signal.metadata.sourceShopifyOrderId ?? '')
-        : null;
-    items.push({
-      id: `op-signal-${signal.id}`,
-      type: 'operational_signal',
-      severity: mapSignalSeverity(signal.severity),
-      title: signal.title,
-      description: signal.description,
-      vendorId: signal.vendorId ?? 'platform',
-      vendorName: signal.vendorId ?? 'Platform',
-      relatedOrderId: signal.allocationId,
-      relatedShopifyOrderId,
-      relatedReturnId: null,
-      relatedRefundId: null,
-      status: signal.status,
-      createdAt: signal.triggeredAt,
-      actionLabel: signal.suggestedAction ? 'Review signal' : 'Inspect signal',
-      destinationPath: relatedShopifyOrderId ? `/admin/orders/${relatedShopifyOrderId}` : '/admin/operations',
-    });
+  for (const signal of signals) {
+    items.push(mapPersistedSignalToQueueItem(signal));
   }
   logDashboardTiming('operations.signal_aggregation', signalAggregationStartedAt);
 
-  const automationDashboard = await withDashboardTiming('operations.automation_actions_service', () => listAutomationActions());
+  const automationActions = await withDashboardTiming('operations.automation_actions_fetch', () => prisma.automationAction.findMany({
+    where: {
+      status: {
+        in: ACTIVE_AUTOMATION_ACTION_STATUSES,
+      },
+    },
+    orderBy: [
+      {
+        createdAt: 'desc',
+      },
+    ],
+    take: 100,
+  }));
   const automationAggregationStartedAt = startDashboardTimer();
-  for (const action of automationDashboard.actions) {
-    if (action.status !== 'suggested' && action.status !== 'pending' && action.status !== 'failed') {
-      continue;
+  for (const action of automationActions) {
+    const item = mapPersistedAutomationActionToQueueItem(action);
+    if (item) {
+      items.push(item);
     }
-
-    items.push({
-      id: `op-automation-${action.id}`,
-      type: 'automation_action',
-      severity: action.executionMode === 'auto_safe' ? 'attention' : 'normal',
-      title: action.title,
-      description: action.description,
-      vendorId: action.vendorId ?? 'platform',
-      vendorName: action.vendorId ?? 'Platform',
-      relatedOrderId: action.allocationId,
-      relatedShopifyOrderId: null,
-      relatedReturnId: null,
-      relatedRefundId: null,
-      status: action.status,
-      createdAt: action.createdAt,
-      actionLabel: action.executionMode === 'auto_safe' ? 'Review safe action' : 'Review suggestion',
-      destinationPath: '/admin/operations',
-    });
   }
   logDashboardTiming('operations.automation_aggregation', automationAggregationStartedAt);
 
@@ -714,6 +766,26 @@ export async function getAdminOperationsQueue(options: { limit?: number; offset?
   };
   logDashboardTiming('operations.metrics_aggregation', finalAggregationStartedAt);
   return dashboard;
+}
+
+export async function generateAdminOperationsSignals() {
+  const signals = await withDashboardTiming('operations.generate_signals_service', () => evaluateOperationalSignals());
+
+  return {
+    generated: signals.length,
+    signals,
+  };
+}
+
+export async function generateAdminOperationsAutomationActions() {
+  const actions = await withDashboardTiming('operations.generate_automation_actions_service', () =>
+    generateAutomationActionsForSignals(),
+  );
+
+  return {
+    generated: actions.length,
+    actions,
+  };
 }
 
 export async function getAdminOperationsAttentionCenter(): Promise<OperationsAttentionDashboardDto> {

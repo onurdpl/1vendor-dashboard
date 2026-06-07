@@ -225,6 +225,10 @@ describe('dashboard real-mode loading', () => {
     expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
     expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
     expect(services.operations.dashboard).toHaveBeenCalledWith(expect.any(Object));
+    const operationsOptions = services.operations.dashboard.mock.calls[0]?.[0] as { headers?: Record<string, string>; limit?: number } | undefined;
+    expect(operationsOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
+    expect(operationsOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(operationsOptions?.limit).toBe(20);
   });
 
   it('marks deferred dashboard subrequests with deferred headers and small list limits', async () => {
