@@ -11266,6 +11266,85 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 700;
 }
 
+.vendor-profile-billing-form {
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #eff6ff 100%);
+  padding: 14px;
+}
+
+.vendor-profile-billing-form-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.vendor-profile-billing-form-heading h3,
+.vendor-profile-billing-form-heading p {
+  margin: 0;
+}
+
+.vendor-profile-billing-form-heading h3 {
+  color: #1e293b;
+  font-size: 1rem;
+}
+
+.vendor-profile-billing-form-heading p {
+  margin-top: 4px;
+  color: #64748b;
+  font-size: 0.86rem;
+}
+
+.vendor-profile-billing-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.vendor-profile-billing-form-grid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.vendor-profile-billing-form-grid input,
+.vendor-profile-billing-form-grid textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #cbd5e1;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 600;
+  padding: 10px 12px;
+}
+
+.vendor-profile-billing-form-grid textarea {
+  resize: vertical;
+}
+
+.vendor-profile-billing-form-wide {
+  grid-column: 1 / -1;
+}
+
+.vendor-profile-billing-error {
+  margin: 0;
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  font-weight: 700;
+  padding: 10px 12px;
+}
+
 .vendor-profile-support-panel {
   display: flex;
   align-items: center;
@@ -11344,6 +11423,10 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .vendor-profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vendor-profile-billing-form-grid {
     grid-template-columns: 1fr;
   }
 }

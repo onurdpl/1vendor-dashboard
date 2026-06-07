@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
@@ -15,10 +15,10 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getFinanceDashboard } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
-import { getVendorBillingProfile } from '../features/vendors/api';
+import { getVendorBillingProfile, updateVendorBillingProfile } from '../features/vendors/api';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
-import type { SupportTicket, VendorShippingConfig } from '../lib/api/contracts';
+import type { SupportTicket, VendorBillingProfile, VendorBillingProfileInput, VendorShippingConfig } from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
 import { useActionFeedback } from '../lib/ui';
@@ -44,6 +44,86 @@ type ReadinessSection = {
 
 function formatValue(value: string | null | undefined, fallback = 'Not configured') {
   return value && value.trim() ? value.trim() : fallback;
+}
+
+type BillingProfileFormState = {
+  legalCompanyName: string;
+  taxNumber: string;
+  taxOffice: string;
+  billingAddress: string;
+  billingCity: string;
+  billingDistrict: string;
+  authorizedPerson: string;
+  billingEmail: string;
+  billingPhone: string;
+  iban: string;
+  legalEntityType: string;
+};
+
+const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
+  legalCompanyName: '',
+  taxNumber: '',
+  taxOffice: '',
+  billingAddress: '',
+  billingCity: '',
+  billingDistrict: '',
+  authorizedPerson: '',
+  billingEmail: '',
+  billingPhone: '',
+  iban: '',
+  legalEntityType: '',
+};
+
+const billingRequiredFields: Array<{ field: keyof BillingProfileFormState; label: string }> = [
+  { field: 'legalCompanyName', label: 'Legal company name' },
+  { field: 'taxNumber', label: 'Tax number / TCKN' },
+  { field: 'taxOffice', label: 'Tax office' },
+  { field: 'billingAddress', label: 'Billing address' },
+  { field: 'billingCity', label: 'Billing city' },
+  { field: 'billingDistrict', label: 'Billing district' },
+  { field: 'billingEmail', label: 'Billing email' },
+];
+
+function buildBillingProfileFormState(profile: VendorBillingProfile | null): BillingProfileFormState {
+  return {
+    legalCompanyName: profile?.legalCompanyName ?? '',
+    taxNumber: profile?.taxNumber ?? '',
+    taxOffice: profile?.taxOffice ?? '',
+    billingAddress: profile?.billingAddress ?? '',
+    billingCity: profile?.billingCity ?? '',
+    billingDistrict: profile?.billingDistrict ?? '',
+    authorizedPerson: profile?.authorizedPerson ?? '',
+    billingEmail: profile?.billingEmail ?? '',
+    billingPhone: profile?.billingPhone ?? '',
+    iban: profile?.iban ?? '',
+    legalEntityType: profile?.legalEntityType ?? '',
+  };
+}
+
+function normalizeOptionalBillingValue(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function buildBillingProfileInput(form: BillingProfileFormState): VendorBillingProfileInput {
+  return {
+    legalCompanyName: form.legalCompanyName.trim(),
+    taxNumber: form.taxNumber.trim(),
+    taxOffice: form.taxOffice.trim(),
+    billingAddress: form.billingAddress.trim(),
+    billingCity: form.billingCity.trim(),
+    billingDistrict: form.billingDistrict.trim(),
+    authorizedPerson: normalizeOptionalBillingValue(form.authorizedPerson),
+    billingEmail: form.billingEmail.trim(),
+    billingPhone: normalizeOptionalBillingValue(form.billingPhone),
+    iban: normalizeOptionalBillingValue(form.iban),
+    legalEntityType: normalizeOptionalBillingValue(form.legalEntityType),
+  };
+}
+
+function validateBillingProfileForm(form: BillingProfileFormState) {
+  const missing = billingRequiredFields.find(({ field }) => !form[field].trim());
+  return missing ? `${missing.label} is required for commission invoices.` : null;
 }
 
 function formatBoolean(value: boolean | null | undefined) {
@@ -260,6 +340,10 @@ export function VendorProfilePage() {
   const currentUser = appReadiness.currentUser;
   const isAdmin = currentUser?.role === 'admin';
   const { message, tone, showFeedback } = useActionFeedback();
+  const [billingEditOpen, setBillingEditOpen] = useState(false);
+  const [billingForm, setBillingForm] = useState<BillingProfileFormState>(EMPTY_BILLING_PROFILE_FORM);
+  const [billingFormError, setBillingFormError] = useState<string | null>(null);
+  const [savedBillingProfile, setSavedBillingProfile] = useState<VendorBillingProfile | null>(null);
 
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
@@ -284,7 +368,7 @@ export function VendorProfilePage() {
 
   const shippingConfig = shippingQuery.data;
   const financeProfile = financeQuery.data?.profile ?? null;
-  const billingProfile = billingQuery.data ?? null;
+  const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const supportTickets = useMemo(
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
@@ -497,6 +581,23 @@ export function VendorProfilePage() {
     },
   );
 
+  const billingMutation = useMutationAction(
+    (input: VendorBillingProfileInput) => updateVendorBillingProfile(currentVendor.vendorId, input),
+    {
+      onSuccess: async (savedProfile) => {
+        queryClient.setQueryData(queryKeys.vendorProfile.billingProfile(currentVendor.vendorId), savedProfile);
+        setSavedBillingProfile(savedProfile);
+        setBillingEditOpen(false);
+        setBillingFormError(null);
+        setBillingForm(buildBillingProfileFormState(savedProfile));
+        showFeedback('Billing profile saved.', 'success');
+      },
+      onError: (error) => {
+        setBillingFormError(error instanceof Error ? error.message : 'Unable to save billing profile.');
+      },
+    },
+  );
+
   function handleContactSupport() {
     if (existingProfileTicket) {
       showFeedback('Existing vendor profile support ticket opened.', 'info');
@@ -508,6 +609,36 @@ export function VendorProfilePage() {
 
   function handleOpenReadinessAction(path: string) {
     navigate(path);
+  }
+
+  function handleOpenBillingEdit() {
+    setBillingForm(buildBillingProfileFormState(billingProfile));
+    setBillingFormError(null);
+    setBillingEditOpen(true);
+  }
+
+  function handleCancelBillingEdit() {
+    setBillingForm(buildBillingProfileFormState(billingProfile));
+    setBillingFormError(null);
+    setBillingEditOpen(false);
+    billingMutation.reset();
+  }
+
+  function handleBillingFormChange(field: keyof BillingProfileFormState, value: string) {
+    setBillingForm((current) => ({ ...current, [field]: value }));
+    if (billingFormError) {
+      setBillingFormError(null);
+    }
+  }
+
+  function handleBillingProfileSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validationError = validateBillingProfileForm(billingForm);
+    if (validationError) {
+      setBillingFormError(validationError);
+      return;
+    }
+    void billingMutation.mutateAsync(buildBillingProfileInput(billingForm));
   }
 
   return (
@@ -596,10 +727,24 @@ export function VendorProfilePage() {
                 <MetadataRow label="Tax number / TCKN" value={formatValue(billingProfile?.taxNumber)} />
                 <MetadataRow label="Tax office" value={formatValue(billingProfile?.taxOffice)} />
                 <MetadataRow label="Billing address" value={formatValue(billingProfile?.billingAddress)} />
+                <MetadataRow label="Billing city" value={formatValue(billingProfile?.billingCity)} />
+                <MetadataRow label="Billing district" value={formatValue(billingProfile?.billingDistrict)} />
                 <MetadataRow label="Authorized person" value={formatValue(billingProfile?.authorizedPerson)} />
                 <MetadataRow label="Billing email" value={formatValue(billingProfile?.billingEmail)} />
                 <MetadataRow label="Billing phone" value={formatValue(billingProfile?.billingPhone)} />
                 <MetadataRow label="IBAN" value={formatValue(billingProfile?.iban)} />
+                <MetadataRow label="Legal entity type" value={formatValue(billingProfile?.legalEntityType)} />
+                <MetadataRow label="Logo İşbaşı customer code" value={formatValue(billingProfile?.logoIsbasiCustomerCode)} />
+                <MetadataRow label="Logo İşbaşı customer id" value={formatValue(billingProfile?.logoIsbasiCustomerId)} />
+                <MetadataRow
+                  label="Logo İşbaşı e-invoice eligible"
+                  value={billingProfile?.logoIsbasiEinvoiceEligible === null || billingProfile?.logoIsbasiEinvoiceEligible === undefined
+                    ? 'Not configured'
+                    : billingProfile.logoIsbasiEinvoiceEligible
+                      ? 'Yes'
+                      : 'No'}
+                />
+                <MetadataRow label="Logo İşbaşı last checked" value={formatValue(billingProfile?.logoIsbasiLastCheckedAt)} />
               </MetadataGroup>
               <div className="vendor-profile-integration-list">
                 <div>
@@ -609,10 +754,139 @@ export function VendorProfilePage() {
                   </StatusBadge>
                 </div>
                 <div>
-                  <span>Admin edit UI</span>
-                  <StatusBadge tone="neutral">Deferred</StatusBadge>
+                  <span>Admin edit</span>
+                  <button
+                    type="button"
+                    className="button button-secondary button-compact"
+                    onClick={handleOpenBillingEdit}
+                    disabled={billingMutation.isPending}
+                  >
+                    Edit billing profile
+                  </button>
                 </div>
               </div>
+              {billingEditOpen ? (
+                <form className="vendor-profile-billing-form" onSubmit={handleBillingProfileSubmit} noValidate>
+                  <div className="vendor-profile-billing-form-heading">
+                    <div>
+                      <h3>Billing / Legal Profile edit</h3>
+                      <p>Required fields are used for future Sporgym commission invoices.</p>
+                    </div>
+                    <StatusBadge tone="info">Admin edit</StatusBadge>
+                  </div>
+                  <div className="vendor-profile-billing-form-grid">
+                    <label>
+                      Legal company name
+                      <input
+                        type="text"
+                        value={billingForm.legalCompanyName}
+                        onChange={(event) => handleBillingFormChange('legalCompanyName', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Tax number / TCKN
+                      <input
+                        type="text"
+                        value={billingForm.taxNumber}
+                        onChange={(event) => handleBillingFormChange('taxNumber', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Tax office
+                      <input
+                        type="text"
+                        value={billingForm.taxOffice}
+                        onChange={(event) => handleBillingFormChange('taxOffice', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Billing email
+                      <input
+                        type="email"
+                        value={billingForm.billingEmail}
+                        onChange={(event) => handleBillingFormChange('billingEmail', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Billing city
+                      <input
+                        type="text"
+                        value={billingForm.billingCity}
+                        onChange={(event) => handleBillingFormChange('billingCity', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Billing district
+                      <input
+                        type="text"
+                        value={billingForm.billingDistrict}
+                        onChange={(event) => handleBillingFormChange('billingDistrict', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Authorized person
+                      <input
+                        type="text"
+                        value={billingForm.authorizedPerson}
+                        onChange={(event) => handleBillingFormChange('authorizedPerson', event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Billing phone
+                      <input
+                        type="tel"
+                        value={billingForm.billingPhone}
+                        onChange={(event) => handleBillingFormChange('billingPhone', event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      IBAN
+                      <input
+                        type="text"
+                        value={billingForm.iban}
+                        onChange={(event) => handleBillingFormChange('iban', event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Legal entity type
+                      <input
+                        type="text"
+                        value={billingForm.legalEntityType}
+                        onChange={(event) => handleBillingFormChange('legalEntityType', event.target.value)}
+                      />
+                    </label>
+                    <label className="vendor-profile-billing-form-wide">
+                      Billing address
+                      <textarea
+                        value={billingForm.billingAddress}
+                        onChange={(event) => handleBillingFormChange('billingAddress', event.target.value)}
+                        required
+                        rows={3}
+                      />
+                    </label>
+                  </div>
+                  {billingFormError ? <p className="vendor-profile-billing-error" role="alert">{billingFormError}</p> : null}
+                  <OperationalActionGroup>
+                    <button type="submit" className="button button-primary" disabled={billingMutation.isPending}>
+                      {billingMutation.isPending ? 'Saving billing profile...' : 'Save billing profile'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={handleCancelBillingEdit}
+                      disabled={billingMutation.isPending}
+                    >
+                      Cancel
+                    </button>
+                  </OperationalActionGroup>
+                </form>
+              ) : null}
             </>
           )}
         </OperationalSection>

@@ -1295,10 +1295,17 @@ export type VendorBillingProfile = {
   taxNumber: string | null;
   taxOffice: string | null;
   billingAddress: string | null;
+  billingCity: string | null;
+  billingDistrict: string | null;
   iban: string | null;
   authorizedPerson: string | null;
   billingEmail: string | null;
   billingPhone: string | null;
+  legalEntityType: string | null;
+  logoIsbasiCustomerCode: string | null;
+  logoIsbasiCustomerId: string | null;
+  logoIsbasiEinvoiceEligible: boolean | null;
+  logoIsbasiLastCheckedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -1308,10 +1315,17 @@ export type VendorBillingProfileInput = {
   taxNumber: string;
   taxOffice: string;
   billingAddress: string;
+  billingCity?: string | null;
+  billingDistrict?: string | null;
   iban?: string | null;
   authorizedPerson?: string | null;
   billingEmail?: string | null;
   billingPhone?: string | null;
+  legalEntityType?: string | null;
+  logoIsbasiCustomerCode?: string | null;
+  logoIsbasiCustomerId?: string | null;
+  logoIsbasiEinvoiceEligible?: boolean | null;
+  logoIsbasiLastCheckedAt?: string | null;
 };
 
 export type PayoutCalculation = {

@@ -43,10 +43,17 @@ function billingProfileRecord(overrides: Record<string, unknown> = {}) {
     taxNumber: '1111111111',
     taxOffice: 'Kadikoy',
     billingAddress: 'Billing address 1',
+    billingCity: null,
+    billingDistrict: null,
     iban: null,
     authorizedPerson: null,
     billingEmail: null,
     billingPhone: null,
+    legalEntityType: null,
+    logoIsbasiCustomerCode: null,
+    logoIsbasiCustomerId: null,
+    logoIsbasiEinvoiceEligible: null,
+    logoIsbasiLastCheckedAt: null,
     createdAt: now,
     updatedAt: now,
     ...overrides,
@@ -136,10 +143,17 @@ describe('vendor billing profile service', () => {
       taxNumber: '1111111111',
       taxOffice: 'Kadikoy',
       billingAddress: 'Billing address 1',
+      billingCity: null,
+      billingDistrict: null,
       iban: 'TR000000000000000000000000',
       authorizedPerson: null,
       billingEmail: 'billing@example.test',
       billingPhone: null,
+      legalEntityType: null,
+      logoIsbasiCustomerCode: null,
+      logoIsbasiCustomerId: null,
+      logoIsbasiEinvoiceEligible: null,
+      logoIsbasiLastCheckedAt: null,
       createdAt: '2026-06-05T10:00:00.000Z',
       updatedAt: '2026-06-05T10:00:00.000Z',
     });
@@ -153,10 +167,17 @@ describe('vendor billing profile service', () => {
         taxNumber: '2222222222',
         taxOffice: 'Besiktas',
         billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
         iban: null,
         authorizedPerson: 'Owner',
         billingEmail: 'billing@sporjinal.test',
         billingPhone: '+905551112233',
+        legalEntityType: 'limited_company',
+        logoIsbasiCustomerCode: 'LOGO-CODE-1',
+        logoIsbasiCustomerId: 'LOGO-ID-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: now,
       }),
     );
 
@@ -165,10 +186,17 @@ describe('vendor billing profile service', () => {
       taxNumber: ' 2222222222 ',
       taxOffice: ' Besiktas ',
       billingAddress: ' Address 2 ',
+      billingCity: ' Istanbul ',
+      billingDistrict: ' Kadikoy ',
       iban: '',
       authorizedPerson: ' Owner ',
       billingEmail: ' billing@sporjinal.test ',
       billingPhone: ' +905551112233 ',
+      legalEntityType: ' limited_company ',
+      logoIsbasiCustomerCode: ' LOGO-CODE-1 ',
+      logoIsbasiCustomerId: ' LOGO-ID-1 ',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-05T10:00:00.000Z',
     });
 
     expect(prismaMock.vendorBillingProfile.upsert).toHaveBeenCalledWith({
@@ -178,10 +206,17 @@ describe('vendor billing profile service', () => {
         taxNumber: '2222222222',
         taxOffice: 'Besiktas',
         billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
         iban: null,
         authorizedPerson: 'Owner',
         billingEmail: 'billing@sporjinal.test',
         billingPhone: '+905551112233',
+        legalEntityType: 'limited_company',
+        logoIsbasiCustomerCode: 'LOGO-CODE-1',
+        logoIsbasiCustomerId: 'LOGO-ID-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: new Date('2026-06-05T10:00:00.000Z'),
       },
       create: {
         vendorId: 'sporjinal',
@@ -189,10 +224,17 @@ describe('vendor billing profile service', () => {
         taxNumber: '2222222222',
         taxOffice: 'Besiktas',
         billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
         iban: null,
         authorizedPerson: 'Owner',
         billingEmail: 'billing@sporjinal.test',
         billingPhone: '+905551112233',
+        legalEntityType: 'limited_company',
+        logoIsbasiCustomerCode: 'LOGO-CODE-1',
+        logoIsbasiCustomerId: 'LOGO-ID-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: new Date('2026-06-05T10:00:00.000Z'),
       },
     });
     expect(result).toEqual(
@@ -201,6 +243,8 @@ describe('vendor billing profile service', () => {
         taxNumber: '2222222222',
         taxOffice: 'Besiktas',
         billingAddress: 'Address 2',
+        billingCity: 'Istanbul',
+        billingDistrict: 'Kadikoy',
       }),
     );
   });
@@ -225,6 +269,28 @@ describe('vendor billing profile service', () => {
         billingEmail: { value: 'billing@example.test' },
       }),
     ).toThrow('billingEmail must be a string or null.');
+  });
+
+  it('rejects invalid Logo İşbaşı optional values', () => {
+    expect(() =>
+      __vendorBillingProfileTesting.normalizeBillingProfileInput({
+        legalCompanyName: 'Company',
+        taxNumber: '1',
+        taxOffice: 'Office',
+        billingAddress: 'Address',
+        logoIsbasiEinvoiceEligible: 'yes',
+      }),
+    ).toThrow('logoIsbasiEinvoiceEligible must be a boolean or null.');
+
+    expect(() =>
+      __vendorBillingProfileTesting.normalizeBillingProfileInput({
+        legalCompanyName: 'Company',
+        taxNumber: '1',
+        taxOffice: 'Office',
+        billingAddress: 'Address',
+        logoIsbasiLastCheckedAt: 'not-a-date',
+      }),
+    ).toThrow('logoIsbasiLastCheckedAt must be an ISO date string or null.');
   });
 
   it('fails closed when the vendor does not exist', async () => {

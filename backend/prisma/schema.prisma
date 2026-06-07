@@ -345,19 +345,26 @@ model VendorFinancialProfile {
 }
 
 model VendorBillingProfile {
-  id               String   @id @default(cuid())
-  vendorId         String   @unique
-  legalCompanyName String?
-  taxNumber        String?
-  taxOffice        String?
-  billingAddress   String?
-  iban             String?
-  authorizedPerson String?
-  billingEmail     String?
-  billingPhone     String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-  vendor           Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  id                         String    @id @default(cuid())
+  vendorId                   String    @unique
+  legalCompanyName           String?
+  taxNumber                  String?
+  taxOffice                  String?
+  billingAddress             String?
+  billingCity                String?
+  billingDistrict            String?
+  iban                       String?
+  authorizedPerson           String?
+  billingEmail               String?
+  billingPhone               String?
+  legalEntityType            String?
+  logoIsbasiCustomerCode     String?
+  logoIsbasiCustomerId       String?
+  logoIsbasiEinvoiceEligible Boolean?
+  logoIsbasiLastCheckedAt    DateTime?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+  vendor                     Vendor    @relation(fields: [vendorId], references: [id], onDelete: Cascade)
 
   @@index([vendorId])
 }

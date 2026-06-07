@@ -4,12 +4,19 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
-import type { FinanceDashboard, SupportTicket, VendorBillingProfile, VendorShippingConfig } from '../lib/api/contracts';
+import type {
+  FinanceDashboard,
+  SupportTicket,
+  VendorBillingProfile,
+  VendorBillingProfileInput,
+  VendorShippingConfig,
+} from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>();
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
+const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const createSupportTicketMock = vi.fn();
@@ -35,6 +42,8 @@ vi.mock('../features/vendors/api', async () => {
   return {
     ...actual,
     getVendorBillingProfile: () => getVendorBillingProfileMock(),
+    updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
+      updateVendorBillingProfileMock(vendorId, input),
   };
 });
 
@@ -117,10 +126,17 @@ const billingProfile: VendorBillingProfile = {
   taxNumber: '1111111111',
   taxOffice: 'Kadikoy',
   billingAddress: 'Billing Street 1, Istanbul',
+  billingCity: 'Istanbul',
+  billingDistrict: 'Atasehir',
   iban: 'TR000000000000000000000000',
   authorizedPerson: 'Demo Authorized Person',
   billingEmail: 'billing@example.test',
   billingPhone: '+905551112233',
+  legalEntityType: 'limited_company',
+  logoIsbasiCustomerCode: 'LOGO-CODE-1',
+  logoIsbasiCustomerId: 'LOGO-ID-1',
+  logoIsbasiEinvoiceEligible: true,
+  logoIsbasiLastCheckedAt: '2026-06-07T10:00:00Z',
   createdAt: '2026-06-05T10:00:00Z',
   updatedAt: '2026-06-05T10:00:00Z',
 };
@@ -210,6 +226,16 @@ describe('VendorProfilePage', () => {
     getFinanceDashboardMock.mockResolvedValue(financeDashboard);
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
+    updateVendorBillingProfileMock.mockReset();
+    updateVendorBillingProfileMock.mockImplementation((vendorId, input) =>
+      Promise.resolve({
+        ...billingProfile,
+        ...input,
+        id: `billing-${vendorId}`,
+        vendorId,
+        updatedAt: '2026-06-07T12:00:00Z',
+      }),
+    );
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);
     listAdminSupportTicketsMock.mockReset();
@@ -359,7 +385,7 @@ describe('VendorProfilePage', () => {
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
 
-  it('shows admin-owned profile badges without rendering a broad editor', async () => {
+  it('shows admin-owned profile badges without rendering a broad editor before billing edit is opened', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -388,7 +414,7 @@ describe('VendorProfilePage', () => {
     expect(createSupportTicketMock).not.toHaveBeenCalled();
   });
 
-  it('renders admin billing profile values read-only when configured', async () => {
+  it('renders admin billing profile values read-only with an edit action when configured', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
       name: 'Demo Admin',
@@ -409,9 +435,129 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('1111111111')).toBeInTheDocument();
     expect(screen.getByText('Kadikoy')).toBeInTheDocument();
     expect(screen.getByText('Billing Street 1, Istanbul')).toBeInTheDocument();
+    expect(screen.getByText('Istanbul')).toBeInTheDocument();
+    expect(screen.getByText('limited_company')).toBeInTheDocument();
+    expect(screen.getByText('LOGO-CODE-1')).toBeInTheDocument();
+    expect(screen.getByText('LOGO-ID-1')).toBeInTheDocument();
     expect(screen.getByText('billing@example.test')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Yes')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Configured')).toBeInTheDocument();
-    expect(within(billingSection!).getByText('Deferred')).toBeInTheDocument();
+    expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer code')).not.toBeInTheDocument();
+  });
+
+  it('opens the admin billing profile edit form and validates required fields', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Edit billing profile' }));
+
+    expect(within(billingSection!).getByRole('heading', { name: 'Billing / Legal Profile edit' })).toBeInTheDocument();
+    expect(within(billingSection!).getByLabelText('Legal company name')).toHaveValue('Demo Vendor A Ltd.');
+    expect(within(billingSection!).getByLabelText('Tax number / TCKN')).toHaveValue('1111111111');
+    expect(within(billingSection!).getByLabelText('Billing city')).toHaveValue('Istanbul');
+    expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer id')).not.toBeInTheDocument();
+
+    await userEvent.clear(within(billingSection!).getByLabelText('Billing email'));
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Save billing profile' }));
+
+    expect(await within(billingSection!).findByRole('alert')).toHaveTextContent('Billing email is required for commission invoices.');
+    expect(updateVendorBillingProfileMock).not.toHaveBeenCalled();
+  });
+
+  it('saves edited admin billing profile fields through the existing API', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+    updateVendorBillingProfileMock.mockImplementation((vendorId, input) =>
+      Promise.resolve({
+        ...billingProfile,
+        ...input,
+        vendorId,
+        legalCompanyName: input.legalCompanyName,
+        taxNumber: input.taxNumber,
+        taxOffice: input.taxOffice,
+        billingAddress: input.billingAddress,
+        billingCity: input.billingCity ?? null,
+        billingDistrict: input.billingDistrict ?? null,
+        billingEmail: input.billingEmail ?? null,
+        logoIsbasiCustomerCode: billingProfile.logoIsbasiCustomerCode,
+        logoIsbasiCustomerId: billingProfile.logoIsbasiCustomerId,
+        logoIsbasiEinvoiceEligible: billingProfile.logoIsbasiEinvoiceEligible,
+        logoIsbasiLastCheckedAt: billingProfile.logoIsbasiLastCheckedAt,
+        updatedAt: '2026-06-07T12:00:00Z',
+      }),
+    );
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Edit billing profile' }));
+    await userEvent.clear(within(billingSection!).getByLabelText('Legal company name'));
+    await userEvent.type(within(billingSection!).getByLabelText('Legal company name'), 'Updated Vendor Legal A.S.');
+    await userEvent.clear(within(billingSection!).getByLabelText('Tax number / TCKN'));
+    await userEvent.type(within(billingSection!).getByLabelText('Tax number / TCKN'), '2222222222');
+    await userEvent.clear(within(billingSection!).getByLabelText('Billing city'));
+    await userEvent.type(within(billingSection!).getByLabelText('Billing city'), 'Izmir');
+    await userEvent.clear(within(billingSection!).getByLabelText('Billing district'));
+    await userEvent.type(within(billingSection!).getByLabelText('Billing district'), 'Konak');
+    await userEvent.clear(within(billingSection!).getByLabelText('Billing email'));
+    await userEvent.type(within(billingSection!).getByLabelText('Billing email'), 'updated-billing@example.test');
+
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Save billing profile' }));
+
+    await waitFor(() =>
+      expect(updateVendorBillingProfileMock).toHaveBeenCalledWith(
+        'demo-vendor-a',
+        expect.objectContaining({
+          legalCompanyName: 'Updated Vendor Legal A.S.',
+          taxNumber: '2222222222',
+          taxOffice: 'Kadikoy',
+          billingAddress: 'Billing Street 1, Istanbul',
+          billingCity: 'Izmir',
+          billingDistrict: 'Konak',
+          billingEmail: 'updated-billing@example.test',
+          legalEntityType: 'limited_company',
+        }),
+      ),
+    );
+    expect(await within(billingSection!).findByText('Updated Vendor Legal A.S.')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('2222222222')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Izmir')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Konak')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('updated-billing@example.test')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('LOGO-CODE-1')).toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('heading', { name: 'Billing / Legal Profile edit' })).not.toBeInTheDocument();
   });
 });
