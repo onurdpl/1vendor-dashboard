@@ -1832,6 +1832,10 @@ export const runtimeServices = {
         items,
       });
     },
+    summary: (options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realOperations.getAdminOperationsQueueSummary({ signal: options.signal, headers: options.headers })
+        : Promise.resolve(buildOperationsQueueSummary(listMockAdminOperationsQueue())),
     attention: (options: ReadRequestOptions = {}) =>
       runtimeConfig.apiMode === 'real'
         ? realOperations.getAdminOperationsAttention({ signal: options.signal })

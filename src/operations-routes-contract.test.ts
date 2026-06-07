@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerOperationsRoutes } from '../backend/src/modules/operations/operations.routes.js';
 
 const getAdminOperationsQueueMock = vi.hoisted(() => vi.fn());
+const getAdminOperationsQueueSummaryMock = vi.hoisted(() => vi.fn());
 const getAdminOperationsAttentionCenterMock = vi.hoisted(() => vi.fn());
 const generateAdminOperationsSignalsMock = vi.hoisted(() => vi.fn());
 const generateAdminOperationsAutomationActionsMock = vi.hoisted(() => vi.fn());
@@ -10,6 +11,7 @@ vi.mock('../backend/src/modules/operations/operations.service.js', () => ({
   generateAdminOperationsAutomationActions: generateAdminOperationsAutomationActionsMock,
   generateAdminOperationsSignals: generateAdminOperationsSignalsMock,
   getAdminOperationsQueue: getAdminOperationsQueueMock,
+  getAdminOperationsQueueSummary: getAdminOperationsQueueSummaryMock,
   getAdminOperationsAttentionCenter: getAdminOperationsAttentionCenterMock,
 }));
 
@@ -26,6 +28,7 @@ vi.mock('../backend/src/modules/auth/auth.middleware.js', () => ({
 describe('operations route contract', () => {
   beforeEach(() => {
     getAdminOperationsQueueMock.mockReset();
+    getAdminOperationsQueueSummaryMock.mockReset();
     getAdminOperationsAttentionCenterMock.mockReset();
     generateAdminOperationsSignalsMock.mockReset();
     generateAdminOperationsAutomationActionsMock.mockReset();
@@ -68,6 +71,31 @@ describe('operations route contract', () => {
     const allowed = await gets.get('/admin/operations')?.({ authUser: { role: 'admin' }, query: {} }, {});
 
     expect(allowed).toEqual({ summary: { total: 0 }, items: [] });
+  });
+
+  it('serves summary-only operations counts to admins without loading queue items', async () => {
+    getAdminOperationsQueueSummaryMock.mockResolvedValueOnce({ total: 7, critical: 1 });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; query?: unknown }, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+    const reply = {
+      code: vi.fn((status: number) => ({
+        send: vi.fn((body: unknown) => ({ status, body })),
+      })),
+    };
+
+    registerOperationsRoutes(app as never, {} as never);
+    const blocked = await gets.get('/admin/operations/summary')?.({ authUser: { role: 'vendor' } }, reply);
+    const allowed = await gets.get('/admin/operations/summary')?.({ authUser: { role: 'admin' }, query: { limit: 20 } }, reply);
+
+    expect(blocked).toEqual({ status: 403, body: { message: 'Forbidden' } });
+    expect(allowed).toEqual({ total: 7, critical: 1 });
+    expect(getAdminOperationsQueueSummaryMock).toHaveBeenCalledTimes(1);
+    expect(getAdminOperationsQueueMock).not.toHaveBeenCalled();
   });
 
   it('keeps operations generation explicit and admin-only', async () => {

@@ -53,6 +53,19 @@ function createRuntimeServices() {
     },
     operations: {
       list: vi.fn().mockResolvedValue([]),
+      summary: vi.fn().mockResolvedValue({
+        total: 0,
+        critical: 0,
+        warning: 0,
+        attention: 0,
+        normal: 0,
+        pendingReassignment: 0,
+        vendorBlocked: 0,
+        awaitingShipment: 0,
+        refundAttention: 0,
+        operationalSignals: 0,
+        automationActions: 0,
+      }),
       dashboard: vi.fn().mockResolvedValue({
         summary: {
           total: 0,
@@ -212,23 +225,24 @@ describe('dashboard real-mode loading', () => {
     expect(services.finance.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
-    expect(services.notifications.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.notifications.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).toHaveBeenCalledWith(expect.any(Object));
   });
 
-  it('uses explicit global admin notification scope for admin dashboard aggregation', async () => {
+  it('uses summary-only operations and no notification request for admin dashboard aggregation', async () => {
     const { getDashboardDeferredOverview, services } = await importDashboardWithServices(undefined, 'admin');
 
     await getDashboardDeferredOverview('vendor-query-key');
 
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
-    expect(services.notifications.list).toHaveBeenCalledWith(null, expect.any(Object));
+    expect(services.notifications.list).not.toHaveBeenCalled();
     expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
-    expect(services.operations.dashboard).toHaveBeenCalledWith(expect.any(Object));
-    const operationsOptions = services.operations.dashboard.mock.calls[0]?.[0] as { headers?: Record<string, string>; limit?: number } | undefined;
+    expect(services.operations.dashboard).not.toHaveBeenCalled();
+    expect(services.operations.summary).toHaveBeenCalledWith(expect.any(Object));
+    const operationsOptions = services.operations.summary.mock.calls[0]?.[0] as { headers?: Record<string, string>; limit?: number } | undefined;
     expect(operationsOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(operationsOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
-    expect(operationsOptions?.limit).toBe(20);
+    expect(operationsOptions?.limit).toBeUndefined();
   });
 
   it('marks deferred dashboard subrequests with deferred headers and small list limits', async () => {
@@ -306,21 +320,18 @@ describe('dashboard real-mode loading', () => {
 
   it('uses the existing operations summary total instead of limited operation items', async () => {
     const { getDashboardDeferredOverview } = await importDashboardWithServices((runtimeServices) => {
-      runtimeServices.operations.dashboard.mockResolvedValue({
-        summary: {
-          total: 37,
-          critical: 0,
-          warning: 0,
-          attention: 0,
-          normal: 37,
-          pendingReassignment: 0,
-          vendorBlocked: 0,
-          awaitingShipment: 0,
-          refundAttention: 0,
-          operationalSignals: 0,
-          automationActions: 0,
-        },
-        items: [],
+      runtimeServices.operations.summary.mockResolvedValue({
+        total: 37,
+        critical: 0,
+        warning: 0,
+        attention: 0,
+        normal: 37,
+        pendingReassignment: 0,
+        vendorBlocked: 0,
+        awaitingShipment: 0,
+        refundAttention: 0,
+        operationalSignals: 0,
+        automationActions: 0,
       });
     }, 'admin');
 

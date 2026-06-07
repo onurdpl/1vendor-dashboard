@@ -28,6 +28,7 @@ describe('backend request timing instrumentation', () => {
     expect(shouldLogRequestTiming('GET /notifications')).toBe(true);
     expect(shouldLogRequestTiming('GET /signals')).toBe(true);
     expect(shouldLogRequestTiming('GET /admin/diagnostics/reconciliation')).toBe(true);
+    expect(shouldLogRequestTiming('GET /admin/operations/summary')).toBe(true);
     expect(shouldLogRequestTiming('GET /admin/operations/attention')).toBe(true);
     expect(shouldLogRequestTiming('POST /shipments/:id/retry')).toBe(false);
     expect(shouldLogRequestTiming('POST /webhooks/shopify/orders-create')).toBe(false);

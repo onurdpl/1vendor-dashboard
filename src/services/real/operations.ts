@@ -2,19 +2,7 @@ import { apiClient } from '../../lib/api-client';
 import type { OperationsAttentionDashboard, OperationsQueueDashboard, OperationsQueueItem } from '../../lib/api/contracts';
 
 type OperationsResponseDto = {
-  summary: {
-    total: number;
-    critical: number;
-    warning: number;
-    attention: number;
-    normal: number;
-    pendingReassignment: number;
-    vendorBlocked: number;
-    awaitingShipment: number;
-    refundAttention: number;
-    operationalSignals?: number;
-    automationActions?: number;
-  };
+  summary: OperationsSummaryDto;
   items: Array<{
     id: string;
     type: OperationsQueueItem['type'];
@@ -32,6 +20,20 @@ type OperationsResponseDto = {
     actionLabel: string;
     destinationPath: string | null;
   }>;
+};
+
+type OperationsSummaryDto = {
+  total: number;
+  critical: number;
+  warning: number;
+  attention: number;
+  normal: number;
+  pendingReassignment: number;
+  vendorBlocked: number;
+  awaitingShipment: number;
+  refundAttention: number;
+  operationalSignals?: number;
+  automationActions?: number;
 };
 
 function mapSeverity(severity: OperationsResponseDto['items'][number]['severity']): OperationsQueueItem['severity'] {
@@ -55,13 +57,17 @@ function buildOperationsQueuePath(options: { limit?: number; offset?: number }) 
   return `/admin/operations${params.size ? `?${params.toString()}` : ''}`;
 }
 
+function mapOperationsSummary(summary: OperationsSummaryDto): OperationsQueueDashboard['summary'] {
+  return {
+    ...summary,
+    operationalSignals: summary.operationalSignals ?? 0,
+    automationActions: summary.automationActions ?? 0,
+  };
+}
+
 function mapOperationsResponse(response: OperationsResponseDto): OperationsQueueDashboard {
   return {
-    summary: {
-      ...response.summary,
-      operationalSignals: response.summary.operationalSignals ?? 0,
-      automationActions: response.summary.automationActions ?? 0,
-    },
+    summary: mapOperationsSummary(response.summary),
     items: response.items.map((item) => ({
       id: item.id,
       type: item.type,
@@ -87,6 +93,15 @@ export async function getAdminOperationsQueueDashboard(options: { limit?: number
   });
 
   return mapOperationsResponse(response);
+}
+
+export async function getAdminOperationsQueueSummary(options: { signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueDashboard['summary']> {
+  const response = await apiClient.get<OperationsSummaryDto>('/admin/operations/summary', {
+    signal: options.signal,
+    headers: options.headers,
+  });
+
+  return mapOperationsSummary(response);
 }
 
 export async function listAdminOperationsQueue(options: { limit?: number; offset?: number; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<OperationsQueueItem[]> {

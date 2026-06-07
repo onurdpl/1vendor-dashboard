@@ -9,7 +9,6 @@ import type {
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
   DashboardNormalizedOperationalCounts,
-  DashboardNotificationSummary,
   DashboardOperationalSummary,
   DashboardOverview,
   DashboardObservabilitySummary,
@@ -26,7 +25,6 @@ export const DASHBOARD_DEFERRED_LOAD_HEADER = 'X-Dashboard-Deferred-Load';
 const SLOW_DASHBOARD_OPERATION_MS = 300;
 const SLOW_DASHBOARD_TOTAL_MS = 1000;
 const DASHBOARD_DEFERRED_LIST_LIMIT = 10;
-const DASHBOARD_DEFERRED_OPERATIONS_LIMIT = 20;
 
 type DashboardLoadPhase = 'initial' | 'deferred';
 type DashboardRequestOptions = { signal?: AbortSignal; requestId?: string };
@@ -472,7 +470,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     const currentVendorId = resolveVendorId(vendorId);
     const currentVendor = getCurrentVendorContext();
     const currentUser = getCurrentUser();
-    const notificationScopeVendorId = currentUser?.role === 'admin' ? null : currentVendorId;
     const dashboardSummaryReadOptions = {
       signal: options.signal,
       headers: createDashboardRequestHeaders(requestId, 'deferred'),
@@ -481,12 +478,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
       signal: options.signal,
       headers: createDashboardRequestHeaders(requestId, 'deferred'),
       limit: DASHBOARD_DEFERRED_LIST_LIMIT,
-      offset: 0,
-    };
-    const dashboardOperationsReadOptions = {
-      signal: options.signal,
-      headers: createDashboardRequestHeaders(requestId, 'deferred'),
-      limit: DASHBOARD_DEFERRED_OPERATIONS_LIMIT,
       offset: 0,
     };
 
@@ -498,13 +489,9 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
       withDashboardClientTiming(requestId, 'client.finance.dashboard', () => runtimeServices.finance.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
       currentUser?.role === 'admin'
-        ? withDashboardClientTiming(requestId, 'client.operations.dashboard', () => runtimeServices.operations.dashboard(dashboardOperationsReadOptions), 'deferred')
+        ? withDashboardClientTiming(requestId, 'client.operations.summary', () => runtimeServices.operations.summary(dashboardSummaryReadOptions), 'deferred')
         : Promise.resolve(null),
       withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
-      withDashboardClientTiming(requestId, 'client.notifications.list', () =>
-        runtimeServices.notifications.list(notificationScopeVendorId, dashboardReadOptions),
-        'deferred',
-      ),
       currentUser?.role === 'admin'
         ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
         : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
@@ -529,7 +516,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
       automationResult,
       operationsResult,
       signalsResult,
-      notificationsResult,
       supportResult,
       diagnosticsResult,
       observabilityResult,
@@ -560,7 +546,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     partialDataWarnings.push('Automation issue groups are temporarily unavailable.');
   }
 
-  const operationsDashboard = operationsResult.status === 'fulfilled' ? operationsResult.value : null;
+  const operationsSummary = operationsResult.status === 'fulfilled' ? operationsResult.value : null;
   if (operationsResult.status === 'rejected') {
     partialDataWarnings.push('Operations queue context is temporarily unavailable.');
   }
@@ -568,11 +554,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   const signals = signalsResult.status === 'fulfilled' ? signalsResult.value : null;
   if (signalsResult.status === 'rejected') {
     partialDataWarnings.push('Operational rules signals are temporarily unavailable.');
-  }
-
-  const notifications = notificationsResult.status === 'fulfilled' ? notificationsResult.value : null;
-  if (notificationsResult.status === 'rejected') {
-    partialDataWarnings.push('In-app notifications are temporarily unavailable.');
   }
 
   const supportTickets = supportResult.status === 'fulfilled' ? supportResult.value : null;
@@ -608,8 +589,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   });
   const automationIssueGroupCount = normalizedOperationalCounts.groupedAutomationIssueCount ?? 0;
   const payoutEstimate = finance?.summary.payoutEstimate ?? '—';
-  const operations = operationsDashboard?.items ?? null;
-  const operationsTotal = operationsDashboard?.summary.total ?? null;
+  const operationsTotal = operationsSummary?.total ?? null;
   const blockedSummaryDescription = dashboardSummary
     ? 'Full blocked count comes from dashboard summary.'
     : 'Full blocked count is temporarily unavailable.';
@@ -646,10 +626,8 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   let workspaceStatus = dashboardSummary
     ? `${currentVendor.vendorName} has ${totalOrderCount} vendor allocation${totalOrderCount === 1 ? '' : 's'}, ${awaitingShipmentCount} awaiting shipment, ${blockedCount} blocked, ${activeRefundCount} return/refund attention item${activeRefundCount === 1 ? '' : 's'}, and ${automationIssueGroupCount} grouped automation/rules issues. ${formatRecentListDescription(orders.length, 'order allocation')} ${formatRecentListDescription(returns.length, 'return record')}`
     : `${currentVendor.vendorName} dashboard summary counts are unavailable; ${formatRecentListDescription(orders.length, 'order allocation')} ${formatRecentListDescription(returns.length, 'return record')}`;
-  if (currentUser?.role === 'admin' && operations) {
-    workspaceStatus = operationsTotal === null
-      ? `${workspaceStatus} Admin queue is showing latest ${operations.length} operational item${operations.length === 1 ? '' : 's'} for the selected vendor scope.`
-      : `${workspaceStatus} Admin queue currently tracks ${operationsTotal} operational item${operationsTotal === 1 ? '' : 's'} for the selected vendor scope.`;
+  if (currentUser?.role === 'admin' && operationsSummary) {
+    workspaceStatus = `${workspaceStatus} Admin queue currently tracks ${operationsTotal} operational item${operationsTotal === 1 ? '' : 's'} for the selected vendor scope.`;
   }
 
   const diagnosticsSummary: DashboardDiagnosticsSummary | undefined =
@@ -682,19 +660,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
           note: observability.notes[0] ?? 'No active observability note.',
         }
       : undefined;
-  const notificationSummary: DashboardNotificationSummary | undefined = notifications
-    ? {
-        unread: notifications.summary.unread,
-        highPriority: notifications.summary.critical + notifications.summary.high,
-        latest: notifications.notifications.slice(0, 3).map((notification) => ({
-          id: notification.id,
-          title: notification.title,
-          severity: notification.severity,
-          status: notification.status,
-        })),
-      }
-    : undefined;
-
   logDashboardClientTiming({
     requestId,
     step: 'dashboard.metrics_aggregation',
@@ -722,7 +687,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     financeSnapshot,
     diagnosticsSummary,
     observabilitySummary,
-    notificationSummary,
     partialDataWarnings,
   };
   } catch (error) {

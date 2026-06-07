@@ -333,7 +333,7 @@ function readSignalSeverityCount(
   return groups.find((group) => group.severity === severity)?._count._all ?? 0;
 }
 
-async function getAdminOperationsQueueSummary(): Promise<OperationsQueueDashboardDto['summary']> {
+export async function getAdminOperationsQueueSummary(): Promise<OperationsQueueDashboardDto['summary']> {
   const [
     pendingReassignment,
     vendorBlocked,

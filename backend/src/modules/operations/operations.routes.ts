@@ -7,6 +7,7 @@ import {
   generateAdminOperationsSignals,
   getAdminOperationsAttentionCenter,
   getAdminOperationsQueue,
+  getAdminOperationsQueueSummary,
 } from './operations.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
 import { withSlowEndpointTiming } from '../../lib/performance.js';
@@ -28,6 +29,22 @@ export function registerOperationsRoutes(app: FastifyInstance, env: AppEnv) {
 
       return withDashboardRouteTiming('GET /admin/operations', () =>
         withSlowEndpointTiming('GET /admin/operations', () => getAdminOperationsQueue(resolvePagination(request.query))),
+      );
+    },
+  );
+
+  app.get(
+    '/admin/operations/summary',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return withDashboardRouteTiming('GET /admin/operations/summary', () =>
+        withSlowEndpointTiming('GET /admin/operations/summary', () => getAdminOperationsQueueSummary()),
       );
     },
   );

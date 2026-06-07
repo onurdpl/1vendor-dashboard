@@ -47,6 +47,7 @@ const {
   generateAdminOperationsAutomationActions,
   generateAdminOperationsSignals,
   getAdminOperationsQueue,
+  getAdminOperationsQueueSummary,
 } = await import('../backend/src/modules/operations/operations.service.js');
 
 describe('admin operations summary counts', () => {
@@ -188,6 +189,40 @@ describe('admin operations summary counts', () => {
     expect(prismaMock.vendorAllocation.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 20 }));
     expect(prismaMock.operationalSignal.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
     expect(prismaMock.automationAction.findMany).toHaveBeenCalledWith(expect.objectContaining({ take: 100 }));
+    expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
+  });
+
+  it('returns summary-only counts without loading queue item rows', async () => {
+    prismaMock.vendorAllocation.count
+      .mockResolvedValueOnce(1)
+      .mockResolvedValueOnce(2)
+      .mockResolvedValueOnce(3);
+    prismaMock.returnRecord.count.mockResolvedValueOnce(4);
+    prismaMock.operationalSignal.groupBy.mockResolvedValueOnce([]);
+    prismaMock.automationAction.count
+      .mockResolvedValueOnce(5)
+      .mockResolvedValueOnce(2);
+
+    const summary = await getAdminOperationsQueueSummary();
+
+    expect(summary).toEqual({
+      total: 15,
+      critical: 1,
+      warning: 2,
+      attention: 9,
+      normal: 3,
+      pendingReassignment: 1,
+      vendorBlocked: 2,
+      awaitingShipment: 3,
+      refundAttention: 4,
+      operationalSignals: 0,
+      automationActions: 5,
+    });
+    expect(prismaMock.vendorAllocation.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.findMany).not.toHaveBeenCalled();
     expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
     expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
   });
