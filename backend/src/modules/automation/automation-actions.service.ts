@@ -14,7 +14,7 @@ import {
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
 import { createOperationalJob, serializeOperationalJob } from '../operational-jobs/operational-jobs.service.js';
-import { listOperationalSignals } from '../rules/rules.service.js';
+import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 import type {
   AutomationActionDto,
@@ -255,10 +255,7 @@ async function upsertAutomationNotification(action: AutomationAction) {
 export async function generateAutomationActionsForSignals(options: {
   includeNotifications?: boolean;
 } = {}) {
-  await listOperationalSignals({
-    includeInternal: true,
-    limit: 100,
-  });
+  await withDashboardTiming('signals.evaluate_operational_signals_service', () => evaluateOperationalSignals());
   const signals = await prisma.operationalSignal.findMany({
     where: {
       status: OperationalSignalStatus.ACTIVE,
@@ -324,12 +321,6 @@ export async function listAutomationActions(options: {
   status?: AutomationActionStatus;
   includeNotifications?: boolean;
 } = {}): Promise<AutomationActionsResponseDto> {
-  await withDashboardTiming('automation_actions.generate_for_signals_service', () =>
-    generateAutomationActionsForSignals({
-      includeNotifications: options.includeNotifications,
-    }),
-  );
-
   const actions = await withDashboardTiming('automation_actions.action_fetch', () => prisma.automationAction.findMany({
     where: {
       status: options.status ?? {
@@ -352,6 +343,21 @@ export async function listAutomationActions(options: {
   };
   logDashboardTiming('automation_actions.metrics_aggregation', aggregationStartedAt);
   return response;
+}
+
+export async function generateAutomationActionsForUser(options: {
+  status?: AutomationActionStatus;
+  includeNotifications?: boolean;
+} = {}): Promise<AutomationActionsResponseDto> {
+  await withDashboardTiming('automation_actions.generate_for_signals_service', () =>
+    generateAutomationActionsForSignals({
+      includeNotifications: options.includeNotifications,
+    }),
+  );
+
+  return listAutomationActions({
+    status: options.status,
+  });
 }
 
 export async function executeAutomationAction(input: {

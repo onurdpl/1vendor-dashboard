@@ -3,7 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
-import { listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
+import { evaluateOperationalSignalsForUser, listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
 import type { OperationalSignalLifecycleAction } from './rules.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
@@ -41,6 +41,41 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
       return listOperationalSignals({
         includeInternal: true,
       });
+    },
+  );
+
+  app.post(
+    '/signals/evaluate',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request) => {
+      const includeInternal = request.authUser?.role === 'admin';
+
+      return withDashboardRouteTiming('POST /signals/evaluate', () =>
+        evaluateOperationalSignalsForUser({
+          vendorId: request.vendorContext?.vendorId,
+          includeInternal,
+        }),
+      );
+    },
+  );
+
+  app.post(
+    '/admin/signals/evaluate',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      return withDashboardRouteTiming('POST /admin/signals/evaluate', () =>
+        evaluateOperationalSignalsForUser({
+          includeInternal: true,
+        }),
+      );
     },
   );
 

@@ -18,7 +18,7 @@ const prismaMock = vi.hoisted(() => ({
   },
 }));
 
-const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
+const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const createOperationalJobMock = vi.hoisted(() => vi.fn());
 const serializeOperationalJobMock = vi.hoisted(() => vi.fn());
 
@@ -27,7 +27,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
-  listOperationalSignals: listOperationalSignalsMock,
+  evaluateOperationalSignals: evaluateOperationalSignalsMock,
 }));
 
 vi.mock('../backend/src/modules/operational-jobs/operational-jobs.service.js', () => ({
@@ -38,6 +38,7 @@ vi.mock('../backend/src/modules/operational-jobs/operational-jobs.service.js', (
 const {
   executeAutomationAction,
   generateAutomationActionsForSignals,
+  generateAutomationActionsForUser,
   listAutomationActions,
 } = await import('../backend/src/modules/automation/automation-actions.service.js');
 
@@ -100,11 +101,11 @@ describe('automation action foundation', () => {
     prismaMock.notificationIntent.upsert.mockReset();
     prismaMock.operationalJob.findUnique.mockReset();
     prismaMock.operationalSignal.findMany.mockReset();
-    listOperationalSignalsMock.mockReset();
+    evaluateOperationalSignalsMock.mockReset();
     createOperationalJobMock.mockReset();
     serializeOperationalJobMock.mockReset();
 
-    listOperationalSignalsMock.mockResolvedValue({ summary: { total: 0 }, signals: [] });
+    evaluateOperationalSignalsMock.mockResolvedValue([]);
     prismaMock.operationalSignal.findMany.mockResolvedValue([]);
     prismaMock.automationAction.findMany.mockResolvedValue([]);
     prismaMock.automationAction.upsert.mockImplementation(async ({ create, update, where }) =>
@@ -169,7 +170,7 @@ describe('automation action foundation', () => {
     );
   });
 
-  it('lists actions and creates in-app automation notifications when requested', async () => {
+  it('lists existing actions without evaluating signals or creating notifications', async () => {
     prismaMock.operationalSignal.findMany.mockResolvedValue([
       buildSignal({ id: 'signal-shipping', ruleKey: 'shipping_cost.missing_after_fulfillment', sourceArea: 'SHIPPING_COST' }),
     ]);
@@ -189,6 +190,27 @@ describe('automation action foundation', () => {
       type: 'suggest_shipping_cost_attachment',
       vendorId: 'sporjinal',
     });
+    expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(prismaMock.automationAction.upsert).not.toHaveBeenCalled();
+    expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('creates in-app automation notifications only through explicit generation', async () => {
+    prismaMock.operationalSignal.findMany.mockResolvedValue([
+      buildSignal({ id: 'signal-shipping', ruleKey: 'shipping_cost.missing_after_fulfillment', sourceArea: 'SHIPPING_COST' }),
+    ]);
+    prismaMock.automationAction.findMany.mockResolvedValue([
+      buildAction({
+        id: 'automation-suggest_shipping_cost_attachment-signal-shipping',
+        type: 'SUGGEST_SHIPPING_COST_ATTACHMENT',
+        executionMode: 'MANUAL',
+      }),
+    ]);
+
+    const response = await generateAutomationActionsForUser({ includeNotifications: true });
+
+    expect(response.summary.total).toBe(1);
+    expect(evaluateOperationalSignalsMock).toHaveBeenCalledTimes(1);
     expect(prismaMock.notificationIntent.upsert).toHaveBeenCalled();
   });
 

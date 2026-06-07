@@ -9,7 +9,7 @@ import {
   type OperationalSignal,
 } from '@prisma/client';
 import { prisma } from '../../db/prisma.js';
-import { listOperationalSignals } from '../rules/rules.service.js';
+import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import type { AuthRole } from '../auth/auth.types.js';
 import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import { runEmailDeliveryForIntent, type EmailDeliveryConfig } from './email-delivery.service.js';
@@ -229,7 +229,6 @@ async function generateNotificationsForSignals(options: { role: AuthRole; vendor
     await generateAutomationActionsForSignals({
       includeNotifications: true,
     });
-    await listOperationalSignals({ includeInternal: true });
     const signals = await prisma.operationalSignal.findMany({
       where: {
         status: 'ACTIVE',
@@ -261,10 +260,9 @@ async function generateNotificationsForSignals(options: { role: AuthRole; vendor
     return;
   }
 
-  await listOperationalSignals({
-    vendorId: options.vendorId,
-    includeInternal: false,
-  });
+  await withDashboardTiming('signals.evaluate_operational_signals_service', () =>
+    evaluateOperationalSignals({ vendorId: options.vendorId }),
+  );
   const signals = await prisma.operationalSignal.findMany({
     where: {
       status: 'ACTIVE',

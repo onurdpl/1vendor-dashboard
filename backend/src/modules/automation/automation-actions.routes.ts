@@ -4,6 +4,7 @@ import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import {
   executeAutomationAction,
+  generateAutomationActionsForUser,
   listAutomationActions,
   automationActionEnums,
 } from './automation-actions.service.js';
@@ -11,6 +12,13 @@ import type { AutomationActionExecutionMode } from './automation-actions.types.j
 
 function isExecutionMode(value: unknown): value is AutomationActionExecutionMode {
   return value === 'execute_safe' || value === 'mark_handled' || value === 'skip' || value === 'cancel';
+}
+
+function resolveActionStatus(query: unknown) {
+  const rawStatus = (query as { status?: string } | undefined)?.status?.trim().toUpperCase();
+  return rawStatus && rawStatus in automationActionEnums.status
+    ? automationActionEnums.status[rawStatus as keyof typeof automationActionEnums.status]
+    : undefined;
 }
 
 export function registerAutomationActionRoutes(app: FastifyInstance, env: AppEnv) {
@@ -27,13 +35,27 @@ export function registerAutomationActionRoutes(app: FastifyInstance, env: AppEnv
         return reply.code(403).send({ message: 'Forbidden' });
       }
 
-      const query = request.query as { status?: string } | undefined;
-      const rawStatus = query?.status?.trim().toUpperCase();
-      const status = rawStatus && rawStatus in automationActionEnums.status
-        ? automationActionEnums.status[rawStatus as keyof typeof automationActionEnums.status]
-        : undefined;
+      const status = resolveActionStatus(request.query);
 
       return listAutomationActions({
+        status,
+      });
+    },
+  );
+
+  app.post(
+    '/admin/automation-actions/generate',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      const status = resolveActionStatus(request.query);
+
+      return generateAutomationActionsForUser({
         status,
         includeNotifications: true,
       });

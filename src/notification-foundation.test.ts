@@ -15,7 +15,7 @@ const prismaMock = vi.hoisted(() => ({
   },
 }));
 
-const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
+const evaluateOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const generateAutomationActionsForSignalsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/db/prisma.js', () => ({
@@ -23,7 +23,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 }));
 
 vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
-  listOperationalSignals: listOperationalSignalsMock,
+  evaluateOperationalSignals: evaluateOperationalSignalsMock,
 }));
 
 vi.mock('../backend/src/modules/automation/automation-actions.service.js', () => ({
@@ -96,10 +96,10 @@ describe('notification foundation', () => {
     prismaMock.notificationIntent.upsert.mockReset();
     prismaMock.operationalSignal.findMany.mockReset();
     prismaMock.userVendorAccess.findMany.mockReset();
-    listOperationalSignalsMock.mockReset();
+    evaluateOperationalSignalsMock.mockReset();
     generateAutomationActionsForSignalsMock.mockReset();
 
-    listOperationalSignalsMock.mockResolvedValue({ summary: { total: 0 }, signals: [] });
+    evaluateOperationalSignalsMock.mockResolvedValue([]);
     generateAutomationActionsForSignalsMock.mockResolvedValue([]);
     prismaMock.notificationIntent.findMany.mockResolvedValue([]);
     prismaMock.userVendorAccess.findMany.mockResolvedValue([]);
@@ -137,7 +137,7 @@ describe('notification foundation', () => {
       id: 'notif-existing',
       recipientRole: 'vendor',
     });
-    expect(listOperationalSignalsMock).not.toHaveBeenCalled();
+    expect(evaluateOperationalSignalsMock).not.toHaveBeenCalled();
     expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
     expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalled();

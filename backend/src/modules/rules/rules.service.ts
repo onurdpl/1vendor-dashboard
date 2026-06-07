@@ -668,9 +668,6 @@ export async function listOperationalSignals(options: {
   status?: OperationalSignalStatus;
   limit?: number;
 } = {}): Promise<OperationalSignalsResponseDto> {
-  await withDashboardTiming('signals.evaluate_operational_signals_service', () =>
-    evaluateOperationalSignals({ vendorId: options.vendorId }),
-  );
   const signals = await withDashboardTiming('signals.operational_signal_fetch', () => prisma.operationalSignal.findMany({
     where: {
       vendorId: options.vendorId ?? undefined,
@@ -700,6 +697,19 @@ export async function listOperationalSignals(options: {
   };
   logDashboardTiming('signals.metrics_aggregation', aggregationStartedAt);
   return response;
+}
+
+export async function evaluateOperationalSignalsForUser(options: {
+  vendorId?: string | null;
+  includeInternal?: boolean;
+  status?: OperationalSignalStatus;
+  limit?: number;
+} = {}): Promise<OperationalSignalsResponseDto> {
+  await withDashboardTiming('signals.evaluate_operational_signals_service', () =>
+    evaluateOperationalSignals({ vendorId: options.vendorId }),
+  );
+
+  return listOperationalSignals(options);
 }
 
 export async function updateOperationalSignalStatus(

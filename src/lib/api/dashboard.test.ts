@@ -240,16 +240,20 @@ describe('dashboard real-mode loading', () => {
     const returnOptions = services.returns.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const financeOptions = services.finance.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const summaryOptions = services.dashboard.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const signalOptions = services.signals.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
 
     expect(orderOptions?.headers?.['X-Request-Id']).toEqual(expect.any(String));
     expect(orderOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(orderOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
     expect(summaryOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(summaryOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
+    expect(signalOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
+    expect(signalOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
     expect(summaryOptions?.limit).toBeUndefined();
     expect(orderOptions?.limit).toBe(10);
     expect(returnOptions?.limit).toBe(10);
     expect(financeOptions?.limit).toBe(10);
+    expect(signalOptions?.limit).toBe(10);
   });
 
   it('uses dashboard summary counts for primary metrics instead of limited arrays', async () => {
