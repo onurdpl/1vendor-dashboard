@@ -1335,7 +1335,9 @@ export type LogoIsbasiLoginProbeResult = {
   writesPerformed: false;
   externalApiCallAttempted: boolean;
   missingEnv?: string[];
+  missingSessionFields?: string[];
   httpStatus?: number;
+  errorCode?: string;
   login?: {
     ok?: boolean;
     isError?: boolean;

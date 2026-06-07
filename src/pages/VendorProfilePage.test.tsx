@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
+import { ApiError } from '../lib/api/errors';
 import type {
   FinanceDashboard,
   LogoIsbasiCommissionInvoicePreviewInput,
@@ -652,6 +653,9 @@ describe('VendorProfilePage', () => {
     expect(await within(billingSection!).findByText('Logo login diagnostics result')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Status')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Success')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('HTTP status')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('200').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getByText('Login succeeded.')).toBeInTheDocument();
     expect(within(billingSection!).getByText('accessTokenPresent')).toBeInTheDocument();
     expect(within(billingSection!).getAllByText('Yes').length).toBeGreaterThan(0);
     expect(within(billingSection!).getByText('responseKeys')).toBeInTheDocument();
@@ -660,6 +664,107 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText('abcdef...1234')).toBeInTheDocument();
     expect(within(billingSection!).queryByText(/full-secret-token/)).not.toBeInTheDocument();
     expect(within(billingSection!).queryByText(/api-key-secret|password-secret|integration-user@example/i)).not.toBeInTheDocument();
+  });
+
+  it('renders a persistent Logo login failure panel with missing env names only', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+    probeLogoIsbasiLoginMock.mockRejectedValue(
+      new ApiError('Backend request failed.', 'server', {
+        status: 422,
+        details: {
+          ok: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'login_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          httpStatus: 422,
+          errorCode: 'LOGO_ISBASI_ENV_MISSING',
+          message: 'Required Logo İşbaşı environment variables are missing.',
+          missingEnv: ['LOGO_ISBASI_API_KEY', 'LOGO_ISBASI_PASSWORD'],
+        },
+      }),
+    );
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Test Logo Login' }));
+
+    expect(await within(billingSection!).findByText('Logo login diagnostics result')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Failed')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('LOGO_ISBASI_ENV_MISSING')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Required Logo İşbaşı environment variables are missing.')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('LOGO_ISBASI_API_KEY, LOGO_ISBASI_PASSWORD')).toBeInTheDocument();
+    expect(within(billingSection!).queryByText(/api-key-secret|password-secret|integration-user@example|full-secret-token/i)).not.toBeInTheDocument();
+  });
+
+  it('renders non-2xx Logo backend JSON errors instead of a transient-only message', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+    probeLogoIsbasiLoginMock.mockRejectedValue(
+      new ApiError('Backend request failed.', 'server', {
+        status: 502,
+        details: {
+          ok: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'login_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: 401,
+          errorCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
+          message: 'Logo İşbaşı login request failed.',
+          login: {
+            responseKeys: ['code', 'message'],
+            accessTokenPresent: false,
+            tenantIdPresent: false,
+            userIdPresent: false,
+            userEmailPresent: false,
+            userNamePresent: false,
+            code: '401',
+            message: 'Invalid integration credentials.',
+          },
+        },
+      }),
+    );
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Test Logo Login' }));
+
+    expect(await within(billingSection!).findByText('LOGO_ISBASI_UPSTREAM_NON_2XX')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Invalid integration credentials.')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('401').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getByText('code, message')).toBeInTheDocument();
   });
 
   it('opens the Logo commission e-Fatura preview form and validates required amount', async () => {

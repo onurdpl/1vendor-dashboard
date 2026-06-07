@@ -102,6 +102,7 @@ function createRegisteredRoutes(envOverrides: Record<string, unknown> = {}) {
 
 describe('Logo İşbaşı client and commission invoice preview', () => {
   beforeEach(() => {
+    vi.restoreAllMocks();
     vi.clearAllMocks();
     process.env.ADMIN_PROBES_ENABLED = 'true';
     getVendorBillingProfileMock.mockResolvedValue(vendorBillingProfile);
@@ -158,6 +159,118 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
     expect(JSON.stringify(result)).not.toContain('password-secret');
     expect(JSON.stringify(result)).not.toContain('api-key-secret');
+  });
+
+  it('returns a controlled invalid base URL response from the login probe', async () => {
+    const { posts } = createRegisteredRoutes({ LOGO_ISBASI_BASE_URL: 'not a url' });
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/login')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'LOGO_ISBASI_BASE_URL_INVALID',
+        message: 'LOGO_ISBASI_BASE_URL must be a valid URL.',
+        missingEnv: ['LOGO_ISBASI_BASE_URL'],
+      }),
+    );
+  });
+
+  it('returns sanitized Logo API non-2xx response details', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ code: '401', message: 'Invalid credentials password=secret-password' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/login')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(502);
+    expect(fetchMock).toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
+        message: 'Logo İşbaşı login request failed.',
+        httpStatus: 401,
+        login: expect.objectContaining({
+          code: '401',
+          message: 'Invalid credentials password=[redacted]',
+          accessTokenPresent: false,
+          tenantIdPresent: false,
+        }),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('secret-password');
+  });
+
+  it('returns controlled JSON parse failure diagnostics', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('not json', {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/login')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'LOGO_ISBASI_JSON_PARSE_FAILED',
+        message: 'Logo İşbaşı login returned a non-JSON response.',
+        httpStatus: 200,
+      }),
+    );
+  });
+
+  it('returns controlled missing session field diagnostics', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ data: { accessToken: 'abcdef1234567890' } }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/login')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(422);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'LOGO_ISBASI_SESSION_FIELDS_MISSING',
+        message: 'Logo İşbaşı login response is missing required session fields.',
+        missingSessionFields: ['tenantId'],
+        login: expect.objectContaining({
+          accessTokenPresent: true,
+          tenantIdPresent: false,
+          tokenPreview: 'abcdef...7890',
+        }),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('abcdef1234567890');
   });
 
   it('sanitizes login responses without exposing credentials or full token', () => {

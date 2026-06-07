@@ -8,6 +8,13 @@ export type LogoIsbasiClientConfig = {
   fetchImpl?: FetchLike;
 };
 
+export type LogoIsbasiLoginRawResult = {
+  status: number;
+  ok: boolean;
+  body: unknown;
+  jsonParseFailed: boolean;
+};
+
 export type LogoIsbasiSessionExtraction = {
   accessToken: string | null;
   tenantId: string | null;
@@ -141,7 +148,7 @@ export class LogoIsbasiClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
-  async login() {
+  async login(): Promise<LogoIsbasiLoginRawResult> {
     const baseUrl = this.config.baseUrl.replace(/\/+$/, '');
     const response = await this.fetchImpl(`${baseUrl}/api/v1.0/user/integrationLogin`, {
       method: 'POST',
@@ -157,10 +164,12 @@ export class LogoIsbasiClient {
 
     const rawText = await response.text();
     let body: unknown = null;
+    let jsonParseFailed = false;
     if (rawText) {
       try {
         body = JSON.parse(rawText);
       } catch {
+        jsonParseFailed = true;
         body = { message: 'Logo İşbaşı login returned a non-JSON response.' };
       }
     }
@@ -169,6 +178,7 @@ export class LogoIsbasiClient {
       status: response.status,
       ok: response.ok,
       body,
+      jsonParseFailed,
     };
   }
 }

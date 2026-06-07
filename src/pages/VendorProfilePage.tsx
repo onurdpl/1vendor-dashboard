@@ -23,6 +23,7 @@ import {
 } from '../features/vendors/api';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
+import { ApiError } from '../lib/api/errors';
 import type {
   LogoIsbasiCommissionInvoicePreviewResult,
   LogoIsbasiLoginProbeResult,
@@ -180,6 +181,36 @@ function formatLogoBoolean(value: boolean | undefined) {
   return value ? 'Yes' : 'No';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isLogoLoginProbeResult(value: unknown): value is LogoIsbasiLoginProbeResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'login_probe';
+}
+
+function buildLogoLoginFailureResult(error: unknown): LogoIsbasiLoginProbeResult {
+  if (error instanceof ApiError && isLogoLoginProbeResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'login_probe',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_LOGIN_PROBE_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
 function formatBoolean(value: boolean | null | undefined) {
   return value ? 'Yes' : 'No';
 }
@@ -196,10 +227,6 @@ function formatShippingMode(value: string | null | undefined) {
     return 'Fixed deduction';
   }
   return 'Disabled';
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function readMetadataString(config: VendorShippingConfig | null, keys: string[]) {
@@ -665,7 +692,7 @@ export function VendorProfilePage() {
         showFeedback('Logo İşbaşı login probe completed.', 'success');
       },
       onError: (error) => {
-        showFeedback(error instanceof Error ? error.message : 'Logo İşbaşı login probe failed.', 'error');
+        setLogoLoginResult(buildLogoLoginFailureResult(error));
       },
     },
   );
@@ -681,6 +708,7 @@ export function VendorProfilePage() {
       }),
     {
       onSuccess: (result) => {
+        setLogoLoginResult(null);
         setLogoPreviewResult(result);
         showFeedback('Commission e-Fatura preview generated.', 'success');
       },
@@ -745,9 +773,11 @@ export function VendorProfilePage() {
     event.preventDefault();
     const validationError = validateLogoCommissionPreviewForm(logoPreviewForm);
     if (validationError) {
+      setLogoLoginResult(null);
       setLogoPreviewFormError(validationError);
       return;
     }
+    setLogoLoginResult(null);
     void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
 
@@ -880,7 +910,11 @@ export function VendorProfilePage() {
                     <button
                       type="button"
                       className="button button-secondary button-compact"
-                      onClick={() => void logoLoginMutation.mutateAsync(undefined).catch(() => undefined)}
+                      onClick={() => {
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        void logoLoginMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
                       disabled={logoLoginMutation.isPending}
                     >
                       {logoLoginMutation.isPending ? 'Testing Logo login...' : 'Test Logo Login'}
@@ -889,6 +923,7 @@ export function VendorProfilePage() {
                       type="button"
                       className="button button-secondary button-compact"
                       onClick={() => {
+                        setLogoLoginResult(null);
                         setLogoPreviewOpen((current) => !current);
                         setLogoPreviewFormError(null);
                       }}
@@ -906,6 +941,16 @@ export function VendorProfilePage() {
                       <span>Status</span>
                       <strong>{logoLoginResult.ok ? 'Success' : 'Failed'}</strong>
                     </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoLoginResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    {logoLoginResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoLoginResult.errorCode}</strong>
+                      </div>
+                    ) : null}
                     <div>
                       <span>Code</span>
                       <strong>{logoLoginResult.login?.code ?? 'Not returned'}</strong>
@@ -938,6 +983,18 @@ export function VendorProfilePage() {
                       <span>responseKeys</span>
                       <strong>{logoLoginResult.login?.responseKeys?.join(', ') || 'Not returned'}</strong>
                     </div>
+                    {logoLoginResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoLoginResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                    {logoLoginResult.missingSessionFields?.length ? (
+                      <div>
+                        <span>Missing session fields</span>
+                        <strong>{logoLoginResult.missingSessionFields.join(', ')}</strong>
+                      </div>
+                    ) : null}
                     {logoLoginResult.login?.tokenPreview ? (
                       <div>
                         <span>tokenPreview</span>

@@ -3,7 +3,7 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { getVendorBillingProfile, type VendorBillingProfileDto } from '../vendors/vendor-billing-profile.service.js';
-import { LogoIsbasiClient, sanitizeLoginResponse } from './logo-isbasi.client.js';
+import { extractSessionFromLoginResponse, LogoIsbasiClient, sanitizeLoginResponse } from './logo-isbasi.client.js';
 import {
   buildLogoIsbasiCommissionInvoicePreview,
   sanitizeLogoIsbasiInvoicePreviewPayload,
@@ -43,6 +43,23 @@ function getMissingLogoEnv(env: AppEnv) {
   };
 
   return REQUIRED_LOGO_ENV.filter((key) => !readConfiguredValue(values[key]));
+}
+
+function getLogoBaseUrlError(value: string | undefined | null) {
+  const configured = readConfiguredValue(value);
+  if (!configured) {
+    return 'LOGO_ISBASI_BASE_URL is required.';
+  }
+
+  try {
+    const parsed = new URL(configured);
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+      return 'LOGO_ISBASI_BASE_URL must be an HTTP(S) URL.';
+    }
+    return null;
+  } catch {
+    return 'LOGO_ISBASI_BASE_URL must be a valid URL.';
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,27 +165,77 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           mode: 'login_probe',
           writesPerformed: false,
           externalApiCallAttempted: false,
+          errorCode: 'LOGO_ISBASI_ENV_MISSING',
+          message: 'Required Logo İşbaşı environment variables are missing.',
           missingEnv,
         });
       }
 
-      const client = new LogoIsbasiClient({
-        baseUrl: env.LOGO_ISBASI_BASE_URL!,
-        apiKey: env.LOGO_ISBASI_API_KEY!,
-        username: env.LOGO_ISBASI_USERNAME!,
-        password: env.LOGO_ISBASI_PASSWORD!,
-      });
-      const result = await client.login();
+      const baseUrlError = getLogoBaseUrlError(env.LOGO_ISBASI_BASE_URL);
+      if (baseUrlError) {
+        return reply.code(422).send({
+          ok: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'login_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          errorCode: 'LOGO_ISBASI_BASE_URL_INVALID',
+          message: baseUrlError,
+          missingEnv: ['LOGO_ISBASI_BASE_URL'],
+        });
+      }
 
-      return reply.code(result.ok ? 200 : 502).send({
-        ok: result.ok,
-        provider: 'LOGO_ISBASI',
-        mode: 'login_probe',
-        writesPerformed: false,
-        externalApiCallAttempted: true,
-        httpStatus: result.status,
-        login: sanitizeLoginResponse(result.body),
-      });
+      try {
+        const client = new LogoIsbasiClient({
+          baseUrl: env.LOGO_ISBASI_BASE_URL!,
+          apiKey: env.LOGO_ISBASI_API_KEY!,
+          username: env.LOGO_ISBASI_USERNAME!,
+          password: env.LOGO_ISBASI_PASSWORD!,
+        });
+        const result = await client.login();
+        const login = sanitizeLoginResponse(result.body);
+        const session = extractSessionFromLoginResponse(result.body);
+        const missingSessionFields = session.missing;
+        const sessionComplete = missingSessionFields.length === 0;
+        const ok = result.ok && sessionComplete && !result.jsonParseFailed;
+        const errorCode = result.jsonParseFailed
+          ? 'LOGO_ISBASI_JSON_PARSE_FAILED'
+          : !result.ok
+            ? 'LOGO_ISBASI_UPSTREAM_NON_2XX'
+            : !sessionComplete
+              ? 'LOGO_ISBASI_SESSION_FIELDS_MISSING'
+              : undefined;
+        const message = result.jsonParseFailed
+          ? 'Logo İşbaşı login returned a non-JSON response.'
+          : !result.ok
+            ? 'Logo İşbaşı login request failed.'
+            : !sessionComplete
+              ? 'Logo İşbaşı login response is missing required session fields.'
+              : 'Logo İşbaşı login probe succeeded.';
+
+        return reply.code(ok ? 200 : result.ok ? 422 : 502).send({
+          ok,
+          provider: 'LOGO_ISBASI',
+          mode: 'login_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: result.status,
+          ...(errorCode ? { errorCode } : {}),
+          message,
+          ...(missingSessionFields.length ? { missingSessionFields } : {}),
+          login,
+        });
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'login_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı login.',
+        });
+      }
     },
   );
 
