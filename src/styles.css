@@ -11368,6 +11368,35 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 800;
 }
 
+.vendor-profile-logo-result-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.vendor-profile-logo-result-grid > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #ffffff;
+  padding: 9px 10px;
+}
+
+.vendor-profile-logo-result-grid span {
+  color: #64748b;
+  font-size: 0.74rem;
+  font-weight: 750;
+}
+
+.vendor-profile-logo-result-grid strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #0f172a;
+  font-size: 0.84rem;
+}
+
 .vendor-profile-logo-result pre {
   max-height: 320px;
   overflow: auto;
@@ -11464,6 +11493,10 @@ summary.provider-response-heading::-webkit-details-marker {
   }
 
   .vendor-profile-billing-form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .vendor-profile-logo-result-grid {
     grid-template-columns: 1fr;
   }
 }

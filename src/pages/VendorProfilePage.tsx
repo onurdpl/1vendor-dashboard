@@ -176,6 +176,10 @@ function formatLogoProbeJson(value: LogoIsbasiLoginProbeResult | LogoIsbasiCommi
   return JSON.stringify(value, null, 2);
 }
 
+function formatLogoBoolean(value: boolean | undefined) {
+  return value ? 'Yes' : 'No';
+}
+
 function formatBoolean(value: boolean | null | undefined) {
   return value ? 'Yes' : 'No';
 }
@@ -744,7 +748,7 @@ export function VendorProfilePage() {
       setLogoPreviewFormError(validationError);
       return;
     }
-    void logoPreviewMutation.mutateAsync(logoPreviewForm);
+    void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
 
   return (
@@ -810,7 +814,7 @@ export function VendorProfilePage() {
 
         <OperationalSection
           title="Billing / Legal Profile"
-          description="Seller legal billing identity used later as the Paraşüt contact source for Sporgym commission invoices."
+          description="Seller legal billing identity used later as the billing source for Sporgym commission invoices."
         >
           {!isAdmin ? (
             <MetadataGroup>
@@ -854,7 +858,7 @@ export function VendorProfilePage() {
               </MetadataGroup>
               <div className="vendor-profile-integration-list">
                 <div>
-                  <span>Paraşüt contact source</span>
+                  <span>Commission invoice billing source</span>
                   <StatusBadge tone={billingProfile ? 'success' : 'warning'}>
                     {billingProfile ? 'Configured' : 'Required for commission invoices'}
                   </StatusBadge>
@@ -876,7 +880,7 @@ export function VendorProfilePage() {
                     <button
                       type="button"
                       className="button button-secondary button-compact"
-                      onClick={() => void logoLoginMutation.mutateAsync(undefined)}
+                      onClick={() => void logoLoginMutation.mutateAsync(undefined).catch(() => undefined)}
                       disabled={logoLoginMutation.isPending}
                     >
                       {logoLoginMutation.isPending ? 'Testing Logo login...' : 'Test Logo Login'}
@@ -896,8 +900,51 @@ export function VendorProfilePage() {
               </div>
               {logoLoginResult ? (
                 <div className="vendor-profile-logo-result">
-                  <span>Logo login sanitized result</span>
-                  <pre>{formatLogoProbeJson(logoLoginResult)}</pre>
+                  <span>Logo login diagnostics result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoLoginResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>Code</span>
+                      <strong>{logoLoginResult.login?.code ?? 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>Message</span>
+                      <strong>{logoLoginResult.login?.message ?? logoLoginResult.message ?? 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>accessTokenPresent</span>
+                      <strong>{formatLogoBoolean(logoLoginResult.login?.accessTokenPresent)}</strong>
+                    </div>
+                    <div>
+                      <span>tenantIdPresent</span>
+                      <strong>{formatLogoBoolean(logoLoginResult.login?.tenantIdPresent)}</strong>
+                    </div>
+                    <div>
+                      <span>userIdPresent</span>
+                      <strong>{formatLogoBoolean(logoLoginResult.login?.userIdPresent)}</strong>
+                    </div>
+                    <div>
+                      <span>userEmailPresent</span>
+                      <strong>{formatLogoBoolean(logoLoginResult.login?.userEmailPresent)}</strong>
+                    </div>
+                    <div>
+                      <span>userNamePresent</span>
+                      <strong>{formatLogoBoolean(logoLoginResult.login?.userNamePresent)}</strong>
+                    </div>
+                    <div>
+                      <span>responseKeys</span>
+                      <strong>{logoLoginResult.login?.responseKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                    {logoLoginResult.login?.tokenPreview ? (
+                      <div>
+                        <span>tokenPreview</span>
+                        <strong>{logoLoginResult.login.tokenPreview}</strong>
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
               {logoPreviewOpen ? (

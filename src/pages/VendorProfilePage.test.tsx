@@ -255,6 +255,8 @@ describe('VendorProfilePage', () => {
       externalApiCallAttempted: true,
       httpStatus: 200,
       login: {
+        code: '200',
+        message: 'Login succeeded.',
         responseKeys: ['data', 'ok'],
         accessTokenPresent: true,
         tenantIdPresent: true,
@@ -331,8 +333,11 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Finance readiness means estimate visibility only, not payout or accounting execution.')).toBeInTheDocument();
     expect(screen.getByText('Integration status')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Billing / Legal Profile' })).toBeInTheDocument();
+    expect(screen.getByText('Seller legal billing identity used later as the billing source for Sporgym commission invoices.')).toBeInTheDocument();
     expect(screen.getByText('Admin-managed')).toBeInTheDocument();
     expect(screen.getByText('Not available in vendor view')).toBeInTheDocument();
+    expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
     expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
@@ -498,8 +503,10 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('LOGO-ID-1')).toBeInTheDocument();
     expect(screen.getByText('billing@example.test')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Yes')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Commission invoice billing source')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Configured')).toBeInTheDocument();
     expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument();
+    expect(within(billingSection!).queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
     expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer code')).not.toBeInTheDocument();
   });
@@ -642,10 +649,17 @@ describe('VendorProfilePage', () => {
     await userEvent.click(within(billingSection!).getByRole('button', { name: 'Test Logo Login' }));
 
     await waitFor(() => expect(probeLogoIsbasiLoginMock).toHaveBeenCalled());
-    expect(await within(billingSection!).findByText('Logo login sanitized result')).toBeInTheDocument();
-    expect(within(billingSection!).getByText(/"accessTokenPresent": true/)).toBeInTheDocument();
-    expect(within(billingSection!).getByText(/"tokenPreview": "abcdef\.\.\.1234"/)).toBeInTheDocument();
+    expect(await within(billingSection!).findByText('Logo login diagnostics result')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Status')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Success')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('accessTokenPresent')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('Yes').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getByText('responseKeys')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('data, ok')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('tokenPreview')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('abcdef...1234')).toBeInTheDocument();
     expect(within(billingSection!).queryByText(/full-secret-token/)).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByText(/api-key-secret|password-secret|integration-user@example/i)).not.toBeInTheDocument();
   });
 
   it('opens the Logo commission e-Fatura preview form and validates required amount', async () => {
@@ -726,5 +740,39 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText(/"itemType": 2/)).toBeInTheDocument();
     expect(within(billingSection!).getByText(/11\*\*\*\*\*\*11/)).toBeInTheDocument();
     expect(within(billingSection!).queryByRole('button', { name: /create|send invoice/i })).not.toBeInTheDocument();
+  });
+
+  it('shows Logo commission preview validation errors when billing profile is incomplete', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue({ ...billingProfile, billingCity: null });
+    previewLogoIsbasiCommissionInvoiceMock.mockRejectedValue(
+      new Error('Vendor billing profile is missing required fields: billingCity.'),
+    );
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' }));
+    await userEvent.type(within(billingSection!).getByLabelText('Commission amount'), '100');
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Generate preview' }));
+
+    expect(await within(billingSection!).findByRole('alert')).toHaveTextContent(
+      'Vendor billing profile is missing required fields: billingCity.',
+    );
+    expect(within(billingSection!).queryByText('Commission e-Fatura sanitized preview')).not.toBeInTheDocument();
   });
 });
