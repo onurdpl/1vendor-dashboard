@@ -29,6 +29,7 @@ import type {
   CreateSupportTicketInput,
   DashboardOperationalSummary,
   KargonomiReturnPreview,
+  LogoIsbasiCommissionInvoicePreviewInput,
   OperationsQueueDashboard,
   OperationsQueueItem,
   SupportAnalytics,
@@ -330,6 +331,57 @@ export const runtimeServices = {
             logoIsbasiLastCheckedAt: input.logoIsbasiLastCheckedAt ?? null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
+          }),
+    probeLogoIsbasiLogin: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.probeLogoIsbasiLogin()
+        : Promise.resolve({
+            ok: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'login_probe' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            login: {
+              responseKeys: ['data', 'ok'],
+              accessTokenPresent: true,
+              tenantIdPresent: true,
+              userIdPresent: false,
+              userEmailPresent: false,
+              userNamePresent: false,
+              tokenPreview: 'mock-t...oken',
+            },
+          }),
+    previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.previewLogoIsbasiCommissionInvoice(vendorId, input)
+        : Promise.resolve({
+            ok: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'commission_invoice_preview' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false as const,
+            payload: {
+              invoiceId: 0,
+              customer: {
+                name: 'Mock Vendor Legal Name',
+                tcknVkn: '11*******11',
+              },
+              currency: input.currency,
+              description: input.description,
+              salesInvoiceDetails: [
+                {
+                  quantity: 1,
+                  taxRate: input.vatRate,
+                  price: input.commissionAmount,
+                  productDetail: {
+                    itemType: 2,
+                    name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+                  },
+                },
+              ],
+            },
+            warnings: ['eGovernmentInvoice enum/required fields unknown; omitted in dry-run.'],
           }),
   },
   auth: {

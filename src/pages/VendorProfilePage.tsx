@@ -15,10 +15,22 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { getFinanceDashboard } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
-import { getVendorBillingProfile, updateVendorBillingProfile } from '../features/vendors/api';
+import {
+  getVendorBillingProfile,
+  previewLogoIsbasiCommissionInvoice,
+  probeLogoIsbasiLogin,
+  updateVendorBillingProfile,
+} from '../features/vendors/api';
 import { queryClient } from '../lib/api/queryClient';
 import { queryKeys } from '../lib/api/queryKeys';
-import type { SupportTicket, VendorBillingProfile, VendorBillingProfileInput, VendorShippingConfig } from '../lib/api/contracts';
+import type {
+  LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiLoginProbeResult,
+  SupportTicket,
+  VendorBillingProfile,
+  VendorBillingProfileInput,
+  VendorShippingConfig,
+} from '../lib/api/contracts';
 import { useAppReadiness } from '../lib/appReadiness';
 import { formatShippingProviderName } from '../lib/shippingDisplay';
 import { useActionFeedback } from '../lib/ui';
@@ -60,6 +72,14 @@ type BillingProfileFormState = {
   legalEntityType: string;
 };
 
+type LogoCommissionPreviewFormState = {
+  commissionAmount: string;
+  vatRate: string;
+  currency: string;
+  description: string;
+  sourcePeriod: string;
+};
+
 const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
   legalCompanyName: '',
   taxNumber: '',
@@ -72,6 +92,14 @@ const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
   billingPhone: '',
   iban: '',
   legalEntityType: '',
+};
+
+const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
+  commissionAmount: '',
+  vatRate: '20',
+  currency: 'TL',
+  description: 'Pazaryeri komisyon hizmet bedeli',
+  sourcePeriod: '',
 };
 
 const billingRequiredFields: Array<{ field: keyof BillingProfileFormState; label: string }> = [
@@ -124,6 +152,28 @@ function buildBillingProfileInput(form: BillingProfileFormState): VendorBillingP
 function validateBillingProfileForm(form: BillingProfileFormState) {
   const missing = billingRequiredFields.find(({ field }) => !form[field].trim());
   return missing ? `${missing.label} is required for commission invoices.` : null;
+}
+
+function validateLogoCommissionPreviewForm(form: LogoCommissionPreviewFormState) {
+  const amount = Number(form.commissionAmount);
+  if (!form.commissionAmount.trim() || !Number.isFinite(amount) || amount <= 0) {
+    return 'Commission amount is required.';
+  }
+  if (!form.description.trim()) {
+    return 'Description is required.';
+  }
+  if (!form.currency.trim()) {
+    return 'Currency is required.';
+  }
+  const vatRate = Number(form.vatRate);
+  if (!form.vatRate.trim() || !Number.isFinite(vatRate) || vatRate < 0 || vatRate > 100) {
+    return 'VAT rate must be between 0 and 100.';
+  }
+  return null;
+}
+
+function formatLogoProbeJson(value: LogoIsbasiLoginProbeResult | LogoIsbasiCommissionInvoicePreviewResult) {
+  return JSON.stringify(value, null, 2);
 }
 
 function formatBoolean(value: boolean | null | undefined) {
@@ -344,6 +394,11 @@ export function VendorProfilePage() {
   const [billingForm, setBillingForm] = useState<BillingProfileFormState>(EMPTY_BILLING_PROFILE_FORM);
   const [billingFormError, setBillingFormError] = useState<string | null>(null);
   const [savedBillingProfile, setSavedBillingProfile] = useState<VendorBillingProfile | null>(null);
+  const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
+  const [logoPreviewOpen, setLogoPreviewOpen] = useState(false);
+  const [logoPreviewForm, setLogoPreviewForm] = useState<LogoCommissionPreviewFormState>(DEFAULT_LOGO_COMMISSION_PREVIEW_FORM);
+  const [logoPreviewFormError, setLogoPreviewFormError] = useState<string | null>(null);
+  const [logoPreviewResult, setLogoPreviewResult] = useState<LogoIsbasiCommissionInvoicePreviewResult | null>(null);
 
   const shippingQuery = useQueryResource(
     queryKeys.vendorProfile.shippingConfig(currentVendor.vendorId),
@@ -598,6 +653,40 @@ export function VendorProfilePage() {
     },
   );
 
+  const logoLoginMutation = useMutationAction(
+    () => probeLogoIsbasiLogin(),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(result);
+        showFeedback('Logo İşbaşı login probe completed.', 'success');
+      },
+      onError: (error) => {
+        showFeedback(error instanceof Error ? error.message : 'Logo İşbaşı login probe failed.', 'error');
+      },
+    },
+  );
+
+  const logoPreviewMutation = useMutationAction(
+    (input: LogoCommissionPreviewFormState) =>
+      previewLogoIsbasiCommissionInvoice(currentVendor.vendorId, {
+        commissionAmount: input.commissionAmount.trim(),
+        vatRate: input.vatRate.trim(),
+        currency: input.currency.trim(),
+        description: input.description.trim(),
+        sourcePeriod: input.sourcePeriod.trim() || null,
+      }),
+    {
+      onSuccess: (result) => {
+        setLogoPreviewResult(result);
+        showFeedback('Commission e-Fatura preview generated.', 'success');
+      },
+      onError: (error) => {
+        setLogoPreviewResult(null);
+        setLogoPreviewFormError(error instanceof Error ? error.message : 'Commission e-Fatura preview failed.');
+      },
+    },
+  );
+
   function handleContactSupport() {
     if (existingProfileTicket) {
       showFeedback('Existing vendor profile support ticket opened.', 'info');
@@ -639,6 +728,23 @@ export function VendorProfilePage() {
       return;
     }
     void billingMutation.mutateAsync(buildBillingProfileInput(billingForm));
+  }
+
+  function handleLogoPreviewFormChange(field: keyof LogoCommissionPreviewFormState, value: string) {
+    setLogoPreviewForm((current) => ({ ...current, [field]: value }));
+    if (logoPreviewFormError) {
+      setLogoPreviewFormError(null);
+    }
+  }
+
+  function handleLogoCommissionPreviewSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const validationError = validateLogoCommissionPreviewForm(logoPreviewForm);
+    if (validationError) {
+      setLogoPreviewFormError(validationError);
+      return;
+    }
+    void logoPreviewMutation.mutateAsync(logoPreviewForm);
   }
 
   return (
@@ -764,7 +870,122 @@ export function VendorProfilePage() {
                     Edit billing profile
                   </button>
                 </div>
+                <div>
+                  <span>Logo İşbaşı diagnostics</span>
+                  <div className="vendor-profile-logo-actions">
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => void logoLoginMutation.mutateAsync(undefined)}
+                      disabled={logoLoginMutation.isPending}
+                    >
+                      {logoLoginMutation.isPending ? 'Testing Logo login...' : 'Test Logo Login'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoPreviewOpen((current) => !current);
+                        setLogoPreviewFormError(null);
+                      }}
+                    >
+                      Preview Commission e-Fatura
+                    </button>
+                  </div>
+                </div>
               </div>
+              {logoLoginResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo login sanitized result</span>
+                  <pre>{formatLogoProbeJson(logoLoginResult)}</pre>
+                </div>
+              ) : null}
+              {logoPreviewOpen ? (
+                <form className="vendor-profile-billing-form" onSubmit={handleLogoCommissionPreviewSubmit} noValidate>
+                  <div className="vendor-profile-billing-form-heading">
+                    <div>
+                      <h3>Commission e-Fatura dry-run preview</h3>
+                      <p>Builds a sanitized Logo İşbaşı payload only. It does not create or send an invoice.</p>
+                    </div>
+                    <StatusBadge tone="warning">Dry-run only</StatusBadge>
+                  </div>
+                  <div className="vendor-profile-billing-form-grid">
+                    <label>
+                      Commission amount
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={logoPreviewForm.commissionAmount}
+                        onChange={(event) => handleLogoPreviewFormChange('commissionAmount', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      VAT rate
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={logoPreviewForm.vatRate}
+                        onChange={(event) => handleLogoPreviewFormChange('vatRate', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Currency
+                      <input
+                        type="text"
+                        value={logoPreviewForm.currency}
+                        onChange={(event) => handleLogoPreviewFormChange('currency', event.target.value)}
+                        required
+                      />
+                    </label>
+                    <label>
+                      Source period
+                      <input
+                        type="text"
+                        value={logoPreviewForm.sourcePeriod}
+                        onChange={(event) => handleLogoPreviewFormChange('sourcePeriod', event.target.value)}
+                        placeholder="Optional"
+                      />
+                    </label>
+                    <label className="vendor-profile-billing-form-wide">
+                      Description
+                      <textarea
+                        value={logoPreviewForm.description}
+                        onChange={(event) => handleLogoPreviewFormChange('description', event.target.value)}
+                        required
+                        rows={3}
+                      />
+                    </label>
+                  </div>
+                  {logoPreviewFormError ? <p className="vendor-profile-billing-error" role="alert">{logoPreviewFormError}</p> : null}
+                  <OperationalActionGroup>
+                    <button type="submit" className="button button-primary" disabled={logoPreviewMutation.isPending}>
+                      {logoPreviewMutation.isPending ? 'Generating preview...' : 'Generate preview'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      onClick={() => {
+                        setLogoPreviewOpen(false);
+                        setLogoPreviewFormError(null);
+                      }}
+                      disabled={logoPreviewMutation.isPending}
+                    >
+                      Cancel
+                    </button>
+                  </OperationalActionGroup>
+                </form>
+              ) : null}
+              {logoPreviewResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Commission e-Fatura sanitized preview</span>
+                  <pre>{formatLogoProbeJson(logoPreviewResult)}</pre>
+                </div>
+              ) : null}
               {billingEditOpen ? (
                 <form className="vendor-profile-billing-form" onSubmit={handleBillingProfileSubmit} noValidate>
                   <div className="vendor-profile-billing-form-heading">

@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
 import type {
   FinanceDashboard,
+  LogoIsbasiCommissionInvoicePreviewInput,
+  LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiLoginProbeResult,
   SupportTicket,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -17,6 +20,10 @@ const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>()
 const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
+const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
+const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
+  (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) => Promise<LogoIsbasiCommissionInvoicePreviewResult>
+>();
 const listVendorSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const listAdminSupportTicketsMock = vi.fn<() => Promise<SupportTicket[]>>();
 const createSupportTicketMock = vi.fn();
@@ -44,6 +51,9 @@ vi.mock('../features/vendors/api', async () => {
     getVendorBillingProfile: () => getVendorBillingProfileMock(),
     updateVendorBillingProfile: (vendorId: string, input: VendorBillingProfileInput) =>
       updateVendorBillingProfileMock(vendorId, input),
+    probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
+    previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
+      previewLogoIsbasiCommissionInvoiceMock(vendorId, input),
   };
 });
 
@@ -236,6 +246,53 @@ describe('VendorProfilePage', () => {
         updatedAt: '2026-06-07T12:00:00Z',
       }),
     );
+    probeLogoIsbasiLoginMock.mockReset();
+    probeLogoIsbasiLoginMock.mockResolvedValue({
+      ok: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'login_probe',
+      writesPerformed: false,
+      externalApiCallAttempted: true,
+      httpStatus: 200,
+      login: {
+        responseKeys: ['data', 'ok'],
+        accessTokenPresent: true,
+        tenantIdPresent: true,
+        userIdPresent: false,
+        userEmailPresent: false,
+        userNamePresent: false,
+        tokenPreview: 'abcdef...1234',
+      },
+    });
+    previewLogoIsbasiCommissionInvoiceMock.mockReset();
+    previewLogoIsbasiCommissionInvoiceMock.mockResolvedValue({
+      ok: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'commission_invoice_preview',
+      writesPerformed: false,
+      externalApiCallAttempted: false,
+      payload: {
+        invoiceId: 0,
+        customer: {
+          name: 'Demo Vendor A Ltd.',
+          tcknVkn: '11******11',
+        },
+        currency: 'TL',
+        description: 'Pazaryeri komisyon hizmet bedeli',
+        salesInvoiceDetails: [
+          {
+            quantity: 1,
+            taxRate: '20',
+            price: '100',
+            productDetail: {
+              itemType: 2,
+              name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+            },
+          },
+        ],
+      },
+      warnings: ['eGovernmentInvoice enum/required fields unknown; omitted in dry-run.'],
+    });
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);
     listAdminSupportTicketsMock.mockReset();
@@ -559,5 +616,115 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText('updated-billing@example.test')).toBeInTheDocument();
     expect(within(billingSection!).getByText('LOGO-CODE-1')).toBeInTheDocument();
     expect(within(billingSection!).queryByRole('heading', { name: 'Billing / Legal Profile edit' })).not.toBeInTheDocument();
+  });
+
+  it('runs the Logo İşbaşı login probe and displays sanitized fields only', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Test Logo Login' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Test Logo Login' }));
+
+    await waitFor(() => expect(probeLogoIsbasiLoginMock).toHaveBeenCalled());
+    expect(await within(billingSection!).findByText('Logo login sanitized result')).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/"accessTokenPresent": true/)).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/"tokenPreview": "abcdef\.\.\.1234"/)).toBeInTheDocument();
+    expect(within(billingSection!).queryByText(/full-secret-token/)).not.toBeInTheDocument();
+  });
+
+  it('opens the Logo commission e-Fatura preview form and validates required amount', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' }));
+
+    expect(within(billingSection!).getByRole('heading', { name: 'Commission e-Fatura dry-run preview' })).toBeInTheDocument();
+    expect(within(billingSection!).getByLabelText('VAT rate')).toHaveValue(20);
+    expect(within(billingSection!).getByLabelText('Currency')).toHaveValue('TL');
+    expect(within(billingSection!).getByLabelText('Description')).toHaveValue('Pazaryeri komisyon hizmet bedeli');
+
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Generate preview' }));
+
+    expect(await within(billingSection!).findByRole('alert')).toHaveTextContent('Commission amount is required.');
+    expect(previewLogoIsbasiCommissionInvoiceMock).not.toHaveBeenCalled();
+    expect(within(billingSection!).queryByRole('button', { name: /create|send invoice/i })).not.toBeInTheDocument();
+  });
+
+  it('displays the sanitized Logo commission e-Fatura preview payload', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Preview Commission e-Fatura' }));
+    await userEvent.type(within(billingSection!).getByLabelText('Commission amount'), '100');
+    await userEvent.type(within(billingSection!).getByLabelText('Source period'), '2026-06');
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Generate preview' }));
+
+    await waitFor(() =>
+      expect(previewLogoIsbasiCommissionInvoiceMock).toHaveBeenCalledWith(
+        'demo-vendor-a',
+        expect.objectContaining({
+          commissionAmount: '100',
+          vatRate: '20',
+          currency: 'TL',
+          description: 'Pazaryeri komisyon hizmet bedeli',
+          sourcePeriod: '2026-06',
+        }),
+      ),
+    );
+    expect(await within(billingSection!).findByText('Commission e-Fatura sanitized preview')).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/"invoiceId": 0/)).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/"itemType": 2/)).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/11\*\*\*\*\*\*11/)).toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: /create|send invoice/i })).not.toBeInTheDocument();
   });
 });

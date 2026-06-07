@@ -1328,6 +1328,51 @@ export type VendorBillingProfileInput = {
   logoIsbasiLastCheckedAt?: string | null;
 };
 
+export type LogoIsbasiLoginProbeResult = {
+  ok: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'login_probe';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  missingEnv?: string[];
+  httpStatus?: number;
+  login?: {
+    ok?: boolean;
+    isError?: boolean;
+    code?: string;
+    message?: string;
+    responseKeys: string[];
+    accessTokenPresent: boolean;
+    tenantIdPresent: boolean;
+    userIdPresent: boolean;
+    userEmailPresent: boolean;
+    userNamePresent: boolean;
+    tokenPreview?: string;
+  };
+  message?: string;
+};
+
+export type LogoIsbasiCommissionInvoicePreviewInput = {
+  commissionAmount: string;
+  vatRate: string;
+  currency: string;
+  description: string;
+  invoiceDate?: string | null;
+  sourceOrderIds?: string[];
+  sourcePeriod?: string | null;
+};
+
+export type LogoIsbasiCommissionInvoicePreviewResult = {
+  ok: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'commission_invoice_preview';
+  writesPerformed: false;
+  externalApiCallAttempted: false;
+  payload?: Record<string, unknown>;
+  warnings?: string[];
+  message?: string;
+};
+
 export type PayoutCalculation = {
   grossAmount: string;
   commission: string;

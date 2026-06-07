@@ -32,6 +32,7 @@ import { registerVendorIntegrationRoutes } from './modules/vendor-integration/ve
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
 import { registerParatikaProbeRoutes } from './modules/paratika/paratika-probe.routes.js';
+import { registerLogoIsbasiRoutes } from './modules/logo-isbasi/logo-isbasi.routes.js';
 import { registerPaymentReturnRoutes } from './modules/payments/payment-return.routes.js';
 import { registerIyzicoMarketplaceDiagnosticsRoutes } from './modules/iyzico/iyzico-marketplace.routes.js';
 import { registerOdooDiscoveryProbeRoutes } from './integrations/odoo/odooDiscovery.routes.js';
@@ -371,6 +372,7 @@ export function createApp() {
   registerPaymentReturnRoutes(app);
   registerParasutProbeRoutes(app, env);
   registerParatikaProbeRoutes(app, env);
+  registerLogoIsbasiRoutes(app, env);
   registerIyzicoMarketplaceDiagnosticsRoutes(app, env);
   registerReconciliationRoutes(app, env);
   registerOdooDiscoveryProbeRoutes(app);

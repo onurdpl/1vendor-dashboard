@@ -81,6 +81,10 @@ export type AppEnv = {
   PARATIKA_PROBE_DRY_RUN?: boolean;
   PARATIKA_PROBE_CONFIRM?: string;
   PARATIKA_MARKETPLACE_MODEL: ParatikaMarketplaceModel;
+  LOGO_ISBASI_BASE_URL?: string;
+  LOGO_ISBASI_API_KEY?: string;
+  LOGO_ISBASI_USERNAME?: string;
+  LOGO_ISBASI_PASSWORD?: string;
   LIDIO_ENABLED?: boolean;
   LIDIO_BASE_URL?: string;
   LIDIO_MERCHANT_CODE?: string;
@@ -274,6 +278,10 @@ export function loadEnv(): AppEnv {
   const paratikaProbeDryRun = parseBoolean(process.env.PARATIKA_PROBE_DRY_RUN, true);
   const paratikaProbeConfirm = process.env.PARATIKA_PROBE_CONFIRM?.trim() || undefined;
   const paratikaMarketplaceModel = parseParatikaMarketplaceModel(process.env.PARATIKA_MARKETPLACE_MODEL);
+  const logoIsbasiBaseUrl = process.env.LOGO_ISBASI_BASE_URL?.trim() || 'https://soho-isbasi-mwv2-test.logo-paas.com';
+  const logoIsbasiApiKey = process.env.LOGO_ISBASI_API_KEY?.trim() || undefined;
+  const logoIsbasiUsername = process.env.LOGO_ISBASI_USERNAME?.trim() || undefined;
+  const logoIsbasiPassword = process.env.LOGO_ISBASI_PASSWORD?.trim() || undefined;
   const lidioEnabled = parseBoolean(process.env.LIDIO_ENABLED, false);
   const lidioBaseUrl = process.env.LIDIO_BASE_URL?.trim() || undefined;
   const lidioMerchantCode = process.env.LIDIO_MERCHANT_CODE?.trim() || undefined;
@@ -430,6 +438,10 @@ export function loadEnv(): AppEnv {
     PARATIKA_PROBE_DRY_RUN: paratikaProbeDryRun,
     PARATIKA_PROBE_CONFIRM: paratikaProbeConfirm,
     PARATIKA_MARKETPLACE_MODEL: paratikaMarketplaceModel,
+    LOGO_ISBASI_BASE_URL: logoIsbasiBaseUrl,
+    LOGO_ISBASI_API_KEY: logoIsbasiApiKey,
+    LOGO_ISBASI_USERNAME: logoIsbasiUsername,
+    LOGO_ISBASI_PASSWORD: logoIsbasiPassword,
     LIDIO_ENABLED: lidioEnabled,
     LIDIO_BASE_URL: lidioBaseUrl,
     LIDIO_MERCHANT_CODE: lidioMerchantCode,
