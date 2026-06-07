@@ -544,6 +544,7 @@ model VendorAllocation {
   vendorIntegrationShipmentEvents VendorIntegrationShipmentEvent[]
   vendorIntegrationInvoiceEvents VendorIntegrationInvoiceEvent[]
 
+  @@index([createdAt])
   @@index([odooSaleOrderId])
   @@index([vendorIntegrationStatus])
 }
@@ -694,6 +695,7 @@ model ReturnRecord {
 
   @@index([sourceShopifyReturnGid])
   @@index([sourceShopifyReturnId])
+  @@index([vendorAllocationId, createdAt])
 }
 
 model RefundRecord {
@@ -709,6 +711,8 @@ model RefundRecord {
   vendorAllocation         VendorAllocation        @relation(fields: [vendorAllocationId], references: [id], onDelete: Cascade)
   lineItems                ShopifyRefundLineItem[]
   operationalJobs          OperationalJob[]
+
+  @@index([vendorAllocationId, createdAt])
 }
 
 model ShopifyRefund {
