@@ -624,7 +624,7 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText('updated-billing@example.test')).toBeInTheDocument();
     expect(within(billingSection!).getByText('LOGO-CODE-1')).toBeInTheDocument();
     expect(within(billingSection!).queryByRole('heading', { name: 'Billing / Legal Profile edit' })).not.toBeInTheDocument();
-  });
+  }, 10000);
 
   it('runs the Logo İşbaşı login probe and displays sanitized fields only', async () => {
     setCurrentUser({

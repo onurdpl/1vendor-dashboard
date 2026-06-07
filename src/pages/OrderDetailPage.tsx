@@ -1691,6 +1691,7 @@ export function OrderDetailPage() {
   const [shipmentActionState, setShipmentActionState] = useState<ShipmentActionState | null>(null);
   const [shipmentCustomerOverrides, setShipmentCustomerOverrides] = useState<ShipmentCustomerOverrides>({});
   const [shippingConfigDraft, setShippingConfigDraft] = useState<ShippingConfigDraft>(() => buildShippingConfigDraft(null));
+  const [shippingConfigDraftReady, setShippingConfigDraftReady] = useState(false);
   const [shippingConfigFeedback, setShippingConfigFeedback] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
   const [kargonomiLookupDiagnostics, setKargonomiLookupDiagnostics] = useState<KargonomiLocationLookupDiagnostics | null>(null);
   const [kargonomiLookupError, setKargonomiLookupError] = useState<string | null>(null);
@@ -1735,38 +1736,12 @@ export function OrderDetailPage() {
       enabled: authContextReady && isAdmin && Boolean(currentVendor.vendorId) && Boolean(order),
     },
   );
-  const diagnosticsProvider =
-    vendorShippingConfig?.preferredProvider === 'try_oto'
-      ? 'try_oto'
-      : vendorShippingConfig?.preferredProvider === 'kargonomi'
-        ? 'kargonomi'
-        : 'kargo_entegrator';
+  const diagnosticsProvider = shippingConfigDraft.preferredProvider;
   const { data: shippingProviderDiagnostics, refetch: refetchShippingProviderDiagnostics } = useQueryResource(
     queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
     ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: diagnosticsProvider, signal }),
     {
-      enabled: authContextReady && isAdmin && Boolean(order),
-    },
-  );
-  const { data: tryOtoOptionDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig('try_oto', currentVendor.vendorId),
-    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'try_oto', signal }),
-    {
-      enabled: authContextReady && isAdmin && Boolean(order),
-    },
-  );
-  const { data: kargonomiOptionDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig('kargonomi', currentVendor.vendorId),
-    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'kargonomi', signal }),
-    {
-      enabled: authContextReady && isAdmin && Boolean(order),
-    },
-  );
-  const { data: navlungoOptionDiagnostics } = useQueryResource(
-    queryKeys.admin.shipments.providerConfig('navlungo', currentVendor.vendorId),
-    ({ signal }) => getShippingProviderDiagnostics({ vendorId: currentVendor.vendorId, provider: 'navlungo', signal }),
-    {
-      enabled: authContextReady && isAdmin && Boolean(order),
+      enabled: authContextReady && isAdmin && Boolean(order) && shippingConfigDraftReady,
     },
   );
   const { data: relatedReturnsData } = useQueryResource(
@@ -2046,8 +2021,13 @@ export function OrderDetailPage() {
   );
 
   useEffect(() => {
+    setShippingConfigDraftReady(false);
+  }, [currentVendor.vendorId]);
+
+  useEffect(() => {
     if (vendorShippingConfig) {
       setShippingConfigDraft(buildShippingConfigDraft(vendorShippingConfig));
+      setShippingConfigDraftReady(true);
     }
   }, [vendorShippingConfig]);
 
@@ -4971,15 +4951,11 @@ export function OrderDetailPage() {
   const shouldShowTryOtoProviderOption =
     vendorShippingConfig?.preferredProvider === 'try_oto' ||
     shippingProviderDiagnostics?.provider === 'try_oto' ||
-    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('try_oto')) ||
-    Boolean(tryOtoOptionDiagnostics?.supportedProviders?.includes('try_oto')) ||
-    Boolean(tryOtoOptionDiagnostics?.providerEnabled);
+    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('try_oto'));
   const shouldShowKargonomiProviderOption =
     vendorShippingConfig?.preferredProvider === 'kargonomi' ||
     shippingProviderDiagnostics?.provider === 'kargonomi' ||
-    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi')) ||
-    Boolean(kargonomiOptionDiagnostics?.supportedProviders?.includes('kargonomi')) ||
-    Boolean(kargonomiOptionDiagnostics?.providerEnabled);
+    Boolean(shippingProviderDiagnostics?.supportedProviders?.includes('kargonomi'));
   const tryOtoPickupLocationCode = readTryOtoPickupLocationCode(vendorShippingConfig);
   const tryOtoOriginCity = readTryOtoOriginCity(vendorShippingConfig);
   const kargonomiShippingProviderId = readKargonomiShippingProviderId(vendorShippingConfig);
@@ -5007,12 +4983,14 @@ export function OrderDetailPage() {
           <span>Provider</span>
           <select
             value={shippingConfigDraft.preferredProvider}
-            onChange={(event) =>
+            onChange={(event) => {
+              const preferredProvider = event.target.value as ShippingConfigDraftProvider;
               setShippingConfigDraft((current) => ({
                 ...current,
-                preferredProvider: event.target.value as ShippingConfigDraftProvider,
-              }))
-            }
+                preferredProvider,
+              }));
+              setShippingConfigDraftReady(true);
+            }}
           >
             <option value="kargo_entegrator">Kargo Entegratör</option>
             {shouldShowTryOtoProviderOption ? <option value="try_oto">Try OTO</option> : null}
@@ -5437,27 +5415,27 @@ export function OrderDetailPage() {
             </details>
             <div className="shipping-config-readonly">
               <span>Base URL configured</span>
-              <strong>{navlungoOptionDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.baseUrlConfigured ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Username configured</span>
-              <strong>{navlungoOptionDiagnostics?.navlungo?.usernameConfigured ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.navlungo?.usernameConfigured ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Password configured</span>
-              <strong>{navlungoOptionDiagnostics?.navlungo?.passwordConfigured ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.navlungo?.passwordConfigured ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Sender address configured</span>
-              <strong>{navlungoOptionDiagnostics?.navlungo?.defaultSenderAddressIdConfigured ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.navlungo?.defaultSenderAddressIdConfigured ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Auth diagnostics available</span>
-              <strong>{navlungoOptionDiagnostics?.navlungo?.authDiagnosticsAvailable ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.navlungo?.authDiagnosticsAvailable ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Runtime shipment execution enabled</span>
-              <strong>{navlungoOptionDiagnostics?.navlungo?.runtimeShipmentExecutionEnabled ? 'yes' : 'no'}</strong>
+              <strong>{shippingProviderDiagnostics?.navlungo?.runtimeShipmentExecutionEnabled ? 'yes' : 'no'}</strong>
             </div>
             <div className="shipping-config-readonly">
               <span>Return/reverse implementation</span>
@@ -5465,7 +5443,7 @@ export function OrderDetailPage() {
             </div>
             <div className="shipping-config-readonly">
               <span>Create Post execution</span>
-              <strong>{navlungoOptionDiagnostics?.executionReady ? 'ready' : 'not ready'}</strong>
+              <strong>{shippingProviderDiagnostics?.executionReady ? 'ready' : 'not ready'}</strong>
             </div>
           </>
         ) : null}
@@ -8402,7 +8380,7 @@ export function OrderDetailPage() {
                       <>
                         <div className="summary-row">
                           <span>Kargonomi warehouse configured</span>
-                          <strong>{(kargonomiOptionDiagnostics ?? shippingProviderDiagnostics).warehouseIdConfigured ? 'yes' : 'no'}</strong>
+                          <strong>{shippingProviderDiagnostics.warehouseIdConfigured ? 'yes' : 'no'}</strong>
                         </div>
                         <div className="summary-row">
                           <span>Kargonomi carrier/provider ID</span>

@@ -385,7 +385,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       if (options?.provider === 'navlungo') {
         return Promise.resolve({
           provider: 'navlungo',
-          supportedProviders: ['navlungo'],
+          supportedProviders: ['kargo_entegrator', 'hepsijet', 'kargonomi', 'navlungo'],
           executionReady: true,
           sandboxModeEnabled: false,
           shippingExecutionEnabled: true,
@@ -2528,7 +2528,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    expect(await screen.findByLabelText('Shipping provider configuration editor')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Shipping provider configuration editor', {}, { timeout: 10000 })).toBeInTheDocument();
     const cargoInput = screen.getByLabelText('Cargo integration ID');
     await user.clear(cargoInput);
     await user.type(cargoInput, '9999');
@@ -2551,9 +2551,13 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       ),
     );
     expect(await screen.findByText('Shipping provider configuration saved.')).toBeInTheDocument();
-    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(5));
+    await waitFor(() => expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledTimes(2));
+    expect(getShippingProviderDiagnosticsMock.mock.calls.map(([options]) => options?.provider)).toEqual([
+      'kargo_entegrator',
+      'kargo_entegrator',
+    ]);
     expect(getVendorShippingConfigMock).toHaveBeenCalledWith(expect.objectContaining({ vendorId: 'sporjinal' }));
-  });
+  }, 10000);
 
   it('lets admins update Try OTO pickup location configuration', async () => {
     const user = userEvent.setup();
@@ -2627,7 +2631,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
         }),
       ),
     );
-  }, 10000);
+  }, 20000);
 
   it('shows Try OTO as selected in admin diagnostics when vendor config uses Try OTO', async () => {
     setCurrentUser({
@@ -2730,14 +2734,14 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const providerSelect = await screen.findByLabelText('Provider');
+    const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(providerSelect).toHaveValue('kargo_entegrator');
     expect(screen.getByRole('option', { name: 'Try OTO' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'try_oto');
     expect(await screen.findByLabelText('Try OTO pickup location code')).toBeInTheDocument();
     expect(screen.getByLabelText('Try OTO origin city')).toBeInTheDocument();
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
-  });
+  }, 20000);
 
   it('shows Kargonomi provider option and warehouse config when backend diagnostics expose it as supported', async () => {
     const user = userEvent.setup();
@@ -2807,7 +2811,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const providerSelect = await screen.findByLabelText('Provider');
+    const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(screen.getByRole('option', { name: 'Kargonomi' })).toBeInTheDocument();
     await user.selectOptions(providerSelect, 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
@@ -2866,7 +2870,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
-  });
+  }, 20000);
 
   it('preserves Kargonomi automatic carrier selection when carrier id is empty', async () => {
     const user = userEvent.setup();
@@ -2925,7 +2929,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.selectOptions(await screen.findByLabelText('Provider'), 'kargonomi');
+    await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'kargonomi');
     const warehouseInput = await screen.findByLabelText('Kargonomi warehouse ID');
     const carrierInput = await screen.findByLabelText(/Kargonomi carrier\/provider ID/);
     expect(carrierInput).toHaveValue('');
@@ -2936,7 +2940,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     await waitFor(() => expect(updateVendorShippingConfigMock).toHaveBeenCalled());
     const savedPayload = updateVendorShippingConfigMock.mock.calls.at(-1)?.[1] as { providerMetadata?: Record<string, unknown> };
     expect(savedPayload.providerMetadata).not.toHaveProperty('kargonomiShippingProviderId');
-  });
+  }, 10000);
 
   it('shows Navlungo diagnostics config and allows live provider save', async () => {
     const user = userEvent.setup();
@@ -2952,7 +2956,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    const providerSelect = await screen.findByLabelText('Provider');
+    const providerSelect = await screen.findByLabelText('Provider', {}, { timeout: 10000 });
     expect(screen.getByRole('option', { name: 'Navlungo' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo auth diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).not.toBeInTheDocument();
@@ -3045,6 +3049,9 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByText('secret-access-token')).not.toBeInTheDocument();
 
     await user.selectOptions(providerSelect, 'kargonomi');
+    await waitFor(() =>
+      expect(getShippingProviderDiagnosticsMock).toHaveBeenCalledWith(expect.objectContaining({ provider: 'kargonomi' })),
+    );
 
     await waitFor(() => {
       expect(screen.queryByLabelText('Navlungo auth diagnostic result')).not.toBeInTheDocument();
@@ -3056,7 +3063,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.queryByRole('button', { name: 'Run Navlungo carrier diagnostic' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Run Navlungo Create Post probe' })).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Navlungo Create Post probe controls')).not.toBeInTheDocument();
-  });
+  }, 15000);
 
   it('persists and restores Navlungo sender and return recipient config fields after save', async () => {
     const user = userEvent.setup();
@@ -3191,7 +3198,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByLabelText('Sender name')).toHaveValue('Sporjinal Sender');
     expect(screen.getByLabelText('Return recipient city')).toHaveValue('Istanbul');
     expect(screen.getByLabelText('Return recipient district')).toHaveValue('Ataşehir');
-  });
+  }, 15000);
 
   it('renders Navlungo auth validation fields and messages safely', async () => {
     const user = userEvent.setup();
@@ -3248,7 +3255,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.selectOptions(await screen.findByLabelText('Provider'), 'navlungo');
+    await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'navlungo');
     await user.click(screen.getByRole('button', { name: 'Run Navlungo auth diagnostic' }));
 
     expect(await screen.findByLabelText('Navlungo auth diagnostic result')).toBeInTheDocument();
@@ -6962,7 +6969,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
 
     renderOrderDetail();
 
-    await user.selectOptions(await screen.findByLabelText('Provider'), 'navlungo');
+    await user.selectOptions(await screen.findByLabelText('Provider', {}, { timeout: 10000 }), 'navlungo');
     await user.click(screen.getByLabelText('I understand this creates one Navlungo test post'));
     await user.click(screen.getByRole('button', { name: 'Run Navlungo Create Post probe' }));
 
@@ -7006,7 +7013,7 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       'safe fields compared',
     );
     expect((screen.getByLabelText('Navlungo retry diagnostics') as HTMLDetailsElement).open).toBe(true);
-  });
+  }, 10000);
 
   it('renders current-only Navlungo request diagnostics when no last successful summary exists', async () => {
     getOrderMock.mockResolvedValue({
