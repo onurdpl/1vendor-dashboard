@@ -1143,48 +1143,17 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         });
       }
 
-      const readinessError = buildLogoReadinessError(env, 'invoice_detail_discovery');
-      if (readinessError) {
-        return reply.code(readinessError.status).send(readinessError.body);
-      }
-
-      try {
-        const client = buildLogoClient(env);
-        const login = await loginForLogoReadProbe(client, 'invoice_detail_discovery');
-        if (!login.ok) {
-          return reply.code(login.status).send(login.body);
-        }
-
-        const result = await client.getInvoiceDetail(login.session, invoiceId);
-        if (!result.ok || result.jsonParseFailed) {
-          logLogoInvoiceUpstreamFailure(app, 'invoice_detail_discovery', result);
-          return reply.code(502).send(buildLogoUpstreamError('invoice_detail_discovery', result));
-        }
-
-        const invoice = readLogoInvoiceDetailRecord(result.body);
-        return {
-          ok: true,
-          success: true,
-          provider: 'LOGO_ISBASI',
-          mode: 'invoice_detail_discovery',
-          writesPerformed: false,
-          externalApiCallAttempted: true,
-          httpStatus: result.status,
-          invoice: sanitizeLogoInvoiceDetail(invoice),
-          shape: extractInvoiceShape(invoice),
-        };
-      } catch {
-        return reply.code(502).send({
-          ok: false,
-          success: false,
-          provider: 'LOGO_ISBASI',
-          mode: 'invoice_detail_discovery',
-          writesPerformed: false,
-          externalApiCallAttempted: true,
-          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
-          message: 'Network/backend request failed while calling Logo İşbaşı invoice detail.',
-        });
-      }
+      return reply.code(501).send({
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'invoice_detail_discovery',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        errorCode: 'LOGO_ISBASI_INVOICE_DETAIL_ENDPOINT_UNKNOWN',
+        message: 'Invoice list discovery succeeded. Detail endpoint is not confirmed yet.',
+        invoiceId,
+      });
     },
   );
 

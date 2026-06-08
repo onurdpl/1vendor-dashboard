@@ -324,13 +324,40 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(reply.statusCode).toBe(200);
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/salesInvoices',
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/invoices/invoices',
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
           Authorization: 'Bearer full-secret-access-token',
           tenantId: 'tenant-1',
           apiKey: 'api-key-secret',
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json',
+          Lang: 'tr-TR',
+          DeviceType: 'WEB',
+        }),
+        body: JSON.stringify({
+          filters: [
+            {
+              columnName: 'type',
+              operator: 17,
+              value: [1, 2, 3],
+            },
+          ],
+          sorting: {
+            date: -1,
+          },
+          paging: {
+            currentPage: 1,
+            pageSize: 20,
+          },
+          columnNames: null,
+          count: true,
+          excel: {
+            export: false,
+            allowedColumns: null,
+            lucaExport: false,
+          },
         }),
       }),
     );
@@ -394,9 +421,9 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         errorCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
         httpStatus: 404,
         request: {
-          url: 'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/salesInvoices',
+          url: 'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/invoices/invoices',
           method: 'POST',
-          contentType: 'application/json',
+          contentType: 'application/json; charset=utf-8',
           accept: 'application/json',
           queryParameters: [],
         },
@@ -412,61 +439,8 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
   });
 
-  it('returns sanitized Logo invoice detail and shape without exposing tokens or personal fields', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          data: {
-            id: 'invoice-1',
-            currency: 'TL',
-            invoiceType: 'SATIS',
-            scenario: 'TEMELFATURA',
-            customer: {
-              id: 'firm-1',
-              code: 'CUST001',
-              name: 'Sporjinal Spor Malzemeleri A.S.',
-              taxNumber: '6490512763',
-              taxOffice: 'Kadikoy',
-              city: 'Istanbul',
-              district: 'Atasehir',
-              email: 'billing@sporjinal.test',
-              phone: '+905551112233',
-            },
-            salesInvoiceDetails: [
-              {
-                id: 'line-1',
-                itemCode: 'SPORGYM-COMMISSION',
-                name: 'Pazaryeri Komisyon Hizmeti',
-                quantity: 1,
-                price: '100',
-                taxRate: '20',
-                secret: 'line-secret-value',
-              },
-            ],
-            eGovernmentInvoice: {
-              scenario: 'TEMELFATURA',
-              receiverTaxNumber: '6490512763',
-              receiverEmail: 'billing@sporjinal.test',
-              receiverPhone: '+905551112233',
-              accessToken: 'invoice-access-token-secret',
-            },
-            eArchivePortalInvoice: {
-              internetSale: false,
-              recipientTaxNumber: '11111111111',
-              recipientEmail: 'customer@example.test',
-            },
-          },
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        }),
-      );
+  it('does not call undocumented Logo invoice detail endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
     const { posts } = createRegisteredRoutes();
     const reply = createReply();
 
@@ -475,57 +449,21 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       reply,
     );
 
-    expect(reply.statusCode).toBe(200);
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/invoice-1',
-      expect.objectContaining({ method: 'GET' }),
-    );
+    expect(reply.statusCode).toBe(501);
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({
-        ok: true,
-        success: true,
-        invoice: expect.objectContaining({
-          invoiceId: 'invoice-1',
-          currency: 'TL',
-          invoiceType: 'SATIS',
-          scenario: 'TEMELFATURA',
-          customer: expect.objectContaining({
-            taxNumberMasked: '64******63',
-            emailMasked: 'b***@sporjinal.test',
-            phoneMasked: '***33',
-          }),
-          eGovernmentInvoice: expect.objectContaining({
-            scenario: 'TEMELFATURA',
-            receiverTaxNumber: '64******63',
-            receiverEmail: 'b***@sporjinal.test',
-            receiverPhone: '***33',
-            accessToken: '[redacted]',
-          }),
-          eArchivePortalInvoice: expect.objectContaining({
-            internetSale: false,
-            recipientTaxNumber: '11*******11',
-            recipientEmail: 'c***@example.test',
-          }),
-        }),
-        shape: expect.objectContaining({
-          hasEGovernmentInvoice: true,
-          eGovernmentInvoiceKeys: ['accessToken', 'receiverEmail', 'receiverPhone', 'receiverTaxNumber', 'scenario'],
-          hasEArchivePortalInvoice: true,
-          eArchivePortalInvoiceKeys: ['internetSale', 'recipientEmail', 'recipientTaxNumber'],
-          lineItemShape: ['id', 'itemCode', 'name', 'price', 'quantity', 'secret', 'taxRate'],
-        }),
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'invoice_detail_discovery',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        errorCode: 'LOGO_ISBASI_INVOICE_DETAIL_ENDPOINT_UNKNOWN',
+        message: 'Invoice list discovery succeeded. Detail endpoint is not confirmed yet.',
+        invoiceId: 'invoice-1',
       }),
     );
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain('6490512763');
-    expect(serialized).not.toContain('11111111111');
-    expect(serialized).not.toContain('billing@sporjinal.test');
-    expect(serialized).not.toContain('customer@example.test');
-    expect(serialized).not.toContain('+905551112233');
-    expect(serialized).not.toContain('invoice-access-token-secret');
-    expect(serialized).not.toContain('line-secret-value');
-    expect(serialized).not.toContain('full-secret-access-token');
   });
 
   it('extracts Logo invoice shape from invoice detail payloads', () => {

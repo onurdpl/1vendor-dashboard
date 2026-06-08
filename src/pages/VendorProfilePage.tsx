@@ -1595,6 +1595,11 @@ export function VendorProfilePage() {
                       <pre>{logoInvoicesResult.response.bodySnippet}</pre>
                     </div>
                   ) : null}
+                  {logoInvoicesResult.ok ? (
+                    <p className="page-description">
+                      Invoice list discovery succeeded. Detail endpoint is not confirmed yet.
+                    </p>
+                  ) : null}
                   {logoInvoicesResult.sampleInvoices?.length ? (
                     <>
                       <ul className="vendor-profile-logo-firm-list" aria-label="Logo invoice samples">

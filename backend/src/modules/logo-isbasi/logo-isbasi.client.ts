@@ -279,42 +279,48 @@ export class LogoIsbasiClient {
   }
 
   async listInvoices(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
-    const requestUrl = `${this.baseUrl}/api/v1.0/salesInvoices/salesInvoices`;
+    const requestUrl = `${this.baseUrl}/api/v1.0/invoices/invoices`;
+    const requestBody = {
+      filters: [
+        {
+          columnName: 'type',
+          operator: 17,
+          value: [1, 2, 3],
+        },
+      ],
+      sorting: {
+        date: -1,
+      },
+      paging: {
+        currentPage: 1,
+        pageSize: 20,
+      },
+      columnNames: null,
+      count: true,
+      excel: {
+        export: false,
+        allowedColumns: null,
+        lucaExport: false,
+      },
+    };
     const response = await this.fetchImpl(requestUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
         tenantId: session.tenantId,
         apiKey: this.config.apiKey,
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json; charset=utf-8',
         Accept: 'application/json',
+        Lang: 'tr-TR',
+        DeviceType: 'WEB',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify(requestBody),
     });
 
     return this.parseResponse(response, {
       url: requestUrl,
       method: 'POST',
-      contentType: 'application/json',
-      accept: 'application/json',
-    });
-  }
-
-  async getInvoiceDetail(session: LogoIsbasiAuthenticatedSession, id: string): Promise<LogoIsbasiRawResult> {
-    const requestUrl = `${this.baseUrl}/api/v1.0/salesInvoices/${encodeURIComponent(id)}`;
-    const response = await this.fetchImpl(requestUrl, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${session.accessToken}`,
-        tenantId: session.tenantId,
-        apiKey: this.config.apiKey,
-        Accept: 'application/json',
-      },
-    });
-
-    return this.parseResponse(response, {
-      url: requestUrl,
-      method: 'GET',
+      contentType: 'application/json; charset=utf-8',
       accept: 'application/json',
     });
   }
