@@ -22,6 +22,10 @@ const { clearKargonomiLocationLookupCache } = await import(
   '../backend/src/modules/shipping/kargonomi-provider.adapter.js'
 );
 
+const kargonomiReturnSenderTaxInput = {
+  senderTaxNumber: '11111111111',
+};
+
 function buildKargonomiDestinationClient() {
   return {
     listStates: vi.fn().mockResolvedValue({
@@ -184,7 +188,7 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'vendor',
       vendorId: 'yalispor',
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview.ready).toBe(false);
     expect(preview.missingFields).toContain('sender.phone');
@@ -203,10 +207,70 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'admin',
       vendorId: null,
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview.ready).toBe(false);
     expect(preview.missingFields).toContain('receiver.warehouseId');
+  });
+
+  it('marks preview not ready when sender tax number is missing', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(baseShippingConfig());
+
+    const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
+      role: 'vendor',
+      vendorId: 'yalispor',
+    });
+
+    expect(preview.ready).toBe(false);
+    expect(preview.missingFields).toContain('sender.taxNumber');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        sender: {
+          phoneValid: true,
+          taxNumberPresent: false,
+        },
+      },
+    });
+    expect(JSON.stringify(preview.previewPayload)).not.toContain('11111111111');
+  });
+
+  it('marks preview not ready when Kargonomi buyer name has one word', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        warehouses: [
+          {
+            warehouseId: '112668',
+            provider: 'KARGONOMI',
+            isDefault: true,
+            name: 'Sporjinal',
+            address: 'Vendor full address',
+            metadata: {
+              phone: '+902121112233',
+              stateId: '34',
+              cityId: '828',
+            },
+          },
+        ],
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
+      role: 'vendor',
+      vendorId: 'yalispor',
+    }, kargonomiReturnSenderTaxInput);
+
+    expect(preview.ready).toBe(false);
+    expect(preview.missingFields).toContain('receiver.name');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        receiver: {
+          namePresent: true,
+          nameValid: false,
+        },
+      },
+    });
   });
 
   it('returns a ready sanitized preview when local return shipment inputs are present', async () => {
@@ -216,7 +280,7 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'vendor',
       vendorId: 'yalispor',
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview).toMatchObject({
       ok: true,
@@ -233,6 +297,8 @@ describe('Kargonomi return preview', () => {
         sender: {
           namePresent: true,
           phonePresent: true,
+          phoneValid: true,
+          taxNumberPresent: true,
           addressPresent: true,
           cityId: '828',
           stateId: '34',
@@ -247,7 +313,9 @@ describe('Kargonomi return preview', () => {
         receiver: {
           warehouseId: '112668',
           namePresent: true,
+          nameValid: true,
           phonePresent: true,
+          phoneValid: true,
           addressPresent: true,
         },
       },
@@ -257,6 +325,7 @@ describe('Kargonomi return preview', () => {
     expect(serializedPreview).not.toContain('Vendor full address');
     expect(serializedPreview).not.toContain('+905551112233');
     expect(serializedPreview).not.toContain('+902121112233');
+    expect(serializedPreview).not.toContain('11111111111');
   });
 
   it('treats address2-derived shippingDistrict as ready for Kargonomi return sender district', async () => {
@@ -294,7 +363,7 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'vendor',
       vendorId: 'yalispor',
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview.missingFields).not.toContain('sender.district');
     expect(preview.previewPayload).toMatchObject({
@@ -326,6 +395,7 @@ describe('Kargonomi return preview', () => {
       },
       {
         kargonomiDestinationClient: destinationClient,
+        ...kargonomiReturnSenderTaxInput,
       },
     );
 
@@ -396,6 +466,7 @@ describe('Kargonomi return preview', () => {
       },
       {
         kargonomiDestinationClient: destinationClient,
+        ...kargonomiReturnSenderTaxInput,
       },
     );
 
@@ -433,6 +504,7 @@ describe('Kargonomi return preview', () => {
       },
       {
         kargonomiDestinationClient: destinationClient,
+        ...kargonomiReturnSenderTaxInput,
       },
     );
 
@@ -479,7 +551,7 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'vendor',
       vendorId: 'yalispor',
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview.ready).toBe(true);
     expect(preview.missingFields).not.toContain('receiver.phone');
@@ -533,7 +605,7 @@ describe('Kargonomi return preview', () => {
     const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
       role: 'vendor',
       vendorId: 'yalispor',
-    });
+    }, kargonomiReturnSenderTaxInput);
 
     expect(preview.ready).toBe(true);
     expect(preview.missingFields).not.toContain('receiver.phone');
@@ -577,6 +649,7 @@ describe('Kargonomi return preview', () => {
         },
         {} as never,
         {
+          senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
           adapter: {
             provider: 'KARGONOMI',
             createShipment: adapterCreateShipment,
@@ -588,8 +661,91 @@ describe('Kargonomi return preview', () => {
       details: expect.objectContaining({
         senderCityIdPresent: true,
         senderStateIdPresent: true,
+        senderPhoneValid: true,
+        senderTaxNumberPresent: true,
+        buyerNameValid: false,
         receiverCityIdPresent: false,
         receiverStateIdPresent: false,
+      }),
+    });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks create before Kargonomi when sender tax number is missing', async () => {
+    const adapterCreateShipment = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+
+    await expect(
+      createKargonomiReturnShipmentForReturn(
+        'return-1',
+        {
+          role: 'admin',
+          vendorId: null,
+        },
+        {} as never,
+        {
+          adapter: {
+            provider: 'KARGONOMI',
+            createShipment: adapterCreateShipment,
+          } as never,
+        },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('- sender.taxNumber'),
+      details: expect.objectContaining({
+        senderPhoneValid: true,
+        senderTaxNumberPresent: false,
+        buyerNameValid: true,
+      }),
+    });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+  });
+
+  it('blocks create before Kargonomi when buyer name has one word', async () => {
+    const adapterCreateShipment = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(
+      baseShippingConfig({
+        warehouses: [
+          {
+            warehouseId: '112668',
+            provider: 'KARGONOMI',
+            isDefault: true,
+            name: 'Sporjinal',
+            address: 'Vendor full address',
+            metadata: {
+              phone: '+902121112233',
+              stateId: '34',
+              cityId: '828',
+            },
+          },
+        ],
+      }),
+    );
+
+    await expect(
+      createKargonomiReturnShipmentForReturn(
+        'return-1',
+        {
+          role: 'admin',
+          vendorId: null,
+        },
+        {} as never,
+        {
+          senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
+          adapter: {
+            provider: 'KARGONOMI',
+            createShipment: adapterCreateShipment,
+          } as never,
+        },
+      ),
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('- receiver.name'),
+      details: expect.objectContaining({
+        senderPhoneValid: true,
+        senderTaxNumberPresent: true,
+        buyerNameValid: false,
       }),
     });
     expect(adapterCreateShipment).not.toHaveBeenCalled();
@@ -631,6 +787,7 @@ describe('Kargonomi return preview', () => {
       },
       {} as never,
       {
+        senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
         adapter: {
           provider: 'KARGONOMI',
           createShipment: adapterCreateShipment,
@@ -646,14 +803,15 @@ describe('Kargonomi return preview', () => {
         requestSnapshot: expect.objectContaining({
           sender: expect.objectContaining({
             sender_name: 'Customer Name',
-            sender_phone: '+905551112233',
+            sender_phone: '5551112233',
+            sender_tax_number: '11111111111',
             sender_address: 'Customer full address',
             sender_state_id: '34',
             sender_city_id: '828',
           }),
           buyer: expect.objectContaining({
             buyer_name: 'Yalispor Warehouse',
-            buyer_phone: '+902121112233',
+            buyer_phone: '2121112233',
             buyer_address: 'Vendor full address',
             buyer_state_id: '34',
             buyer_city_id: '828',
@@ -732,6 +890,7 @@ describe('Kargonomi return preview', () => {
       {} as never,
       {
         kargonomiDestinationClient: destinationClient,
+        senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
         adapter: {
           provider: 'KARGONOMI',
           createShipment: adapterCreateShipment,

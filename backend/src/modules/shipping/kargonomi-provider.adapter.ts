@@ -18,6 +18,27 @@ export const KARGONOMI_ENV_NAMES = {
 
 const KARGONOMI_CANCELLATION_UNSUPPORTED_MESSAGE = 'Kargonomi shipment cancellation is not implemented.';
 
+export function normalizeKargonomiPhone(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const digits = value.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return digits;
+  }
+  if (digits.length === 11 && digits.startsWith('0')) {
+    return digits.slice(1);
+  }
+  if (digits.length === 12 && digits.startsWith('90')) {
+    return digits.slice(2);
+  }
+  if (digits.length > 10) {
+    return digits.slice(-10);
+  }
+  return null;
+}
+
 export type KargonomiShipmentPackageInput = {
   content?: string | null;
   barcode?: string | null;

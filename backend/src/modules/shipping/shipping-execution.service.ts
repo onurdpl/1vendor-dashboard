@@ -16,6 +16,7 @@ import {
 } from './shipping-provider.adapter.js';
 import {
   KargonomiHttpClient,
+  normalizeKargonomiPhone,
   resolveKargonomiDestinationAddress,
   type KargonomiDestinationLookupClient,
 } from './kargonomi-provider.adapter.js';
@@ -1563,28 +1564,6 @@ function normalizeNavlungoPhone(value: string | null | undefined) {
 
 function isNavlungoEmailLike(value: string | null | undefined) {
   return !value?.trim() || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
-function normalizeKargonomiPhone(value: string | null) {
-  if (!value) {
-    return null;
-  }
-
-  const digits = value.replace(/\D/g, '');
-  if (digits.length === 10) {
-    return digits;
-  }
-  if (digits.length === 11 && digits.startsWith('0')) {
-    return digits.slice(1);
-  }
-  if (digits.length === 12 && digits.startsWith('90')) {
-    return digits.slice(2);
-  }
-  if (digits.length > 10) {
-    return digits.slice(-10);
-  }
-
-  return null;
 }
 
 function splitCustomerName(name: string | null | undefined) {
