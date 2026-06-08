@@ -1436,6 +1436,12 @@ export type FinanceDashboardSummary = {
   summary: Pick<FinanceSummary, 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
 };
 
+export type ReturnFinanceRecord = Pick<FinanceTransaction, 'id' | 'category' | 'amount' | 'status' | 'date'>;
+
+export type ReturnFinanceRecordsResponse = {
+  records: ReturnFinanceRecord[];
+};
+
 export type AutomationAlertType = 'Info' | 'Warning' | 'Critical';
 export type AutomationAlertStatus = 'New' | 'In Progress' | 'Resolved';
 

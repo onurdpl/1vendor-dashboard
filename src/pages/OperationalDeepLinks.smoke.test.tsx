@@ -5,7 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OrderDetail, OrderSummary } from '../features/orders/api';
 import type { ReturnDetail, ReturnSummary } from '../features/returns/api';
-import type { FinanceDashboard, FinanceTransaction } from '../lib/api/contracts';
+import type { FinanceDashboard, FinanceTransaction, ReturnFinanceRecordsResponse } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 import { FinancePage } from './FinancePage';
 import { OrderDetailPage } from './OrderDetailPage';
@@ -18,6 +18,7 @@ const getOrderMock = vi.fn<(orderId: string, options?: { vendorId?: string | nul
 const listReturnsMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<ReturnSummary[]>>();
 const getReturnMock = vi.fn<(returnId: string, options?: { vendorId?: string | null }) => Promise<ReturnDetail>>();
 const getFinanceDashboardMock = vi.fn<(options?: { vendorId?: string | null }) => Promise<FinanceDashboard>>();
+const getReturnFinanceRecordsMock = vi.fn<() => Promise<ReturnFinanceRecordsResponse>>();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 
@@ -50,6 +51,7 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+    getReturnFinanceRecords: () => getReturnFinanceRecordsMock(),
     getInvoiceExecutionResponseSummary: vi.fn(),
     attachShippingCost: vi.fn(),
     createInvoiceExecution: vi.fn(),
@@ -363,6 +365,17 @@ function setupApiMocks() {
     return firstReturn;
   });
   getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+  getReturnFinanceRecordsMock.mockResolvedValue({
+    records: [
+      {
+        id: targetRefundFinanceRow.id,
+        category: targetRefundFinanceRow.category,
+        amount: targetRefundFinanceRow.amount,
+        status: targetRefundFinanceRow.status,
+        date: targetRefundFinanceRow.date,
+      },
+    ],
+  });
   listAdminSupportTicketsMock.mockResolvedValue([]);
   listVendorSupportTicketsMock.mockResolvedValue([]);
 }
@@ -401,6 +414,7 @@ describe('operational deep-link smoke navigation', () => {
     listReturnsMock.mockReset();
     getReturnMock.mockReset();
     getFinanceDashboardMock.mockReset();
+    getReturnFinanceRecordsMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockReset();
     setupApiMocks();

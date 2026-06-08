@@ -51,6 +51,11 @@ export const queryKeys = {
   finance: {
     summary: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'summary', vendorId] as const,
     records: (vendorId = getCurrentVendorContext().vendorId) => ['finance', 'records', vendorId] as const,
+    returnRecords: (
+      vendorId = getCurrentVendorContext().vendorId,
+      shopifyRefundId?: string | null,
+      shopifyOrderNumber?: string | number | null,
+    ) => ['finance', 'return-records', vendorId, shopifyRefundId ?? null, shopifyOrderNumber ?? null] as const,
     invoiceResponseSummary: (invoiceExecutionId: string) =>
       ['finance', 'invoice-response-summary', invoiceExecutionId] as const,
   },

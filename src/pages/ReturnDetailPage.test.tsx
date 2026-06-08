@@ -7,6 +7,7 @@ import { ReturnDetailPage } from './ReturnDetailPage';
 import type { KargonomiReturnPreview, ReturnDetail } from '../features/returns/api';
 import { clearToken, setCurrentUser, setToken } from '../lib/auth';
 import { ApiError } from '../lib/api/errors';
+import type { ReturnFinanceRecordsResponse } from '../lib/api/contracts';
 
 const appReadinessOverride = vi.hoisted(() => ({
   value: null as null | {
@@ -59,6 +60,13 @@ const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
 const getFinanceDashboardMock = vi.fn();
+const getReturnFinanceRecordsMock = vi.fn<
+  (options?: {
+    vendorId?: string | null;
+    shopifyRefundId?: string | null;
+    shopifyOrderNumber?: string | number | null;
+  }) => Promise<ReturnFinanceRecordsResponse>
+>();
 
 vi.mock('../features/returns/api', async () => {
   const actual = await vi.importActual<typeof import('../features/returns/api')>('../features/returns/api');
@@ -107,6 +115,11 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: (options?: { vendorId?: string | null }) => getFinanceDashboardMock(options),
+    getReturnFinanceRecords: (options?: {
+      vendorId?: string | null;
+      shopifyRefundId?: string | null;
+      shopifyOrderNumber?: string | number | null;
+    }) => getReturnFinanceRecordsMock(options),
   };
 });
 
@@ -259,6 +272,8 @@ describe('ReturnDetailPage vendor review screen', () => {
       },
       transactions: [],
     });
+    getReturnFinanceRecordsMock.mockReset();
+    getReturnFinanceRecordsMock.mockResolvedValue({ records: [] });
   });
 
   it('renders the Return Detail frame before primary data hydrates', () => {
@@ -273,6 +288,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByLabelText('Return summary skeleton')).toBeInTheDocument();
     expect(screen.getByLabelText('Return timeline skeleton')).toBeInTheDocument();
     expect(getFinanceDashboardMock).not.toHaveBeenCalled();
+    expect(getReturnFinanceRecordsMock).not.toHaveBeenCalled();
     expect(listVendorSupportTicketsMock).not.toHaveBeenCalled();
   });
 
@@ -294,6 +310,16 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByRole('heading', { name: 'Return request' })).toBeInTheDocument();
     expect((await screen.findAllByText('Order #1023')).length).toBeGreaterThan(0);
     expect(screen.getByText('Nike Air Force 1 07')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(getReturnFinanceRecordsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          vendorId: 'demo-vendor-a',
+          shopifyRefundId: '',
+          shopifyOrderNumber: 1023,
+        }),
+      ),
+    );
+    expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(screen.getByRole('img', { name: 'Nike Air Force 1 07 product image' })).toHaveAttribute(
       'src',
       'https://cdn.example.com/air-force-1.png',
@@ -466,7 +492,7 @@ describe('ReturnDetailPage vendor review screen', () => {
   it('keeps primary Return Detail content visible when optional sections fail', async () => {
     const user = userEvent.setup();
     getReturnMock.mockResolvedValue(returnDetail);
-    getFinanceDashboardMock.mockRejectedValueOnce(new Error('Finance request timed out.'));
+    getReturnFinanceRecordsMock.mockRejectedValueOnce(new Error('Finance request timed out.'));
     listVendorSupportTicketsMock.mockRejectedValueOnce(new Error('Support request timed out.'));
 
     renderPage();
@@ -481,7 +507,8 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(financeRetrySection).not.toBeNull();
     await user.click(within(financeRetrySection as HTMLElement).getByRole('button', { name: 'Retry' }));
 
-    await waitFor(() => expect(getFinanceDashboardMock).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(getReturnFinanceRecordsMock).toHaveBeenCalledTimes(2));
+    expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(getReturnMock).toHaveBeenCalledTimes(1);
   });
 

@@ -2,6 +2,7 @@ import { runtimeConfig } from '../config/runtime';
 import { createMockSession, createCurrentUserFromVendorAccess, type CurrentUser, getCurrentUser, getDemoUserByCredentials } from '../lib/auth';
 import { getCurrentVendorContext } from '../lib/auth/vendorContext';
 import { ApiError } from '../lib/api/errors';
+import { sameOrderNumber, sameShopifyIdentifier } from '../lib/shopifyIdentifiers';
 import { getMockFinanceDashboard } from '../lib/api/mockFinance';
 import { getMockAutomationDashboard } from '../lib/api/mockAutomation';
 import { getMockOrder, getShopifyOrderBreakdown, listMockOrders } from '../lib/api/mockOrders';
@@ -1692,6 +1693,31 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceProfile({ vendorId, signal: options.signal, headers: options.headers })
         : Promise.resolve(getMockFinanceDashboard(vendorId).profile!),
+    returnRecords: (
+      input: { shopifyRefundId?: string | null; shopifyOrderNumber?: string | number | null; vendorId?: string | null },
+      options: ReadRequestOptions = {},
+    ) => {
+      const finance = getMockFinanceDashboard(input.vendorId ?? getCurrentVendorId());
+      return runtimeConfig.apiMode === 'real'
+        ? realFinance.getReturnFinanceRecords({
+            ...input,
+            signal: options.signal,
+            headers: options.headers,
+          })
+        : Promise.resolve({
+            records: finance.transactions.filter(
+              (record) =>
+                (input.shopifyRefundId && sameShopifyIdentifier(record.shopifyRefundId, input.shopifyRefundId)) ||
+                (input.shopifyOrderNumber && sameOrderNumber(record.shopifyOrderNumber, input.shopifyOrderNumber)),
+            ).map((record) => ({
+              id: record.id,
+              category: record.category,
+              amount: record.amount,
+              status: record.status,
+              date: record.date,
+            })),
+          });
+    },
     updateProfile: (
       vendorId: string,
       input: Parameters<typeof realFinance.updateVendorFinancialProfile>[1],

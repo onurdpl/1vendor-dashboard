@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
-import { getFinanceDashboard, getFinanceProfile, getFinanceSummary } from './services/real/finance';
+import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
 import { listOrders } from './services/real/orders';
 import { listAdminOperationsQueue } from './services/real/operations';
 import { listReturns } from './services/real/returns';
@@ -116,6 +116,45 @@ describe('real service pagination plumbing', () => {
       fixedShippingFee: null,
       active: true,
       source: 'configured',
+    });
+  });
+
+  it('reads return-scoped finance records without calling the full finance dashboard endpoint', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      records: [
+        {
+          id: 'ledger-refund-1',
+          category: 'refund',
+          amount: 125.5,
+          status: 'recorded',
+          date: '2026-05-13T05:00:00.000Z',
+        },
+      ],
+    });
+
+    const response = await getReturnFinanceRecords({
+      vendorId: 'vendor-1',
+      shopifyRefundId: 'gid://shopify/Refund/1',
+      shopifyOrderNumber: 1023,
+    });
+
+    expect(apiClientGet).toHaveBeenCalledWith(
+      '/finance/return-records?shopifyRefundId=gid%3A%2F%2Fshopify%2FRefund%2F1&shopifyOrderNumber=1023',
+      expect.objectContaining({
+        vendorId: 'vendor-1',
+      }),
+    );
+    expect(apiClientGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/finance(?:\?|$)/), expect.anything());
+    expect(response).toEqual({
+      records: [
+        {
+          id: 'ledger-refund-1',
+          category: 'Refund',
+          amount: 'TRY\u00a0125.50',
+          status: 'Recorded',
+          date: '2026-05-13T05:00:00.000Z',
+        },
+      ],
     });
   });
 });

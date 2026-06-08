@@ -10,6 +10,7 @@ import type {
   FinanceDashboardSummaryDto,
   InvoiceExecutionReferenceDto,
   FinanceRecordDto,
+  ReturnFinanceRecordsResponseDto,
   PayoutBatchDto,
   PayoutBatchReferenceDto,
   PayoutCalculationDto,
@@ -985,6 +986,72 @@ export async function getVendorFinanceSummary(vendorId: string): Promise<Finance
       netRevenue: dashboard.summary.netRevenue,
       payoutEstimate: dashboard.summary.payoutEstimate,
     },
+  };
+}
+
+export async function getVendorReturnFinanceRecords(
+  vendorId: string,
+  input: { shopifyRefundId?: string | null; shopifyOrderNumber?: string | null },
+): Promise<ReturnFinanceRecordsResponseDto> {
+  const shopifyRefundId = input.shopifyRefundId?.trim();
+  const shopifyOrderNumber = input.shopifyOrderNumber?.trim();
+  const referenceFilters = [
+    shopifyRefundId
+      ? {
+          vendorAllocation: {
+            is: {
+              refundRecords: {
+                some: {
+                  OR: [
+                    { sourceShopifyRefundId: shopifyRefundId },
+                    { id: shopifyRefundId },
+                  ],
+                },
+              },
+            },
+          },
+        }
+      : null,
+    shopifyOrderNumber
+      ? {
+          vendorAllocation: {
+            is: {
+              sourceShopifyOrderNumber: shopifyOrderNumber,
+            },
+          },
+        }
+      : null,
+  ].filter((filter): filter is NonNullable<typeof filter> => Boolean(filter));
+
+  if (!referenceFilters.length) {
+    return { records: [] };
+  }
+
+  const entries = await withDashboardTiming('finance.return_records_fetch', () => prisma.financeLedgerEntry.findMany({
+    where: {
+      vendorId,
+      OR: referenceFilters,
+    },
+    select: {
+      id: true,
+      entryType: true,
+      amount: true,
+      payoutStatus: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+  }));
+
+  return {
+    records: entries.map((entry) => ({
+      id: entry.id,
+      category: normalizeType(entry.entryType),
+      amount: toNumber(entry.amount),
+      status: mapStatus(entry.payoutStatus),
+      date: entry.createdAt.toISOString(),
+    })),
   };
 }
 

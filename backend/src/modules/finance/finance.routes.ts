@@ -9,6 +9,7 @@ import {
   getVendorFinanceDashboard,
   getVendorFinanceSummary,
   getVendorFinancialProfile,
+  getVendorReturnFinanceRecords,
   listPayoutBatches,
   markPayoutBatchReview,
   preparePayoutBatch,
@@ -42,6 +43,15 @@ function validateVendorFinancialShippingMode(body: unknown) {
   }
 
   return { ok: true as const };
+}
+
+function readOptionalQueryString(query: unknown, key: string) {
+  if (!isRecord(query)) {
+    return null;
+  }
+
+  const value = query[key];
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
 export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
@@ -78,6 +88,28 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
 
       return withDashboardRouteTiming('GET /finance/profile', () =>
         withSlowEndpointTiming('GET /finance/profile', () => getVendorFinancialProfile(vendorId)),
+      );
+    },
+  );
+
+  app.get(
+    '/finance/return-records',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      const shopifyRefundId = readOptionalQueryString(request.query, 'shopifyRefundId');
+      const shopifyOrderNumber = readOptionalQueryString(request.query, 'shopifyOrderNumber');
+
+      return withDashboardRouteTiming('GET /finance/return-records', () =>
+        withSlowEndpointTiming('GET /finance/return-records', () =>
+          getVendorReturnFinanceRecords(vendorId, { shopifyRefundId, shopifyOrderNumber }),
+        ),
       );
     },
   );

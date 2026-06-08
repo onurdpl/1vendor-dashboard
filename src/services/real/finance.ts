@@ -6,6 +6,7 @@ import type {
   InvoiceExecutionReference,
   InvoiceExecutionResponseSummary,
   PayoutBatch,
+  ReturnFinanceRecordsResponse,
   VendorFinancialProfile,
 } from '../../lib/api/contracts';
 import { formatCurrency } from './formatting';
@@ -48,6 +49,16 @@ type FinanceDashboardDto = {
 
 type FinanceDashboardSummaryDto = {
   summary: Pick<FinanceDashboardDto['summary'], 'grossSales' | 'refunds' | 'netRevenue' | 'payoutEstimate'>;
+};
+
+type ReturnFinanceRecordsResponseDto = {
+  records: Array<{
+    id: string;
+    category: string;
+    amount: number;
+    status: string;
+    date: string;
+  }>;
 };
 
 function mapTransactionCategory(type: string): FinanceTransaction['category'] {
@@ -235,6 +246,33 @@ export async function getFinanceProfile(options: { vendorId?: string | null; sig
   return requestOptions
     ? apiClient.get<VendorFinancialProfile>('/finance/profile', requestOptions)
     : apiClient.get<VendorFinancialProfile>('/finance/profile');
+}
+
+export async function getReturnFinanceRecords(options: {
+  shopifyRefundId?: string | null;
+  shopifyOrderNumber?: string | number | null;
+  vendorId?: string | null;
+  signal?: AbortSignal;
+  headers?: HeadersInit;
+} = {}): Promise<ReturnFinanceRecordsResponse> {
+  const params = new URLSearchParams();
+  if (options.shopifyRefundId) params.set('shopifyRefundId', String(options.shopifyRefundId));
+  if (options.shopifyOrderNumber) params.set('shopifyOrderNumber', String(options.shopifyOrderNumber));
+  const path = `/finance/return-records${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options);
+  const response = await (requestOptions
+    ? apiClient.get<ReturnFinanceRecordsResponseDto>(path, requestOptions)
+    : apiClient.get<ReturnFinanceRecordsResponseDto>(path));
+
+  return {
+    records: response.records.map((record) => ({
+      id: record.id,
+      category: mapTransactionCategory(record.category),
+      amount: formatCurrency(record.amount),
+      status: mapRecordStatusLabel(record.status),
+      date: record.date,
+    })),
+  };
 }
 
 export async function updateVendorFinancialProfile(

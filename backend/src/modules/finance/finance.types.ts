@@ -168,6 +168,18 @@ export type FinanceRecordDto = {
   invoiceExecution: InvoiceExecutionReferenceDto | null;
 };
 
+export type ReturnFinanceRecordDto = {
+  id: string;
+  category: string;
+  amount: number;
+  status: string;
+  date: string;
+};
+
+export type ReturnFinanceRecordsResponseDto = {
+  records: ReturnFinanceRecordDto[];
+};
+
 export type FinanceDashboardDto = {
   summary: FinanceSummaryDto;
   profile: VendorFinancialProfileDto;

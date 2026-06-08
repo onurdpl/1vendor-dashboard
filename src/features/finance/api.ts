@@ -4,6 +4,7 @@ export {
   getFinanceDashboard,
   getFinanceProfile,
   getInvoiceExecutionResponseSummary,
+  getReturnFinanceRecords,
   preparePayoutBatch,
   retryInvoiceExecution,
   updateVendorFinancialProfile,

@@ -4,6 +4,7 @@ import { registerFinanceRoutes } from '../backend/src/modules/finance/finance.ro
 const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
 const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
+const getVendorReturnFinanceRecordsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
@@ -11,6 +12,7 @@ vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   getVendorFinanceDashboard: vi.fn(),
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
   getVendorFinancialProfile: getVendorFinancialProfileMock,
+  getVendorReturnFinanceRecords: getVendorReturnFinanceRecordsMock,
   listPayoutBatches: vi.fn(),
   markPayoutBatchReview: vi.fn(),
   preparePayoutBatch: vi.fn(),
@@ -148,6 +150,17 @@ describe('finance route validation', () => {
       active: true,
       source: 'configured',
     });
+    getVendorReturnFinanceRecordsMock.mockResolvedValue({
+      records: [
+        {
+          id: 'ledger-refund-1',
+          category: 'refund',
+          amount: 125.5,
+          status: 'recorded',
+          date: '2026-05-13T05:00:00.000Z',
+        },
+      ],
+    });
   });
 
   it('returns only dashboard finance summary fields', async () => {
@@ -230,6 +243,64 @@ describe('finance route validation', () => {
       body: { message: 'Vendor context could not be resolved.' },
     });
     expect(getVendorFinancialProfileMock).not.toHaveBeenCalled();
+  });
+
+  it('returns only return-scoped finance record fields', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/return-records')?.(
+      {
+        vendorContext: { vendorId: 'sporjinal' },
+        query: {
+          shopifyRefundId: 'gid://shopify/Refund/1',
+          shopifyOrderNumber: '1023',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      records: [
+        {
+          id: 'ledger-refund-1',
+          category: 'refund',
+          amount: 125.5,
+          status: 'recorded',
+          date: '2026-05-13T05:00:00.000Z',
+        },
+      ],
+    });
+    expect(getVendorReturnFinanceRecordsMock).toHaveBeenCalledWith('sporjinal', {
+      shopifyRefundId: 'gid://shopify/Refund/1',
+      shopifyOrderNumber: '1023',
+    });
+    expect(result?.records[0]).not.toHaveProperty('settlement');
+    expect(result?.records[0]).not.toHaveProperty('payoutCalculation');
+    expect(result?.records[0]).not.toHaveProperty('invoiceExecution');
+    expect(result).not.toHaveProperty('summary');
+    expect(result).not.toHaveProperty('profile');
+    expect(result).not.toHaveProperty('payoutBatchSummary');
+  });
+
+  it('rejects return finance record requests without resolved vendor context', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/return-records')?.(
+      {
+        query: {
+          shopifyOrderNumber: '1023',
+        },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      status: 400,
+      body: { message: 'Vendor context could not be resolved.' },
+    });
+    expect(getVendorReturnFinanceRecordsMock).not.toHaveBeenCalled();
   });
 
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {

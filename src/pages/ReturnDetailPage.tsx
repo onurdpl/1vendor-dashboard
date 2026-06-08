@@ -23,14 +23,13 @@ import { useAppReadiness } from '../lib/appReadiness';
 import { formatShopifyOrderNumber } from '../lib/formatOrderDisplay';
 import { useActionFeedback } from '../lib/ui';
 import { SupportTicketModal } from '../components/SupportTicketModal';
-import { getFinanceDashboard } from '../features/finance/api';
+import { getReturnFinanceRecords } from '../features/finance/api';
 import { listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import { OperationalLinkCards, OperationalTimeline } from '../components/OperationalTimeline';
 import { OperationalRecommendations } from '../components/OperationalRecommendations';
 import { AdminCollaborationNotes } from '../components/AdminCollaborationNotes';
 import type { OperationsRecommendation } from '../lib/api/contracts';
 import {
-  sameOperationalOrderNumber,
   supportTicketMatchesReturn,
   type OperationalEventInput,
   type OperationalLinkInput,
@@ -537,12 +536,22 @@ export function ReturnDetailPage() {
     error: relatedFinanceErrorMessage,
     refetch: refetchRelatedFinance,
   } = useQueryResource(
-    queryKeys.finance.summary(currentVendor.vendorId),
-    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
+    queryKeys.finance.returnRecords(
+      currentVendor.vendorId,
+      returnRequest?.sourceShopifyRefundId,
+      returnRequest?.sourceShopifyOrderNumber,
+    ),
+    ({ signal }) =>
+      getReturnFinanceRecords({
+        vendorId: currentVendor.vendorId,
+        shopifyRefundId: returnRequest?.sourceShopifyRefundId,
+        shopifyOrderNumber: returnRequest?.sourceShopifyOrderNumber,
+        signal,
+      }),
     {
       enabled: authContextReady && Boolean(returnRequest),
       routeName: 'ReturnDetailPage.relatedFinance',
-      endpoint: '/finance',
+      endpoint: '/finance/return-records',
     },
   );
   const {
@@ -1088,11 +1097,7 @@ export function ReturnDetailPage() {
     returnCarrierPresent: Boolean(returnRequest.returnCarrierName),
     returnTrackingPresent: Boolean(returnRequest.returnTrackingNumber || returnRequest.returnTrackingUrl),
   };
-  const relatedFinanceRecords = safeArray(relatedFinanceData?.transactions).filter(
-    (record) =>
-      (returnRequest.sourceShopifyRefundId && sameShopifyIdentifier(record.shopifyRefundId, returnRequest.sourceShopifyRefundId)) ||
-      sameOperationalOrderNumber(record.shopifyOrderNumber, returnRequest.sourceShopifyOrderNumber),
-  );
+  const relatedFinanceRecords = safeArray(relatedFinanceData?.records);
   const relatedSupportTickets = safeArray(relatedSupportTicketsData).filter((ticket) =>
     supportTicketMatchesReturn(ticket, returnRequest.id, {
       audience: isAdmin ? 'admin' : 'vendor',

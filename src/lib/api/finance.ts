@@ -9,6 +9,22 @@ export function getFinanceProfile(options: { vendorId?: string | null; signal?: 
   return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export function getReturnFinanceRecords(options: {
+  shopifyRefundId?: string | null;
+  shopifyOrderNumber?: string | number | null;
+  vendorId?: string | null;
+  signal?: AbortSignal;
+} = {}) {
+  return runtimeServices.finance.returnRecords(
+    {
+      shopifyRefundId: options.shopifyRefundId,
+      shopifyOrderNumber: options.shopifyOrderNumber,
+      vendorId: options.vendorId,
+    },
+    { signal: options.signal },
+  );
+}
+
 export function updateVendorFinancialProfile(
   vendorId: string,
   input: {
