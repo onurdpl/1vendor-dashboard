@@ -1406,6 +1406,30 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
   });
 
+  it.each([
+    ['Limited Şirket', false],
+    ['Anonim Şirket', false],
+    ['Şahıs Şirketi', true],
+  ])('maps Turkish legalEntityType label %s to customer.isPerson %s', (legalEntityType, expectedIsPerson) => {
+    const preview = buildLogoIsbasiCommissionInvoicePreview({
+      vendorBillingProfile: {
+        ...vendorBillingProfile,
+        legalEntityType,
+        legalCompanyName: expectedIsPerson ? 'Ali Veli' : vendorBillingProfile.legalCompanyName,
+      },
+      commissionAmount: '1',
+      vatRate: '20',
+      currency: 'TL',
+      description: 'Pazaryeri komisyon hizmet bedeli',
+    });
+
+    expect(preview.payload.customer).toEqual(
+      expect.objectContaining({
+        isPerson: expectedIsPerson,
+      }),
+    );
+  });
+
   it('blocks unknown legalEntityType before building a Logo invoice payload', () => {
     expect(() =>
       buildLogoIsbasiCommissionInvoicePreview({

@@ -19,11 +19,23 @@ export type LogoIsbasiCommissionInvoicePreview = {
 const OMITTED_E_GOVERNMENT_WARNING = 'eGovernmentInvoice enum/required fields unknown; omitted in dry-run.';
 
 function resolveLegalEntityIsPerson(value: string | null | undefined) {
-  const normalized = value?.trim().toLowerCase();
+  const normalized = value?.trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
   if (!normalized) {
     throw new Error('legalEntityType is required for Logo İşbaşı invoice payload.');
   }
-  if (['person', 'personal', 'individual', 'bireysel', 'sole_proprietorship', 'personal_company', 'sahis', 'sahis_sirketi'].includes(normalized)) {
+  if ([
+    'person',
+    'personal',
+    'individual',
+    'bireysel',
+    'şahıs',
+    'sahis',
+    'şahıs şirketi',
+    'sahis sirketi',
+    'sole_proprietorship',
+    'personal_company',
+    'sahis_sirketi',
+  ].includes(normalized)) {
     return true;
   }
   if ([
@@ -31,13 +43,22 @@ function resolveLegalEntityIsPerson(value: string | null | undefined) {
     'corporate',
     'kurumsal',
     'limited',
+    'limited şirket',
+    'limited sirket',
     'limited_company',
     'limited_sirket',
+    'ltd',
+    'ltd. şti.',
+    'ltd. sti.',
     'joint_stock_company',
     'corporation',
     'anonim',
     'anonym',
+    'anonim şirket',
+    'anonim sirket',
     'anonim_sirket',
+    'a.ş.',
+    'a.s.',
   ].includes(normalized)) {
     return false;
   }
