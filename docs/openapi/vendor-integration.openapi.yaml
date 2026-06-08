@@ -1,0 +1,1026 @@
+openapi: 3.0.3
+info:
+  title: Vendor Integration API
+  version: 1.0.0
+  description: >
+    Provider-facing API for vendor-scoped order pulls and allocation-level
+    status, shipment, and invoice reference writebacks.
+servers:
+  - url: https://backend.example.com
+    description: Placeholder backend base URL.
+tags:
+  - name: Vendor Integration
+    description: Vendor-scoped provider integration endpoints.
+paths:
+  /api/vendor-integration/orders:
+    get:
+      tags:
+        - Vendor Integration
+      summary: List vendor-allocated orders
+      description: >
+        Returns VendorAllocation order snapshots for the vendor attached to the
+        authenticated integration token.
+      operationId: listVendorIntegrationOrders
+      security:
+        - VendorBearerAuth: []
+      x-required-scopes:
+        - orders:read
+      parameters:
+        - name: status
+          in: query
+          required: false
+          description: Optional allocation status filter.
+          schema:
+            $ref: '#/components/schemas/AllocationStatus'
+          example: ACTIVE
+        - name: limit
+          in: query
+          required: false
+          description: Page size. Defaults to 50 and is capped at 100.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+          example: 50
+        - name: cursor
+          in: query
+          required: false
+          description: Cursor returned by the previous response.
+          schema:
+            type: string
+            maxLength: 128
+          example: alloc-sporjinal-1001
+      responses:
+        '200':
+          description: Vendor allocation order page.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorIntegrationOrdersResponse'
+              examples:
+                orderPage:
+                  value:
+                    data:
+                      - id: alloc-sporjinal-1001
+                        shopifyOrderId: gid://shopify/Order/1001
+                        shopifyOrderNumber: '#1001'
+                        allocationStatus: ACTIVE
+                        fulfillmentStatus: Pending
+                        shippingStatus: Awaiting Shipment
+                        vendorIdentifier: sporjinal
+                        originalVendorIdentifier: sporjinal
+                        vendorIntegrationStatus: acknowledged
+                        vendorIntegrationStatusMessage: Order imported into provider
+                        vendorIntegrationStatusUpdatedAt: '2026-06-02T12:30:00.000Z'
+                        vendorIntegrationProvider: provider-name
+                        shopifyCreatedAt: '2026-06-02T10:00:00.000Z'
+                        createdAt: '2026-06-02T10:05:00.000Z'
+                        updatedAt: '2026-06-02T12:30:00.000Z'
+                        financial:
+                          currency: TRY
+                          financialStatus: paid
+                          paymentGatewayName: PayTR Marketplace
+                          taxesIncluded: true
+                          orderTaxAmount: '118.17'
+                          shippingAmount: '29.90'
+                          discountAmount: '15.50'
+                        orderNote: Optional customer/order note
+                        orderTags:
+                          - tag-1
+                          - tag-2
+                        customer:
+                          name: Customer Name
+                          email: customer@example.com
+                          phone: '+900000000000'
+                        billingAddress:
+                          fullName: Billing Customer
+                          company: Billing Company
+                          phone: '+900000000001'
+                          city: Istanbul
+                          district: Besiktas
+                          address1: Billing address 1
+                          address2: Floor 2
+                          postcode: '34330'
+                        shippingAddress:
+                          country: TR
+                          postcode: '34000'
+                          city: Istanbul
+                          district: Kadikoy
+                          address: Shipping address
+                        shipment:
+                          carrier: Yurtici Kargo
+                          trackingNumber: ABC123456
+                          trackingUrl: https://tracking.example/ABC123456
+                          fulfilledAt: null
+                          shipmentCreatedAt: '2026-06-02T12:00:00.000Z'
+                          shipmentUpdatedAt: null
+                          externalShippedAt: '2026-06-02T12:00:00.000Z'
+                        vendorInvoice:
+                          invoiceNumber: ABC202600001
+                          invoiceDate: '2026-06-02'
+                          invoiceUrl: https://provider.example/invoices/ABC202600001.pdf
+                          invoiceAmount: '1299.90'
+                          receivedAt: '2026-06-02T12:30:00.000Z'
+                        totals:
+                          orderTotal: '1299.90'
+                          allocationLineTotal: '1299.90'
+                        lineItems:
+                          - id: allocation-line-1
+                            shopifyLineItemId: gid://shopify/LineItem/1
+                            shopifyProductId: gid://shopify/Product/1
+                            shopifyVariantId: gid://shopify/ProductVariant/1
+                            sku: SKU-1
+                            title: Product title
+                            imageUrl: null
+                            quantity: 1
+                            unitPrice: '1299.90'
+                            unitPriceVatIncluded: '1299.90'
+                            lineTotalVatIncluded: '1299.90'
+                            lineTaxAmount: '118.17'
+                            vatRate: '10'
+                            lineAmount: '1299.90'
+                    pagination:
+                      limit: 50
+                      nextCursor: null
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/vendor-integration/orders/{allocationId}/status:
+    post:
+      tags:
+        - Vendor Integration
+      summary: Write provider order status
+      description: >
+        Stores the external provider import or processing status snapshot for
+        one vendor allocation. This does not create Shopify fulfillments,
+        shipment labels, invoices, payout records, settlement records,
+        accounting entries, returns, or refunds.
+      operationId: updateVendorIntegrationOrderStatus
+      security:
+        - VendorBearerAuth: []
+      x-required-scopes:
+        - status:write
+      parameters:
+        - $ref: '#/components/parameters/AllocationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorIntegrationStatusRequest'
+            examples:
+              status:
+                value:
+                  status: acknowledged
+                  message: Order imported into provider
+      responses:
+        '200':
+          description: Stored provider status snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorIntegrationStatusResponse'
+              examples:
+                statusResponse:
+                  value:
+                    idempotent: false
+                    allocation:
+                      id: alloc-sporjinal-1001
+                      vendorIdentifier: sporjinal
+                      vendorIntegrationStatus: acknowledged
+                      vendorIntegrationStatusMessage: Order imported into provider
+                      vendorIntegrationStatusUpdatedAt: '2026-06-02T14:30:00.000Z'
+                      vendorIntegrationProvider: provider-name
+                      lastVendorIntegrationRequestId: request-id
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/vendor-integration/orders/{allocationId}/shipment:
+    post:
+      tags:
+        - Vendor Integration
+      summary: Write provider shipment reference
+      description: >
+        Stores allocation-level shipment and tracking snapshot fields reported
+        by the external provider. This sets the local shipping status to
+        In Transit and does not create a Shopify fulfillment, shipment label,
+        carrier record, invoice, payout record, settlement record, accounting
+        entry, return, or refund.
+      operationId: updateVendorIntegrationOrderShipment
+      security:
+        - VendorBearerAuth: []
+      x-required-scopes:
+        - shipment:write
+      parameters:
+        - $ref: '#/components/parameters/AllocationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorIntegrationShipmentRequest'
+            examples:
+              shipment:
+                value:
+                  carrier: Yurtici Kargo
+                  trackingNumber: ABC123456
+                  trackingUrl: https://tracking.example/ABC123456
+                  shippedAt: '2026-06-02T12:00:00Z'
+      responses:
+        '200':
+          description: Stored provider shipment snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorIntegrationShipmentResponse'
+              examples:
+                shipmentResponse:
+                  value:
+                    idempotent: false
+                    allocation:
+                      id: alloc-sporjinal-1001
+                      vendorIdentifier: sporjinal
+                      carrier: Yurtici Kargo
+                      trackingNumber: ABC123456
+                      trackingUrl: https://tracking.example/ABC123456
+                      shippedAt: '2026-06-02T12:00:00.000Z'
+                      shippingStatus: In Transit
+                      lastVendorIntegrationShipmentRequestId: request-id
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /api/vendor-integration/orders/{allocationId}/invoice:
+    post:
+      tags:
+        - Vendor Integration
+      summary: Write provider invoice reference
+      description: >
+        Stores allocation-level vendor invoice reference snapshot fields. This
+        endpoint is informational only and does not create Shopify invoices,
+        accounting records, financial postings, payout records, settlement
+        records, returns, refunds, shipment labels, or Shopify fulfillments.
+      operationId: updateVendorIntegrationOrderInvoice
+      security:
+        - VendorBearerAuth: []
+      x-required-scopes:
+        - invoice:write
+      parameters:
+        - $ref: '#/components/parameters/AllocationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VendorIntegrationInvoiceRequest'
+            examples:
+              invoice:
+                value:
+                  invoiceNumber: ABC202600001
+                  invoiceDate: '2026-06-02'
+                  invoiceUrl: https://provider.example/invoices/ABC202600001.pdf
+                  invoiceAmount: '1299.90'
+      responses:
+        '200':
+          description: Stored provider invoice reference snapshot.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VendorIntegrationInvoiceResponse'
+              examples:
+                invoiceResponse:
+                  value:
+                    idempotent: false
+                    allocation:
+                      id: alloc-sporjinal-1001
+                      vendorIdentifier: sporjinal
+                      vendorInvoiceNumber: ABC202600001
+                      vendorInvoiceDate: '2026-06-02'
+                      vendorInvoiceUrl: https://provider.example/invoices/ABC202600001.pdf
+                      vendorInvoiceAmount: '1299.90'
+                      vendorInvoiceReceivedAt: '2026-06-02T12:30:00.000Z'
+                      lastVendorIntegrationInvoiceRequestId: request-id
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+components:
+  securitySchemes:
+    VendorBearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: Vendor integration token
+      description: >
+        Bearer token issued by Sporgym for one vendor integration client. Token
+        scopes are documented with x-required-scopes on each operation.
+
+  parameters:
+    AllocationId:
+      name: allocationId
+      in: path
+      required: true
+      description: Sporgym VendorAllocation id.
+      schema:
+        type: string
+      example: alloc-sporjinal-1001
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >
+        Provider-unique operation key. Repeating the same key for the same
+        client and allocation returns the previous result without creating a
+        duplicate event or overwriting the stored snapshot.
+      schema:
+        type: string
+        minLength: 1
+      example: provider-name:shipment:alloc-sporjinal-1001:tracking-ABC123456
+
+  responses:
+    BadRequest:
+      description: Validation error, invalid status, invalid amount/date, invalid cursor, or missing Idempotency-Key.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            validation:
+              value:
+                message: Idempotency-Key header is required.
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            unauthorized:
+              value:
+                message: Vendor integration token is required.
+    Forbidden:
+      description: Missing scope, disabled token, revoked token, or forbidden access.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            forbidden:
+              value:
+                message: 'Missing required scope: invoice:write'
+    NotFound:
+      description: Allocation not found for the authenticated vendor.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            notFound:
+              value:
+                message: Vendor allocation not found.
+    RateLimited:
+      description: Vendor integration rate limit exceeded.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          examples:
+            rateLimited:
+              value:
+                message: Rate limit exceeded.
+
+  schemas:
+    AllocationStatus:
+      type: string
+      enum:
+        - ACTIVE
+        - VENDOR_BLOCKED
+        - PENDING_REASSIGNMENT
+        - REASSIGNED
+        - FULFILLED
+
+    VendorIntegrationStatus:
+      type: string
+      enum:
+        - acknowledged
+        - processing
+        - ready_to_ship
+        - failed
+        - cancelled
+
+    DateTime:
+      type: string
+      format: date-time
+      example: '2026-06-02T12:30:00.000Z'
+
+    DateOnly:
+      type: string
+      format: date
+      pattern: '^\d{4}-\d{2}-\d{2}$'
+      example: '2026-06-02'
+
+    DecimalString:
+      type: string
+      pattern: '^\d+(?:\.\d{1,2})?$'
+      example: '1299.90'
+
+    ErrorResponse:
+      type: object
+      required:
+        - message
+      properties:
+        message:
+          type: string
+
+    Pagination:
+      type: object
+      required:
+        - limit
+        - nextCursor
+      properties:
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+        nextCursor:
+          type: string
+          nullable: true
+
+    VendorIntegrationOrdersResponse:
+      type: object
+      required:
+        - data
+        - pagination
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VendorIntegrationOrder'
+        pagination:
+          $ref: '#/components/schemas/Pagination'
+
+    VendorIntegrationOrder:
+      type: object
+      required:
+        - id
+        - shopifyOrderId
+        - shopifyOrderNumber
+        - allocationStatus
+        - fulfillmentStatus
+        - shippingStatus
+        - vendorIdentifier
+        - originalVendorIdentifier
+        - vendorIntegrationStatus
+        - vendorIntegrationStatusMessage
+        - vendorIntegrationStatusUpdatedAt
+        - vendorIntegrationProvider
+        - shopifyCreatedAt
+        - createdAt
+        - updatedAt
+        - financial
+        - orderNote
+        - orderTags
+        - customer
+        - billingAddress
+        - shippingAddress
+        - shipment
+        - vendorInvoice
+        - totals
+        - lineItems
+      properties:
+        id:
+          type: string
+        shopifyOrderId:
+          type: string
+        shopifyOrderNumber:
+          type: string
+        allocationStatus:
+          $ref: '#/components/schemas/AllocationStatus'
+        fulfillmentStatus:
+          type: string
+        shippingStatus:
+          type: string
+        vendorIdentifier:
+          type: string
+        originalVendorIdentifier:
+          type: string
+        vendorIntegrationStatus:
+          allOf:
+            - $ref: '#/components/schemas/VendorIntegrationStatus'
+          nullable: true
+        vendorIntegrationStatusMessage:
+          type: string
+          nullable: true
+        vendorIntegrationStatusUpdatedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+        vendorIntegrationProvider:
+          type: string
+          nullable: true
+        shopifyCreatedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+        createdAt:
+          $ref: '#/components/schemas/DateTime'
+        updatedAt:
+          $ref: '#/components/schemas/DateTime'
+        financial:
+          $ref: '#/components/schemas/VendorIntegrationFinancial'
+        orderNote:
+          type: string
+          nullable: true
+        orderTags:
+          type: array
+          items:
+            type: string
+        customer:
+          $ref: '#/components/schemas/VendorIntegrationCustomer'
+        billingAddress:
+          $ref: '#/components/schemas/VendorIntegrationBillingAddress'
+        shippingAddress:
+          $ref: '#/components/schemas/VendorIntegrationShippingAddress'
+        shipment:
+          $ref: '#/components/schemas/VendorIntegrationShipmentSnapshot'
+        vendorInvoice:
+          $ref: '#/components/schemas/VendorIntegrationInvoiceSnapshot'
+        totals:
+          $ref: '#/components/schemas/VendorIntegrationTotals'
+        lineItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/VendorIntegrationLineItem'
+
+    VendorIntegrationFinancial:
+      type: object
+      required:
+        - currency
+        - financialStatus
+        - paymentGatewayName
+        - taxesIncluded
+        - orderTaxAmount
+        - shippingAmount
+        - discountAmount
+      properties:
+        currency:
+          type: string
+          nullable: true
+        financialStatus:
+          type: string
+          nullable: true
+        paymentGatewayName:
+          type: string
+          nullable: true
+        taxesIncluded:
+          type: boolean
+          nullable: true
+        orderTaxAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        shippingAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        discountAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+
+    VendorIntegrationCustomer:
+      type: object
+      required:
+        - name
+        - email
+        - phone
+      properties:
+        name:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+
+    VendorIntegrationBillingAddress:
+      type: object
+      required:
+        - fullName
+        - company
+        - phone
+        - city
+        - district
+        - address1
+        - address2
+        - postcode
+      properties:
+        fullName:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        phone:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        district:
+          type: string
+          nullable: true
+        address1:
+          type: string
+          nullable: true
+        address2:
+          type: string
+          nullable: true
+        postcode:
+          type: string
+          nullable: true
+
+    VendorIntegrationShippingAddress:
+      type: object
+      required:
+        - country
+        - postcode
+        - city
+        - district
+        - address
+      properties:
+        country:
+          type: string
+          nullable: true
+        postcode:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        district:
+          type: string
+          nullable: true
+        address:
+          type: string
+          nullable: true
+
+    VendorIntegrationShipmentSnapshot:
+      type: object
+      required:
+        - carrier
+        - trackingNumber
+        - trackingUrl
+        - fulfilledAt
+        - shipmentCreatedAt
+        - shipmentUpdatedAt
+        - externalShippedAt
+      properties:
+        carrier:
+          type: string
+          nullable: true
+        trackingNumber:
+          type: string
+          nullable: true
+        trackingUrl:
+          type: string
+          nullable: true
+        fulfilledAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+        shipmentCreatedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+        shipmentUpdatedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+        externalShippedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+
+    VendorIntegrationInvoiceSnapshot:
+      type: object
+      required:
+        - invoiceNumber
+        - invoiceDate
+        - invoiceUrl
+        - invoiceAmount
+        - receivedAt
+      properties:
+        invoiceNumber:
+          type: string
+          nullable: true
+        invoiceDate:
+          allOf:
+            - $ref: '#/components/schemas/DateOnly'
+          nullable: true
+        invoiceUrl:
+          type: string
+          nullable: true
+        invoiceAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        receivedAt:
+          allOf:
+            - $ref: '#/components/schemas/DateTime'
+          nullable: true
+
+    VendorIntegrationTotals:
+      type: object
+      required:
+        - orderTotal
+        - allocationLineTotal
+      properties:
+        orderTotal:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        allocationLineTotal:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+
+    VendorIntegrationLineItem:
+      type: object
+      required:
+        - id
+        - shopifyLineItemId
+        - shopifyProductId
+        - shopifyVariantId
+        - sku
+        - title
+        - imageUrl
+        - quantity
+        - unitPrice
+        - unitPriceVatIncluded
+        - lineTotalVatIncluded
+        - lineTaxAmount
+        - vatRate
+        - lineAmount
+      properties:
+        id:
+          type: string
+        shopifyLineItemId:
+          type: string
+        shopifyProductId:
+          type: string
+          nullable: true
+        shopifyVariantId:
+          type: string
+          nullable: true
+        sku:
+          type: string
+          nullable: true
+        title:
+          type: string
+          nullable: true
+        imageUrl:
+          type: string
+          nullable: true
+        quantity:
+          type: integer
+        unitPrice:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        unitPriceVatIncluded:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        lineTotalVatIncluded:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        lineTaxAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        vatRate:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+        lineAmount:
+          allOf:
+            - $ref: '#/components/schemas/DecimalString'
+          nullable: true
+
+    VendorIntegrationStatusRequest:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          $ref: '#/components/schemas/VendorIntegrationStatus'
+        message:
+          type: string
+          nullable: true
+          maxLength: 500
+
+    VendorIntegrationStatusResponse:
+      type: object
+      required:
+        - idempotent
+        - allocation
+      properties:
+        idempotent:
+          type: boolean
+        allocation:
+          type: object
+          required:
+            - id
+            - vendorIdentifier
+            - vendorIntegrationStatus
+            - vendorIntegrationStatusMessage
+            - vendorIntegrationStatusUpdatedAt
+            - vendorIntegrationProvider
+            - lastVendorIntegrationRequestId
+          properties:
+            id:
+              type: string
+            vendorIdentifier:
+              type: string
+            vendorIntegrationStatus:
+              allOf:
+                - $ref: '#/components/schemas/VendorIntegrationStatus'
+              nullable: true
+            vendorIntegrationStatusMessage:
+              type: string
+              nullable: true
+            vendorIntegrationStatusUpdatedAt:
+              allOf:
+                - $ref: '#/components/schemas/DateTime'
+              nullable: true
+            vendorIntegrationProvider:
+              type: string
+              nullable: true
+            lastVendorIntegrationRequestId:
+              type: string
+              nullable: true
+
+    VendorIntegrationShipmentRequest:
+      type: object
+      required:
+        - carrier
+        - trackingNumber
+      properties:
+        carrier:
+          type: string
+          maxLength: 200
+        trackingNumber:
+          type: string
+          maxLength: 200
+        trackingUrl:
+          type: string
+          nullable: true
+          maxLength: 1000
+        shippedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    VendorIntegrationShipmentResponse:
+      type: object
+      required:
+        - idempotent
+        - allocation
+      properties:
+        idempotent:
+          type: boolean
+        allocation:
+          type: object
+          required:
+            - id
+            - vendorIdentifier
+            - carrier
+            - trackingNumber
+            - trackingUrl
+            - shippedAt
+            - shippingStatus
+            - lastVendorIntegrationShipmentRequestId
+          properties:
+            id:
+              type: string
+            vendorIdentifier:
+              type: string
+            carrier:
+              type: string
+              nullable: true
+            trackingNumber:
+              type: string
+              nullable: true
+            trackingUrl:
+              type: string
+              nullable: true
+            shippedAt:
+              type: string
+              format: date-time
+              nullable: true
+            shippingStatus:
+              type: string
+              example: In Transit
+            lastVendorIntegrationShipmentRequestId:
+              type: string
+              nullable: true
+
+    VendorIntegrationInvoiceRequest:
+      type: object
+      required:
+        - invoiceNumber
+        - invoiceDate
+        - invoiceAmount
+      properties:
+        invoiceNumber:
+          type: string
+          maxLength: 200
+        invoiceDate:
+          $ref: '#/components/schemas/DateOnly'
+        invoiceUrl:
+          type: string
+          nullable: true
+          maxLength: 1000
+        invoiceAmount:
+          $ref: '#/components/schemas/DecimalString'
+
+    VendorIntegrationInvoiceResponse:
+      type: object
+      required:
+        - idempotent
+        - allocation
+      properties:
+        idempotent:
+          type: boolean
+        allocation:
+          type: object
+          required:
+            - id
+            - vendorIdentifier
+            - vendorInvoiceNumber
+            - vendorInvoiceDate
+            - vendorInvoiceUrl
+            - vendorInvoiceAmount
+            - vendorInvoiceReceivedAt
+            - lastVendorIntegrationInvoiceRequestId
+          properties:
+            id:
+              type: string
+            vendorIdentifier:
+              type: string
+            vendorInvoiceNumber:
+              type: string
+              nullable: true
+            vendorInvoiceDate:
+              allOf:
+                - $ref: '#/components/schemas/DateOnly'
+              nullable: true
+            vendorInvoiceUrl:
+              type: string
+              nullable: true
+            vendorInvoiceAmount:
+              allOf:
+                - $ref: '#/components/schemas/DecimalString'
+              nullable: true
+            vendorInvoiceReceivedAt:
+              allOf:
+                - $ref: '#/components/schemas/DateTime'
+              nullable: true
+            lastVendorIntegrationInvoiceRequestId:
+              type: string
+              nullable: true
