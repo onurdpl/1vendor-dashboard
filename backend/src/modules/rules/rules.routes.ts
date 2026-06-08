@@ -7,11 +7,15 @@ import { evaluateOperationalSignalsForUser, listOperationalSignals, updateOperat
 import type { OperationalSignalLifecycleAction } from './rules.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
 
+type SignalListQuery = {
+  limit?: string | number;
+};
+
 export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
 
-  app.get(
+  app.get<{ Querystring: SignalListQuery }>(
     '/signals',
     {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
@@ -23,6 +27,7 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
         listOperationalSignals({
           vendorId: request.vendorContext?.vendorId,
           includeInternal,
+          limit: parseSignalLimit(request.query?.limit),
         }),
       );
     },
@@ -102,4 +107,14 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
       return signal;
     },
   );
+}
+
+function parseSignalLimit(value: unknown) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const parsed = typeof raw === 'number' ? raw : typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+
+  return Math.floor(parsed);
 }

@@ -38,9 +38,9 @@ describe('rules route contract', () => {
 
   it('keeps GET /signals read-only for dashboard deferred reads', async () => {
     listOperationalSignalsMock.mockResolvedValueOnce({ summary: { total: 1 }, signals: [] });
-    const gets = new Map<string, (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string } }, reply: Reply) => unknown>();
+    const gets = new Map<string, (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string } }, reply: Reply) => unknown>();
     const app = {
-      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string } }, reply: Reply) => unknown) => {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string } }, reply: Reply) => unknown) => {
         gets.set(path, handler);
       }),
       post: vi.fn(),
@@ -50,14 +50,40 @@ describe('rules route contract', () => {
     const response = await gets.get('/signals')?.({
       authUser: { role: 'vendor' },
       vendorContext: { vendorId: 'sporjinal' },
+      query: { limit: '10' },
     }, {} as Reply);
 
     expect(response).toEqual({ summary: { total: 1 }, signals: [] });
     expect(listOperationalSignalsMock).toHaveBeenCalledWith({
       vendorId: 'sporjinal',
       includeInternal: false,
+      limit: 10,
     });
     expect(evaluateOperationalSignalsForUserMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps GET /signals default limit behavior when no limit query is provided', async () => {
+    listOperationalSignalsMock.mockResolvedValueOnce({ summary: { total: 1 }, signals: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string } }, reply: Reply) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string } }, reply: Reply) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerRulesRoutes(app as never, {} as never);
+    await gets.get('/signals')?.({
+      authUser: { role: 'vendor' },
+      vendorContext: { vendorId: 'sporjinal' },
+      query: {},
+    }, {} as Reply);
+
+    expect(listOperationalSignalsMock).toHaveBeenCalledWith({
+      vendorId: 'sporjinal',
+      includeInternal: false,
+      limit: undefined,
+    });
   });
 
   it('runs vendor-scoped signal evaluation only through POST /signals/evaluate', async () => {
