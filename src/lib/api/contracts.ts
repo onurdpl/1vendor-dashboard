@@ -1004,6 +1004,13 @@ export type ReturnSummary = {
   refundedItems?: ReturnLineItem[];
 };
 
+export type DashboardReturnSummary = {
+  id: string;
+  status: string;
+  sourceShopifyRefundId: string | null;
+  createdAt: string;
+};
+
 export type ReturnLineItem = {
   originalVendorId: VendorId;
   assignedVendorId: VendorId;

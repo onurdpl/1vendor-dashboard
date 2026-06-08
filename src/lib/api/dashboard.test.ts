@@ -37,6 +37,14 @@ function createRuntimeServices() {
           amount: 'TRY 25.00',
         },
       ]),
+      dashboard: vi.fn().mockResolvedValue([
+        {
+          id: 'return-1',
+          sourceShopifyRefundId: 'refund-1',
+          status: 'Pending',
+          createdAt: '2026-05-13T04:44:00Z',
+        },
+      ]),
     },
     finance: {
       summary: vi.fn().mockResolvedValue({
@@ -218,6 +226,7 @@ describe('dashboard real-mode loading', () => {
     expect(overview.title).toBe('Stored Vendor command center');
     expect(services.orders.list).not.toHaveBeenCalled();
     expect(services.returns.list).not.toHaveBeenCalled();
+    expect(services.returns.dashboard).not.toHaveBeenCalled();
     expect(services.finance.summary).not.toHaveBeenCalled();
     expect(services.finance.dashboard).not.toHaveBeenCalled();
     expect(services.diagnostics.reconciliation).not.toHaveBeenCalled();
@@ -231,7 +240,8 @@ describe('dashboard real-mode loading', () => {
 
     expect(services.dashboard.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.orders.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
-    expect(services.returns.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.returns.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.returns.list).not.toHaveBeenCalled();
     expect(services.finance.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.finance.dashboard).not.toHaveBeenCalled();
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
@@ -248,7 +258,8 @@ describe('dashboard real-mode loading', () => {
 
     expect(services.dashboard.summary).toHaveBeenCalledTimes(1);
     expect(services.orders.list).toHaveBeenCalledTimes(1);
-    expect(services.returns.list).toHaveBeenCalledTimes(1);
+    expect(services.returns.dashboard).toHaveBeenCalledTimes(1);
+    expect(services.returns.list).not.toHaveBeenCalled();
     expect(services.finance.summary).not.toHaveBeenCalled();
     expect(services.automation.dashboard).not.toHaveBeenCalled();
     expect(services.signals.list).not.toHaveBeenCalled();
@@ -295,7 +306,7 @@ describe('dashboard real-mode loading', () => {
     await getDashboardDeferredOverview('vendor-query-key');
 
     const orderOptions = services.orders.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
-    const returnOptions = services.returns.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const returnOptions = services.returns.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number; offset?: number } | undefined;
     const financeOptions = services.finance.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const summaryOptions = services.dashboard.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const signalOptions = services.signals.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
@@ -310,6 +321,7 @@ describe('dashboard real-mode loading', () => {
     expect(summaryOptions?.limit).toBeUndefined();
     expect(orderOptions?.limit).toBe(10);
     expect(returnOptions?.limit).toBe(10);
+    expect(returnOptions?.offset).toBe(0);
     expect(financeOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(financeOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
     expect(financeOptions?.limit).toBeUndefined();
@@ -326,12 +338,12 @@ describe('dashboard real-mode loading', () => {
           allocationStatus: 'active',
         })),
       );
-      runtimeServices.returns.list.mockResolvedValue(
+      runtimeServices.returns.dashboard.mockResolvedValue(
         Array.from({ length: 10 }, (_, index) => ({
           id: `return-${index + 1}`,
           sourceShopifyRefundId: `refund-${index + 1}`,
           status: 'Pending',
-          amount: 'TRY 25.00',
+          createdAt: '2026-05-13T04:44:00Z',
         })),
       );
       runtimeServices.dashboard.summary.mockResolvedValue({

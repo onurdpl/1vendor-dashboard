@@ -36,6 +36,13 @@ export type ReturnSummaryDto = {
   updatedAt: string;
 };
 
+export type DashboardReturnSummaryDto = {
+  id: string;
+  status: string;
+  sourceShopifyRefundId: string | null;
+  createdAt: string;
+};
+
 export type RefundedItemDto = {
   id: string;
   sourceLineItemId: string;

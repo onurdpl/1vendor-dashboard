@@ -520,7 +520,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     const phase1Requests = Promise.allSettled([
       withDashboardClientTiming(requestId, 'client.dashboard.summary', () => runtimeServices.dashboard.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
-      withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
+      withDashboardClientTiming(requestId, 'client.returns.dashboard', () => runtimeServices.returns.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
     ] as const);
     const phase2Requests = waitForDashboardDeferredPhase(options.signal, DASHBOARD_DEFERRED_PHASE_2_DELAY_MS)
       .then(() => Promise.allSettled([

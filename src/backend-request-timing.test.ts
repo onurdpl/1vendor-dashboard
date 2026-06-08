@@ -24,6 +24,7 @@ describe('backend request timing instrumentation', () => {
   it('limits timing logs to production dashboard routes', () => {
     expect(shouldLogRequestTiming('POST /auth/login')).toBe(true);
     expect(shouldLogRequestTiming('GET /orders')).toBe(true);
+    expect(shouldLogRequestTiming('GET /returns/dashboard')).toBe(true);
     expect(shouldLogRequestTiming('GET /returns/:returnId')).toBe(true);
     expect(shouldLogRequestTiming('GET /notifications')).toBe(true);
     expect(shouldLogRequestTiming('GET /notifications/dashboard')).toBe(true);

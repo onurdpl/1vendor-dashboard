@@ -9,6 +9,7 @@ import {
   getVendorReturnById,
   createKargonomiReturnShipmentForReturn,
   createNavlungoReturnPickupForReturn,
+  listVendorDashboardReturns,
   listVendorReturns,
   markReturnReceived,
   previewKargonomiReturnShipmentForReturn,
@@ -155,6 +156,23 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
 
       return withDashboardRouteTiming('GET /returns', () =>
         withSlowEndpointTiming('GET /returns', () => listVendorReturns(vendorId, resolvePagination(request.query))),
+      );
+    },
+  );
+
+  app.get(
+    '/returns/dashboard',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return [];
+      }
+
+      return withDashboardRouteTiming('GET /returns/dashboard', () =>
+        listVendorDashboardReturns(vendorId, resolvePagination(request.query, { limit: 10 })),
       );
     },
   );

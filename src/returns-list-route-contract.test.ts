@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerReturnsRoutes } from '../backend/src/modules/returns/returns.routes.js';
 
 const listVendorReturnsMock = vi.hoisted(() => vi.fn());
+const listVendorDashboardReturnsMock = vi.hoisted(() => vi.fn());
 const markReturnReceivedMock = vi.hoisted(() => vi.fn());
 const reviewReturnMock = vi.hoisted(() => vi.fn());
 const backfillShopifyReturnReasonsMock = vi.hoisted(() => vi.fn());
@@ -9,6 +10,7 @@ const cleanupDuplicateReturnRecordsMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/returns/returns.service.js', () => ({
   getVendorReturnById: vi.fn(),
+  listVendorDashboardReturns: listVendorDashboardReturnsMock,
   listVendorReturns: listVendorReturnsMock,
   markReturnReceived: markReturnReceivedMock,
   reviewReturn: reviewReturnMock,
@@ -162,6 +164,69 @@ describe('backend returns list route contract', () => {
         ],
       }),
     ]);
+    expect(listVendorDashboardReturnsMock).not.toHaveBeenCalled();
+  });
+
+  it('routes dashboard return reads through the projection service with pagination', async () => {
+    listVendorDashboardReturnsMock.mockResolvedValueOnce([
+      {
+        id: 'return-dashboard-1',
+        status: 'requested',
+        sourceShopifyRefundId: null,
+        createdAt: '2026-05-13T04:44:00Z',
+      },
+    ]);
+    const routes = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { vendorContext?: { vendorId?: string }; query?: unknown }) => unknown) => {
+        routes.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerReturnsRoutes(app as never, {} as never);
+    const response = await routes.get('/returns/dashboard')?.({
+      vendorContext: { vendorId: 'sporjinal' },
+      query: { limit: '5', offset: '2' },
+    });
+
+    expect(response).toEqual([
+      {
+        id: 'return-dashboard-1',
+        status: 'requested',
+        sourceShopifyRefundId: null,
+        createdAt: '2026-05-13T04:44:00Z',
+      },
+    ]);
+    expect(listVendorDashboardReturnsMock).toHaveBeenCalledWith('sporjinal', {
+      limit: 5,
+      offset: 2,
+    });
+    expect(listVendorReturnsMock).not.toHaveBeenCalled();
+    expect(response?.[0]).not.toHaveProperty('refundedItems');
+    expect(response?.[0]).not.toHaveProperty('returnProvider');
+  });
+
+  it('defaults dashboard return reads to a ten item window', async () => {
+    listVendorDashboardReturnsMock.mockResolvedValueOnce([]);
+    const routes = new Map<string, (request: { vendorContext?: { vendorId?: string }; query?: unknown }) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { vendorContext?: { vendorId?: string }; query?: unknown }) => unknown) => {
+        routes.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerReturnsRoutes(app as never, {} as never);
+    await routes.get('/returns/dashboard')?.({
+      vendorContext: { vendorId: 'sporjinal' },
+      query: {},
+    });
+
+    expect(listVendorDashboardReturnsMock).toHaveBeenCalledWith('sporjinal', {
+      limit: 10,
+      offset: 0,
+    });
   });
 
   it('registers an admin-only Shopify return reason backfill route', async () => {

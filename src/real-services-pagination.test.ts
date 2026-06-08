@@ -3,7 +3,7 @@ import { listWebhookDiagnostics } from './services/real/diagnostics';
 import { getFinanceDashboard, getFinanceProfile, getFinanceSummary, getReturnFinanceRecords } from './services/real/finance';
 import { listOrders } from './services/real/orders';
 import { listAdminOperationsQueue } from './services/real/operations';
-import { listReturns } from './services/real/returns';
+import { listDashboardReturns, listReturns } from './services/real/returns';
 
 const apiClientGet = vi.hoisted(() => vi.fn());
 
@@ -34,6 +34,26 @@ describe('real service pagination plumbing', () => {
     expect(apiClientGet).toHaveBeenNthCalledWith(2, '/returns?limit=25&offset=50');
     expect(apiClientGet).toHaveBeenNthCalledWith(3, '/admin/diagnostics/webhooks?limit=25&offset=50', expect.any(Object));
     expect(apiClientGet).toHaveBeenNthCalledWith(4, '/admin/operations?limit=25&offset=50', expect.any(Object));
+  });
+
+  it('passes limit and offset to dashboard return projection endpoint', async () => {
+    apiClientGet.mockResolvedValueOnce([]);
+
+    await listDashboardReturns({
+      vendorId: 'vendor-1',
+      limit: 10,
+      offset: 0,
+      headers: { 'X-Dashboard-Deferred-Load': 'true' },
+    });
+
+    expect(apiClientGet).toHaveBeenCalledWith(
+      '/returns/dashboard?limit=10&offset=0',
+      expect.objectContaining({
+        vendorId: 'vendor-1',
+        headers: { 'X-Dashboard-Deferred-Load': 'true' },
+      }),
+    );
+    expect(apiClientGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/returns(?:\?|$)/), expect.anything());
   });
 
   it('keeps finance summary request array-shaped while allowing record windowing', async () => {

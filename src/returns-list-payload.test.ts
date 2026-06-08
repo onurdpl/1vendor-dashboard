@@ -14,7 +14,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { listVendorReturns, getVendorReturnById } = await import('../backend/src/modules/returns/returns.service.js');
+const { listVendorDashboardReturns, listVendorReturns, getVendorReturnById } = await import('../backend/src/modules/returns/returns.service.js');
 
 function buildReturnRecord() {
   const orderLineItem = {
@@ -109,6 +109,52 @@ describe('returns list payload optimization', () => {
       }),
     );
     expect(result[0]).not.toHaveProperty('returnProviderSnapshot');
+  });
+
+  it('returns dashboard return summaries with only dashboard fields', async () => {
+    prismaMock.returnRecord.findMany.mockResolvedValueOnce([
+      buildReturnRecord(),
+      {
+        ...buildReturnRecord(),
+        id: 'return-2',
+        sourceShopifyRefundId: 'gid://shopify/Refund/2',
+        status: 'pending',
+        returnLifecycleStatus: null,
+      },
+    ]);
+
+    const result = await listVendorDashboardReturns('sporjinal', { limit: 1, offset: 2 });
+
+    expect(prismaMock.returnRecord.findMany).toHaveBeenCalledWith({
+      where: {
+        vendorAllocation: {
+          assignedVendorId: 'sporjinal',
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        returnLifecycleStatus: true,
+        sourceShopifyRefundId: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 1,
+      skip: 2,
+    });
+    expect(result[0]).toEqual({
+      id: 'return-1',
+      status: 'approved',
+      sourceShopifyRefundId: null,
+      createdAt: '2026-05-01T08:00:00.000Z',
+    });
+    expect(result[0]).not.toHaveProperty('refundedItems');
+    expect(result[0]).not.toHaveProperty('returnProvider');
+    expect(result[0]).not.toHaveProperty('returnTrackingNumber');
+    expect(result[0]).not.toHaveProperty('refundAmount');
+    expect(result[0]).not.toHaveProperty('refundedSkus');
   });
 
   it('keeps return provider snapshots on detail responses', async () => {

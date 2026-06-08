@@ -1,5 +1,5 @@
 import { apiClient } from '../../lib/api-client';
-import type { KargonomiReturnPreview, ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
+import type { DashboardReturnSummary, KargonomiReturnPreview, ReturnDetail, ReturnSummary } from '../../lib/api/contracts';
 import { formatCurrency, toTitleCaseLabel } from './formatting';
 
 type ReturnSummaryDto = {
@@ -89,6 +89,13 @@ type ReturnDetailDto = ReturnSummaryDto & {
   requestCreatedAt: string | null;
   requestUpdatedAt: string | null;
   refundedItems: NonNullable<ReturnSummaryDto['refundedItems']>;
+};
+
+type DashboardReturnSummaryDto = {
+  id: string;
+  status: string;
+  sourceShopifyRefundId: string | null;
+  createdAt: string;
 };
 
 function mapStatus(status: string, sourceType: ReturnSummary['sourceType']): ReturnSummary['status'] {
@@ -328,6 +335,17 @@ export async function listReturns(options: { limit?: number; offset?: number; ve
     : apiClient.get<ReturnSummaryDto[]>(path));
   const mapped = response.map(mapSummary);
   return mapped;
+}
+
+export async function listDashboardReturns(options: { limit?: number; offset?: number; vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<DashboardReturnSummary[]> {
+  const params = new URLSearchParams();
+  if (typeof options.limit === 'number') params.set('limit', String(options.limit));
+  if (typeof options.offset === 'number') params.set('offset', String(options.offset));
+  const path = `/returns/dashboard${params.size ? `?${params.toString()}` : ''}`;
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<DashboardReturnSummaryDto[]>(path, requestOptions)
+    : apiClient.get<DashboardReturnSummaryDto[]>(path);
 }
 
 export async function getReturn(returnId: string, options: { vendorId?: string | null; signal?: AbortSignal } = {}): Promise<ReturnDetail> {

@@ -5,6 +5,7 @@ const TIMED_ROUTE_NAMES = new Set([
   'GET /orders',
   'GET /orders/:orderId',
   'GET /returns',
+  'GET /returns/dashboard',
   'GET /returns/:returnId',
   'GET /finance',
   'GET /finance/summary',

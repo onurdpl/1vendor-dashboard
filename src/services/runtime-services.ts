@@ -30,6 +30,7 @@ import type {
   CreateSupportTicketInput,
   DashboardNotificationsResponse,
   DashboardOperationalSummary,
+  DashboardReturnSummary,
   KargonomiReturnPreview,
   LogoIsbasiCommissionInvoicePreviewInput,
   OperationsQueueDashboard,
@@ -1654,6 +1655,15 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realReturns.listReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(listMockReturns(vendorId)),
+    dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}): Promise<DashboardReturnSummary[]> =>
+      runtimeConfig.apiMode === 'real'
+        ? realReturns.listDashboardReturns({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
+        : Promise.resolve(listMockReturns(vendorId).map((returnRecord) => ({
+            id: returnRecord.id,
+            status: returnRecord.status,
+            sourceShopifyRefundId: returnRecord.sourceShopifyRefundId,
+            createdAt: returnRecord.date,
+          }))),
     async detail(returnId: string, vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.getReturn(returnId, { vendorId, signal: options.signal });

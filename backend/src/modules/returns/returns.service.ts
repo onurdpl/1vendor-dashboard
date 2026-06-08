@@ -21,7 +21,7 @@ import {
   type KargonomiDestinationResolution,
 } from '../shipping/kargonomi-provider.adapter.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
-import type { KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
+import type { DashboardReturnSummaryDto, KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 import {
   backfillMissingLineItemImages,
   type ShopifyLineItemImageLookupService,
@@ -1015,6 +1015,38 @@ export async function listVendorReturns(
       createdAt: record.createdAt.toISOString(),
       updatedAt: record.updatedAt.toISOString(),
     };
+  }));
+}
+
+export async function listVendorDashboardReturns(
+  vendorId: string,
+  options: { limit?: number; offset?: number } = {},
+): Promise<DashboardReturnSummaryDto[]> {
+  const records = await withDashboardTiming('returns.dashboard_return_fetch', () => prisma.returnRecord.findMany({
+    where: {
+      vendorAllocation: {
+        assignedVendorId: vendorId,
+      },
+    },
+    select: {
+      id: true,
+      status: true,
+      returnLifecycleStatus: true,
+      sourceShopifyRefundId: true,
+      createdAt: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: options.limit ?? 10,
+    skip: options.offset ?? 0,
+  }));
+
+  return records.map((record) => ({
+    id: record.id,
+    status: getLifecycleStatus(record.status, record.returnLifecycleStatus),
+    sourceShopifyRefundId: record.sourceShopifyRefundId,
+    createdAt: record.createdAt.toISOString(),
   }));
 }
 
