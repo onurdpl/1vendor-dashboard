@@ -93,6 +93,7 @@ export type KargonomiClient = Pick<
   | 'confirmShippingPrice'
   | 'getShipmentBarcodePdf'
   | 'getShipment'
+  | 'getWarehouse'
 >;
 
 export type KargonomiDestinationLookupClient = Pick<KargonomiHttpClient, 'listStates' | 'listCities'>;
@@ -992,6 +993,12 @@ export class KargonomiHttpClient {
 
   async getShipment(shipmentId: string | number): Promise<KargonomiRawHttpResponse> {
     return this.request(`/shipments/${encodeURIComponent(String(shipmentId))}`, {
+      method: 'GET',
+    });
+  }
+
+  async getWarehouse(warehouseId: string | number): Promise<KargonomiRawHttpResponse> {
+    return this.request(`/warehouses/${encodeURIComponent(String(warehouseId))}`, {
       method: 'GET',
     });
   }

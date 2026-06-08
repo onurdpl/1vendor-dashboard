@@ -614,6 +614,18 @@ export type VendorShippingWarehouse = {
   name: string | null;
   address: string | null;
   isDefault: boolean;
+  syncStatus?: {
+    contactNamePresent: boolean;
+    phonePresent: boolean;
+    addressPresent: boolean;
+    stateIdPresent: boolean;
+    cityIdPresent: boolean;
+    stateName: string | null;
+    cityName: string | null;
+    syncedAt: string | null;
+    lookupStatus: string | null;
+    lookupError: string | null;
+  };
 };
 
 export type VendorShippingConfig = {
@@ -645,6 +657,26 @@ export type VendorShippingConfigUpdate = {
     provider?: ShippingProvider;
   }>;
   providerMetadata?: unknown;
+};
+
+export type KargonomiWarehouseSyncResult = {
+  ok: boolean;
+  provider: 'KARGONOMI';
+  mode: 'warehouse_detail_sync';
+  vendorId: string;
+  warehouseId: string;
+  writesPerformed: boolean;
+  warehouse: {
+    contactNamePresent: boolean;
+    phonePresent: boolean;
+    addressPresent: boolean;
+    stateName: string | null;
+    cityName: string | null;
+    stateId: string | null;
+    cityId: string | null;
+  };
+  syncedConfig: VendorShippingConfig;
+  warnings: string[];
 };
 
 export type AssignmentHistoryAction = 'assigned' | 'vendor_blocked' | 'reassignment_requested' | 'reassigned';

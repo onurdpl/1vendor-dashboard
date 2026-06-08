@@ -16,6 +16,7 @@ import type {
   ShippingStatus,
   ShopifyOrderBreakdown,
   VendorAllocationSummary,
+  KargonomiWarehouseSyncResult,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
   ParatikaSessionTokenLiveProbeResult,
@@ -689,5 +690,12 @@ export async function updateVendorShippingConfig(vendorId: string, input: Vendor
   return apiClient.put<VendorShippingConfig>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/shipping-config`,
     input,
+  );
+}
+
+export async function syncKargonomiWarehouseDetails(vendorId: string, warehouseId: string) {
+  return apiClient.post<KargonomiWarehouseSyncResult>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/shipping-config/kargonomi/warehouses/${encodeURIComponent(warehouseId)}/sync`,
+    {},
   );
 }

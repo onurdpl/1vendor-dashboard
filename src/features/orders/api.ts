@@ -17,6 +17,7 @@ export {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
 } from '../../lib/api/orders';
@@ -29,6 +30,7 @@ export type {
   ShippingProvider,
   ShippingProviderDiagnostics,
   ShopifyOrderBreakdown,
+  KargonomiWarehouseSyncResult,
   VendorShippingConfig,
   VendorShippingConfigUpdate,
   ParatikaSessionTokenLiveProbeResult,

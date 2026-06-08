@@ -22,6 +22,7 @@ import {
   retryFailedShipmentExecution,
   retryShipmentExecution,
   submitFulfillmentTracking,
+  syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
   updateVendorShippingConfig,
   type OrderDetail,
@@ -1023,6 +1024,16 @@ function readKargonomiBuyerCityId(config?: VendorShippingConfig | null) {
   return typeof raw === 'string' ? raw : '';
 }
 
+function getKargonomiDefaultWarehouse(config?: VendorShippingConfig | null) {
+  const warehouses = config?.warehouses ?? [];
+  return (
+    warehouses.find((warehouse) => warehouse.provider === 'kargonomi' && warehouse.warehouseId === config?.defaultWarehouseId) ??
+    warehouses.find((warehouse) => warehouse.provider === 'kargonomi' && warehouse.isDefault) ??
+    warehouses.find((warehouse) => warehouse.provider === 'kargonomi') ??
+    null
+  );
+}
+
 function readKargonomiReturnReceiverField(config: VendorShippingConfig | null | undefined, keys: string[], fallback?: string | null) {
   const metadata = isRecord(config?.providerMetadata) ? config.providerMetadata : {};
   for (const key of keys) {
@@ -1939,6 +1950,27 @@ export function OrderDetailPage() {
       },
       onError: (error) => {
         const message = error instanceof Error ? error.message : 'Shipping provider configuration could not be saved.';
+        setShippingConfigFeedback({ tone: 'error', message });
+      },
+    },
+  );
+  const { mutateAsync: syncKargonomiWarehouseMutation, isPending: isSyncingKargonomiWarehouse } = useMutationAction(
+    async (warehouseId: string) => syncKargonomiWarehouseDetails(currentVendor.vendorId, warehouseId),
+    {
+      invalidateQueryKeys: [
+        queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
+        queryKeys.admin.shipments.providerConfig(diagnosticsProvider, currentVendor.vendorId),
+      ],
+      onSuccess: (result) => {
+        queryClient.setQueryData(
+          queryKeys.admin.shipments.vendorShippingConfig(currentVendor.vendorId),
+          result.syncedConfig,
+        );
+        setShippingConfigDraft(buildShippingConfigDraft(result.syncedConfig));
+        setShippingConfigFeedback({ tone: 'success', message: 'Kargonomi warehouse details synced.' });
+      },
+      onError: (error) => {
+        const message = error instanceof Error ? error.message : 'Kargonomi warehouse details could not be synced.';
         setShippingConfigFeedback({ tone: 'error', message });
       },
     },
@@ -4961,6 +4993,10 @@ export function OrderDetailPage() {
   const kargonomiShippingProviderId = readKargonomiShippingProviderId(vendorShippingConfig);
   const kargonomiBuyerStateId = readKargonomiBuyerStateId(vendorShippingConfig);
   const kargonomiBuyerCityId = readKargonomiBuyerCityId(vendorShippingConfig);
+  const kargonomiDefaultWarehouse = getKargonomiDefaultWarehouse(vendorShippingConfig);
+  const kargonomiWarehouseSyncStatus = kargonomiDefaultWarehouse?.syncStatus;
+  const kargonomiWarehouseIdForSync = kargonomiDefaultWarehouse?.warehouseId ?? '';
+  const canSyncKargonomiWarehouse = isKargonomiConfigDraft && /^\d+$/.test(kargonomiWarehouseIdForSync);
 
   const shippingConfigEditorForm = isAdmin && shippingProviderDiagnostics ? (
     <form
@@ -5033,6 +5069,37 @@ export function OrderDetailPage() {
             </label>
             {isKargonomiConfigDraft ? (
               <>
+                <div className="field field-full shipping-config-sync-panel">
+                  <div className="shipping-config-sync-heading">
+                    <div>
+                      <span>Kargonomi warehouse details</span>
+                      <small>Read-only sync from Kargonomi. Used to map return receiver buyer fields.</small>
+                    </div>
+                    <button
+                      type="button"
+                      className="button button-secondary"
+                      disabled={!canSyncKargonomiWarehouse || isSyncingKargonomiWarehouse}
+                      onClick={() => void syncKargonomiWarehouseMutation(kargonomiWarehouseIdForSync)}
+                    >
+                      {isSyncingKargonomiWarehouse ? 'Syncing...' : 'Sync Kargonomi warehouse details'}
+                    </button>
+                  </div>
+                  <div className="shipping-config-sync-grid">
+                    <span>Contact name {kargonomiWarehouseSyncStatus?.contactNamePresent ? 'present' : 'missing'}</span>
+                    <span>Phone {kargonomiWarehouseSyncStatus?.phonePresent ? 'present' : 'missing'}</span>
+                    <span>Address {kargonomiWarehouseSyncStatus?.addressPresent ? 'present' : 'missing'}</span>
+                    <span>State ID {kargonomiWarehouseSyncStatus?.stateIdPresent ? 'present' : 'missing'}</span>
+                    <span>City ID {kargonomiWarehouseSyncStatus?.cityIdPresent ? 'present' : 'missing'}</span>
+                  </div>
+                  {kargonomiWarehouseSyncStatus?.stateName || kargonomiWarehouseSyncStatus?.cityName ? (
+                    <small>
+                      Resolved location:{' '}
+                      {[kargonomiWarehouseSyncStatus.stateName, kargonomiWarehouseSyncStatus.cityName]
+                        .filter(Boolean)
+                        .join(' / ')}
+                    </small>
+                  ) : null}
+                </div>
                 <label className="field">
                   <span>Kargonomi carrier/provider ID</span>
                   <input

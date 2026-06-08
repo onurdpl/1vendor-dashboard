@@ -12,6 +12,7 @@ const prismaMock = vi.hoisted(() => ({
   },
   vendorShippingWarehouse: {
     upsert: vi.fn(),
+    update: vi.fn(),
   },
   shipmentExecution: {
     findUnique: vi.fn(),
@@ -70,6 +71,7 @@ const {
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
   syncNavlungoShipmentStatus,
+  syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
   upsertVendorShippingConfig,
 } = await import(
@@ -415,6 +417,7 @@ describe('shipping execution foundation', () => {
     prismaMock.vendorShippingConfig.findUniqueOrThrow.mockReset();
     prismaMock.vendorShippingConfig.upsert.mockReset();
     prismaMock.vendorShippingWarehouse.upsert.mockReset();
+    prismaMock.vendorShippingWarehouse.update.mockReset();
     prismaMock.shipmentExecution.findUnique.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
     prismaMock.shipmentExecution.findMany.mockReset();
@@ -835,6 +838,182 @@ describe('shipping execution foundation', () => {
         }),
       }),
     );
+  });
+
+  it('syncs Kargonomi warehouse details and resolved location IDs', async () => {
+    const originalConfig = buildKargonomiShippingConfig({
+      vendorId: 'yalispor',
+      defaultWarehouseId: '112666',
+      warehouses: [
+        {
+          id: 'warehouse-yalispor-112666',
+          configId: 'shipping-config-yalispor',
+          vendorId: 'yalispor',
+          provider: 'KARGONOMI',
+          warehouseId: '112666',
+          name: 'Yalispor Kargonomi warehouse',
+          address: null,
+          isDefault: true,
+          metadata: { legacy: 'kept' },
+          createdAt: new Date('2026-06-01T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-01T10:00:00.000Z'),
+        },
+      ],
+    });
+    const updatedConfig = buildKargonomiShippingConfig({
+      vendorId: 'yalispor',
+      defaultWarehouseId: '112666',
+      warehouses: [
+        {
+          id: 'warehouse-yalispor-112666',
+          configId: 'shipping-config-yalispor',
+          vendorId: 'yalispor',
+          provider: 'KARGONOMI',
+          warehouseId: '112666',
+          name: 'Yalispor Kargonomi warehouse',
+          address: 'Synced warehouse address',
+          isDefault: true,
+          metadata: {
+            legacy: 'kept',
+            contactName: 'Yalispor Depo',
+            phone: '+902121112233',
+            stateName: 'İstanbul',
+            cityName: 'Kadıköy',
+            stateId: '34',
+            cityId: '828',
+            lookupStatus: 'resolved',
+            lookupError: null,
+            kargonomiWarehouseSyncedAt: '2026-06-01T10:05:00.000Z',
+          },
+          createdAt: new Date('2026-06-01T10:00:00.000Z'),
+          updatedAt: new Date('2026-06-01T10:05:00.000Z'),
+        },
+      ],
+    });
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(originalConfig).mockResolvedValueOnce(updatedConfig);
+    prismaMock.vendorShippingWarehouse.update.mockResolvedValue({});
+    const client = {
+      getWarehouse: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: {
+          data: {
+            contact_name: 'Yalispor Depo',
+            contact_phone: '+902121112233',
+            address: 'Synced warehouse address',
+            state: 'ISTANBUL',
+            city: 'KADIKOY',
+          },
+        },
+      }),
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: '34', name: 'İstanbul' }] },
+      }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: '828', name: 'Kadıköy' }] },
+      }),
+    };
+
+    const result = await syncKargonomiWarehouseDetails('yalispor', '112666', env, { client });
+
+    expect(client.getWarehouse).toHaveBeenCalledWith('112666');
+    expect(client.listStates).toHaveBeenCalled();
+    expect(client.listCities).toHaveBeenCalledWith('34');
+    expect(prismaMock.vendorShippingWarehouse.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          vendorId_provider_warehouseId: {
+            vendorId: 'yalispor',
+            provider: 'KARGONOMI',
+            warehouseId: '112666',
+          },
+        },
+        data: expect.objectContaining({
+          address: 'Synced warehouse address',
+          metadata: expect.objectContaining({
+            legacy: 'kept',
+            contactName: 'Yalispor Depo',
+            phone: '+902121112233',
+            stateName: 'İstanbul',
+            cityName: 'Kadıköy',
+            stateId: '34',
+            cityId: '828',
+            lookupStatus: 'resolved',
+            lookupError: null,
+          }),
+        }),
+      }),
+    );
+    expect(result).toMatchObject({
+      ok: true,
+      provider: 'KARGONOMI',
+      warehouseId: '112666',
+      warehouse: {
+        contactNamePresent: true,
+        phonePresent: true,
+        addressPresent: true,
+        stateName: 'İstanbul',
+        cityName: 'Kadıköy',
+        stateId: '34',
+        cityId: '828',
+      },
+      syncedConfig: {
+        warehouses: [
+          expect.objectContaining({
+            syncStatus: expect.objectContaining({
+              phonePresent: true,
+              addressPresent: true,
+              stateIdPresent: true,
+              cityIdPresent: true,
+            }),
+          }),
+        ],
+      },
+    });
+  });
+
+  it('does not persist Kargonomi warehouse details when state/city lookup fails', async () => {
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(buildKargonomiShippingConfig());
+    const client = {
+      getWarehouse: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: {
+          warehouse: {
+            contact_name: 'Sporjinal Depo',
+            contact_phone: '+902121112233',
+            address: 'Synced warehouse address',
+            state: 'Istanbul',
+            city: 'Unknown District',
+          },
+        },
+      }),
+      listStates: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: '34', name: 'Istanbul' }] },
+      }),
+      listCities: vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        contentType: 'application/json',
+        body: { data: [{ id: '828', name: 'Kadikoy' }] },
+      }),
+    };
+
+    await expect(syncKargonomiWarehouseDetails('sporjinal', '112668', env, { client })).rejects.toThrow(
+      'Kargonomi warehouse location could not be resolved',
+    );
+    expect(prismaMock.vendorShippingWarehouse.update).not.toHaveBeenCalled();
   });
 
   it('resolves Kargonomi destination IDs from order shipping address before shipment create', async () => {

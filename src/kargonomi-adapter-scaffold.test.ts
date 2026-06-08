@@ -670,6 +670,7 @@ describe('Kargonomi forward adapter scaffold', () => {
     await client.confirmShippingPrice({ shipmentId: 123, shippingProviderId: 5 });
     await client.getShipmentBarcodePdf(123);
     await client.getShipment(123);
+    await client.getWarehouse(112668);
     await client.listStates();
     await client.listStates(225);
     await client.listCities(34);
@@ -680,6 +681,7 @@ describe('Kargonomi forward adapter scaffold', () => {
       ['POST', 'https://app.kargonomi.com.tr/api/v1/confirm-shipping-price'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123/barcode?format=pdf'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/shipments/123'],
+      ['GET', 'https://app.kargonomi.com.tr/api/v1/warehouses/112668'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/states'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/states/225'],
       ['GET', 'https://app.kargonomi.com.tr/api/v1/cities/34'],

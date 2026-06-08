@@ -13,6 +13,7 @@ const getOrderMock = vi.fn<(orderId: string) => Promise<OrderDetail>>();
 const getShippingProviderDiagnosticsMock = vi.fn();
 const getVendorShippingConfigMock = vi.fn();
 const updateVendorShippingConfigMock = vi.fn();
+const syncKargonomiWarehouseDetailsMock = vi.fn();
 const createShipmentExecutionMock = vi.fn();
 const retryShipmentExecutionMock = vi.fn();
 const retryFailedShipmentExecutionMock = vi.fn();
@@ -70,6 +71,8 @@ vi.mock('../features/orders/api', async () => {
       getShippingProviderDiagnosticsMock(options),
     getVendorShippingConfig: (options?: { vendorId?: string | null }) => getVendorShippingConfigMock(options),
     updateVendorShippingConfig: (vendorId: string, input: unknown) => updateVendorShippingConfigMock(vendorId, input),
+    syncKargonomiWarehouseDetails: (vendorId: string, warehouseId: string) =>
+      syncKargonomiWarehouseDetailsMock(vendorId, warehouseId),
     createShipmentExecution: (allocationId: string, options?: { vendorId?: string | null }) => createShipmentExecutionMock(allocationId, options),
     retryShipmentExecution: (shipmentExecutionId: string) => retryShipmentExecutionMock(shipmentExecutionId),
     retryFailedShipmentExecution: (
@@ -722,6 +725,63 @@ describe('OrderDetailPage shipment provider response visibility', () => {
       },
       source: 'configured',
       updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+    syncKargonomiWarehouseDetailsMock.mockReset();
+    syncKargonomiWarehouseDetailsMock.mockResolvedValue({
+      ok: true,
+      provider: 'KARGONOMI',
+      mode: 'warehouse_detail_sync',
+      vendorId: 'sporjinal',
+      warehouseId: '112668',
+      writesPerformed: true,
+      warehouse: {
+        contactNamePresent: true,
+        phonePresent: true,
+        addressPresent: true,
+        stateName: 'Istanbul',
+        cityName: 'Kadikoy',
+        stateId: '34',
+        cityId: '828',
+      },
+      syncedConfig: {
+        vendorId: 'sporjinal',
+        preferredProvider: 'kargonomi',
+        shippingEnabled: true,
+        defaultDesi: '3.00',
+        cargoIntegrationId: null,
+        defaultWarehouseId: '112668',
+        shippingVatPercent: '18.00',
+        warehouses: [
+          {
+            id: 'warehouse-sporjinal-112668',
+            vendorId: 'sporjinal',
+            provider: 'kargonomi',
+            warehouseId: '112668',
+            name: 'Sporjinal warehouse',
+            address: 'Synced warehouse address',
+            isDefault: true,
+            syncStatus: {
+              contactNamePresent: true,
+              phonePresent: true,
+              addressPresent: true,
+              stateIdPresent: true,
+              cityIdPresent: true,
+              stateName: 'Istanbul',
+              cityName: 'Kadikoy',
+              syncedAt: '2026-06-08T10:00:00.000Z',
+              lookupStatus: 'resolved',
+              lookupError: null,
+            },
+          },
+        ],
+        providerMetadata: {
+          kargonomiBuyerStateId: '34',
+          kargonomiBuyerCityId: '828',
+        },
+        source: 'configured',
+        updatedAt: '2026-06-08T10:00:00.000Z',
+      },
+      warnings: [],
     });
     createShipmentExecutionMock.mockReset();
     createShipmentExecutionMock.mockResolvedValue({
@@ -2825,6 +2885,8 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(returnReceiverNameInput).toHaveValue('Sporjinal warehouse');
     expect(returnReceiverPhoneInput).toHaveValue('');
     expect(returnReceiverAddressInput).toHaveValue('');
+    expect(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' })).toBeInTheDocument();
+    expect(screen.getByText('Phone missing')).toBeInTheDocument();
     expect(screen.getByText(/-1 means automatic cheapest provider selection/)).toBeInTheDocument();
     expect(screen.getAllByText('Used as the warehouse/receiver destination for customer return shipments.')).toHaveLength(3);
     expect(screen.getByRole('button', { name: 'Run Kargonomi lookup diagnostic' })).toBeInTheDocument();
@@ -2870,6 +2932,95 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     );
     expect(screen.queryByLabelText('Cargo integration ID')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Try OTO pickup location code')).not.toBeInTheDocument();
+  }, 20000);
+
+  it('syncs saved Kargonomi warehouse details from the shipping config editor', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getShippingProviderDiagnosticsMock.mockImplementation((options?: { provider?: string | null }) =>
+      Promise.resolve({
+        provider: options?.provider === 'kargonomi' ? 'kargonomi' : 'kargo_entegrator',
+        supportedProviders: ['kargo_entegrator', 'hepsijet', 'kargonomi'],
+        executionReady: options?.provider === 'kargonomi',
+        sandboxModeEnabled: false,
+        shippingExecutionEnabled: true,
+        providerSelected: options?.provider === 'kargonomi',
+        providerEnabled: true,
+        webhookIngestEnabled: false,
+        baseUrlConfigured: true,
+        apiKeyConfigured: true,
+        cargoIntegrationIdConfigured: false,
+        warehouseIdConfigured: true,
+        defaultDesiConfigured: true,
+        packageTypeUsed: 'box',
+        notificationUrlConfigured: false,
+        webhookRouteImplemented: true,
+        receiverAddressAvailability: 'confirmed_required',
+        dummyKargoSupport: 'not_implemented',
+        statusSyncSupport: 'not_implemented',
+        missing: [],
+        deprecatedEnvFallbacks: [],
+        warnings: [],
+      }),
+    );
+    getVendorShippingConfigMock.mockResolvedValueOnce({
+      vendorId: 'sporjinal',
+      preferredProvider: 'kargonomi',
+      shippingEnabled: true,
+      defaultDesi: '3.00',
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112668',
+      shippingVatPercent: '18.00',
+      warehouses: [
+        {
+          id: 'warehouse-sporjinal-112668',
+          vendorId: 'sporjinal',
+          provider: 'kargonomi',
+          warehouseId: '112668',
+          name: 'Sporjinal warehouse',
+          address: null,
+          isDefault: true,
+          syncStatus: {
+            contactNamePresent: true,
+            phonePresent: false,
+            addressPresent: false,
+            stateIdPresent: false,
+            cityIdPresent: false,
+            stateName: null,
+            cityName: null,
+            syncedAt: null,
+            lookupStatus: null,
+            lookupError: null,
+          },
+        },
+      ],
+      providerMetadata: {
+        kargonomiBuyerStateId: '34',
+        kargonomiBuyerCityId: '828',
+      },
+      source: 'configured',
+      updatedAt: '2026-05-15T19:45:00.000Z',
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByLabelText('Kargonomi warehouse ID')).toHaveValue('112668');
+    expect(screen.getByText('Phone missing')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Sync Kargonomi warehouse details' }));
+
+    await waitFor(() => expect(syncKargonomiWarehouseDetailsMock).toHaveBeenCalledWith('sporjinal', '112668'));
+    expect(await screen.findByText('Kargonomi warehouse details synced.')).toBeInTheDocument();
+    expect(screen.getByText('Phone present')).toBeInTheDocument();
+    expect(screen.getByText('State ID present')).toBeInTheDocument();
+    expect(screen.getByText('City ID present')).toBeInTheDocument();
   }, 20000);
 
   it('preserves Kargonomi automatic carrier selection when carrier id is empty', async () => {

@@ -6955,6 +6955,43 @@ summary.provider-response-heading::-webkit-details-marker {
   font-weight: 700;
 }
 
+.shipping-config-sync-panel {
+  align-self: stretch;
+  padding: 10px;
+  border: 1px solid rgba(79, 70, 229, 0.18);
+  border-radius: 12px;
+  background: rgba(238, 242, 255, 0.62);
+}
+
+.shipping-config-sync-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.shipping-config-sync-heading span,
+.shipping-config-sync-heading small {
+  display: block;
+}
+
+.shipping-config-sync-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.shipping-config-sync-grid span {
+  padding: 4px 8px;
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  border-radius: 999px;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
 .shipping-config-readonly {
   display: grid;
   gap: 5px;

@@ -144,3 +144,7 @@ export async function getVendorShippingConfig(options: { vendorId?: string | nul
 export async function updateVendorShippingConfig(vendorId: string, input: VendorShippingConfigUpdate) {
   return runtimeServices.orders.updateVendorShippingConfig(vendorId, input);
 }
+
+export async function syncKargonomiWarehouseDetails(vendorId: string, warehouseId: string) {
+  return runtimeServices.orders.syncKargonomiWarehouseDetails(vendorId, warehouseId);
+}

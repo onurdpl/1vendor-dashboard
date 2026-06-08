@@ -23,6 +23,7 @@ import {
   refreshShipmentExecutionStatus,
   retryDryRunShipmentExecution,
   retryFailedShipmentExecution,
+  syncKargonomiWarehouseDetails,
   updateNavlungoShipmentExecution,
   upsertVendorShippingConfig,
 } from './shipping-execution.service.js';
@@ -585,6 +586,26 @@ export function registerShippingExecutionRoutes(app: FastifyInstance, env: AppEn
         return await upsertVendorShippingConfig(vendorId, (request.body ?? {}) as VendorShippingConfigUpdateDto);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Vendor shipping configuration could not be saved.';
+        return reply.code(400).send({ message });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/vendors/:vendorId/shipping-config/kargonomi/warehouses/:warehouseId/sync',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      const { vendorId, warehouseId } = request.params as { vendorId: string; warehouseId: string };
+      try {
+        return await syncKargonomiWarehouseDetails(vendorId, warehouseId, env);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Kargonomi warehouse details could not be synced.';
         return reply.code(400).send({ message });
       }
     },

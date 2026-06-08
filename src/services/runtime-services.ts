@@ -1421,6 +1421,67 @@ export const runtimeServices = {
         updatedAt: new Date().toISOString(),
       };
     },
+    async syncKargonomiWarehouseDetails(vendorId: string, warehouseId: string) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realOrders.syncKargonomiWarehouseDetails(vendorId, warehouseId);
+      }
+
+      const syncedConfig = {
+        vendorId,
+        preferredProvider: 'kargonomi' as const,
+        shippingEnabled: true,
+        defaultDesi: '3.00',
+        cargoIntegrationId: null,
+        defaultWarehouseId: warehouseId,
+        shippingVatPercent: '18.00',
+        warehouses: [
+          {
+            id: `mock-warehouse-${vendorId}-${warehouseId}`,
+            vendorId,
+            provider: 'kargonomi' as const,
+            warehouseId,
+            name: 'Mock Kargonomi warehouse',
+            address: 'Synced warehouse address',
+            isDefault: true,
+            syncStatus: {
+              contactNamePresent: true,
+              phonePresent: true,
+              addressPresent: true,
+              stateIdPresent: true,
+              cityIdPresent: true,
+              stateName: 'Istanbul',
+              cityName: 'Kadikoy',
+              syncedAt: new Date().toISOString(),
+              lookupStatus: 'resolved',
+              lookupError: null,
+            },
+          },
+        ],
+        providerMetadata: null,
+        source: 'configured' as const,
+        updatedAt: new Date().toISOString(),
+      };
+
+      return {
+        ok: true,
+        provider: 'KARGONOMI' as const,
+        mode: 'warehouse_detail_sync' as const,
+        vendorId,
+        warehouseId,
+        writesPerformed: true,
+        warehouse: {
+          contactNamePresent: true,
+          phonePresent: true,
+          addressPresent: true,
+          stateName: 'Istanbul',
+          cityName: 'Kadikoy',
+          stateId: '34',
+          cityId: '828',
+        },
+        syncedConfig,
+        warnings: [],
+      };
+    },
   },
   returns: {
     list: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>

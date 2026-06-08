@@ -495,6 +495,65 @@ describe('Kargonomi return preview', () => {
     expect(serializedPreview).not.toContain('Metadata return address');
   });
 
+  it('uses synced Kargonomi warehouse metadata for return receiver readiness', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(
+      baseShippingConfig({
+        providerMetadata: {
+          fallbackBuyerStateId: '34',
+          fallbackBuyerCityId: '828',
+          kargonomiReturnReceiverName: 'Manual fallback warehouse',
+          kargonomiReturnReceiverPhone: '+902129990000',
+          kargonomiReturnReceiverAddress: 'Manual fallback address',
+        },
+        warehouses: [
+          {
+            warehouseId: '112666',
+            provider: 'KARGONOMI',
+            isDefault: true,
+            name: 'Stored warehouse name',
+            address: 'Synced warehouse address',
+            metadata: {
+              contactName: 'Synced Kargonomi contact',
+              phone: '+902121112233',
+              stateId: '34',
+              cityId: '828',
+              stateName: 'İstanbul',
+              cityName: 'Kadıköy',
+            },
+          },
+        ],
+      }),
+    );
+
+    const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
+      role: 'vendor',
+      vendorId: 'yalispor',
+    });
+
+    expect(preview.ready).toBe(true);
+    expect(preview.missingFields).not.toContain('receiver.phone');
+    expect(preview.missingFields).not.toContain('receiver.address');
+    expect(preview.missingFields).not.toContain('receiver.stateId');
+    expect(preview.missingFields).not.toContain('receiver.cityId');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        receiver: {
+          warehouseId: '112666',
+          namePresent: true,
+          phonePresent: true,
+          addressPresent: true,
+          stateId: '34',
+          cityId: '828',
+        },
+      },
+    });
+    const serializedPreview = JSON.stringify(preview.previewPayload);
+    expect(serializedPreview).not.toContain('+902121112233');
+    expect(serializedPreview).not.toContain('Synced warehouse address');
+    expect(serializedPreview).not.toContain('Manual fallback address');
+  });
+
   it('blocks create when preview readiness fails', async () => {
     prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(

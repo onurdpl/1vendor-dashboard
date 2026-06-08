@@ -1330,11 +1330,13 @@ function readOrderAddress(order: { shippingAddress: string | null }) {
 function readKargonomiWarehousePhone(warehouseMetadata: unknown, configMetadata: unknown) {
   return (
     readString(warehouseMetadata, [
+      'phone',
+      'contactPhone',
+      'contact_phone',
       'kargonomiReturnReceiverPhone',
       'returnReceiverPhone',
       'receiverPhone',
       'warehousePhone',
-      'phone',
     ]) ??
     readString(configMetadata, [
       'kargonomiReturnReceiverPhone',
@@ -1343,6 +1345,15 @@ function readKargonomiWarehousePhone(warehouseMetadata: unknown, configMetadata:
       'warehousePhone',
       'phone',
     ])
+  );
+}
+
+function readKargonomiWarehouseContactName(warehouseMetadata: unknown, configMetadata: unknown, fallback?: string | null) {
+  const fallbackName = fallback?.trim() || null;
+  return (
+    readString(warehouseMetadata, ['contactName', 'contact_name']) ??
+    fallbackName ??
+    readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName'])
   );
 }
 
@@ -1357,11 +1368,12 @@ function readKargonomiLocationId(source: unknown, keys: string[]) {
 function readKargonomiReceiverStateId(warehouseMetadata: unknown, configMetadata: unknown) {
   return (
     readKargonomiLocationId(warehouseMetadata, [
+      'stateId',
+      'state_id',
       'kargonomiReturnReceiverStateId',
       'returnReceiverStateId',
       'receiverStateId',
       'warehouseStateId',
-      'stateId',
     ]) ??
     readKargonomiLocationId(configMetadata, [
       'kargonomiReturnReceiverStateId',
@@ -1376,11 +1388,12 @@ function readKargonomiReceiverStateId(warehouseMetadata: unknown, configMetadata
 function readKargonomiReceiverCityId(warehouseMetadata: unknown, configMetadata: unknown) {
   return (
     readKargonomiLocationId(warehouseMetadata, [
+      'cityId',
+      'city_id',
       'kargonomiReturnReceiverCityId',
       'returnReceiverCityId',
       'receiverCityId',
       'warehouseCityId',
-      'cityId',
     ]) ??
     readKargonomiLocationId(configMetadata, [
       'kargonomiReturnReceiverCityId',
@@ -1649,7 +1662,7 @@ export async function previewKargonomiReturnShipmentForReturn(
     kargonomiWarehouses[0] ??
     null;
   const warehouseId = warehouse?.warehouseId ?? config?.defaultWarehouseId ?? null;
-  const receiverName = warehouse?.name?.trim() || readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName']);
+  const receiverName = readKargonomiWarehouseContactName(warehouse?.metadata ?? null, configMetadata, warehouse?.name);
   const receiverPhone = readKargonomiWarehousePhone(warehouse?.metadata ?? null, configMetadata);
   const receiverAddress =
     warehouse?.address?.trim() ||
@@ -1814,7 +1827,7 @@ function buildKargonomiReturnShipmentPayload(input: {
     kargonomiWarehouses[0] ??
     null;
   const warehouseMetadata = warehouse?.metadata ?? null;
-  const receiverName = warehouse?.name?.trim() || readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName']);
+  const receiverName = readKargonomiWarehouseContactName(warehouseMetadata, configMetadata, warehouse?.name);
   const receiverPhone = readKargonomiWarehousePhone(warehouseMetadata, configMetadata);
   const receiverAddress =
     warehouse?.address?.trim() ||

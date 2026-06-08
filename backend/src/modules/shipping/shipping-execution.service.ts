@@ -35,6 +35,7 @@ import type {
   ShippingProviderGateDiagnosticsDto,
   ShippingProviderDto,
   UpdateNavlungoShipmentDto,
+  KargonomiWarehouseSyncResultDto,
   VendorShippingConfigDto,
   VendorShippingConfigUpdateDto,
 } from './shipping-execution.types.js';
@@ -163,6 +164,25 @@ function mapStatus(status: ShipmentExecutionStatus | string): ShipmentExecutionD
   return status.trim().toLowerCase() as ShipmentExecutionDto['shipmentStatus'];
 }
 
+function readWarehouseMetadataString(metadata: unknown, keys: string[]) {
+  return readString(metadata, keys);
+}
+
+function buildWarehouseSyncStatus(metadata: unknown, address: string | null) {
+  return {
+    contactNamePresent: Boolean(readWarehouseMetadataString(metadata, ['contactName', 'contact_name'])),
+    phonePresent: Boolean(readWarehouseMetadataString(metadata, ['phone', 'contactPhone', 'contact_phone'])),
+    addressPresent: Boolean(address?.trim()),
+    stateIdPresent: Boolean(readWarehouseMetadataString(metadata, ['stateId', 'state_id', 'warehouseStateId'])),
+    cityIdPresent: Boolean(readWarehouseMetadataString(metadata, ['cityId', 'city_id', 'warehouseCityId'])),
+    stateName: readWarehouseMetadataString(metadata, ['stateName', 'state_name']) ?? null,
+    cityName: readWarehouseMetadataString(metadata, ['cityName', 'city_name']) ?? null,
+    syncedAt: readWarehouseMetadataString(metadata, ['syncedAt', 'kargonomiWarehouseSyncedAt']) ?? null,
+    lookupStatus: readWarehouseMetadataString(metadata, ['lookupStatus', 'kargonomiWarehouseLookupStatus']) ?? null,
+    lookupError: readWarehouseMetadataString(metadata, ['lookupError', 'kargonomiWarehouseLookupError']) ?? null,
+  };
+}
+
 function mapWarehouse(warehouse: VendorShippingWarehouse): VendorShippingConfigDto['warehouses'][number] {
   return {
     id: warehouse.id,
@@ -172,6 +192,7 @@ function mapWarehouse(warehouse: VendorShippingWarehouse): VendorShippingConfigD
     name: warehouse.name,
     address: warehouse.address,
     isDefault: warehouse.isDefault,
+    syncStatus: buildWarehouseSyncStatus(warehouse.metadata, warehouse.address),
   };
 }
 
@@ -2448,6 +2469,172 @@ export async function upsertVendorShippingConfig(
   });
 
   return mapShippingConfig(config, vendorId);
+}
+
+type KargonomiWarehouseDetailClient = Pick<KargonomiHttpClient, 'getWarehouse' | 'listStates' | 'listCities'>;
+
+function extractKargonomiWarehouseBody(body: unknown) {
+  if (!isRecord(body)) {
+    return {};
+  }
+
+  if (isRecord(body.warehouse)) {
+    return body.warehouse;
+  }
+
+  if (isRecord(body.data)) {
+    if (isRecord(body.data.warehouse)) {
+      return body.data.warehouse;
+    }
+    return body.data;
+  }
+
+  return body;
+}
+
+function readNestedStringValue(value: unknown, keys: string[]) {
+  if (typeof value === 'string' && value.trim()) {
+    return value.trim();
+  }
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (!isRecord(value)) {
+    return null;
+  }
+  return readString(value, keys);
+}
+
+function readKargonomiWarehouseDetailString(warehouse: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const direct = readNestedStringValue(warehouse[key], ['name', 'title', 'value', 'label']);
+    if (direct) {
+      return direct;
+    }
+  }
+
+  return null;
+}
+
+function buildKargonomiWarehouseSyncMetadata(input: {
+  existingMetadata: unknown;
+  contactName: string | null;
+  phone: string | null;
+  stateName: string;
+  cityName: string;
+  stateId: string;
+  cityId: string;
+  syncedAt: string;
+}) {
+  const metadata = isRecord(input.existingMetadata) ? { ...input.existingMetadata } : {};
+  return {
+    ...metadata,
+    contactName: input.contactName,
+    phone: input.phone,
+    stateName: input.stateName,
+    cityName: input.cityName,
+    stateId: input.stateId,
+    cityId: input.cityId,
+    lookupStatus: 'resolved',
+    lookupError: null,
+    kargonomiWarehouseSyncedAt: input.syncedAt,
+  };
+}
+
+export async function syncKargonomiWarehouseDetails(
+  vendorId: string,
+  warehouseId: string,
+  env: AppEnv,
+  options: { client?: KargonomiWarehouseDetailClient } = {},
+): Promise<KargonomiWarehouseSyncResultDto> {
+  if (!/^\d+$/.test(warehouseId)) {
+    throw new Error('warehouseId must be numeric.');
+  }
+
+  const config = await getStoredShippingConfig(vendorId);
+  const warehouse = (config?.warehouses ?? []).find(
+    (item) => mapProvider(item.provider) === 'kargonomi' && item.warehouseId === warehouseId,
+  );
+  if (!config || !warehouse) {
+    throw new Error('Kargonomi warehouse is not configured for this vendor.');
+  }
+
+  const client = options.client ?? new KargonomiHttpClient(env);
+  const response = await client.getWarehouse(warehouseId);
+  if (!response.ok) {
+    const bodyKeys = isRecord(response.body) ? Object.keys(response.body) : [];
+    throw new Error(`Kargonomi warehouse detail lookup failed with HTTP ${response.status}. Body keys: ${bodyKeys.join(', ') || 'none'}.`);
+  }
+
+  const detail = extractKargonomiWarehouseBody(response.body);
+  const contactName = readKargonomiWarehouseDetailString(detail, ['contact_name', 'contactName']);
+  const phone = readKargonomiWarehouseDetailString(detail, ['contact_phone', 'contactPhone', 'phone']);
+  const address = readKargonomiWarehouseDetailString(detail, ['address']);
+  const stateName = readKargonomiWarehouseDetailString(detail, ['state', 'state_name', 'stateName']);
+  const cityName = readKargonomiWarehouseDetailString(detail, ['city', 'city_name', 'cityName']);
+
+  if (!stateName) {
+    throw new Error('Kargonomi warehouse detail is missing state name; stateId cannot be resolved safely.');
+  }
+  if (!cityName) {
+    throw new Error('Kargonomi warehouse detail is missing city name; cityId cannot be resolved safely.');
+  }
+
+  const resolution = await resolveKargonomiDestinationAddress(
+    {
+      province: stateName,
+      district: cityName,
+    },
+    client,
+  );
+  if (!resolution.ok) {
+    throw new Error(`Kargonomi warehouse location could not be resolved: ${resolution.message}`);
+  }
+
+  const syncedAt = new Date().toISOString();
+  await prisma.vendorShippingWarehouse.update({
+    where: {
+      vendorId_provider_warehouseId: {
+        vendorId,
+        provider: ShippingProvider.KARGONOMI,
+        warehouseId,
+      },
+    },
+    data: {
+      address: address ?? warehouse.address,
+      metadata: buildKargonomiWarehouseSyncMetadata({
+        existingMetadata: warehouse.metadata,
+        contactName,
+        phone,
+        stateName: resolution.stateName,
+        cityName: resolution.cityName,
+        stateId: resolution.buyerStateId,
+        cityId: resolution.buyerCityId,
+        syncedAt,
+      }) as Prisma.InputJsonValue,
+    },
+  });
+
+  const syncedConfig = await getVendorShippingConfig(vendorId);
+  return {
+    ok: true,
+    provider: 'KARGONOMI',
+    mode: 'warehouse_detail_sync',
+    vendorId,
+    warehouseId,
+    writesPerformed: true,
+    warehouse: {
+      contactNamePresent: Boolean(contactName),
+      phonePresent: Boolean(phone),
+      addressPresent: Boolean(address ?? warehouse.address),
+      stateName: resolution.stateName,
+      cityName: resolution.cityName,
+      stateId: resolution.buyerStateId,
+      cityId: resolution.buyerCityId,
+    },
+    syncedConfig,
+    warnings: [],
+  };
 }
 
 export function getShippingProviderGateDiagnostics(
