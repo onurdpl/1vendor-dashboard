@@ -459,6 +459,236 @@ export async function getWebhookDiagnosticById(webhookEventId: string): Promise<
   };
 }
 
+function normalizeDiagnosticOrderNumber(value: string) {
+  const trimmed = value.trim();
+  return {
+    plain: trimmed.replace(/^#/, ''),
+    hash: trimmed.startsWith('#') ? trimmed : `#${trimmed}`,
+  };
+}
+
+function parseDiagnosticPayload(rawPayload: string | null | undefined) {
+  if (!rawPayload?.trim()) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawPayload) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+function readDiagnosticRecord(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
+function readDiagnosticString(value: Record<string, unknown> | null | undefined, keys: string[]) {
+  if (!value) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const candidate = value[key];
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim();
+    }
+    if (typeof candidate === 'number' && Number.isFinite(candidate)) {
+      return String(candidate);
+    }
+  }
+
+  return null;
+}
+
+const DISTRICT_CANDIDATE_KEYS = [
+  'district',
+  'district_name',
+  'districtName',
+  'city_area',
+  'cityArea',
+  'county',
+  'county_name',
+  'countyName',
+  'province',
+  'province_name',
+  'provinceName',
+] as const;
+
+function readRawDistrictCandidate(address: Record<string, unknown> | null, prefix: 'shipping_address' | 'billing_address') {
+  if (!address) {
+    return null;
+  }
+
+  for (const key of DISTRICT_CANDIDATE_KEYS) {
+    const value = readDiagnosticString(address, [key]);
+    if (value) {
+      return {
+        field: `${prefix}.${key}`,
+        value,
+      };
+    }
+  }
+
+  return null;
+}
+
+function buildRawDistrictCandidateKeyPresence(address: Record<string, unknown> | null) {
+  return Object.fromEntries(
+    DISTRICT_CANDIDATE_KEYS.map((key) => [key, Boolean(readDiagnosticString(address, [key]))]),
+  );
+}
+
+function readKargonomiDiagnosticId(value: unknown, keys: string[]) {
+  const text = readDiagnosticString(readDiagnosticRecord(value), keys);
+  if (!text) {
+    return null;
+  }
+
+  const numeric = Number(text);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+function buildReturnSenderPreviewDiagnostic(input: {
+  shippingDistrict: string | null;
+  billingDistrict: string | null;
+  rawDistrict: string | null;
+  configMetadata: unknown;
+}) {
+  const senderDistrict = input.shippingDistrict?.trim() || input.billingDistrict?.trim() || input.rawDistrict?.trim() || null;
+  const senderStateId = readKargonomiDiagnosticId(input.configMetadata, [
+    'kargonomiReturnSenderStateId',
+    'returnSenderStateId',
+    'fallbackBuyerStateId',
+    'buyerStateId',
+    'buyer_state_id',
+  ]);
+  const senderCityId = readKargonomiDiagnosticId(input.configMetadata, [
+    'kargonomiReturnSenderCityId',
+    'returnSenderCityId',
+    'fallbackBuyerCityId',
+    'buyerCityId',
+    'buyer_city_id',
+  ]);
+
+  return {
+    senderCityIdPresent: Boolean(senderCityId),
+    senderStateIdPresent: Boolean(senderStateId),
+    senderDistrictPresent: Boolean(senderDistrict),
+    senderDestinationResolution: {
+      source: senderCityId || senderStateId ? 'metadata_ids_no_lookup' : 'stored_order_fields_no_lookup',
+      senderCityIdPresent: Boolean(senderCityId),
+      senderStateIdPresent: Boolean(senderStateId),
+      senderDistrictPresent: Boolean(senderDistrict),
+      lookupAttempted: false,
+      reason: senderDistrict ? null : 'missing_district_text',
+    },
+  };
+}
+
+export async function getOrderDistrictReadinessDiagnostic(orderNumber: string) {
+  const normalized = normalizeDiagnosticOrderNumber(orderNumber);
+  const order = await prisma.shopifyOrder.findFirst({
+    where: {
+      sourceShopifyOrderNumber: {
+        in: [normalized.plain, normalized.hash],
+      },
+    },
+    include: {
+      webhookEvents: {
+        where: {
+          topic: 'orders/create',
+          rawPayload: {
+            not: null,
+          },
+        },
+        orderBy: [
+          {
+            processedAt: 'desc',
+          },
+          {
+            receivedAt: 'desc',
+          },
+        ],
+        take: 1,
+        select: {
+          rawPayload: true,
+        },
+      },
+      allocations: {
+        select: {
+          id: true,
+          assignedVendorId: true,
+          returnRecords: {
+            select: {
+              id: true,
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!order) {
+    return null;
+  }
+
+  const payload = parseDiagnosticPayload(order.webhookEvents[0]?.rawPayload);
+  const shippingAddress = readDiagnosticRecord(payload?.shipping_address);
+  const billingAddress = readDiagnosticRecord(payload?.billing_address);
+  const rawShippingDistrict = readRawDistrictCandidate(shippingAddress, 'shipping_address');
+  const rawBillingDistrict = readRawDistrictCandidate(billingAddress, 'billing_address');
+  const rawDistrict = rawShippingDistrict ?? rawBillingDistrict;
+  const districtSource =
+    order.shippingDistrict?.trim()
+      ? { field: 'ShopifyOrder.shippingDistrict', value: order.shippingDistrict.trim() }
+      : order.billingDistrict?.trim()
+        ? { field: 'ShopifyOrder.billingDistrict', value: order.billingDistrict.trim() }
+        : rawDistrict;
+  const returnIds = order.allocations.flatMap((allocation) => allocation.returnRecords.map((record) => record.id));
+  const firstReturnAllocation = order.allocations.find((allocation) => allocation.returnRecords.length > 0) ?? null;
+  const config = firstReturnAllocation
+    ? await prisma.vendorShippingConfig.findUnique({
+        where: {
+          vendorId: firstReturnAllocation.assignedVendorId,
+        },
+        select: {
+          providerMetadata: true,
+        },
+      })
+    : null;
+
+  return {
+    ok: true,
+    orderNumber: order.sourceShopifyOrderNumber,
+    orderId: order.id,
+    allocationIds: order.allocations.map((allocation) => allocation.id),
+    returnIds,
+    shippingDistrict: order.shippingDistrict,
+    billingDistrict: order.billingDistrict,
+    shippingCity: order.shippingCity,
+    billingCity: order.billingCity,
+    shippingProvince: readDiagnosticString(shippingAddress, ['province', 'province_name', 'provinceName']),
+    billingProvince: readDiagnosticString(billingAddress, ['province', 'province_name', 'provinceName']),
+    districtPresent: Boolean(order.shippingDistrict?.trim() || order.billingDistrict?.trim() || rawDistrict?.value),
+    districtSourceField: districtSource?.field ?? null,
+    districtSourceValue: districtSource?.value ?? null,
+    rawDistrictCandidateKeysPresent: {
+      shipping_address: buildRawDistrictCandidateKeyPresence(shippingAddress),
+      billing_address: buildRawDistrictCandidateKeyPresence(billingAddress),
+    },
+    kargonomiReturnSenderPreview: returnIds.length
+      ? buildReturnSenderPreviewDiagnostic({
+          shippingDistrict: order.shippingDistrict,
+          billingDistrict: order.billingDistrict,
+          rawDistrict: rawDistrict?.value ?? null,
+          configMetadata: config?.providerMetadata ?? null,
+        })
+      : undefined,
+  };
+}
+
 function normalizeOrderLookup(value: string) {
   const trimmed = value.trim();
   return {
