@@ -3,7 +3,6 @@ import { Link } from 'react-router-dom';
 import { ActionFeedback } from '../components/ActionFeedback';
 import {
   EmptyStatePanel,
-  MetricSkeletonGrid,
   MetadataRow,
   OperationalSection,
   SectionErrorRetry,
@@ -96,49 +95,6 @@ function readNotificationMetadata(notification: NotificationIntent, key: string)
 
 function formatNotificationSource(notification: NotificationIntent) {
   return readNotificationMetadata(notification, 'signalSourceArea')?.toLowerCase().replaceAll('_', ' ') ?? 'signal';
-}
-
-function getDashboardKpiTone(label: string) {
-  const normalized = label.toLowerCase();
-  if (normalized.includes('order') || normalized.includes('vendor')) {
-    return 'orders';
-  }
-  if (normalized.includes('awaiting') || normalized.includes('action') || normalized.includes('payout')) {
-    return 'action';
-  }
-  if (normalized.includes('refund') || normalized.includes('healthy')) {
-    return 'healthy';
-  }
-  if (normalized.includes('blocked')) {
-    return 'blocked';
-  }
-  if (normalized.includes('attention')) {
-    return 'attention';
-  }
-  return 'scope';
-}
-
-function getDashboardKpiHelper(label: string) {
-  const normalized = label.toLowerCase();
-  if (normalized.includes('order') || normalized.includes('vendor')) {
-    return 'From vendor scope';
-  }
-  if (normalized.includes('awaiting') || normalized.includes('action')) {
-    return 'Needs attention';
-  }
-  if (normalized.includes('refund')) {
-    return 'Current refund total';
-  }
-  if (normalized.includes('blocked')) {
-    return 'Requires review';
-  }
-  if (normalized.includes('payout')) {
-    return 'Current estimate';
-  }
-  if (normalized.includes('attention')) {
-    return 'Pending review';
-  }
-  return 'Current scope';
 }
 
 function formatPriorityLabel(tone: string) {
@@ -699,7 +655,6 @@ export function DashboardPage() {
 
   const priorityWork = safeArray(dashboardView.priorityWork);
   const recentActivity = safeArray(dashboardView.recentActivity);
-  const dashboardStats = safeArray(dashboardView.stats);
   const normalizedCounts = dashboardView.normalizedOperationalCounts;
   const groupedRecentActivity = groupRecentActivity(recentActivity);
   const visibleRecentActivity = groupedRecentActivity.slice(0, 3);
@@ -718,9 +673,6 @@ export function DashboardPage() {
     ? 'Action counts include deferred slices where full totals are unavailable.'
     : `${operationalActionTotal} grouped actionable issues across fulfillment, returns, refunds, and automation.`;
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
-  const businessSnapshotKpis = dashboardStats
-    .filter((stat) => stat.label === 'Vendor orders' || stat.label === 'Vendor checks')
-    .map((stat) => (stat.label === 'Vendor checks' ? { ...stat, label: 'Vendor orders' } : stat));
   const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !initialDashboard);
   const isDashboardShellOnly = dashboard?.loadPhase === 'initial' && !deferredDashboard && !isDeferredDashboardError;
   const isDashboardDataLoading = isDashboardInitialLoading || isDashboardShellOnly;
@@ -910,24 +862,7 @@ export function DashboardPage() {
         </div>
       </OperationalSection>
 
-      <div className="dashboard-passive-heading">
-        <span>Business Snapshot</span>
-        <p>High-level business KPIs. Active work remains above.</p>
-      </div>
-
-      <div className="dashboard-enterprise-kpi-row dashboard-passive-kpis">
-        {isDashboardDataLoading ? (
-          <MetricSkeletonGrid labels={['Vendor orders']} />
-        ) : businessSnapshotKpis.map((stat) => (
-          <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
-            <span>{stat.label}</span>
-            <strong>{stat.value}</strong>
-            <small>{getDashboardKpiHelper(stat.label)}</small>
-          </article>
-        ))}
-      </div>
-
-      <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Business dashboard snapshot">
+      <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Dashboard reporting sections">
         <div className="dashboard-enterprise-main">
           <OperationalSection title="Recent operational events" description="Compact grouped history for context.">
             {isDashboardDataLoading ? (
@@ -992,6 +927,27 @@ export function DashboardPage() {
                 ) : null}
               </ul>
             )}
+          </OperationalSection>
+
+          <OperationalSection title="Finance snapshot" description="Overview of financial performance.">
+            <div className="dashboard-status-metric-list dashboard-finance-rows">
+              <div className="dashboard-status-metric-row">
+                <span>Gross sales</span>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Refunds</span>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Net revenue</span>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
+              </div>
+              <div className="dashboard-status-metric-row">
+                <span>Payout estimate</span>
+                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
+              </div>
+            </div>
           </OperationalSection>
 
           <OperationalSection
@@ -1134,27 +1090,6 @@ export function DashboardPage() {
         </div>
 
         <aside className="dashboard-enterprise-aside">
-          <OperationalSection title="Finance snapshot" description="Overview of financial performance.">
-            <div className="dashboard-status-metric-list dashboard-finance-rows">
-              <div className="dashboard-status-metric-row">
-                <span>Gross sales</span>
-                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.grossSales ?? '—'}</strong>
-              </div>
-              <div className="dashboard-status-metric-row">
-                <span>Refunds</span>
-                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.refunds ?? '—'}</strong>
-              </div>
-              <div className="dashboard-status-metric-row">
-                <span>Net revenue</span>
-                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.netRevenue ?? '—'}</strong>
-              </div>
-              <div className="dashboard-status-metric-row">
-                <span>Payout estimate</span>
-                <strong>{isDashboardDataLoading ? <SkeletonText width="4rem" /> : dashboardView.financeSnapshot?.payoutEstimate ?? '—'}</strong>
-              </div>
-            </div>
-          </OperationalSection>
-
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Diagnostics summary" description="System health and reconciliation overview.">
               {isDashboardDataLoading ? (
