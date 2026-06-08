@@ -15,6 +15,13 @@ export type LogoIsbasiLoginRawResult = {
   jsonParseFailed: boolean;
 };
 
+export type LogoIsbasiRawResult = {
+  status: number;
+  ok: boolean;
+  body: unknown;
+  jsonParseFailed: boolean;
+};
+
 export type LogoIsbasiSessionExtraction = {
   accessToken: string | null;
   tenantId: string | null;
@@ -27,6 +34,11 @@ export type LogoIsbasiSessionExtraction = {
   userEmailPresent: boolean;
   userNamePresent: boolean;
   missing: string[];
+};
+
+export type LogoIsbasiAuthenticatedSession = {
+  accessToken: string;
+  tenantId: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -148,9 +160,33 @@ export class LogoIsbasiClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
+  private async parseResponse(response: Response): Promise<LogoIsbasiRawResult> {
+    const rawText = await response.text();
+    let body: unknown = null;
+    let jsonParseFailed = false;
+    if (rawText) {
+      try {
+        body = JSON.parse(rawText);
+      } catch {
+        jsonParseFailed = true;
+        body = { message: 'Logo İşbaşı returned a non-JSON response.' };
+      }
+    }
+
+    return {
+      status: response.status,
+      ok: response.ok,
+      body,
+      jsonParseFailed,
+    };
+  }
+
+  private get baseUrl() {
+    return this.config.baseUrl.replace(/\/+$/, '');
+  }
+
   async login(): Promise<LogoIsbasiLoginRawResult> {
-    const baseUrl = this.config.baseUrl.replace(/\/+$/, '');
-    const response = await this.fetchImpl(`${baseUrl}/api/v1.0/user/integrationLogin`, {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/user/integrationLogin`, {
       method: 'POST',
       headers: {
         apiKey: this.config.apiKey,
@@ -162,23 +198,44 @@ export class LogoIsbasiClient {
       }),
     });
 
-    const rawText = await response.text();
-    let body: unknown = null;
-    let jsonParseFailed = false;
-    if (rawText) {
-      try {
-        body = JSON.parse(rawText);
-      } catch {
-        jsonParseFailed = true;
-        body = { message: 'Logo İşbaşı login returned a non-JSON response.' };
-      }
+    const parsed = await this.parseResponse(response);
+    if (parsed.jsonParseFailed) {
+      parsed.body = { message: 'Logo İşbaşı login returned a non-JSON response.' };
     }
 
     return {
-      status: response.status,
-      ok: response.ok,
-      body,
-      jsonParseFailed,
+      status: parsed.status,
+      ok: parsed.ok,
+      body: parsed.body,
+      jsonParseFailed: parsed.jsonParseFailed,
     };
+  }
+
+  async listFirms(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/firms/firms`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        tenantId: session.tenantId,
+        apiKey: this.config.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    return this.parseResponse(response);
+  }
+
+  async getFirmDetail(session: LogoIsbasiAuthenticatedSession, id: string): Promise<LogoIsbasiRawResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/firms/${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        tenantId: session.tenantId,
+        apiKey: this.config.apiKey,
+      },
+    });
+
+    return this.parseResponse(response);
   }
 }

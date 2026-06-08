@@ -13,6 +13,14 @@ export function probeLogoIsbasiLogin() {
   return runtimeServices.vendors.probeLogoIsbasiLogin();
 }
 
+export function discoverLogoIsbasiFirms() {
+  return runtimeServices.vendors.discoverLogoIsbasiFirms();
+}
+
+export function matchVendorLogoIsbasiFirm(vendorId: string) {
+  return runtimeServices.vendors.matchVendorLogoIsbasiFirm(vendorId);
+}
+
 export function previewLogoIsbasiCommissionInvoice(
   vendorId: string,
   input: LogoIsbasiCommissionInvoicePreviewInput,

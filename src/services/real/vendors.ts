@@ -2,6 +2,8 @@ import { apiClient } from '../../lib/api-client';
 import type {
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiFirmMatchResult,
+  LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiLoginProbeResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -26,6 +28,22 @@ export function updateVendorBillingProfile(vendorId: string, input: VendorBillin
 export function probeLogoIsbasiLogin() {
   return apiClient.post<LogoIsbasiLoginProbeResult>(
     '/admin/probes/logo-isbasi/login',
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function discoverLogoIsbasiFirms() {
+  return apiClient.post<LogoIsbasiFirmsDiscoveryResult>(
+    '/admin/probes/logo-isbasi/firms',
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function matchVendorLogoIsbasiFirm(vendorId: string) {
+  return apiClient.post<LogoIsbasiFirmMatchResult>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/logo-isbasi/match-firm`,
     undefined,
     { skipVendorContext: true },
   );

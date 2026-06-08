@@ -16,7 +16,9 @@ import { getFinanceProfile } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import {
+  discoverLogoIsbasiFirms,
   getVendorBillingProfile,
+  matchVendorLogoIsbasiFirm,
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
   updateVendorBillingProfile,
@@ -26,6 +28,9 @@ import { queryKeys } from '../lib/api/queryKeys';
 import { ApiError } from '../lib/api/errors';
 import type {
   LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiFirmMatchResult,
+  LogoIsbasiFirmSummary,
+  LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiLoginProbeResult,
   SupportTicket,
   VendorBillingProfile,
@@ -189,6 +194,14 @@ function isLogoLoginProbeResult(value: unknown): value is LogoIsbasiLoginProbeRe
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'login_probe';
 }
 
+function isLogoFirmsDiscoveryResult(value: unknown): value is LogoIsbasiFirmsDiscoveryResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'firms_discovery';
+}
+
+function isLogoFirmMatchResult(value: unknown): value is LogoIsbasiFirmMatchResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'firm_match_probe';
+}
+
 function buildLogoLoginFailureResult(error: unknown): LogoIsbasiLoginProbeResult {
   if (error instanceof ApiError && isLogoLoginProbeResult(error.details)) {
     return {
@@ -209,6 +222,56 @@ function buildLogoLoginFailureResult(error: unknown): LogoIsbasiLoginProbeResult
     errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_LOGIN_PROBE_FAILED',
     message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
   };
+}
+
+function buildLogoFirmsFailureResult(error: unknown): LogoIsbasiFirmsDiscoveryResult {
+  if (error instanceof ApiError && isLogoFirmsDiscoveryResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'firms_discovery',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_FIRMS_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoFirmMatchFailureResult(error: unknown): LogoIsbasiFirmMatchResult {
+  if (error instanceof ApiError && isLogoFirmMatchResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'firm_match_probe',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_FIRM_MATCH_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function formatLogoFirmSummary(firm: LogoIsbasiFirmSummary) {
+  return [
+    firm.code ? `code ${firm.code}` : null,
+    firm.firmType ? `type ${firm.firmType}` : null,
+    firm.taxNumberMasked ? `tax ${firm.taxNumberMasked}` : null,
+  ].filter(Boolean).join(', ') || 'No optional fields returned';
 }
 
 function formatBoolean(value: boolean | null | undefined) {
@@ -426,6 +489,8 @@ export function VendorProfilePage() {
   const [billingFormError, setBillingFormError] = useState<string | null>(null);
   const [savedBillingProfile, setSavedBillingProfile] = useState<VendorBillingProfile | null>(null);
   const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
+  const [logoFirmsResult, setLogoFirmsResult] = useState<LogoIsbasiFirmsDiscoveryResult | null>(null);
+  const [logoFirmMatchResult, setLogoFirmMatchResult] = useState<LogoIsbasiFirmMatchResult | null>(null);
   const [logoPreviewOpen, setLogoPreviewOpen] = useState(false);
   const [logoPreviewForm, setLogoPreviewForm] = useState<LogoCommissionPreviewFormState>(DEFAULT_LOGO_COMMISSION_PREVIEW_FORM);
   const [logoPreviewFormError, setLogoPreviewFormError] = useState<string | null>(null);
@@ -688,11 +753,55 @@ export function VendorProfilePage() {
     () => probeLogoIsbasiLogin(),
     {
       onSuccess: (result) => {
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoPreviewResult(null);
         setLogoLoginResult(result);
         showFeedback('Logo İşbaşı login probe completed.', 'success');
       },
       onError: (error) => {
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoPreviewResult(null);
         setLogoLoginResult(buildLogoLoginFailureResult(error));
+      },
+    },
+  );
+
+  const logoFirmsMutation = useMutationAction(
+    () => discoverLogoIsbasiFirms(),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoPreviewResult(null);
+        setLogoFirmsResult(result);
+        showFeedback('Logo İşbaşı firms discovery completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoPreviewResult(null);
+        setLogoFirmsResult(buildLogoFirmsFailureResult(error));
+      },
+    },
+  );
+
+  const logoFirmMatchMutation = useMutationAction(
+    () => matchVendorLogoIsbasiFirm(currentVendor.vendorId),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoPreviewResult(null);
+        setLogoFirmMatchResult(result);
+        showFeedback('Logo İşbaşı firm match probe completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoPreviewResult(null);
+        setLogoFirmMatchResult(buildLogoFirmMatchFailureResult(error));
       },
     },
   );
@@ -709,10 +818,15 @@ export function VendorProfilePage() {
     {
       onSuccess: (result) => {
         setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
         setLogoPreviewResult(result);
         showFeedback('Commission e-Fatura preview generated.', 'success');
       },
       onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
         setLogoPreviewResult(null);
         setLogoPreviewFormError(error instanceof Error ? error.message : 'Commission e-Fatura preview failed.');
       },
@@ -774,10 +888,14 @@ export function VendorProfilePage() {
     const validationError = validateLogoCommissionPreviewForm(logoPreviewForm);
     if (validationError) {
       setLogoLoginResult(null);
+      setLogoFirmsResult(null);
+      setLogoFirmMatchResult(null);
       setLogoPreviewFormError(validationError);
       return;
     }
     setLogoLoginResult(null);
+    setLogoFirmsResult(null);
+    setLogoFirmMatchResult(null);
     void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
 
@@ -912,6 +1030,8 @@ export function VendorProfilePage() {
                       className="button button-secondary button-compact"
                       onClick={() => {
                         setLogoPreviewResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoFirmMatchResult(null);
                         setLogoPreviewFormError(null);
                         void logoLoginMutation.mutateAsync(undefined).catch(() => undefined);
                       }}
@@ -924,6 +1044,36 @@ export function VendorProfilePage() {
                       className="button button-secondary button-compact"
                       onClick={() => {
                         setLogoLoginResult(null);
+                        setLogoFirmMatchResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        void logoFirmsMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
+                      disabled={logoFirmsMutation.isPending}
+                    >
+                      {logoFirmsMutation.isPending ? 'Discovering firms...' : 'Discover Logo Firms'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        void logoFirmMatchMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
+                      disabled={logoFirmMatchMutation.isPending}
+                    >
+                      {logoFirmMatchMutation.isPending ? 'Matching firm...' : 'Match Vendor To Logo Firm'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoFirmMatchResult(null);
                         setLogoPreviewOpen((current) => !current);
                         setLogoPreviewFormError(null);
                       }}
@@ -1002,6 +1152,118 @@ export function VendorProfilePage() {
                       </div>
                     ) : null}
                   </div>
+                </div>
+              ) : null}
+              {logoFirmsResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo firms discovery result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoFirmsResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoFirmsResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Firm count</span>
+                      <strong>{logoFirmsResult.count ?? 0}</strong>
+                    </div>
+                    {logoFirmsResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoFirmsResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoFirmsResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoFirmsResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoFirmsResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoFirmsResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  {logoFirmsResult.sampleFirms?.length ? (
+                    <ul className="vendor-profile-logo-firm-list" aria-label="Logo firm samples">
+                      {logoFirmsResult.sampleFirms.map((firm, index) => (
+                        <li key={firm.id ?? firm.code ?? `${firm.name}-${index}`}>
+                          <strong>{firm.name ?? 'Unnamed firm'}</strong>
+                          <span>{formatLogoFirmSummary(firm)}</span>
+                          <small>
+                            e-Invoice {formatBoolean(firm.eInvoiceResponsible)}, e-Archive {formatBoolean(firm.eArchiveResponsible)}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {logoFirmMatchResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo vendor firm match result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoFirmMatchResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>Match status</span>
+                      <strong>{logoFirmMatchResult.matchStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Match method</span>
+                      <strong>{logoFirmMatchResult.matchMethod ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Firm count</span>
+                      <strong>{logoFirmMatchResult.count ?? 0}</strong>
+                    </div>
+                    {logoFirmMatchResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoFirmMatchResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoFirmMatchResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoFirmMatchResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoFirmMatchResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoFirmMatchResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  {logoFirmMatchResult.exactMatch ? (
+                    <div className="vendor-profile-logo-match-card">
+                      <span>Exact match</span>
+                      <strong>{logoFirmMatchResult.exactMatch.name ?? 'Unnamed firm'}</strong>
+                      <small>{formatLogoFirmSummary(logoFirmMatchResult.exactMatch)}</small>
+                    </div>
+                  ) : logoFirmMatchResult.possibleMatches?.length ? (
+                    <ul className="vendor-profile-logo-firm-list" aria-label="Logo possible firm matches">
+                      {logoFirmMatchResult.possibleMatches.map((firm, index) => (
+                        <li key={firm.id ?? firm.code ?? `${firm.name}-${index}`}>
+                          <strong>{firm.name ?? 'Unnamed firm'}</strong>
+                          <span>{formatLogoFirmSummary(firm)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="page-description">No Logo firm match found for this vendor billing profile.</p>
+                  )}
+                  {logoFirmMatchResult.warnings?.length ? (
+                    <p className="vendor-profile-billing-error" role="alert">{logoFirmMatchResult.warnings.join(', ')}</p>
+                  ) : null}
                 </div>
               ) : null}
               {logoPreviewOpen ? (

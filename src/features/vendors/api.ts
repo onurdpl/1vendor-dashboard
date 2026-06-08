@@ -1,5 +1,7 @@
 export {
+  discoverLogoIsbasiFirms,
   getVendorBillingProfile,
+  matchVendorLogoIsbasiFirm,
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
   updateVendorBillingProfile,
@@ -7,6 +9,8 @@ export {
 export type {
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiFirmMatchResult,
+  LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiLoginProbeResult,
   VendorBillingProfile,
   VendorBillingProfileInput,

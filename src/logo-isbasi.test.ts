@@ -139,6 +139,192 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
   });
 
+  it('reuses login session for firm discovery and returns sanitized firm samples', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-1',
+              code: 'CARI-1',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              firmType: 'customer',
+              taxNumber: '6490512763',
+              eInvoiceResponsible: true,
+              eArchiveResponsible: false,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/firms')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/firms/firms',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          apiKey: 'api-key-secret',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        count: 1,
+        sampleFirms: [
+          expect.objectContaining({
+            id: 'firm-1',
+            code: 'CARI-1',
+            name: 'Sporjinal Spor Malzemeleri A.S.',
+            taxNumberMasked: '64******63',
+            eInvoiceResponsible: true,
+            eArchiveResponsible: false,
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('6490512763');
+    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
+    expect(JSON.stringify(result)).not.toContain('api-key-secret');
+  });
+
+  it('returns sanitized Logo firm detail fields only', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: {
+            id: 'firm-1',
+            code: 'CARI-1',
+            name: 'Sporjinal Spor Malzemeleri A.S.',
+            firmType: 'customer',
+            taxNumber: '6490512763',
+            taxOffice: 'Kadikoy',
+            city: 'Istanbul',
+            district: 'Atasehir',
+            eInvoiceResponsible: true,
+            eArchiveResponsible: false,
+            eDispatchResponsible: true,
+            phone: '+905551112233',
+            address: 'Sensitive address',
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/firms/:firmId')?.(
+      { authUser: { role: 'admin' }, params: { firmId: 'firm-1' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        firm: expect.objectContaining({
+          id: 'firm-1',
+          code: 'CARI-1',
+          name: 'Sporjinal Spor Malzemeleri A.S.',
+          taxNumberMasked: '64******63',
+          taxOffice: 'Kadikoy',
+          city: 'Istanbul',
+          district: 'Atasehir',
+          eDispatchResponsible: true,
+        }),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('6490512763');
+    expect(serialized).not.toContain('+905551112233');
+    expect(serialized).not.toContain('Sensitive address');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
+  it('matches a vendor billing profile to a Logo firm by tax number without saving', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-1',
+              code: 'CARI-1',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              firmType: 'customer',
+              tcknVkn: '6490512763',
+              eInvoiceResponsible: true,
+              eArchiveResponsible: false,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue(vendorBillingProfile);
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/match-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(getVendorBillingProfileMock).toHaveBeenCalledWith('sporjinal');
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        vendorId: 'sporjinal',
+        matchStatus: 'exact_match',
+        matchMethod: 'taxNumberOrTckn',
+        exactMatch: expect.objectContaining({
+          id: 'firm-1',
+          taxNumberMasked: '64******63',
+        }),
+        possibleMatches: [],
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('6490512763');
+    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
+  });
+
   it('returns a controlled missing env response from the login probe', async () => {
     const { posts } = createRegisteredRoutes({ LOGO_ISBASI_API_KEY: undefined });
     const reply = createReply();

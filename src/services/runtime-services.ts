@@ -353,6 +353,61 @@ export const runtimeServices = {
               tokenPreview: 'mock-t...oken',
             },
           }),
+    discoverLogoIsbasiFirms: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.discoverLogoIsbasiFirms()
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'firms_discovery' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            count: 1,
+            sampleFirms: [
+              {
+                id: 'mock-logo-firm-1',
+                code: 'LOGO-MOCK-1',
+                name: 'Mock Vendor Legal Name',
+                firmType: 'customer',
+                taxNumberMasked: '11******11',
+                eInvoiceResponsible: true,
+                eArchiveResponsible: false,
+              },
+            ],
+          }),
+    matchVendorLogoIsbasiFirm: (vendorId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.matchVendorLogoIsbasiFirm(vendorId)
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'firm_match_probe' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            vendorId,
+            billingProfilePresent: true,
+            searchedBy: {
+              taxNumberOrTcknPresent: true,
+              legalCompanyNamePresent: true,
+            },
+            count: 1,
+            matchStatus: 'exact_match' as const,
+            matchMethod: 'taxNumberOrTckn' as const,
+            exactMatch: {
+              id: 'mock-logo-firm-1',
+              code: 'LOGO-MOCK-1',
+              name: 'Mock Vendor Legal Name',
+              firmType: 'customer',
+              taxNumberMasked: '11******11',
+              eInvoiceResponsible: true,
+              eArchiveResponsible: false,
+            },
+            possibleMatches: [],
+            warnings: [],
+          }),
     previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.previewLogoIsbasiCommissionInvoice(vendorId, input)

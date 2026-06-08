@@ -1386,6 +1386,75 @@ export type LogoIsbasiLoginProbeResult = {
   message?: string;
 };
 
+export type LogoIsbasiFirmSummary = {
+  id: string | null;
+  code: string | null;
+  name: string | null;
+  firmType: string | null;
+  taxNumberMasked: string | null;
+  eInvoiceResponsible: boolean | null;
+  eArchiveResponsible: boolean | null;
+};
+
+export type LogoIsbasiFirmDetail = LogoIsbasiFirmSummary & {
+  taxOffice: string | null;
+  city: string | null;
+  district: string | null;
+  eDispatchResponsible: boolean | null;
+};
+
+export type LogoIsbasiFirmsDiscoveryResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'firms_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  count?: number;
+  sampleFirms?: LogoIsbasiFirmSummary[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+};
+
+export type LogoIsbasiFirmDetailProbeResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'firm_detail_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  firm?: LogoIsbasiFirmDetail;
+  errorCode?: string;
+  message?: string;
+};
+
+export type LogoIsbasiFirmMatchResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'firm_match_probe';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  vendorId?: string;
+  billingProfilePresent?: boolean;
+  searchedBy?: {
+    taxNumberOrTcknPresent: boolean;
+    legalCompanyNamePresent: boolean;
+  };
+  count?: number;
+  matchStatus?: 'exact_match' | 'possible_matches' | 'none';
+  matchMethod?: 'taxNumberOrTckn' | 'legalCompanyName' | null;
+  exactMatch?: LogoIsbasiFirmSummary | null;
+  possibleMatches?: LogoIsbasiFirmSummary[];
+  warnings?: string[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+};
+
 export type LogoIsbasiCommissionInvoicePreviewInput = {
   commissionAmount: string;
   vatRate: string;
