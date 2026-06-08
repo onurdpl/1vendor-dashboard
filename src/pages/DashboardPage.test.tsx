@@ -205,6 +205,10 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     expect(screen.getAllByText('Operational queues')).toHaveLength(1);
     expect(screen.queryByText('Operational signals')).not.toBeInTheDocument();
+    expect(screen.queryByText('Priority')).not.toBeInTheDocument();
+    expect(screen.queryByText('Business Snapshot')).toBeInTheDocument();
+    expect(screen.queryByText('Passive insights')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workspace context')).not.toBeInTheDocument();
     expect(screen.getByText('Diagnostics summary')).toBeInTheDocument();
     expect(screen.getByText('Operational health')).toBeInTheDocument();
     expect(screen.getByText('1 operational job is dead-letter ready.')).toBeInTheDocument();
@@ -229,7 +233,7 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText('Needs attention')).toBeInTheDocument();
     expect(screen.getByText('Operational queues')).toBeInTheDocument();
     expect(screen.getByLabelText('Dashboard action skeleton')).toBeInTheDocument();
-    expect(screen.getByLabelText('Dashboard priority skeleton')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Dashboard priority skeleton')).not.toBeInTheDocument();
     expect(screen.getByText('Vendor orders')).toBeInTheDocument();
     expect(screen.queryByText('Loading operational overview')).not.toBeInTheDocument();
   });
@@ -281,8 +285,8 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
     const pageText = container.textContent ?? '';
     expect(pageText.indexOf('Needs attention')).toBeLessThan(pageText.indexOf('Operational queues'));
-    expect(pageText.indexOf('Operational queues')).toBeLessThan(pageText.indexOf('Passive insights'));
-    expect(pageText.indexOf('Passive insights')).toBeLessThan(pageText.indexOf('Finance snapshot'));
+    expect(pageText.indexOf('Operational queues')).toBeLessThan(pageText.indexOf('Business Snapshot'));
+    expect(pageText.indexOf('Business Snapshot')).toBeLessThan(pageText.indexOf('Finance snapshot'));
     expect(screen.getByText('Fulfillment queue')).toBeInTheDocument();
     expect(screen.getByText('Returns queue')).toBeInTheDocument();
     expect(screen.getByText('Finance review queue')).toBeInTheDocument();
@@ -296,6 +300,9 @@ describe('DashboardPage command center', () => {
     expect(screen.getByRole('link', { name: 'Open support' })).toHaveAttribute('href', '/support?workflow=open-support-issues');
     expect(screen.getByRole('link', { name: 'Open automation' })).toHaveAttribute('href', '/automation?workflow=active-issue-groups');
     expect(screen.getAllByLabelText('Workflow action guidance').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Priority')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blocked / attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
   });
 
   it('loads admin dashboard data for the selected vendor and admin notifications globally', async () => {
@@ -405,7 +412,7 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    expect(await screen.findByLabelText('Compact passive dashboard insights')).toBeInTheDocument();
+    expect(await screen.findByLabelText('Business dashboard snapshot')).toBeInTheDocument();
     expect(await screen.findByText('1 older event group collapsed')).toBeInTheDocument();
     expect(screen.getByText('Historical records remain available in operational detail pages.')).toBeInTheDocument();
   });
@@ -715,19 +722,29 @@ describe('DashboardPage command center', () => {
     expect(screen.getByText(/passive notification history/i)).toBeInTheDocument();
   });
 
-  it('renders workspace context without duplicating action counts as passive status', async () => {
+  it('removes workspace context and duplicate passive status cards', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
 
-    renderDashboardPage();
+    const { container } = renderDashboardPage();
 
-    expect(await screen.findByText('Workspace context')).toBeInTheDocument();
-    expect(screen.getByText('History mode')).toBeInTheDocument();
-    expect(screen.getByText('Grouped')).toBeInTheDocument();
-    expect(screen.getByText('Top groups')).toBeInTheDocument();
-    expect(screen.getByText('Traceable')).toBeInTheDocument();
+    expect(await screen.findByText('Business Snapshot')).toBeInTheDocument();
+    const businessSnapshotKpis = container.querySelector('.dashboard-passive-kpis');
+    expect(businessSnapshotKpis).not.toBeNull();
+    expect(within(businessSnapshotKpis as HTMLElement).getByText('Vendor orders')).toBeInTheDocument();
+    expect(within(businessSnapshotKpis as HTMLElement).queryByText('Awaiting shipment')).not.toBeInTheDocument();
+    expect(within(businessSnapshotKpis as HTMLElement).queryByText('Blocked / attention')).not.toBeInTheDocument();
+    expect(within(businessSnapshotKpis as HTMLElement).queryByText('Payout estimate')).not.toBeInTheDocument();
+    expect(within(businessSnapshotKpis as HTMLElement).queryByText('Refund amount')).not.toBeInTheDocument();
+    expect(screen.queryByText('Workspace context')).not.toBeInTheDocument();
+    expect(screen.queryByText('History mode')).not.toBeInTheDocument();
+    expect(screen.queryByText('Grouped')).not.toBeInTheDocument();
+    expect(screen.queryByText('Top groups')).not.toBeInTheDocument();
+    expect(screen.queryByText('Traceable')).not.toBeInTheDocument();
     expect(screen.queryByText('Operational items')).not.toBeInTheDocument();
     expect(screen.queryByText('Pending attention')).not.toBeInTheDocument();
     expect(screen.queryByText('Queue items')).not.toBeInTheDocument();
+    expect(screen.queryByText('Blocked / attention')).not.toBeInTheDocument();
+    expect(screen.queryByText('Refund amount')).not.toBeInTheDocument();
   });
 
   it('projects raw operational identifiers into readable dashboard history copy', async () => {

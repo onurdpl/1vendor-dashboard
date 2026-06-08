@@ -699,7 +699,6 @@ export function DashboardPage() {
 
   const priorityWork = safeArray(dashboardView.priorityWork);
   const recentActivity = safeArray(dashboardView.recentActivity);
-  const partialDataWarnings = safeArray(dashboardView.partialDataWarnings);
   const dashboardStats = safeArray(dashboardView.stats);
   const normalizedCounts = dashboardView.normalizedOperationalCounts;
   const groupedRecentActivity = groupRecentActivity(recentActivity);
@@ -719,7 +718,9 @@ export function DashboardPage() {
     ? 'Action counts include deferred slices where full totals are unavailable.'
     : `${operationalActionTotal} grouped actionable issues across fulfillment, returns, refunds, and automation.`;
   const health = dashboardView.observabilitySummary?.health ?? 'Unknown';
-  const dashboardKpis = dashboardStats.slice(0, 5);
+  const businessSnapshotKpis = dashboardStats
+    .filter((stat) => stat.label === 'Vendor orders' || stat.label === 'Vendor checks')
+    .map((stat) => (stat.label === 'Vendor checks' ? { ...stat, label: 'Vendor orders' } : stat));
   const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !initialDashboard);
   const isDashboardShellOnly = dashboard?.loadPhase === 'initial' && !deferredDashboard && !isDeferredDashboardError;
   const isDashboardDataLoading = isDashboardInitialLoading || isDashboardShellOnly;
@@ -825,7 +826,7 @@ export function DashboardPage() {
         <div className="dashboard-enterprise-title">
           <h1>{dashboardView.title}</h1>
           <p className="page-description">{dashboardView.description}</p>
-          <div className="dashboard-role-badges" aria-label="Workspace context">
+          <div className="dashboard-role-badges" aria-label="Dashboard user scope">
             <StatusBadge tone="info">User {currentUser?.name ?? 'Unknown'}</StatusBadge>
             <StatusBadge tone="attention">Role {currentUser?.role ?? 'Unknown'}</StatusBadge>
             <StatusBadge tone="info">Vendor {dashboardView.vendorName ?? 'Unknown'}</StatusBadge>
@@ -907,74 +908,17 @@ export function DashboardPage() {
             </article>
           ))}
         </div>
-        {isError && !dashboard ? (
-          <SectionErrorRetry
-            title="Operational queues unavailable"
-            description={error ?? 'The backend-derived dashboard overview could not be loaded.'}
-            onRetry={() => void refetchDashboard()}
-          />
-        ) : isDashboardDataLoading ? (
-          <div className="dashboard-priority-table" aria-label="Dashboard priority skeleton">
-            <div className="dashboard-priority-head" aria-hidden="true">
-              <span>Priority</span>
-              <span>Type</span>
-              <span>Count</span>
-              <span>Oldest</span>
-              <span>Status</span>
-              <span>Action</span>
-            </div>
-            {Array.from({ length: 3 }, (_, index) => (
-              <article key={`dashboard-priority-skeleton-${index}`} className="dashboard-priority-row op-skeleton-row">
-                <SkeletonText width="56%" />
-                <SkeletonText width="70%" />
-                <SkeletonText width="28%" />
-                <SkeletonText width="42%" />
-                <SkeletonText width="48%" />
-                <SkeletonText width="36%" />
-              </article>
-            ))}
-          </div>
-        ) : actionProjections.length === 0 ? (
-          <EmptyStatePanel title="No records available" description="No records available." />
-        ) : (
-          <div className="dashboard-priority-table">
-            <div className="dashboard-priority-head" aria-hidden="true">
-              <span>Priority</span>
-              <span>Type</span>
-              <span>Count</span>
-              <span>Oldest</span>
-              <span>Status</span>
-              <span>Action</span>
-            </div>
-            {actionProjections.map((item) => (
-              <article key={item.label} className="dashboard-priority-row">
-                <div className="dashboard-priority-cell">
-                  <span className={`dashboard-priority-dot ${item.tone}`} aria-hidden="true" />
-                  <span>{formatPriorityLabel(item.tone)}</span>
-                </div>
-                <div>
-                  <strong>{item.label}</strong>
-                  {item.description ? <p>{item.description}</p> : null}
-                </div>
-                <strong className="dashboard-count-value">{item.value}</strong>
-                <span className="dashboard-muted-value">—</span>
-                <span className="dashboard-muted-value">—</span>
-                <span className="dashboard-muted-value">—</span>
-              </article>
-            ))}
-          </div>
-        )}
       </OperationalSection>
 
       <div className="dashboard-passive-heading">
-        <span>Passive insights</span>
-        <p>Compact reporting and history. Active work remains above.</p>
+        <span>Business Snapshot</span>
+        <p>High-level business KPIs. Active work remains above.</p>
       </div>
 
       <div className="dashboard-enterprise-kpi-row dashboard-passive-kpis">
         {isDashboardDataLoading ? (
-          <MetricSkeletonGrid labels={['Vendor orders', 'Awaiting shipment', 'Blocked / attention', 'Payout estimate']} />
-        ) : dashboardKpis.map((stat) => (
+          <MetricSkeletonGrid labels={['Vendor orders']} />
+        ) : businessSnapshotKpis.map((stat) => (
           <article key={stat.label} className={`dashboard-enterprise-kpi dashboard-kpi-${getDashboardKpiTone(stat.label)}`}>
             <span>{stat.label}</span>
             <strong>{stat.value}</strong>
@@ -983,7 +927,7 @@ export function DashboardPage() {
         ))}
       </div>
 
-      <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Compact passive dashboard insights">
+      <div className="dashboard-enterprise-grid dashboard-passive-grid" aria-label="Business dashboard snapshot">
         <div className="dashboard-enterprise-main">
           <OperationalSection title="Recent operational events" description="Compact grouped history for context.">
             {isDashboardDataLoading ? (
@@ -1312,41 +1256,6 @@ export function DashboardPage() {
             </OperationalSection>
           ) : null}
         </aside>
-      </div>
-
-      <div className="dashboard-workspace-compact">
-        <OperationalSection title="Workspace context" description="Scope and passive evidence mode for this dashboard.">
-          <div className="dashboard-workspace-status-grid">
-            <div>
-              <span>Vendor</span>
-              <strong>{dashboardView.vendorName ?? 'Unknown'}</strong>
-            </div>
-            <div>
-              <span>Scope</span>
-              <strong>Vendor-scoped</strong>
-            </div>
-            <div>
-              <span>History mode</span>
-              <strong>Grouped</strong>
-            </div>
-            <div>
-              <span>Notifications</span>
-              <strong>Top groups</strong>
-            </div>
-            <div>
-              <span>Evidence</span>
-              <strong>Traceable</strong>
-            </div>
-          </div>
-          <p className="dashboard-workspace-status-copy">{dashboardView.workspaceStatus}</p>
-          {partialDataWarnings.length ? (
-            <ul className="dashboard-activity-list">
-              {partialDataWarnings.map((warning) => (
-                <li key={warning}>{warning}</li>
-              ))}
-            </ul>
-          ) : null}
-        </OperationalSection>
       </div>
 
       {message ? <ActionFeedback tone={tone} message={message} /> : null}
