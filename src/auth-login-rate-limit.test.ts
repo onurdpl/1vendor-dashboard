@@ -365,6 +365,64 @@ describe('auth login rate limiting', () => {
     );
   });
 
+  it('reuses the middleware-authenticated user for /auth/me without a duplicate route lookup', async () => {
+    const handlers = createAuthRouteHandlers();
+    const loginReply = createReply();
+    await handlers.post['/auth/login']?.(
+      {
+        headers: {},
+        body: {
+          email: 'vendor@example.com',
+          password: 'demo123',
+        },
+        ip: '127.0.0.1',
+      },
+      loginReply,
+    );
+    const sessionCookie = extractSessionCookie(readSetCookieHeader(loginReply.headers));
+    findUniqueMock.mockClear();
+
+    const meReply = createReply();
+    const request = {
+      method: 'GET',
+      routeOptions: { url: '/auth/me' },
+      requestId: 'auth-me-test',
+      log: {
+        info: vi.fn(),
+      },
+      headers: {
+        cookie: sessionCookie,
+      },
+    };
+    const meResult = await invokeGetRoute(handlers.get['/auth/me'], request, meReply);
+    const mePayload = meReply.sent ? meReply.payload : meResult;
+
+    expect(meReply.statusCode).toBe(200);
+    expect(mePayload).toEqual(
+      expect.objectContaining({
+        user: expect.objectContaining({
+          email: 'vendor@example.com',
+          vendorAccess: [{ vendorId: 'vendor-a', vendorName: 'Vendor A' }],
+        }),
+      }),
+    );
+    expect(findUniqueMock).toHaveBeenCalledTimes(1);
+    expect(request.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+        requestId: 'auth-me-test',
+        cookiePresent: true,
+        authFailureStage: null,
+        middlewareValidationDurationMs: expect.any(Number),
+        routeHandlerDurationMs: expect.any(Number),
+        userLookupDurationMs: expect.any(Number),
+        responseStatus: 200,
+        sessionSource: 'cookie',
+      }),
+      'auth me restore diagnostics',
+    );
+  });
+
   it('restores /auth/me from a valid cookie when a stale bearer header is also present', async () => {
     const handlers = createAuthRouteHandlers();
     const loginReply = createReply();
@@ -422,11 +480,17 @@ describe('auth login rate limiting', () => {
   it('rejects /auth/me when the session cookie is missing', async () => {
     const handlers = createAuthRouteHandlers();
     const reply = createReply();
+    const log = {
+      info: vi.fn(),
+    };
 
     await invokeGetRoute(
       handlers.get['/auth/me'],
       {
         method: 'GET',
+        routeOptions: { url: '/auth/me' },
+        requestId: 'missing-cookie-test',
+        log,
         headers: {},
       },
       reply,
@@ -445,6 +509,17 @@ describe('auth login rate limiting', () => {
         attemptedSessionSources: [],
       },
     });
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+        requestId: 'missing-cookie-test',
+        cookiePresent: false,
+        authFailureStage: 'missing_token',
+        authFailureReason: 'missing_cookie',
+        responseStatus: 401,
+      }),
+      'auth me restore diagnostics',
+    );
   });
 
   it('rejects /auth/me when the session cookie is expired', async () => {
@@ -452,11 +527,17 @@ describe('auth login rate limiting', () => {
     const handlers = createAuthRouteHandlers(env);
     const reply = createReply();
     const expiredToken = signExpiredJwt(env.JWT_SECRET);
+    const log = {
+      info: vi.fn(),
+    };
 
     await invokeGetRoute(
       handlers.get['/auth/me'],
       {
         method: 'GET',
+        routeOptions: { url: '/auth/me' },
+        requestId: 'expired-cookie-test',
+        log,
         headers: {
           cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(expiredToken)}`,
         },
@@ -478,6 +559,64 @@ describe('auth login rate limiting', () => {
       },
     });
     expect(JSON.stringify(reply.payload)).not.toContain(expiredToken);
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+        requestId: 'expired-cookie-test',
+        cookiePresent: true,
+        authFailureStage: 'jwt_verify',
+        authFailureReason: 'expired_token',
+        responseStatus: 401,
+      }),
+      'auth me restore diagnostics',
+    );
+  });
+
+  it('rejects /auth/me when the session cookie token is invalid', async () => {
+    const handlers = createAuthRouteHandlers();
+    const reply = createReply();
+    const log = {
+      info: vi.fn(),
+    };
+
+    await invokeGetRoute(
+      handlers.get['/auth/me'],
+      {
+        method: 'GET',
+        routeOptions: { url: '/auth/me' },
+        requestId: 'invalid-cookie-test',
+        log,
+        headers: {
+          cookie: `${SESSION_COOKIE_NAME}=not-a-valid-token`,
+        },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.payload).toEqual({
+      message: 'Unauthorized',
+      authDiagnostics: {
+        cookiePresent: true,
+        authorizationBearerPresent: false,
+        jwtVerifySuccess: false,
+        userLookupSuccess: false,
+        authFailureStage: 'jwt_verify',
+        selectedSessionSource: null,
+        attemptedSessionSources: ['cookie'],
+      },
+    });
+    expect(log.info).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_ME_RESTORE_DIAGNOSTICS',
+        requestId: 'invalid-cookie-test',
+        cookiePresent: true,
+        authFailureStage: 'jwt_verify',
+        authFailureReason: 'invalid_token',
+        responseStatus: 401,
+      }),
+      'auth me restore diagnostics',
+    );
   });
 
   it('diagnoses /auth/me user lookup failures without exposing the cookie token', async () => {

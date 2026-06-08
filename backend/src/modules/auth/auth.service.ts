@@ -175,16 +175,18 @@ export function createAuthService(env: AppEnv) {
     jwtVerifySuccess: boolean;
     userLookupSuccess: boolean;
     authFailureStage: AuthFailureStage;
+    authFailureReason: 'invalid_token' | 'expired_token' | 'user_not_found' | null;
     user: AuthUserResponse | null;
   }> {
     let payload: JwtPayload;
     try {
       payload = verifyToken(token);
-    } catch {
+    } catch (error) {
       return {
         jwtVerifySuccess: false,
         userLookupSuccess: false,
         authFailureStage: 'jwt_verify',
+        authFailureReason: error instanceof jwt.TokenExpiredError ? 'expired_token' : 'invalid_token',
         user: null,
       };
     }
@@ -194,6 +196,7 @@ export function createAuthService(env: AppEnv) {
       jwtVerifySuccess: true,
       userLookupSuccess: Boolean(user),
       authFailureStage: user ? null : 'user_lookup',
+      authFailureReason: user ? null : 'user_not_found',
       user,
     };
   }

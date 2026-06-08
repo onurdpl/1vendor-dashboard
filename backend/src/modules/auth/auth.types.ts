@@ -89,8 +89,12 @@ export function requireAuthUser(request: FastifyRequest): AuthUserContext {
 declare module 'fastify' {
   interface FastifyRequest {
     authUser?: AuthUserContext;
+    authUserResponse?: AuthUserResponse;
     authSessionSource?: 'bearer' | 'cookie';
     authSessionToken?: string;
     authDiagnostics?: AuthRestoreDiagnostics;
+    authSessionValidationDurationMs?: number;
+    authSessionUserLookupDurationMs?: number;
+    authFailureReason?: 'missing_cookie' | 'invalid_token' | 'expired_token' | 'user_not_found' | 'unknown';
   }
 }

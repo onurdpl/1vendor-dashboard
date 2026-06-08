@@ -120,22 +120,46 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   });
 
   app.get('/auth/me', { preHandler: authMiddleware.authenticateRequest }, async (request, reply) => {
+    const routeStartedAt = process.hrtime.bigint();
     const authHeader = request.headers.authorization ?? '';
     const token = request.authSessionToken ?? authHeader.split(' ')[1];
 
     if (!token) {
+      authMiddleware.logAuthMeRestoreDiagnostics(request, {
+        statusCode: 401,
+        routeHandlerDurationMs: elapsedMs(routeStartedAt),
+        userLookupDurationMs: null,
+      });
       return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
     }
 
-    const user = await authService.currentUserFromToken(token);
+    let user = request.authUserResponse ?? null;
+    let userLookupDurationMs: number | null = null;
     if (!user) {
+      const userLookupStartedAt = process.hrtime.bigint();
+      user = await authService.currentUserFromToken(token);
+      userLookupDurationMs = elapsedMs(userLookupStartedAt);
+    }
+    if (!user) {
+      request.authFailureReason = 'user_not_found';
+      authMiddleware.logAuthMeRestoreDiagnostics(request, {
+        statusCode: 401,
+        routeHandlerDurationMs: elapsedMs(routeStartedAt),
+        userLookupDurationMs,
+      });
       return reply.code(401).send({ message: 'Unauthorized', authDiagnostics: request.authDiagnostics });
     }
 
-    return {
+    const responseBody = {
       user,
       csrfToken: request.authSessionSource === 'cookie' ? authService.createCsrfToken(token) : null,
     };
+    authMiddleware.logAuthMeRestoreDiagnostics(request, {
+      statusCode: 200,
+      routeHandlerDurationMs: elapsedMs(routeStartedAt),
+      userLookupDurationMs,
+    });
+    return responseBody;
   });
 }
 
