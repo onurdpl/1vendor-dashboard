@@ -4,12 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DashboardPage } from './DashboardPage';
-import type { DashboardOverview, NotificationIntent, NotificationsResponse } from '../lib/api/contracts';
+import type { DashboardNotificationsResponse, DashboardOverview, NotificationIntent, NotificationsResponse } from '../lib/api/contracts';
 import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 
 const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
 const getDashboardDeferredOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
 const listNotificationsMock = vi.fn<(vendorId?: string | null, options?: { headers?: HeadersInit }) => Promise<NotificationsResponse>>();
+const listDashboardNotificationsMock = vi.fn<(vendorId?: string | null, options?: { headers?: HeadersInit }) => Promise<DashboardNotificationsResponse>>();
 const getObservabilitySummaryMock = vi.fn();
 const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
@@ -27,6 +28,7 @@ vi.mock('../services/runtime-services', () => ({
   runtimeServices: {
     notifications: {
       list: (vendorId?: string, options?: { headers?: HeadersInit }) => listNotificationsMock(vendorId, options),
+      listDashboard: (vendorId?: string, options?: { headers?: HeadersInit }) => listDashboardNotificationsMock(vendorId, options),
       markRead: (notificationId: string) => markNotificationReadMock(notificationId),
       dismiss: (notificationId: string) => dismissNotificationMock(notificationId),
     },
@@ -178,6 +180,7 @@ describe('DashboardPage command center', () => {
     getDashboardDeferredOverviewMock.mockReset();
     getDashboardDeferredOverviewMock.mockReturnValue(pendingDeferredDashboard);
     listNotificationsMock.mockReset();
+    listDashboardNotificationsMock.mockReset();
     getObservabilitySummaryMock.mockReset();
     markNotificationReadMock.mockReset();
     dismissNotificationMock.mockReset();
@@ -189,6 +192,9 @@ describe('DashboardPage command center', () => {
         high: 0,
         warning: 1,
       },
+      notifications: [notification],
+    });
+    listDashboardNotificationsMock.mockResolvedValue({
       notifications: [notification],
     });
     getObservabilitySummaryMock.mockResolvedValue({
@@ -312,8 +318,9 @@ describe('DashboardPage command center', () => {
 
     renderDashboardPage();
 
-    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
-    const notificationOptions = listNotificationsMock.mock.calls[0]?.[1];
+    await waitFor(() => expect(listDashboardNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
+    expect(listNotificationsMock).not.toHaveBeenCalled();
+    const notificationOptions = listDashboardNotificationsMock.mock.calls[0]?.[1];
     const headers = new Headers(notificationOptions?.headers);
 
     expect(headers.get('X-Request-Id')).toEqual(expect.any(String));
@@ -377,7 +384,7 @@ describe('DashboardPage command center', () => {
 
     expect(await screen.findByRole('heading', { name: /demo vendor b command center/i })).toBeInTheDocument();
     expect(getDashboardOverviewMock).toHaveBeenCalledWith('demo-vendor-b');
-    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
+    await waitFor(() => expect(listDashboardNotificationsMock).toHaveBeenCalledWith(null, expect.any(Object)));
     expect(screen.getByText('Admin passive notification history')).toBeInTheDocument();
     expect(screen.getByText('Top grouped admin alert history. Lower priority groups stay collapsed.')).toBeInTheDocument();
   });
@@ -397,7 +404,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
+    await waitFor(() => expect(listDashboardNotificationsMock).toHaveBeenCalledWith('demo-vendor-a', expect.any(Object)));
   });
 
   it('renders the notification center list with compact metadata', async () => {
@@ -406,7 +413,7 @@ describe('DashboardPage command center', () => {
     renderDashboardPage();
 
     expect(await screen.findByRole('heading', { name: /demo vendor a command center/i })).toBeInTheDocument();
-    await waitFor(() => expect(listNotificationsMock).toHaveBeenCalled());
+    await waitFor(() => expect(listDashboardNotificationsMock).toHaveBeenCalled());
     const notificationCenter = getNotificationCenter();
     expect(notificationCenter.getByText(/notification history/i)).toBeInTheDocument();
     expect(await notificationCenter.findByText('Shipping cost review needed')).toBeInTheDocument();
@@ -466,7 +473,7 @@ describe('DashboardPage command center', () => {
 
   it('labels support workload as notification-based when only notification data is available', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
-    listNotificationsMock.mockResolvedValue({
+    listDashboardNotificationsMock.mockResolvedValue({
       summary: {
         total: 2,
         unread: 2,
@@ -652,7 +659,7 @@ describe('DashboardPage command center', () => {
 
   it('groups repeated notification alerts while preserving the latest action surface', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
-    listNotificationsMock.mockResolvedValue({
+    listDashboardNotificationsMock.mockResolvedValue({
       summary: {
         total: 3,
         unread: 3,
@@ -714,7 +721,7 @@ describe('DashboardPage command center', () => {
 
   it('keeps notification history compact by collapsing lower priority groups', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
-    listNotificationsMock.mockResolvedValue({
+    listDashboardNotificationsMock.mockResolvedValue({
       summary: {
         total: 4,
         unread: 4,
@@ -798,7 +805,7 @@ describe('DashboardPage command center', () => {
         'return-request-23165600081-sporjinal-20393734144337 is requested against refund',
       ],
     });
-    listNotificationsMock.mockResolvedValue({
+    listDashboardNotificationsMock.mockResolvedValue({
       summary: {
         total: 1,
         unread: 1,
@@ -835,7 +842,7 @@ describe('DashboardPage command center', () => {
 
   it('renders an empty notification state', async () => {
     getDashboardOverviewMock.mockResolvedValue(dashboardOverview);
-    listNotificationsMock.mockResolvedValue({
+    listDashboardNotificationsMock.mockResolvedValue({
       summary: {
         total: 0,
         unread: 0,
@@ -865,7 +872,7 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByText('Notification marked as read.')).toBeInTheDocument();
     expect(getNotificationSummaryValue('Unread')).toBe('0');
     expect(screen.getByText('read')).toBeInTheDocument();
-    await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(listDashboardNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 
@@ -882,7 +889,7 @@ describe('DashboardPage command center', () => {
     expect(await screen.findByText('Notification dismissed.')).toBeInTheDocument();
     expect(getNotificationSummaryValue('Unread')).toBe('0');
     expect(getNotificationCenter().getByText('No active notifications')).toBeInTheDocument();
-    await waitFor(() => expect(listNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(listDashboardNotificationsMock.mock.calls.length).toBeGreaterThanOrEqual(2));
     await waitFor(() => expect(getDashboardOverviewMock.mock.calls.length).toBeGreaterThanOrEqual(2));
   });
 

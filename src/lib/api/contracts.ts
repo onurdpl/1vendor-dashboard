@@ -1722,6 +1722,37 @@ export type NotificationsResponse = {
   notifications: NotificationIntent[];
 };
 
+export type DashboardNotificationMetadata = Partial<Record<
+  | 'signalSourceArea'
+  | 'category'
+  | 'linkedEntityType'
+  | 'linkedEntityId'
+  | 'orderId'
+  | 'returnRequestId'
+  | 'supportTicketId',
+  string
+>>;
+
+export type DashboardNotificationIntent = Pick<
+  NotificationIntent,
+  | 'id'
+  | 'signalId'
+  | 'vendorId'
+  | 'status'
+  | 'title'
+  | 'message'
+  | 'severity'
+  | 'deliveredAt'
+  | 'createdAt'
+  | 'updatedAt'
+> & {
+  metadata?: DashboardNotificationMetadata;
+};
+
+export type DashboardNotificationsResponse = {
+  notifications: DashboardNotificationIntent[];
+};
+
 export type DashboardNotificationSummary = {
   unread: number;
   highPriority: number;

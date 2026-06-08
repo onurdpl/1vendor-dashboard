@@ -22,12 +22,14 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
-import type { DashboardObservabilitySummary, NotificationIntent } from '../lib/api/contracts';
+import type { DashboardNotificationIntent, DashboardObservabilitySummary, NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 import { getDashboardWorkflowAction, getDashboardWorkflowRoute, workflowRoutes } from '../lib/workflowActionGuidance';
 import { projectOperationalEvent } from '../lib/operationalEventProjection';
 
 const DASHBOARD_NOTIFICATION_DEFERRED_DELAY_MS = 500;
+
+type DashboardNotificationView = DashboardNotificationIntent & Partial<Pick<NotificationIntent, 'readAt'>>;
 
 function parseDashboardCount(value: string | number | null | undefined) {
   if (typeof value === 'number') {
@@ -99,7 +101,7 @@ function getNotificationTone(severity: string): 'success' | 'warning' | 'danger'
   return 'info';
 }
 
-function readNotificationMetadata(notification: NotificationIntent, key: string) {
+function readNotificationMetadata(notification: DashboardNotificationView, key: string) {
   if (!notification.metadata || typeof notification.metadata !== 'object' || !(key in notification.metadata)) {
     return null;
   }
@@ -108,7 +110,7 @@ function readNotificationMetadata(notification: NotificationIntent, key: string)
   return typeof value === 'string' && value.trim() ? value : null;
 }
 
-function formatNotificationSource(notification: NotificationIntent) {
+function formatNotificationSource(notification: DashboardNotificationView) {
   return readNotificationMetadata(notification, 'signalSourceArea')?.toLowerCase().replaceAll('_', ' ') ?? 'signal';
 }
 
@@ -200,7 +202,7 @@ function groupStaleFulfillmentSignals(items: string[]) {
   });
 }
 
-function getNotificationSeverityRank(severity: NotificationIntent['severity']) {
+function getNotificationSeverityRank(severity: DashboardNotificationView['severity']) {
   if (severity === 'critical') {
     return 4;
   }
@@ -213,7 +215,7 @@ function getNotificationSeverityRank(severity: NotificationIntent['severity']) {
   return 1;
 }
 
-function getNotificationTime(notification: NotificationIntent) {
+function getNotificationTime(notification: DashboardNotificationView) {
   const timestamp = Date.parse(notification.updatedAt || notification.createdAt || notification.deliveredAt || '');
   return Number.isFinite(timestamp) ? timestamp : 0;
 }
@@ -232,13 +234,13 @@ function formatGroupedNotificationTitle(title: string, count: number) {
   return `${count} related alerts`;
 }
 
-function groupNotifications(notifications: NotificationIntent[]) {
+function groupNotifications(notifications: DashboardNotificationView[]) {
   const groups = new Map<
     string,
     {
       key: string;
-      representative: NotificationIntent;
-      notifications: NotificationIntent[];
+      representative: DashboardNotificationView;
+      notifications: DashboardNotificationView[];
       unread: number;
       latestTime: number;
       severityRank: number;
@@ -286,7 +288,7 @@ function groupNotifications(notifications: NotificationIntent[]) {
   });
 }
 
-function projectNotificationForDisplay(notification: NotificationIntent) {
+function projectNotificationForDisplay(notification: DashboardNotificationView) {
   return projectOperationalEvent({
     title: notification.title,
     description: notification.message,
@@ -294,11 +296,11 @@ function projectNotificationForDisplay(notification: NotificationIntent) {
   });
 }
 
-function isUnreadNotification(notification: NotificationIntent) {
+function isUnreadNotification(notification: DashboardNotificationView) {
   return notification.status !== 'read' && notification.status !== 'dismissed';
 }
 
-function isSupportNotification(notification: NotificationIntent) {
+function isSupportNotification(notification: DashboardNotificationView) {
   const source = formatNotificationSource(notification);
   const category = readNotificationMetadata(notification, 'category') ?? '';
   const linkedEntityType = readNotificationMetadata(notification, 'linkedEntityType') ?? '';
@@ -314,7 +316,7 @@ function isSupportNotification(notification: NotificationIntent) {
   );
 }
 
-function getSupportNotificationGroupKey(notification: NotificationIntent, index: number) {
+function getSupportNotificationGroupKey(notification: DashboardNotificationView, index: number) {
   const linkedEntityId =
     readNotificationMetadata(notification, 'linkedEntityId') ??
     readNotificationMetadata(notification, 'orderId') ??
@@ -332,13 +334,13 @@ function getSupportNotificationGroupKey(notification: NotificationIntent, index:
     .join('|');
 }
 
-function groupSupportActivity(notifications: NotificationIntent[]) {
+function groupSupportActivity(notifications: DashboardNotificationView[]) {
   const groups = new Map<
     string,
     {
       key: string;
-      representative: NotificationIntent;
-      notifications: NotificationIntent[];
+      representative: DashboardNotificationView;
+      notifications: DashboardNotificationView[];
       latestTime: number;
       unread: number;
     }
@@ -469,7 +471,7 @@ export function DashboardPage() {
   const notificationQueryKey = isAdmin ? queryKeys.notifications.adminGlobal() : queryKeys.notifications.list(vendorId);
   const notificationScopeVendorId = isAdmin ? null : vendorId;
   const { message, tone, showFeedback } = useActionFeedback();
-  const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
+  const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<DashboardNotificationView>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
   const [shouldLoadDeferredDashboard, setShouldLoadDeferredDashboard] = useState(false);
   const [shouldLoadDeferredNotifications, setShouldLoadDeferredNotifications] = useState(false);
@@ -555,7 +557,7 @@ export function DashboardPage() {
     data: notifications,
     isLoading: isNotificationsLoading,
     refetch: refetchNotifications,
-  } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.list(notificationScopeVendorId, {
+  } = useQueryResource(notificationQueryKey, ({ signal }) => runtimeServices.notifications.listDashboard(notificationScopeVendorId, {
     signal,
     headers: dashboardDeferredHeaders,
   }), {
@@ -606,7 +608,8 @@ export function DashboardPage() {
   );
   const notificationView = useMemo(() => {
     const merged = safeArray(notifications?.notifications)
-      .map((notification) => ({
+      .map((notification): DashboardNotificationView => ({
+        readAt: null,
         ...notification,
         ...notificationOverrides[notification.id],
       }))

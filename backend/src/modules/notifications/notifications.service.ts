@@ -13,7 +13,13 @@ import { evaluateOperationalSignals } from '../rules/rules.service.js';
 import type { AuthRole } from '../auth/auth.types.js';
 import { generateAutomationActionsForSignals } from '../automation/automation-actions.service.js';
 import { runEmailDeliveryForIntent, type EmailDeliveryConfig } from './email-delivery.service.js';
-import type { NotificationIntentDto, NotificationsResponseDto } from './notifications.types.js';
+import type {
+  DashboardNotificationIntentDto,
+  DashboardNotificationMetadataDto,
+  DashboardNotificationsResponseDto,
+  NotificationIntentDto,
+  NotificationsResponseDto,
+} from './notifications.types.js';
 import { logDashboardTiming, startDashboardTimer, withDashboardTiming } from '../../lib/dashboard-timing.js';
 
 const VENDOR_SAFE_SOURCE_AREAS = new Set<OperationalSignalSourceArea>([
@@ -47,6 +53,60 @@ function mapNotification(notification: NotificationIntent): NotificationIntentDt
     deliveredAt: notification.deliveredAt?.toISOString() ?? null,
     readAt: notification.readAt?.toISOString() ?? null,
     metadata: notification.metadata,
+    createdAt: notification.createdAt.toISOString(),
+    updatedAt: notification.updatedAt.toISOString(),
+  };
+}
+
+const DASHBOARD_NOTIFICATION_METADATA_KEYS = [
+  'signalSourceArea',
+  'category',
+  'linkedEntityType',
+  'linkedEntityId',
+  'orderId',
+  'returnRequestId',
+  'supportTicketId',
+] as const;
+
+type DashboardNotificationRow = {
+  id: string;
+  signalId: string | null;
+  vendorId: string | null;
+  status: NotificationIntent['status'];
+  title: string;
+  message: string;
+  severity: NotificationIntent['severity'];
+  deliveredAt: Date | null;
+  metadata: unknown;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function pickDashboardNotificationMetadata(metadata: unknown): DashboardNotificationMetadataDto {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    return {};
+  }
+
+  return DASHBOARD_NOTIFICATION_METADATA_KEYS.reduce<DashboardNotificationMetadataDto>((picked, key) => {
+    const value = Reflect.get(metadata, key);
+    if (typeof value === 'string' && value.trim()) {
+      picked[key] = value;
+    }
+    return picked;
+  }, {});
+}
+
+function mapDashboardNotification(notification: DashboardNotificationRow): DashboardNotificationIntentDto {
+  return {
+    id: notification.id,
+    signalId: notification.signalId,
+    vendorId: notification.vendorId,
+    status: notification.status.trim().toLowerCase() as DashboardNotificationIntentDto['status'],
+    title: notification.title,
+    message: notification.message,
+    severity: notification.severity.trim().toLowerCase() as DashboardNotificationIntentDto['severity'],
+    deliveredAt: notification.deliveredAt?.toISOString() ?? null,
+    metadata: pickDashboardNotificationMetadata(notification.metadata),
     createdAt: notification.createdAt.toISOString(),
     updatedAt: notification.updatedAt.toISOString(),
   };
@@ -324,6 +384,44 @@ export async function listNotificationsForUser(input: {
   };
   logDashboardTiming('notifications.metrics_aggregation', aggregationStartedAt);
   return response;
+}
+
+export async function listDashboardNotificationsForUser(input: {
+  role: AuthRole;
+  vendorId?: string | null;
+}): Promise<DashboardNotificationsResponseDto> {
+  const notifications = await withDashboardTiming('notifications.dashboard_notification_fetch', () => prisma.notificationIntent.findMany({
+    where:
+      input.role === 'admin'
+        ? {
+            recipientRole: NotificationRecipientRole.ADMIN,
+          }
+        : {
+            recipientRole: NotificationRecipientRole.VENDOR,
+            vendorId: input.vendorId ?? undefined,
+          },
+    select: {
+      id: true,
+      signalId: true,
+      vendorId: true,
+      status: true,
+      title: true,
+      message: true,
+      severity: true,
+      deliveredAt: true,
+      metadata: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+    orderBy: {
+      createdAt: 'desc',
+    },
+    take: 50,
+  }));
+
+  return {
+    notifications: notifications.map(mapDashboardNotification),
+  };
 }
 
 export async function generateNotificationsForUser(input: {

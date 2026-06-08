@@ -30,7 +30,7 @@ vi.mock('../backend/src/modules/automation/automation-actions.service.js', () =>
   generateAutomationActionsForSignals: generateAutomationActionsForSignalsMock,
 }));
 
-const { generateNotificationsForUser, listNotificationsForUser, updateNotificationLifecycle } = await import(
+const { generateNotificationsForUser, listDashboardNotificationsForUser, listNotificationsForUser, updateNotificationLifecycle } = await import(
   '../backend/src/modules/notifications/notifications.service.js'
 );
 
@@ -141,6 +141,87 @@ describe('notification foundation', () => {
     expect(generateAutomationActionsForSignalsMock).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.findMany).not.toHaveBeenCalled();
     expect(prismaMock.notificationIntent.upsert).not.toHaveBeenCalled();
+  });
+
+  it('returns dashboard notifications with selected fields and dashboard metadata only', async () => {
+    prismaMock.notificationIntent.findMany.mockResolvedValue([
+      buildNotification({
+        id: 'notif-dashboard',
+        metadata: {
+          signalSourceArea: 'SHIPPING_COST',
+          category: 'support',
+          linkedEntityType: 'order',
+          linkedEntityId: 'alloc-1',
+          orderId: '1001',
+          returnRequestId: 'return-1',
+          supportTicketId: 'ticket-1',
+          signalRuleKey: 'shipping_cost.missing_after_fulfillment',
+          suggestedAction: 'Attach confirmed provider cost.',
+          recipients: ['ops@example.test'],
+        },
+      }),
+    ]);
+
+    const response = await listDashboardNotificationsForUser({ role: 'vendor', vendorId: 'sporjinal' });
+
+    expect(prismaMock.notificationIntent.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          recipientRole: 'VENDOR',
+          vendorId: 'sporjinal',
+        },
+        select: {
+          id: true,
+          signalId: true,
+          vendorId: true,
+          status: true,
+          title: true,
+          message: true,
+          severity: true,
+          deliveredAt: true,
+          metadata: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        take: 50,
+      }),
+    );
+    const query = prismaMock.notificationIntent.findMany.mock.calls[0]?.[0];
+    expect(query.select).not.toHaveProperty('recipientRole');
+    expect(query.select).not.toHaveProperty('channel');
+    expect(query.select).not.toHaveProperty('readAt');
+    expect(response).toEqual({
+      notifications: [
+        {
+          id: 'notif-dashboard',
+          signalId: 'signal-test',
+          vendorId: 'sporjinal',
+          status: 'delivered',
+          title: 'Shipping cost is pending',
+          message: 'External-provider shipping cost is missing.',
+          severity: 'warning',
+          deliveredAt: '2026-05-13T10:00:00.000Z',
+          metadata: {
+            signalSourceArea: 'SHIPPING_COST',
+            category: 'support',
+            linkedEntityType: 'order',
+            linkedEntityId: 'alloc-1',
+            orderId: '1001',
+            returnRequestId: 'return-1',
+            supportTicketId: 'ticket-1',
+          },
+          createdAt: '2026-05-13T10:00:00.000Z',
+          updatedAt: '2026-05-13T10:00:00.000Z',
+        },
+      ],
+    });
+    expect(response).not.toHaveProperty('summary');
+    expect(response.notifications[0]).not.toHaveProperty('recipientRole');
+    expect(response.notifications[0]).not.toHaveProperty('channel');
+    expect(response.notifications[0]).not.toHaveProperty('readAt');
+    expect(response.notifications[0].metadata).not.toHaveProperty('signalRuleKey');
+    expect(response.notifications[0].metadata).not.toHaveProperty('suggestedAction');
+    expect(response.notifications[0].metadata).not.toHaveProperty('recipients');
   });
 
   it('creates one duplicate-safe in-app notification for an active vendor-safe signal through explicit generation', async () => {

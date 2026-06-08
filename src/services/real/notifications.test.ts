@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { dismissNotification, markNotificationRead } from './notifications';
+import { dismissNotification, listDashboardNotifications, markNotificationRead } from './notifications';
 
 const notificationResponse = {
   id: 'notif-in_app-admin-sporjinal-long-notification-id-that-stays-out-of-the-url-path',
@@ -50,6 +50,25 @@ describe('real notification service', () => {
         body: JSON.stringify({ notificationId }),
       }),
     );
+  });
+
+  it('loads dashboard notifications through the dashboard projection endpoint', async () => {
+    await listDashboardNotifications('sporjinal', {
+      headers: {
+        'X-Dashboard-Deferred-Load': 'true',
+      },
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/notifications/dashboard'),
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.any(Headers),
+      }),
+    );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get('X-Vendor-Id')).toBe('sporjinal');
+    expect(headers.get('X-Dashboard-Deferred-Load')).toBe('true');
   });
 
   it('dismisses notifications through the body route so cards can be removed immediately', async () => {

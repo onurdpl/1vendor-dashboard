@@ -28,6 +28,7 @@ import * as realVendorIntegration from './real/vendorIntegration';
 import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
+  DashboardNotificationsResponse,
   DashboardOperationalSummary,
   KargonomiReturnPreview,
   LogoIsbasiCommissionInvoicePreviewInput,
@@ -2069,6 +2070,12 @@ export const runtimeServices = {
               high: 0,
               warning: 0,
             },
+            notifications: [],
+          }),
+    listDashboard: (vendorId: string | null = getCurrentVendorId(), options: ReadRequestOptions = {}): Promise<DashboardNotificationsResponse> =>
+      runtimeConfig.apiMode === 'real'
+        ? realNotifications.listDashboardNotifications(vendorId, { signal: options.signal, headers: options.headers })
+        : Promise.resolve({
             notifications: [],
           }),
     markRead: (notificationId: string) =>
