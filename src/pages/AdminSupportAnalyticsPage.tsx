@@ -22,6 +22,23 @@ function formatHours(value: number | null | undefined) {
   return `${value}h`;
 }
 
+function hasMetricValue(value: unknown) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed !== '' && trimmed !== '—' && Number.isFinite(Number(trimmed));
+  }
+
+  return false;
+}
+
+function formatOptionalHours(value: number | null | undefined) {
+  return hasMetricValue(value) ? formatHours(value) : null;
+}
+
 function formatPercent(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return '—';
@@ -97,6 +114,26 @@ export function AdminSupportAnalyticsPage() {
   const categoryInsights = safeArray(analyticsView.categoryInsights);
   const assignmentInsights = safeArray(analyticsView.assignmentInsights);
   const needsAttentionVendors = vendorInsights.filter((vendor) => vendor.needsAttention);
+  const avgResolutionKpi = formatOptionalHours(kpis.avgResolutionHours);
+  const slaAvgResolution = formatOptionalHours(slaInsights.avgResolutionHours);
+  const showVendorAvgResolution = vendorInsights.some((vendor) => hasMetricValue(vendor.avgResolutionHours));
+  const showCategoryAvgResolution = categoryInsights.some((entry) => hasMetricValue(entry.avgResolutionHours));
+  const vendorColumns = [
+    'Vendor',
+    'Tickets',
+    'Unresolved',
+    'Overdue',
+    'Overdue rate',
+    ...(showVendorAvgResolution ? ['Avg resolution'] : []),
+  ];
+  const categoryColumns = [
+    'Category',
+    'Tickets',
+    'Overdue',
+    'Overdue %',
+    ...(showCategoryAvgResolution ? ['Avg resolution'] : []),
+  ];
+  const hasTrendActivity = trends.some((point) => point.created > 0 || point.resolved > 0 || point.overdue > 0);
 
   return (
     <section className="op-page support-ops-page support-analytics-page">
@@ -115,7 +152,9 @@ export function AdminSupportAnalyticsPage() {
         <KPIStatCard label="Open tickets" value={kpis.openTickets} detail="Unresolved support load" tone="info" />
         <KPIStatCard label="Overdue tickets" value={kpis.overdueTickets} detail="SLA currently breached" tone={kpis.overdueTickets ? 'danger' : 'success'} />
         <KPIStatCard label="Avg first response" value={formatHours(kpis.avgFirstResponseHours)} detail="First admin public reply" tone="neutral" />
-        <KPIStatCard label="Avg resolution" value={formatHours(kpis.avgResolutionHours)} detail="Resolved or closed tickets" tone="neutral" />
+        {avgResolutionKpi ? (
+          <KPIStatCard label="Avg resolution" value={avgResolutionKpi} detail="Resolved or closed tickets" tone="neutral" />
+        ) : null}
         <KPIStatCard label="Waiting on vendor" value={kpis.waitingOnVendor} detail="Vendor response needed" tone="warning" />
         <KPIStatCard label="Resolved today" value={kpis.resolvedToday} detail="Closed support work" tone="success" />
       </div>
@@ -138,7 +177,7 @@ export function AdminSupportAnalyticsPage() {
             </div>
           </div>
           <div className="support-trend-list">
-            {trends.map((point) => (
+            {hasTrendActivity ? trends.map((point) => (
               <div key={point.date} className="support-trend-row">
                 <span>{formatDate(point.date)}</span>
                 <div>
@@ -154,7 +193,9 @@ export function AdminSupportAnalyticsPage() {
                   <small>overdue</small>
                 </div>
               </div>
-            ))}
+            )) : (
+              <p className="page-description">No ticket activity in selected period.</p>
+            )}
           </div>
         </article>
 
@@ -181,10 +222,12 @@ export function AdminSupportAnalyticsPage() {
               <span>Avg delay</span>
               <strong>{formatHours(slaInsights.avgResponseDelayHours)}</strong>
             </div>
-            <div>
-              <span>Avg resolution</span>
-              <strong>{formatHours(slaInsights.avgResolutionHours)}</strong>
-            </div>
+            {slaAvgResolution ? (
+              <div>
+                <span>Avg resolution</span>
+                <strong>{slaAvgResolution}</strong>
+              </div>
+            ) : null}
           </div>
           <div className="support-mini-list">
             {breachesByCategory.length ? breachesByCategory.map((entry) => (
@@ -207,23 +250,21 @@ export function AdminSupportAnalyticsPage() {
           </div>
         </div>
         {vendorInsights.length ? (
-          <OperationalTable columns={['Vendor', 'Tickets', 'Unresolved', 'Overdue', 'Overdue rate', 'Avg resolution', 'Signal']}>
+          <OperationalTable
+            columns={vendorColumns}
+            className={`support-analytics-vendor-table ${showVendorAvgResolution ? '' : 'support-analytics-table-without-avg-resolution'}`}
+          >
             {vendorInsights.map((vendor) => (
               <OperationalTableRow key={vendor.vendorId}>
-                <td>
+                <span role="cell">
                   <strong>{vendor.vendorName ?? vendor.vendorId}</strong>
                   <span>{vendor.vendorId}</span>
-                </td>
-                <td>{vendor.ticketCount}</td>
-                <td>{vendor.unresolvedCount}</td>
-                <td>{vendor.overdueCount}</td>
-                <td>{formatPercent(vendor.overduePercent)}</td>
-                <td>{formatHours(vendor.avgResolutionHours)}</td>
-                <td>
-                  <StatusBadge tone={vendor.needsAttention ? 'warning' : 'success'}>
-                    {vendor.needsAttention ? 'Needs attention' : 'Stable'}
-                  </StatusBadge>
-                </td>
+                </span>
+                <span role="cell">{vendor.ticketCount}</span>
+                <span role="cell">{vendor.unresolvedCount}</span>
+                <span role="cell">{vendor.overdueCount}</span>
+                <span role="cell">{formatPercent(vendor.overduePercent)}</span>
+                {showVendorAvgResolution ? <span role="cell">{formatOptionalHours(vendor.avgResolutionHours)}</span> : null}
               </OperationalTableRow>
             ))}
           </OperationalTable>
@@ -240,16 +281,19 @@ export function AdminSupportAnalyticsPage() {
               <h3>Support mix</h3>
             </div>
           </div>
-          <OperationalTable columns={['Category', 'Tickets', 'Overdue', 'Overdue %', 'Avg resolution']}>
+          <OperationalTable
+            columns={categoryColumns}
+            className={`support-analytics-category-table ${showCategoryAvgResolution ? '' : 'support-analytics-table-without-avg-resolution'}`}
+          >
             {categoryInsights.map((entry) => (
               <OperationalTableRow key={entry.category}>
-                <td>{formatSupportLabel(entry.category)}</td>
-                <td>{entry.ticketCount}</td>
-                <td>{entry.overdueCount}</td>
-                <td>
+                <span role="cell">{formatSupportLabel(entry.category)}</span>
+                <span role="cell">{entry.ticketCount}</span>
+                <span role="cell">{entry.overdueCount}</span>
+                <span role="cell">
                   <StatusBadge tone={getCategoryTone(entry)}>{formatPercent(entry.overduePercent)}</StatusBadge>
-                </td>
-                <td>{formatHours(entry.avgResolutionHours)}</td>
+                </span>
+                {showCategoryAvgResolution ? <span role="cell">{formatOptionalHours(entry.avgResolutionHours)}</span> : null}
               </OperationalTableRow>
             ))}
           </OperationalTable>
@@ -263,14 +307,14 @@ export function AdminSupportAnalyticsPage() {
             </div>
           </div>
           {assignmentInsights.length ? (
-            <OperationalTable columns={['Assignee', 'Tickets', 'Overdue', 'Avg response', 'Open unassigned']}>
+            <OperationalTable columns={['Assignee', 'Tickets', 'Overdue', 'Avg response', 'Open unassigned']} className="support-analytics-assignment-table">
               {assignmentInsights.map((entry) => (
                 <OperationalTableRow key={entry.assigneeName}>
-                  <td>{entry.assigneeName}</td>
-                  <td>{entry.ticketCount}</td>
-                  <td>{entry.overdueCount}</td>
-                  <td>{formatHours(entry.avgFirstResponseHours)}</td>
-                  <td>{entry.unassignedOpenTickets || '—'}</td>
+                  <span role="cell">{entry.assigneeName}</span>
+                  <span role="cell">{entry.ticketCount}</span>
+                  <span role="cell">{entry.overdueCount}</span>
+                  <span role="cell">{formatHours(entry.avgFirstResponseHours)}</span>
+                  <span role="cell">{entry.unassignedOpenTickets || '—'}</span>
                 </OperationalTableRow>
               ))}
             </OperationalTable>

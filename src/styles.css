@@ -9882,7 +9882,7 @@ summary.provider-response-heading::-webkit-details-marker {
 
 .support-analytics-kpis {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 12px;
 }
 
@@ -9890,6 +9890,88 @@ summary.provider-response-heading::-webkit-details-marker {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
+}
+
+.support-analytics-vendor-table,
+.support-analytics-category-table,
+.support-analytics-assignment-table {
+  overflow-x: auto;
+}
+
+.support-analytics-vendor-table .op-table-head,
+.support-analytics-vendor-table .op-table-row {
+  min-width: 760px;
+  grid-template-columns:
+    minmax(180px, 1.35fr)
+    minmax(82px, 0.62fr)
+    minmax(96px, 0.72fr)
+    minmax(82px, 0.62fr)
+    minmax(110px, 0.78fr)
+    minmax(128px, 0.86fr);
+}
+
+.support-analytics-vendor-table.support-analytics-table-without-avg-resolution .op-table-head,
+.support-analytics-vendor-table.support-analytics-table-without-avg-resolution .op-table-row {
+  min-width: 640px;
+  grid-template-columns:
+    minmax(180px, 1.4fr)
+    minmax(82px, 0.66fr)
+    minmax(96px, 0.76fr)
+    minmax(82px, 0.66fr)
+    minmax(110px, 0.82fr);
+}
+
+.support-analytics-category-table .op-table-head,
+.support-analytics-category-table .op-table-row {
+  min-width: 620px;
+  grid-template-columns:
+    minmax(160px, 1.3fr)
+    minmax(82px, 0.72fr)
+    minmax(82px, 0.72fr)
+    minmax(94px, 0.76fr)
+    minmax(128px, 0.9fr);
+}
+
+.support-analytics-category-table.support-analytics-table-without-avg-resolution .op-table-head,
+.support-analytics-category-table.support-analytics-table-without-avg-resolution .op-table-row {
+  min-width: 500px;
+  grid-template-columns:
+    minmax(160px, 1.35fr)
+    minmax(82px, 0.76fr)
+    minmax(82px, 0.76fr)
+    minmax(94px, 0.8fr);
+}
+
+.support-analytics-assignment-table .op-table-head,
+.support-analytics-assignment-table .op-table-row {
+  min-width: 650px;
+  grid-template-columns:
+    minmax(170px, 1.25fr)
+    minmax(82px, 0.68fr)
+    minmax(82px, 0.68fr)
+    minmax(110px, 0.82fr)
+    minmax(130px, 0.9fr);
+}
+
+.support-analytics-page .op-table-row {
+  cursor: default;
+}
+
+.support-analytics-page .op-table-row > span {
+  min-width: 0;
+  align-content: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1200px) {
+  .support-analytics-vendor-table .op-table-head,
+  .support-analytics-vendor-table .op-table-row,
+  .support-analytics-category-table .op-table-head,
+  .support-analytics-category-table .op-table-row,
+  .support-analytics-assignment-table .op-table-head,
+  .support-analytics-assignment-table .op-table-row {
+    min-width: 980px;
+  }
 }
 
 .support-trend-list,
