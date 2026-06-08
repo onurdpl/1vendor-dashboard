@@ -1046,7 +1046,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(createBody).toEqual(
       expect.objectContaining({
         invoiceId: 0,
-        invoiceDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+        invoiceDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2} 00:00:00$/),
         currency: 'TL',
         description: 'SPORGYM TEST KOMİSYON FATURASI',
         vatIncluded: false,
@@ -1350,12 +1350,14 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       vatRate: '20',
       currency: 'TL',
       description: 'Pazaryeri komisyon hizmet bedeli',
+      invoiceDate: '2026-06-08',
       sourcePeriod: '2026-06',
     });
 
     expect(preview.payload).toEqual(
       expect.objectContaining({
         invoiceId: 0,
+        invoiceDate: '2026-06-08 00:00:00',
         currency: 'TL',
         exchangeRate: 1,
         vatIncluded: false,
@@ -1382,6 +1384,32 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(preview.warnings).toContain('eGovernmentInvoice enum/required fields unknown; omitted in dry-run.');
     const serialized = JSON.stringify(preview.payload);
     expect(serialized).not.toMatch(/shipmentAgentItem|website|eArchivePaymentType|eArchivePaymentDate/);
+  });
+
+  it('normalizes Logo invoiceDate values with time to yyyy-MM-dd HH:mm:ss', () => {
+    const preview = buildLogoIsbasiCommissionInvoicePreview({
+      vendorBillingProfile,
+      commissionAmount: '100',
+      vatRate: '20',
+      currency: 'TL',
+      description: 'Pazaryeri komisyon hizmet bedeli',
+      invoiceDate: '2026-06-08T13:14:15.000Z',
+    });
+
+    expect(preview.payload.invoiceDate).toBe('2026-06-08 13:14:15');
+  });
+
+  it('formats Date invoiceDate values for Logo integration invoices', () => {
+    const preview = buildLogoIsbasiCommissionInvoicePreview({
+      vendorBillingProfile,
+      commissionAmount: '100',
+      vatRate: '20',
+      currency: 'TL',
+      description: 'Pazaryeri komisyon hizmet bedeli',
+      invoiceDate: new Date(Date.UTC(2026, 5, 8, 13, 14, 15)),
+    });
+
+    expect(preview.payload.invoiceDate).toBe('2026-06-08 13:14:15');
   });
 
   it('maps individual legalEntityType to customer.isPerson true', () => {

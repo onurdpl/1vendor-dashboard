@@ -6,7 +6,7 @@ export type LogoIsbasiCommissionInvoicePreviewInput = {
   vatRate: string;
   currency: string;
   description: string;
-  invoiceDate?: string | null;
+  invoiceDate?: string | Date | null;
   sourceOrderIds?: string[];
   sourcePeriod?: string | null;
 };
@@ -101,6 +101,39 @@ function parseLogoDecimalNumber(value: string, field: string, options: { allowZe
   return parsed;
 }
 
+function formatDateObjectForLogoInvoiceDate(value: Date, useTime: boolean) {
+  if (Number.isNaN(value.getTime())) {
+    throw new Error('invoiceDate must be a valid date.');
+  }
+  const date = value.toISOString();
+  return useTime ? `${date.slice(0, 10)} ${date.slice(11, 19)}` : `${date.slice(0, 10)} 00:00:00`;
+}
+
+function formatLogoInvoiceDate(value: string | Date | null | undefined) {
+  if (value instanceof Date) {
+    return formatDateObjectForLogoInvoiceDate(value, true);
+  }
+
+  if (typeof value !== 'string' || !value.trim()) {
+    return formatDateObjectForLogoInvoiceDate(new Date(), false);
+  }
+
+  const trimmed = value.trim();
+  const dateOnly = trimmed.match(/^(\d{4}-\d{2}-\d{2})$/);
+  if (dateOnly) {
+    return `${dateOnly[1]} 00:00:00`;
+  }
+
+  const dateTime = trimmed.match(
+    /^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?$/,
+  );
+  if (dateTime) {
+    return `${dateTime[1]} ${dateTime[2]}:${dateTime[3]}:${dateTime[4] ?? '00'}`;
+  }
+
+  throw new Error('invoiceDate must use yyyy-MM-dd or yyyy-MM-dd HH:mm:ss format.');
+}
+
 function compactRecord(record: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
@@ -152,6 +185,7 @@ export function buildLogoIsbasiCommissionInvoicePreview(
   const customerNameFields = buildCustomerNameFields(profile, isPerson);
   const commissionAmount = parseLogoDecimalNumber(input.commissionAmount, 'commissionAmount');
   const vatRate = parseLogoDecimalNumber(input.vatRate, 'vatRate', { allowZero: true, max: 100 });
+  const invoiceDate = formatLogoInvoiceDate(input.invoiceDate);
   const customer = compactRecord({
     code: profile.logoIsbasiCustomerCode || undefined,
     ...customerNameFields,
@@ -169,7 +203,7 @@ export function buildLogoIsbasiCommissionInvoicePreview(
   const payload = {
     invoiceId: 0,
     customer,
-    invoiceDate: input.invoiceDate?.trim() || new Date().toISOString().slice(0, 10),
+    invoiceDate,
     currency: input.currency.trim(),
     exchangeRate: 1,
     description,
