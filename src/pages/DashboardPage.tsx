@@ -22,7 +22,7 @@ import { useQueryResource } from '../hooks/useQueryResource';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { queryKeys } from '../lib/api/queryKeys';
 import { runtimeServices } from '../services/runtime-services';
-import type { NotificationIntent } from '../lib/api/contracts';
+import type { DashboardObservabilitySummary, NotificationIntent } from '../lib/api/contracts';
 import { formatDateTime, safeArray } from '../services/real/formatting';
 import { getDashboardWorkflowAction, getDashboardWorkflowRoute, workflowRoutes } from '../lib/workflowActionGuidance';
 import { projectOperationalEvent } from '../lib/operationalEventProjection';
@@ -71,6 +71,19 @@ function getHealthTone(health: string): 'success' | 'warning' | 'danger' | 'atte
 
 function formatRate(value: number) {
   return `${Math.round(value * 100)}%`;
+}
+
+function mapDashboardObservabilitySummary(observability: Awaited<ReturnType<typeof runtimeServices.observability.summary>>): DashboardObservabilitySummary {
+  return {
+    health: observability.health,
+    retryPressureScore: observability.retryPressure.pressureScore,
+    deadLetterReady: observability.retryPressure.deadLetterReady + observability.retryPressure.permanentlyFailed,
+    failedWebhooks24h: observability.webhookHealth.failed24h,
+    successRate24h: observability.webhookHealth.successRate24h,
+    reconciliationBacklog: observability.reconciliation.pending + observability.reconciliation.processing,
+    staleStateCount: observability.staleStates.total,
+    note: observability.notes[0] ?? 'No active observability note.',
+  };
 }
 
 function getNotificationTone(severity: string): 'success' | 'warning' | 'danger' | 'attention' | 'info' {
@@ -521,6 +534,23 @@ export function DashboardPage() {
     { enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard) },
   );
   const dashboard = deferredDashboard?.vendorId === vendorId ? deferredDashboard : initialDashboard;
+  const shouldLoadObservabilitySummary =
+    appReadiness.ready &&
+    isAdmin &&
+    shouldLoadDeferredDashboard &&
+    Boolean(initialDashboard) &&
+    (Boolean(deferredDashboard) || isDeferredDashboardError);
+  const {
+    data: observability,
+    isLoading: isObservabilityLoading,
+  } = useQueryResource(
+    queryKeys.admin.observability.summary(),
+    ({ signal }) => runtimeServices.observability.summary({
+      signal,
+      headers: dashboardDeferredHeaders,
+    }),
+    { enabled: shouldLoadObservabilitySummary },
+  );
   const {
     data: notifications,
     isLoading: isNotificationsLoading,
@@ -659,7 +689,13 @@ export function DashboardPage() {
     }
   }
 
-  const dashboardView = dashboard ?? {
+  const observabilitySummary = observability ? mapDashboardObservabilitySummary(observability) : dashboard?.observabilitySummary;
+  const dashboardView = dashboard
+    ? {
+        ...dashboard,
+        ...(observabilitySummary ? { observabilitySummary } : {}),
+      }
+    : {
     vendorId,
     vendorName: currentVendor.vendorName,
     title: 'Operations dashboard',
@@ -693,6 +729,8 @@ export function DashboardPage() {
   const isDashboardInitialLoading = !appReadiness.ready || (isLoading && !initialDashboard);
   const isDashboardShellOnly = dashboard?.loadPhase === 'initial' && !deferredDashboard && !isDeferredDashboardError;
   const isDashboardDataLoading = isDashboardInitialLoading || isDashboardShellOnly;
+  const isOperationalHealthLoading =
+    isDashboardDataLoading || (shouldLoadObservabilitySummary && isObservabilityLoading && !dashboardView.observabilitySummary);
   const fulfillmentProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('awaiting shipment'));
   const returnsProjection = actionProjections.find((item) => normalizeGroupKey(item.sourceLabel).includes('refund attention'));
   const automationProjection = actionProjections.find((item) => item.id === 'automation-issue-groups');
@@ -1156,7 +1194,7 @@ export function DashboardPage() {
 
           {currentUser?.role === 'admin' ? (
             <OperationalSection title="Operational health" description="Uptime and operational metrics.">
-              {isDashboardDataLoading ? (
+              {isOperationalHealthLoading ? (
                 <div className="dashboard-status-metric-list dashboard-health-list">
                   {['Health', 'Success rate 24h', 'Failed webhooks 24h', 'Retry pressure', 'Dead-letter', 'Reconciliation backlog', 'Stale signals'].map((label) => (
                     <div key={label} className="dashboard-status-metric-row">

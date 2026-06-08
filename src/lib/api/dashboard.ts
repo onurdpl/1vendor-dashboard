@@ -11,7 +11,6 @@ import type {
   DashboardNormalizedOperationalCounts,
   DashboardOperationalSummary,
   DashboardOverview,
-  DashboardObservabilitySummary,
   DashboardPriorityItem,
   FinanceTransaction,
   OperationalSignal,
@@ -543,9 +542,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
               'deferred',
             )
           : Promise.resolve(null),
-        currentUser?.role === 'admin'
-          ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
-          : Promise.resolve(null),
       ] as const));
     const [phase1Results, phase2Results, phase3Results] = await Promise.all([
       phase1Requests,
@@ -566,7 +562,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
       signalsResult,
       supportResult,
       diagnosticsResult,
-      observabilityResult,
     ] = dashboardRequests;
 
     const dashboardSummary: DashboardOperationalSummary | null = summaryResult.status === 'fulfilled' ? summaryResult.value : null;
@@ -612,11 +607,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
   const diagnostics = diagnosticsResult.status === 'fulfilled' ? diagnosticsResult.value : null;
   if (diagnosticsResult.status === 'rejected') {
     partialDataWarnings.push('Diagnostics summary is temporarily unavailable.');
-  }
-
-  const observability = observabilityResult.status === 'fulfilled' ? observabilityResult.value : null;
-  if (observabilityResult.status === 'rejected') {
-    partialDataWarnings.push('Operational observability is temporarily unavailable.');
   }
 
   const aggregationStartedAt = getDashboardNow();
@@ -695,19 +685,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
         payoutEstimate: finance.summary.payoutEstimate,
       }
     : undefined;
-  const observabilitySummary: DashboardObservabilitySummary | undefined =
-    currentUser?.role === 'admin' && observability
-      ? {
-          health: observability.health,
-          retryPressureScore: observability.retryPressure.pressureScore,
-          deadLetterReady: observability.retryPressure.deadLetterReady + observability.retryPressure.permanentlyFailed,
-          failedWebhooks24h: observability.webhookHealth.failed24h,
-          successRate24h: observability.webhookHealth.successRate24h,
-          reconciliationBacklog: observability.reconciliation.pending + observability.reconciliation.processing,
-          staleStateCount: observability.staleStates.total,
-          note: observability.notes[0] ?? 'No active observability note.',
-        }
-      : undefined;
   logDashboardClientTiming({
     requestId,
     step: 'dashboard.metrics_aggregation',
@@ -734,7 +711,6 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     normalizedOperationalCounts,
     financeSnapshot,
     diagnosticsSummary,
-    observabilitySummary,
     partialDataWarnings,
   };
   } catch (error) {

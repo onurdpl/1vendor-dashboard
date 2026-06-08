@@ -10,6 +10,7 @@ import { setCurrentUser, setCurrentVendorId, setToken } from '../lib/auth';
 const getDashboardOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
 const getDashboardDeferredOverviewMock = vi.fn<(vendorId?: string) => Promise<DashboardOverview>>();
 const listNotificationsMock = vi.fn<(vendorId?: string | null, options?: { headers?: HeadersInit }) => Promise<NotificationsResponse>>();
+const getObservabilitySummaryMock = vi.fn();
 const markNotificationReadMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 const dismissNotificationMock = vi.fn<(notificationId: string) => Promise<NotificationIntent>>();
 
@@ -28,6 +29,9 @@ vi.mock('../services/runtime-services', () => ({
       list: (vendorId?: string, options?: { headers?: HeadersInit }) => listNotificationsMock(vendorId, options),
       markRead: (notificationId: string) => markNotificationReadMock(notificationId),
       dismiss: (notificationId: string) => dismissNotificationMock(notificationId),
+    },
+    observability: {
+      summary: () => getObservabilitySummaryMock(),
     },
   },
 }));
@@ -174,6 +178,7 @@ describe('DashboardPage command center', () => {
     getDashboardDeferredOverviewMock.mockReset();
     getDashboardDeferredOverviewMock.mockReturnValue(pendingDeferredDashboard);
     listNotificationsMock.mockReset();
+    getObservabilitySummaryMock.mockReset();
     markNotificationReadMock.mockReset();
     dismissNotificationMock.mockReset();
     listNotificationsMock.mockResolvedValue({
@@ -185,6 +190,42 @@ describe('DashboardPage command center', () => {
         warning: 1,
       },
       notifications: [notification],
+    });
+    getObservabilitySummaryMock.mockResolvedValue({
+      health: 'warning',
+      generatedAt: '2026-05-13T10:00:00.000Z',
+      windows: [],
+      retryPressure: {
+        retryScheduled: 0,
+        retrying: 1,
+        deadLetterReady: 1,
+        permanentlyFailed: 0,
+        pressureScore: 5,
+      },
+      reconciliation: {
+        pending: 1,
+        processing: 1,
+        completed24h: 0,
+        failed24h: 0,
+        scheduled: 0,
+        staleStateCount: 4,
+      },
+      webhookHealth: {
+        received: 0,
+        processing: 0,
+        processed24h: 10,
+        failed24h: 1,
+        successRate24h: 0.91,
+      },
+      staleStates: {
+        stuckReceived: 0,
+        fulfillmentSyncFailures: 0,
+        missingPayload: 0,
+        staleAllocations: 0,
+        scheduledReconciliationJobs: 0,
+        total: 4,
+      },
+      notes: ['1 operational job is dead-letter ready.'],
     });
     markNotificationReadMock.mockResolvedValue({
       ...notification,

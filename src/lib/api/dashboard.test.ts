@@ -281,6 +281,8 @@ describe('dashboard real-mode loading', () => {
     expect(services.support.listAdmin).toHaveBeenCalledWith(expect.any(Object));
     expect(services.operations.dashboard).not.toHaveBeenCalled();
     expect(services.operations.summary).toHaveBeenCalledWith(expect.any(Object));
+    expect(services.diagnostics.reconciliation).toHaveBeenCalledWith(expect.any(Object));
+    expect(services.observability.summary).not.toHaveBeenCalled();
     const operationsOptions = services.operations.summary.mock.calls[0]?.[0] as { headers?: Record<string, string>; limit?: number } | undefined;
     expect(operationsOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
     expect(operationsOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
