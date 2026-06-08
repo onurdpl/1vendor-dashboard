@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getVendorBillingProfileMock = vi.hoisted(() => vi.fn());
+const bindLogoIsbasiFirmToVendorMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/auth/auth.service.js', () => ({
   createAuthService: vi.fn(() => ({})),
@@ -18,6 +19,7 @@ vi.mock('../backend/src/modules/vendors/vendor-billing-profile.service.js', asyn
   );
   return {
     ...actual,
+    bindLogoIsbasiFirmToVendor: bindLogoIsbasiFirmToVendorMock,
     getVendorBillingProfile: getVendorBillingProfileMock,
   };
 });
@@ -106,6 +108,13 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     vi.clearAllMocks();
     process.env.ADMIN_PROBES_ENABLED = 'true';
     getVendorBillingProfileMock.mockResolvedValue(vendorBillingProfile);
+    bindLogoIsbasiFirmToVendorMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-08T10:00:00.000Z',
+    });
   });
 
   it('sends the documented integration login request shape', async () => {
@@ -385,6 +394,215 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
     expect(JSON.stringify(result)).not.toContain('1111111111');
     expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
+  });
+
+  it('binds an exact matched Logo firm to the vendor billing profile', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-1',
+              code: 'CUST001',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              firmType: 'customer',
+              tcknVkn: '6490512763',
+              eInvoiceResponsible: true,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: null,
+      logoIsbasiCustomerId: null,
+    });
+    bindLogoIsbasiFirmToVendorMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-08T10:00:00.000Z',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/bind-matched-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith('sporjinal', {
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: expect.any(Date),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        writesPerformed: true,
+        vendorId: 'sporjinal',
+        matchStatus: 'exact_match',
+        matchMethod: 'taxNumberOrTckn',
+        logoIsbasiCustomerCode: 'CUST001',
+        logoIsbasiCustomerId: 'firm-1',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: '2026-06-08T10:00:00.000Z',
+        previousBinding: {
+          logoIsbasiCustomerCode: null,
+          logoIsbasiCustomerId: null,
+        },
+        newBinding: {
+          logoIsbasiCustomerCode: 'CUST001',
+          logoIsbasiCustomerId: 'firm-1',
+        },
+        matchedFirm: {
+          name: 'Sporjinal Spor Malzemeleri A.S.',
+          code: 'CUST001',
+          taxNumberMasked: '64******63',
+        },
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('6490512763');
+    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
+  });
+
+  it('allows rebinding and replaces the old Logo firm identity', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-5',
+              code: 'CUST005',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              firmType: 'customer',
+              tcknVkn: '6490512763',
+              eInvoiceResponsible: false,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+    });
+    bindLogoIsbasiFirmToVendorMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST005',
+      logoIsbasiCustomerId: 'firm-5',
+      logoIsbasiEinvoiceEligible: false,
+      logoIsbasiLastCheckedAt: '2026-06-08T11:00:00.000Z',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/bind-matched-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(bindLogoIsbasiFirmToVendorMock).toHaveBeenCalledWith('sporjinal', {
+      logoIsbasiCustomerCode: 'CUST005',
+      logoIsbasiCustomerId: 'firm-5',
+      logoIsbasiEinvoiceEligible: false,
+      logoIsbasiLastCheckedAt: expect.any(Date),
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        matchStatus: 'exact_match',
+        matchMethod: 'taxNumberOrTckn',
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+        previousBinding: {
+          logoIsbasiCustomerCode: 'CUST001',
+          logoIsbasiCustomerId: 'firm-1',
+        },
+        newBinding: {
+          logoIsbasiCustomerCode: 'CUST005',
+          logoIsbasiCustomerId: 'firm-5',
+        },
+      }),
+    );
+  });
+
+  it('does not bind when Logo firm matching is not exact', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-possible',
+              code: 'CUST-POSSIBLE',
+              name: 'Sporjinal',
+              firmType: 'customer',
+              tcknVkn: '1111111111',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: null,
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/bind-matched-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(422);
+    expect(bindLogoIsbasiFirmToVendorMock).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        success: false,
+        writesPerformed: false,
+        errorCode: 'LOGO_ISBASI_NO_EXACT_MATCH',
+        matchStatus: 'possible_matches',
+        possibleMatches: [
+          expect.objectContaining({
+            code: 'CUST-POSSIBLE',
+            taxNumberMasked: '11******11',
+          }),
+        ],
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('1111111111');
   });
 
   it('returns a controlled missing env response from the login probe', async () => {

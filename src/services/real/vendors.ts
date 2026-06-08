@@ -2,6 +2,7 @@ import { apiClient } from '../../lib/api-client';
 import type {
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiLoginProbeResult,
@@ -44,6 +45,14 @@ export function discoverLogoIsbasiFirms() {
 export function matchVendorLogoIsbasiFirm(vendorId: string) {
   return apiClient.post<LogoIsbasiFirmMatchResult>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/logo-isbasi/match-firm`,
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function bindVendorLogoIsbasiFirm(vendorId: string) {
+  return apiClient.post<LogoIsbasiFirmBindResult>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/logo-isbasi/bind-matched-firm`,
     undefined,
     { skipVendorContext: true },
   );

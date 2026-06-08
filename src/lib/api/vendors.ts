@@ -21,6 +21,10 @@ export function matchVendorLogoIsbasiFirm(vendorId: string) {
   return runtimeServices.vendors.matchVendorLogoIsbasiFirm(vendorId);
 }
 
+export function bindVendorLogoIsbasiFirm(vendorId: string) {
+  return runtimeServices.vendors.bindVendorLogoIsbasiFirm(vendorId);
+}
+
 export function previewLogoIsbasiCommissionInvoice(
   vendorId: string,
   input: LogoIsbasiCommissionInvoicePreviewInput,

@@ -2,7 +2,11 @@ import type { FastifyInstance } from 'fastify';
 import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
-import { getVendorBillingProfile, type VendorBillingProfileDto } from '../vendors/vendor-billing-profile.service.js';
+import {
+  bindLogoIsbasiFirmToVendor,
+  getVendorBillingProfile,
+  type VendorBillingProfileDto,
+} from '../vendors/vendor-billing-profile.service.js';
 import {
   extractSessionFromLoginResponse,
   LogoIsbasiClient,
@@ -201,6 +205,8 @@ type SanitizedLogoFirm = {
   eInvoiceResponsible: boolean | null;
   eArchiveResponsible: boolean | null;
 };
+
+type LogoFirmMatchResult = ReturnType<typeof matchLogoFirmForVendor>;
 
 type SanitizedLogoFirmDetail = SanitizedLogoFirm & {
   taxOffice: string | null;
@@ -439,6 +445,29 @@ function matchLogoFirmForVendor(profile: VendorBillingProfileDto | null, firms: 
     exactMatch: null,
     possibleMatches,
     warnings: [],
+  };
+}
+
+function buildLogoFirmMatchResponse(vendorId: string, profile: VendorBillingProfileDto | null, firms: unknown[]) {
+  const match = matchLogoFirmForVendor(profile, firms);
+  return {
+    vendorId,
+    billingProfilePresent: Boolean(profile),
+    searchedBy: {
+      logoIsbasiCustomerCodePresent: Boolean(profile?.logoIsbasiCustomerCode?.trim()),
+      taxNumberOrTcknPresent: Boolean(profile?.taxNumber?.trim()),
+      legalCompanyNamePresent: Boolean(profile?.legalCompanyName?.trim()),
+    },
+    count: firms.length,
+    ...match,
+  };
+}
+
+function sanitizeBoundFirm(match: LogoFirmMatchResult['exactMatch']) {
+  return {
+    name: match?.name ?? null,
+    code: match?.code ?? null,
+    taxNumberMasked: match?.taxNumberMasked ?? null,
   };
 }
 
@@ -741,7 +770,6 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         }
 
         const firms = readLogoFirmsArray(result.body);
-        const match = matchLogoFirmForVendor(profile, firms);
         return {
           ok: true,
           success: true,
@@ -749,15 +777,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           mode: 'firm_match_probe',
           writesPerformed: false,
           externalApiCallAttempted: true,
-          vendorId,
-          billingProfilePresent: Boolean(profile),
-          searchedBy: {
-            logoIsbasiCustomerCodePresent: Boolean(profile?.logoIsbasiCustomerCode?.trim()),
-            taxNumberOrTcknPresent: Boolean(profile?.taxNumber?.trim()),
-            legalCompanyNamePresent: Boolean(profile?.legalCompanyName?.trim()),
-          },
-          count: firms.length,
-          ...match,
+          ...buildLogoFirmMatchResponse(vendorId, profile, firms),
         };
       } catch (error) {
         return reply.code(502).send({
@@ -769,6 +789,118 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           externalApiCallAttempted: true,
           errorCode: 'LOGO_ISBASI_MATCH_PROBE_FAILED',
           message: error instanceof Error ? error.message : 'Logo İşbaşı firm match probe failed.',
+        });
+      }
+    },
+  );
+
+  app.post<{ Params: { vendorId: string } }>(
+    '/admin/vendors/:vendorId/logo-isbasi/bind-matched-firm',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Admin access required.' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'firm_bind_probe');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      const { vendorId } = request.params;
+
+      try {
+        const profile = await getVendorBillingProfile(vendorId);
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'firm_bind_probe');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.listFirms(login.session);
+        if (!result.ok || result.jsonParseFailed) {
+          return reply.code(502).send(buildLogoUpstreamError('firm_bind_probe', result));
+        }
+
+        const firms = readLogoFirmsArray(result.body);
+        const matchResponse = buildLogoFirmMatchResponse(vendorId, profile, firms);
+        if (matchResponse.matchStatus !== 'exact_match' || !matchResponse.exactMatch) {
+          return reply.code(422).send({
+            ok: false,
+            success: false,
+            provider: 'LOGO_ISBASI',
+            mode: 'firm_bind_probe',
+            writesPerformed: false,
+            externalApiCallAttempted: true,
+            errorCode: 'LOGO_ISBASI_NO_EXACT_MATCH',
+            message: 'Logo İşbaşı firm binding requires an exact match.',
+            ...matchResponse,
+          });
+        }
+
+        if (!matchResponse.exactMatch.code || !matchResponse.exactMatch.id) {
+          return reply.code(422).send({
+            ok: false,
+            success: false,
+            provider: 'LOGO_ISBASI',
+            mode: 'firm_bind_probe',
+            writesPerformed: false,
+            externalApiCallAttempted: true,
+            errorCode: 'LOGO_ISBASI_MATCH_BINDING_FIELDS_MISSING',
+            message: 'Exact Logo İşbaşı match is missing customer code or id.',
+            ...matchResponse,
+          });
+        }
+
+        const previousBinding = {
+          logoIsbasiCustomerCode: profile?.logoIsbasiCustomerCode ?? null,
+          logoIsbasiCustomerId: profile?.logoIsbasiCustomerId ?? null,
+        };
+        const boundAt = new Date();
+        const saved = await bindLogoIsbasiFirmToVendor(vendorId, {
+          logoIsbasiCustomerCode: matchResponse.exactMatch.code,
+          logoIsbasiCustomerId: matchResponse.exactMatch.id,
+          logoIsbasiEinvoiceEligible: matchResponse.exactMatch.eInvoiceResponsible,
+          logoIsbasiLastCheckedAt: boundAt,
+        });
+
+        return {
+          ok: true,
+          success: true,
+          provider: 'LOGO_ISBASI',
+          mode: 'firm_bind_probe',
+          writesPerformed: true,
+          externalApiCallAttempted: true,
+          vendorId,
+          matchStatus: matchResponse.matchStatus,
+          matchMethod: matchResponse.matchMethod,
+          logoIsbasiCustomerCode: saved.logoIsbasiCustomerCode,
+          logoIsbasiCustomerId: saved.logoIsbasiCustomerId,
+          logoIsbasiEinvoiceEligible: saved.logoIsbasiEinvoiceEligible,
+          logoIsbasiLastCheckedAt: saved.logoIsbasiLastCheckedAt,
+          previousBinding,
+          newBinding: {
+            logoIsbasiCustomerCode: saved.logoIsbasiCustomerCode,
+            logoIsbasiCustomerId: saved.logoIsbasiCustomerId,
+          },
+          matchedFirm: sanitizeBoundFirm(matchResponse.exactMatch),
+        };
+      } catch (error) {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'firm_bind_probe',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_BIND_PROBE_FAILED',
+          message: error instanceof Error ? error.message : 'Logo İşbaşı firm bind probe failed.',
         });
       }
     },

@@ -41,6 +41,13 @@ export type VendorBillingProfileInputDto = {
   logoIsbasiLastCheckedAt?: unknown;
 };
 
+export type VendorLogoIsbasiBindingInput = {
+  logoIsbasiCustomerCode: string;
+  logoIsbasiCustomerId: string;
+  logoIsbasiEinvoiceEligible: boolean | null;
+  logoIsbasiLastCheckedAt: Date;
+};
+
 const REQUIRED_FIELDS = ['legalCompanyName', 'taxNumber', 'taxOffice', 'billingAddress'] as const;
 const OPTIONAL_FIELDS = [
   'billingCity',
@@ -152,6 +159,26 @@ export async function upsertVendorBillingProfile(
     create: {
       vendorId,
       ...data,
+    },
+  });
+
+  return mapBillingProfile(profile);
+}
+
+export async function bindLogoIsbasiFirmToVendor(
+  vendorId: string,
+  input: VendorLogoIsbasiBindingInput,
+): Promise<VendorBillingProfileDto> {
+  await assertVendorExists(vendorId);
+  const profile = await prisma.vendorBillingProfile.update({
+    where: {
+      vendorId,
+    },
+    data: {
+      logoIsbasiCustomerCode: input.logoIsbasiCustomerCode,
+      logoIsbasiCustomerId: input.logoIsbasiCustomerId,
+      logoIsbasiEinvoiceEligible: input.logoIsbasiEinvoiceEligible,
+      logoIsbasiLastCheckedAt: input.logoIsbasiLastCheckedAt,
     },
   });
 

@@ -409,6 +409,37 @@ export const runtimeServices = {
             possibleMatches: [],
             warnings: [],
           }),
+    bindVendorLogoIsbasiFirm: (vendorId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.bindVendorLogoIsbasiFirm(vendorId)
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'firm_bind_probe' as const,
+            writesPerformed: true,
+            externalApiCallAttempted: false,
+            vendorId,
+            matchStatus: 'exact_match' as const,
+            matchMethod: 'logoIsbasiCustomerCode' as const,
+            logoIsbasiCustomerCode: 'LOGO-MOCK-1',
+            logoIsbasiCustomerId: 'mock-logo-firm-1',
+            logoIsbasiEinvoiceEligible: true,
+            logoIsbasiLastCheckedAt: new Date().toISOString(),
+            previousBinding: {
+              logoIsbasiCustomerCode: null,
+              logoIsbasiCustomerId: null,
+            },
+            newBinding: {
+              logoIsbasiCustomerCode: 'LOGO-MOCK-1',
+              logoIsbasiCustomerId: 'mock-logo-firm-1',
+            },
+            matchedFirm: {
+              name: 'Mock Vendor Legal Name',
+              code: 'LOGO-MOCK-1',
+              taxNumberMasked: '11******11',
+            },
+          }),
     previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.previewLogoIsbasiCommissionInvoice(vendorId, input)

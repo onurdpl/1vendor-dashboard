@@ -8,6 +8,7 @@ import { ApiError } from '../lib/api/errors';
 import type {
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
+  LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiLoginProbeResult,
@@ -27,6 +28,7 @@ const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBil
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
 const matchVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmMatchResult>>();
+const bindVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmBindResult>>();
 const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
   (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) => Promise<LogoIsbasiCommissionInvoicePreviewResult>
 >();
@@ -61,6 +63,7 @@ vi.mock('../features/vendors/api', async () => {
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
     discoverLogoIsbasiFirms: () => discoverLogoIsbasiFirmsMock(),
     matchVendorLogoIsbasiFirm: (vendorId: string) => matchVendorLogoIsbasiFirmMock(vendorId),
+    bindVendorLogoIsbasiFirm: (vendorId: string) => bindVendorLogoIsbasiFirmMock(vendorId),
     previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
       previewLogoIsbasiCommissionInvoiceMock(vendorId, input),
   };
@@ -309,6 +312,35 @@ describe('VendorProfilePage', () => {
       possibleMatches: [],
       warnings: [],
     });
+    bindVendorLogoIsbasiFirmMock.mockReset();
+    bindVendorLogoIsbasiFirmMock.mockResolvedValue({
+      ok: true,
+      success: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'firm_bind_probe',
+      writesPerformed: true,
+      externalApiCallAttempted: true,
+      vendorId: 'demo-vendor-a',
+      matchStatus: 'exact_match',
+      matchMethod: 'logoIsbasiCustomerCode',
+      logoIsbasiCustomerCode: 'CUST005',
+      logoIsbasiCustomerId: 'firm-5',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-08T10:00:00.000Z',
+      previousBinding: {
+        logoIsbasiCustomerCode: 'CUST001',
+        logoIsbasiCustomerId: 'firm-1',
+      },
+      newBinding: {
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+      },
+      matchedFirm: {
+        name: 'ABC Teknoloji Ltd. Sti.',
+        code: 'CUST005',
+        taxNumberMasked: '22******22',
+      },
+    });
     previewLogoIsbasiCommissionInvoiceMock.mockReset();
     previewLogoIsbasiCommissionInvoiceMock.mockResolvedValue({
       ok: true,
@@ -541,8 +573,8 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('Billing Street 1, Istanbul')).toBeInTheDocument();
     expect(screen.getByText('Istanbul')).toBeInTheDocument();
     expect(screen.getByText('limited_company')).toBeInTheDocument();
-    expect(screen.getByText('LOGO-CODE-1')).toBeInTheDocument();
-    expect(screen.getByText('LOGO-ID-1')).toBeInTheDocument();
+    expect(screen.getAllByText('LOGO-CODE-1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('LOGO-ID-1').length).toBeGreaterThan(0);
     expect(screen.getByText('billing@example.test')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Yes')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Commission invoice billing source')).toBeInTheDocument();
@@ -630,6 +662,10 @@ describe('VendorProfilePage', () => {
       expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument(),
     );
     await userEvent.click(within(billingSection!).getByRole('button', { name: 'Edit billing profile' }));
+    expect(within(billingSection!).getByLabelText('Logo İşbaşı customer code')).toBeInTheDocument();
+    expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer id')).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByLabelText('Logo İşbaşı e-invoice eligible')).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByLabelText('Logo İşbaşı last checked')).not.toBeInTheDocument();
     await userEvent.clear(within(billingSection!).getByLabelText('Legal company name'));
     await userEvent.type(within(billingSection!).getByLabelText('Legal company name'), 'Updated Vendor Legal A.S.');
     await userEvent.clear(within(billingSection!).getByLabelText('Tax number / TCKN'));
@@ -670,9 +706,77 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText('Izmir')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Konak')).toBeInTheDocument();
     expect(within(billingSection!).getByText('updated-billing@example.test')).toBeInTheDocument();
-    expect(within(billingSection!).getByText('CUST001')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('CUST001').length).toBeGreaterThan(0);
     expect(within(billingSection!).queryByRole('heading', { name: 'Billing / Legal Profile edit' })).not.toBeInTheDocument();
   }, 10000);
+
+  it('shows current Logo binding and allows a rebind through diagnostics', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...billingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+      logoIsbasiLastCheckedAt: '2026-06-07T10:00:00Z',
+    });
+    bindVendorLogoIsbasiFirmMock.mockResolvedValue({
+      ok: true,
+      success: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'firm_bind_probe',
+      writesPerformed: true,
+      externalApiCallAttempted: true,
+      vendorId: 'demo-vendor-a',
+      matchStatus: 'exact_match',
+      matchMethod: 'logoIsbasiCustomerCode',
+      logoIsbasiCustomerCode: 'CUST005',
+      logoIsbasiCustomerId: 'firm-5',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-08T10:00:00.000Z',
+      previousBinding: {
+        logoIsbasiCustomerCode: 'CUST001',
+        logoIsbasiCustomerId: 'firm-1',
+      },
+      newBinding: {
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+      },
+      matchedFirm: {
+        name: 'ABC Teknoloji Ltd. Sti.',
+        code: 'CUST005',
+        taxNumberMasked: '22******22',
+      },
+    });
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    expect(await within(billingSection!).findByText('Current Logo Binding')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('CUST001').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getAllByText('firm-1').length).toBeGreaterThan(0);
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Rebind Logo Firm' }));
+
+    await waitFor(() => expect(bindVendorLogoIsbasiFirmMock).toHaveBeenCalledWith('demo-vendor-a'));
+    expect(await within(billingSection!).findByText('Logo firm bind result')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('logoIsbasiCustomerCode')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('Previous binding')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('CUST001').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getByText('New binding')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('CUST005').length).toBeGreaterThan(0);
+    expect(within(billingSection!).getByText('ABC Teknoloji Ltd. Sti.')).toBeInTheDocument();
+    expect(within(billingSection!).getByText(/tax 22\*\*\*\*\*\*22/)).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('firm-5').length).toBeGreaterThan(0);
+  });
 
   it('runs the Logo İşbaşı login probe and displays sanitized fields only', async () => {
     setCurrentUser({

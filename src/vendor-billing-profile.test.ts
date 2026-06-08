@@ -7,6 +7,7 @@ const prismaMock = vi.hoisted(() => ({
   vendorBillingProfile: {
     findUnique: vi.fn(),
     upsert: vi.fn(),
+    update: vi.fn(),
   },
 }));
 
@@ -25,6 +26,7 @@ vi.mock('../backend/src/modules/auth/auth.middleware.js', () => ({
 }));
 
 const {
+  bindLogoIsbasiFirmToVendor,
   getVendorBillingProfile,
   upsertVendorBillingProfile,
   __vendorBillingProfileTesting,
@@ -111,6 +113,7 @@ describe('vendor billing profile service', () => {
     prismaMock.vendor.findUnique.mockResolvedValue({ id: 'sporjinal' });
     prismaMock.vendorBillingProfile.findUnique.mockResolvedValue(null);
     prismaMock.vendorBillingProfile.upsert.mockResolvedValue(billingProfileRecord());
+    prismaMock.vendorBillingProfile.update.mockResolvedValue(billingProfileRecord());
   });
 
   it('returns null when a vendor has no billing profile yet', async () => {
@@ -285,6 +288,42 @@ describe('vendor billing profile service', () => {
     expect(result).not.toHaveProperty('logoIsbasiCustomerId');
     expect(result).not.toHaveProperty('logoIsbasiEinvoiceEligible');
     expect(result).not.toHaveProperty('logoIsbasiLastCheckedAt');
+  });
+
+  it('binds and rebinds Logo İşbaşı firm identity through the dedicated binding path', async () => {
+    prismaMock.vendorBillingProfile.update.mockResolvedValue(
+      billingProfileRecord({
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: now,
+      }),
+    );
+
+    const result = await bindLogoIsbasiFirmToVendor('sporjinal', {
+      logoIsbasiCustomerCode: 'CUST005',
+      logoIsbasiCustomerId: 'firm-5',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: now,
+    });
+
+    expect(prismaMock.vendorBillingProfile.update).toHaveBeenCalledWith({
+      where: { vendorId: 'sporjinal' },
+      data: {
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: now,
+      },
+    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        logoIsbasiCustomerCode: 'CUST005',
+        logoIsbasiCustomerId: 'firm-5',
+        logoIsbasiEinvoiceEligible: true,
+        logoIsbasiLastCheckedAt: '2026-06-05T10:00:00.000Z',
+      }),
+    );
   });
 
   it('fails closed when the vendor does not exist', async () => {

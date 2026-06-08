@@ -1453,6 +1453,41 @@ export type LogoIsbasiFirmMatchResult = {
   missingEnv?: string[];
 };
 
+export type LogoIsbasiFirmBindResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'firm_bind_probe';
+  writesPerformed: boolean;
+  externalApiCallAttempted: boolean;
+  vendorId?: string;
+  matchStatus?: 'exact_match' | 'possible_matches' | 'none';
+  matchMethod?: 'logoIsbasiCustomerCode' | 'taxNumberOrTckn' | 'legalCompanyName' | null;
+  logoIsbasiCustomerCode?: string | null;
+  logoIsbasiCustomerId?: string | null;
+  logoIsbasiEinvoiceEligible?: boolean | null;
+  logoIsbasiLastCheckedAt?: string | null;
+  previousBinding?: {
+    logoIsbasiCustomerCode: string | null;
+    logoIsbasiCustomerId: string | null;
+  };
+  newBinding?: {
+    logoIsbasiCustomerCode: string | null;
+    logoIsbasiCustomerId: string | null;
+  };
+  matchedFirm?: {
+    name: string | null;
+    code: string | null;
+    taxNumberMasked: string | null;
+  };
+  exactMatch?: LogoIsbasiFirmSummary | null;
+  possibleMatches?: LogoIsbasiFirmSummary[];
+  warnings?: string[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+};
+
 export type LogoIsbasiCommissionInvoicePreviewInput = {
   commissionAmount: string;
   vatRate: string;
