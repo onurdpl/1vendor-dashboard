@@ -1428,6 +1428,20 @@ export type LogoIsbasiFirmDetailProbeResult = {
   message?: string;
 };
 
+export type LogoIsbasiUpstreamRequestDiagnostic = {
+  url: string | null;
+  method: string | null;
+  contentType: string | null;
+  accept: string | null;
+  queryParameters: string[];
+};
+
+export type LogoIsbasiUpstreamResponseDiagnostic = {
+  status: number;
+  contentType: string | null;
+  bodySnippet: string | null;
+};
+
 export type LogoIsbasiInvoiceSummary = {
   id: string | null;
   invoiceNumber: string | null;
@@ -1464,6 +1478,8 @@ export type LogoIsbasiInvoiceListProbeResult = {
   errorCode?: string;
   message?: string;
   missingEnv?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+  response?: LogoIsbasiUpstreamResponseDiagnostic;
 };
 
 export type LogoIsbasiInvoiceDetailProbeResult = {
@@ -1488,6 +1504,8 @@ export type LogoIsbasiInvoiceDetailProbeResult = {
   errorCode?: string;
   message?: string;
   missingEnv?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+  response?: LogoIsbasiUpstreamResponseDiagnostic;
 };
 
 export type LogoIsbasiFirmMatchResult = {

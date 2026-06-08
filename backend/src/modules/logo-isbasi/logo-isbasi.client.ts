@@ -20,6 +20,13 @@ export type LogoIsbasiRawResult = {
   ok: boolean;
   body: unknown;
   jsonParseFailed: boolean;
+  requestUrl?: string;
+  requestMethod?: string;
+  responseBodySnippet?: string | null;
+  responseContentType?: string | null;
+  requestContentType?: string | null;
+  requestAccept?: string | null;
+  queryParameters?: string[];
 };
 
 export type LogoIsbasiSessionExtraction = {
@@ -90,6 +97,7 @@ function sanitizeText(value: unknown) {
     return undefined;
   }
   return value
+    .replace(/("?((?:access|refresh)?token|password|secret|api[_-]?key|authorization)"?\s*[:=]\s*)("[^"]*"|[^&\s,}]+)/gi, '$1[redacted]')
     .replace(/((?:access|refresh)?token|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^&\s,}]+/gi, '$1=[redacted]')
     .replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted-token]')
     .slice(0, 500);
@@ -160,10 +168,20 @@ export class LogoIsbasiClient {
     this.fetchImpl = config.fetchImpl ?? fetch;
   }
 
-  private async parseResponse(response: Response): Promise<LogoIsbasiRawResult> {
+  private async parseResponse(
+    response: Response,
+    request: {
+      url: string;
+      method: string;
+      contentType?: string | null;
+      accept?: string | null;
+    },
+  ): Promise<LogoIsbasiRawResult> {
     const rawText = await response.text();
     let body: unknown = null;
     let jsonParseFailed = false;
+    const responseBodySnippet = rawText ? sanitizeText(rawText) : null;
+    const parsedUrl = new URL(request.url);
     if (rawText) {
       try {
         body = JSON.parse(rawText);
@@ -178,6 +196,13 @@ export class LogoIsbasiClient {
       ok: response.ok,
       body,
       jsonParseFailed,
+      requestUrl: request.url,
+      requestMethod: request.method,
+      responseBodySnippet,
+      responseContentType: response.headers.get('content-type'),
+      requestContentType: request.contentType ?? null,
+      requestAccept: request.accept ?? null,
+      queryParameters: Array.from(parsedUrl.searchParams.keys()).sort(),
     };
   }
 
@@ -186,7 +211,8 @@ export class LogoIsbasiClient {
   }
 
   async login(): Promise<LogoIsbasiLoginRawResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/user/integrationLogin`, {
+    const requestUrl = `${this.baseUrl}/api/v1.0/user/integrationLogin`;
+    const response = await this.fetchImpl(requestUrl, {
       method: 'POST',
       headers: {
         apiKey: this.config.apiKey,
@@ -198,7 +224,11 @@ export class LogoIsbasiClient {
       }),
     });
 
-    const parsed = await this.parseResponse(response);
+    const parsed = await this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json',
+    });
     if (parsed.jsonParseFailed) {
       parsed.body = { message: 'Logo İşbaşı login returned a non-JSON response.' };
     }
@@ -212,7 +242,8 @@ export class LogoIsbasiClient {
   }
 
   async listFirms(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/firms/firms`, {
+    const requestUrl = `${this.baseUrl}/api/v1.0/firms/firms`;
+    const response = await this.fetchImpl(requestUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
@@ -223,11 +254,16 @@ export class LogoIsbasiClient {
       body: JSON.stringify({}),
     });
 
-    return this.parseResponse(response);
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json',
+    });
   }
 
   async getFirmDetail(session: LogoIsbasiAuthenticatedSession, id: string): Promise<LogoIsbasiRawResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/firms/${encodeURIComponent(id)}`, {
+    const requestUrl = `${this.baseUrl}/api/v1.0/firms/${encodeURIComponent(id)}`;
+    const response = await this.fetchImpl(requestUrl, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
@@ -236,34 +272,50 @@ export class LogoIsbasiClient {
       },
     });
 
-    return this.parseResponse(response);
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'GET',
+    });
   }
 
   async listInvoices(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/salesInvoices/salesInvoices`, {
+    const requestUrl = `${this.baseUrl}/api/v1.0/salesInvoices/salesInvoices`;
+    const response = await this.fetchImpl(requestUrl, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
         tenantId: session.tenantId,
         apiKey: this.config.apiKey,
         'Content-Type': 'application/json',
+        Accept: 'application/json',
       },
       body: JSON.stringify({}),
     });
 
-    return this.parseResponse(response);
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json',
+      accept: 'application/json',
+    });
   }
 
   async getInvoiceDetail(session: LogoIsbasiAuthenticatedSession, id: string): Promise<LogoIsbasiRawResult> {
-    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/salesInvoices/${encodeURIComponent(id)}`, {
+    const requestUrl = `${this.baseUrl}/api/v1.0/salesInvoices/${encodeURIComponent(id)}`;
+    const response = await this.fetchImpl(requestUrl, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${session.accessToken}`,
         tenantId: session.tenantId,
         apiKey: this.config.apiKey,
+        Accept: 'application/json',
       },
     });
 
-    return this.parseResponse(response);
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'GET',
+      accept: 'application/json',
+    });
   }
 }

@@ -1552,7 +1552,49 @@ export function VendorProfilePage() {
                         <strong>{logoInvoicesResult.missingEnv.join(', ')}</strong>
                       </div>
                     ) : null}
+                    {logoInvoicesResult.request ? (
+                      <>
+                        <div>
+                          <span>Logo endpoint URL</span>
+                          <strong>{formatValue(logoInvoicesResult.request.url)}</strong>
+                        </div>
+                        <div>
+                          <span>Request method</span>
+                          <strong>{formatValue(logoInvoicesResult.request.method)}</strong>
+                        </div>
+                        <div>
+                          <span>Request content type</span>
+                          <strong>{formatValue(logoInvoicesResult.request.contentType)}</strong>
+                        </div>
+                        <div>
+                          <span>Request accept</span>
+                          <strong>{formatValue(logoInvoicesResult.request.accept)}</strong>
+                        </div>
+                        <div>
+                          <span>Query parameters</span>
+                          <strong>{logoInvoicesResult.request.queryParameters?.join(', ') || 'None'}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    {logoInvoicesResult.response ? (
+                      <>
+                        <div>
+                          <span>Upstream response status</span>
+                          <strong>{logoInvoicesResult.response.status}</strong>
+                        </div>
+                        <div>
+                          <span>Upstream content type</span>
+                          <strong>{formatValue(logoInvoicesResult.response.contentType)}</strong>
+                        </div>
+                      </>
+                    ) : null}
                   </div>
+                  {logoInvoicesResult.response?.bodySnippet ? (
+                    <div className="vendor-profile-logo-match-card">
+                      <span>Upstream response body snippet</span>
+                      <pre>{logoInvoicesResult.response.bodySnippet}</pre>
+                    </div>
+                  ) : null}
                   {logoInvoicesResult.sampleInvoices?.length ? (
                     <>
                       <ul className="vendor-profile-logo-firm-list" aria-label="Logo invoice samples">
@@ -1626,6 +1668,42 @@ export function VendorProfilePage() {
                         <strong>{logoInvoiceDetailResult.message}</strong>
                       </div>
                     ) : null}
+                    {logoInvoiceDetailResult.request ? (
+                      <>
+                        <div>
+                          <span>Logo endpoint URL</span>
+                          <strong>{formatValue(logoInvoiceDetailResult.request.url)}</strong>
+                        </div>
+                        <div>
+                          <span>Request method</span>
+                          <strong>{formatValue(logoInvoiceDetailResult.request.method)}</strong>
+                        </div>
+                        <div>
+                          <span>Request content type</span>
+                          <strong>{formatValue(logoInvoiceDetailResult.request.contentType)}</strong>
+                        </div>
+                        <div>
+                          <span>Request accept</span>
+                          <strong>{formatValue(logoInvoiceDetailResult.request.accept)}</strong>
+                        </div>
+                        <div>
+                          <span>Query parameters</span>
+                          <strong>{logoInvoiceDetailResult.request.queryParameters?.join(', ') || 'None'}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    {logoInvoiceDetailResult.response ? (
+                      <>
+                        <div>
+                          <span>Upstream response status</span>
+                          <strong>{logoInvoiceDetailResult.response.status}</strong>
+                        </div>
+                        <div>
+                          <span>Upstream content type</span>
+                          <strong>{formatValue(logoInvoiceDetailResult.response.contentType)}</strong>
+                        </div>
+                      </>
+                    ) : null}
                     <div>
                       <span>eGovernmentInvoice keys</span>
                       <strong>{logoInvoiceDetailResult.shape?.eGovernmentInvoiceKeys?.join(', ') || 'Not returned'}</strong>
@@ -1635,6 +1713,12 @@ export function VendorProfilePage() {
                       <strong>{logoInvoiceDetailResult.shape?.eArchivePortalInvoiceKeys?.join(', ') || 'Not returned'}</strong>
                     </div>
                   </div>
+                  {logoInvoiceDetailResult.response?.bodySnippet ? (
+                    <div className="vendor-profile-logo-match-card">
+                      <span>Upstream response body snippet</span>
+                      <pre>{logoInvoiceDetailResult.response.bodySnippet}</pre>
+                    </div>
+                  ) : null}
                   <pre>{formatLogoProbeJson(logoInvoiceDetailResult)}</pre>
                 </div>
               ) : null}

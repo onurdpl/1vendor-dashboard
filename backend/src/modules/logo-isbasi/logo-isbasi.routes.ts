@@ -287,6 +287,7 @@ function maskPhone(value: string | null) {
 
 function sanitizeDiagnosticString(value: string) {
   return value
+    .replace(/("?((?:access|refresh)?token|password|secret|api[_-]?key|authorization)"?\s*[:=]\s*)("[^"]*"|[^&\s,}]+)/gi, '$1[redacted]')
     .replace(/((?:access|refresh)?token|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^&\s,}]+/gi, '$1=[redacted]')
     .replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted-token]')
     .slice(0, 500);
@@ -674,7 +675,37 @@ function buildLogoUpstreamError(mode: string, result: LogoIsbasiRawResult) {
       code: sanitized.code,
       message: sanitized.message,
     },
+    request: {
+      url: result.requestUrl ?? null,
+      method: result.requestMethod ?? null,
+      contentType: result.requestContentType ?? null,
+      accept: result.requestAccept ?? null,
+      queryParameters: result.queryParameters ?? [],
+    },
+    response: {
+      status: result.status,
+      contentType: result.responseContentType ?? null,
+      bodySnippet: result.responseBodySnippet ?? null,
+    },
   };
+}
+
+function logLogoInvoiceUpstreamFailure(app: FastifyInstance, mode: string, result: LogoIsbasiRawResult) {
+  app.log?.warn?.(
+    {
+      provider: 'LOGO_ISBASI',
+      mode,
+      requestUrl: result.requestUrl ?? null,
+      requestMethod: result.requestMethod ?? null,
+      requestContentType: result.requestContentType ?? null,
+      requestAccept: result.requestAccept ?? null,
+      queryParameters: result.queryParameters ?? [],
+      httpStatus: result.status,
+      responseContentType: result.responseContentType ?? null,
+      responseBodySnippet: result.responseBodySnippet ?? null,
+    },
+    'Logo İşbaşı invoice probe upstream request failed.',
+  );
 }
 
 function sanitizeFirmMatches(firms: unknown[]) {
@@ -1054,6 +1085,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
 
         const result = await client.listInvoices(login.session);
         if (!result.ok || result.jsonParseFailed) {
+          logLogoInvoiceUpstreamFailure(app, 'invoice_list_discovery', result);
           return reply.code(502).send(buildLogoUpstreamError('invoice_list_discovery', result));
         }
 
@@ -1125,6 +1157,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
 
         const result = await client.getInvoiceDetail(login.session, invoiceId);
         if (!result.ok || result.jsonParseFailed) {
+          logLogoInvoiceUpstreamFailure(app, 'invoice_detail_discovery', result);
           return reply.code(502).send(buildLogoUpstreamError('invoice_detail_discovery', result));
         }
 

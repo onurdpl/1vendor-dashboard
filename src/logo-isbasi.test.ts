@@ -362,6 +362,56 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
   });
 
+  it('returns invoice discovery upstream diagnostics for Logo 404 responses', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          message: 'No HTTP resource was found that matches the request URI.',
+          apiKey: 'provider-api-key-secret',
+        }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoices')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(502);
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        errorCode: 'LOGO_ISBASI_UPSTREAM_NON_2XX',
+        httpStatus: 404,
+        request: {
+          url: 'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/salesInvoices',
+          method: 'POST',
+          contentType: 'application/json',
+          accept: 'application/json',
+          queryParameters: [],
+        },
+        response: expect.objectContaining({
+          status: 404,
+          contentType: 'application/json',
+          bodySnippet: expect.stringContaining('No HTTP resource was found'),
+        }),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('provider-api-key-secret');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
   it('returns sanitized Logo invoice detail and shape without exposing tokens or personal fields', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
