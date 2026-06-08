@@ -946,6 +946,39 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     );
   });
 
+  it('blocks Logo test invoice creation before upstream call when legalEntityType is unknown', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      legalEntityType: 'unknown_kind',
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' }, body: { confirmTestInvoice: true } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(400);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: false,
+        success: false,
+        provider: 'LOGO_ISBASI',
+        mode: 'test_invoice_create',
+        writesPerformed: false,
+        externalApiCallAttempted: false,
+        vendorId: 'sporjinal',
+        errorCode: 'LOGO_ISBASI_TEST_INVOICE_CREATE_FAILED',
+        message: expect.stringContaining('Unsupported legalEntityType'),
+      }),
+    );
+  });
+
   it('creates exactly one Logo test invoice with sanitized request and response diagnostics', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -1020,17 +1053,18 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         customer: expect.objectContaining({
           code: 'CUST001',
           tcknVkn: '6490512763',
+          isPerson: false,
         }),
         salesInvoiceDetails: [
           expect.objectContaining({
             quantity: 1,
-            taxRate: '20',
-            price: '1',
+            taxRate: 20,
+            price: 1,
             description: 'SPORGYM TEST KOMİSYON FATURASI',
             productDetail: expect.objectContaining({
               itemCode: 'SPORGYM-COMMISSION',
               itemType: 2,
-              vat: '20',
+              vat: 20,
               unit: 'Adet',
             }),
           }),
@@ -1056,6 +1090,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
           customer: expect.objectContaining({
             code: 'CUST001',
             tcknVkn: '64******63',
+            isPerson: false,
           }),
         }),
         responseBody: expect.objectContaining({
@@ -1329,18 +1364,61 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(preview.payload.salesInvoiceDetails).toEqual([
       expect.objectContaining({
         quantity: 1,
-        taxRate: '20',
-        price: '100',
+        taxRate: 20,
+        price: 100,
         productDetail: expect.objectContaining({
           itemCode: 'SPORGYM-COMMISSION',
           itemType: 2,
           name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+          vat: 20,
         }),
       }),
     ]);
+    expect(preview.payload.customer).toEqual(
+      expect.objectContaining({
+        isPerson: false,
+      }),
+    );
     expect(preview.warnings).toContain('eGovernmentInvoice enum/required fields unknown; omitted in dry-run.');
     const serialized = JSON.stringify(preview.payload);
     expect(serialized).not.toMatch(/shipmentAgentItem|website|eArchivePaymentType|eArchivePaymentDate/);
+  });
+
+  it('maps individual legalEntityType to customer.isPerson true', () => {
+    const preview = buildLogoIsbasiCommissionInvoicePreview({
+      vendorBillingProfile: {
+        ...vendorBillingProfile,
+        legalEntityType: 'bireysel',
+        legalCompanyName: 'Ali Veli',
+      },
+      commissionAmount: '1',
+      vatRate: '20',
+      currency: 'TL',
+      description: 'Pazaryeri komisyon hizmet bedeli',
+    });
+
+    expect(preview.payload.customer).toEqual(
+      expect.objectContaining({
+        firstName: 'Ali',
+        lastName: 'Veli',
+        isPerson: true,
+      }),
+    );
+  });
+
+  it('blocks unknown legalEntityType before building a Logo invoice payload', () => {
+    expect(() =>
+      buildLogoIsbasiCommissionInvoicePreview({
+        vendorBillingProfile: {
+          ...vendorBillingProfile,
+          legalEntityType: 'unknown_kind',
+        },
+        commissionAmount: '1',
+        vatRate: '20',
+        currency: 'TL',
+        description: 'Pazaryeri komisyon hizmet bedeli',
+      }),
+    ).toThrow('Unsupported legalEntityType');
   });
 
   it('masks tax number in sanitized API preview responses', () => {

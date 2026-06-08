@@ -607,14 +607,15 @@ export const runtimeServices = {
                 code: 'LOGO-MOCK-1',
                 name: 'Mock Vendor Legal Name',
                 tcknVkn: '11******11',
+                isPerson: false,
               },
               currency: 'TL',
               description: 'SPORGYM TEST KOMİSYON FATURASI',
               salesInvoiceDetails: [
                 {
                   quantity: 1,
-                  taxRate: '20',
-                  price: '1',
+                  taxRate: 20,
+                  price: 1,
                 },
               ],
             },

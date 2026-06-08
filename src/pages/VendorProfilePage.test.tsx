@@ -338,14 +338,15 @@ describe('VendorProfilePage', () => {
         customer: {
           code: 'CUST001',
           tcknVkn: '11******11',
+          isPerson: false,
         },
         currency: 'TL',
         description: 'SPORGYM TEST KOMİSYON FATURASI',
         salesInvoiceDetails: [
           {
             quantity: 1,
-            taxRate: '20',
-            price: '1',
+            taxRate: 20,
+            price: 1,
           },
         ],
       },
@@ -428,17 +429,19 @@ describe('VendorProfilePage', () => {
         customer: {
           name: 'Demo Vendor A Ltd.',
           tcknVkn: '11******11',
+          isPerson: false,
         },
         currency: 'TL',
         description: 'Pazaryeri komisyon hizmet bedeli',
         salesInvoiceDetails: [
           {
             quantity: 1,
-            taxRate: '20',
-            price: '100',
+            taxRate: 20,
+            price: 100,
             productDetail: {
               itemType: 2,
               name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+              vat: 20,
             },
           },
         ],
