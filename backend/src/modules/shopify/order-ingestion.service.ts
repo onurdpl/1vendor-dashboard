@@ -30,6 +30,20 @@ function readPayloadString(value: string | null | undefined) {
   return readAddressString(value);
 }
 
+function isTurkeyAddress(address: { country?: string | null; country_code?: string | null } | null | undefined) {
+  const countryCode = readAddressString(address?.country_code)?.toUpperCase();
+  if (countryCode === 'TR') {
+    return true;
+  }
+
+  const country = readAddressString(address?.country)?.toLocaleLowerCase('tr-TR');
+  return country === 'turkey' || country === 'türkiye' || country === 'turkiye';
+}
+
+function readTurkeyAddress2District(address: { address2?: string | null; country?: string | null; country_code?: string | null } | null | undefined) {
+  return isTurkeyAddress(address) ? readAddressString(address?.address2) : null;
+}
+
 function toMoneyString(value: string | number | null | undefined) {
   if (value === undefined || value === null || value === '') {
     return null;
@@ -95,6 +109,7 @@ export function mapShopifyShippingAddress(payload: ShopifyOrdersCreateWebhookPay
       readAddressString(address?.district) ??
       readAddressString(address?.district_name) ??
       readAddressString(address?.city_area) ??
+      readTurkeyAddress2District(address) ??
       readAddressString(address?.province),
     shippingAddress: composeShopifyShippingAddress(address),
   };
@@ -124,6 +139,7 @@ export function mapShopifyBillingAddress(payload: ShopifyOrdersCreateWebhookPayl
       readAddressString(address?.district_name) ??
       readAddressString(address?.city_area) ??
       readAddressString(address?.county) ??
+      readTurkeyAddress2District(address) ??
       readAddressString(address?.province),
     billingAddress1: readAddressString(address?.address1),
     billingAddress2: readAddressString(address?.address2),

@@ -66,10 +66,11 @@ function buildOrder(overrides: Record<string, unknown> = {}) {
         rawPayload: JSON.stringify({
           order_number: 1072,
           shipping_address: {
+            country_code: 'TR',
             city: 'Istanbul',
-            district: 'Kartal',
             province: 'Istanbul',
             address1: 'hidden street address',
+            address2: 'Kartal',
             phone: '+905551112233',
           },
           billing_address: {
@@ -152,11 +153,12 @@ describe('order district readiness diagnostic', () => {
       shippingProvince: 'Istanbul',
       billingProvince: 'Istanbul',
       districtPresent: true,
-      districtSourceField: 'ShopifyOrder.shippingDistrict',
+      districtSourceField: 'shipping_address.address2',
       districtSourceValue: 'Kartal',
       rawDistrictCandidateKeysPresent: {
         shipping_address: expect.objectContaining({
-          district: true,
+          district: false,
+          address2: true,
           province: true,
         }),
         billing_address: expect.objectContaining({
@@ -202,10 +204,46 @@ describe('order district readiness diagnostic', () => {
 
     expect(result).toMatchObject({
       districtPresent: true,
-      districtSourceField: 'shipping_address.district',
+      districtSourceField: 'shipping_address.address2',
       districtSourceValue: 'Kartal',
       kargonomiReturnSenderPreview: {
         senderDistrictPresent: true,
+      },
+    });
+  });
+
+  it('does not report address2 as a raw district candidate for non-Turkey addresses', async () => {
+    prismaMock.shopifyOrder.findFirst.mockResolvedValue(
+      buildOrder({
+        shippingDistrict: null,
+        billingDistrict: null,
+        webhookEvents: [
+          {
+            rawPayload: JSON.stringify({
+              order_number: 1072,
+              shipping_address: {
+                country_code: 'US',
+                city: 'New York',
+                province: 'NY',
+                address1: 'hidden street address',
+                address2: 'Apartment 4',
+              },
+            }),
+          },
+        ],
+      }),
+    );
+
+    const result = await getOrderDistrictReadinessDiagnostic('1072');
+
+    expect(result).toMatchObject({
+      districtSourceField: 'shipping_address.province',
+      districtSourceValue: 'NY',
+      rawDistrictCandidateKeysPresent: {
+        shipping_address: expect.objectContaining({
+          address2: false,
+          province: true,
+        }),
       },
     });
   });

@@ -511,10 +511,21 @@ const DISTRICT_CANDIDATE_KEYS = [
   'county',
   'county_name',
   'countyName',
+  'address2',
   'province',
   'province_name',
   'provinceName',
 ] as const;
+
+function isDiagnosticTurkeyAddress(address: Record<string, unknown> | null) {
+  const countryCode = readDiagnosticString(address, ['country_code'])?.toUpperCase();
+  if (countryCode === 'TR') {
+    return true;
+  }
+
+  const country = readDiagnosticString(address, ['country'])?.toLocaleLowerCase('tr-TR');
+  return country === 'turkey' || country === 'türkiye' || country === 'turkiye';
+}
 
 function readRawDistrictCandidate(address: Record<string, unknown> | null, prefix: 'shipping_address' | 'billing_address') {
   if (!address) {
@@ -522,6 +533,9 @@ function readRawDistrictCandidate(address: Record<string, unknown> | null, prefi
   }
 
   for (const key of DISTRICT_CANDIDATE_KEYS) {
+    if (key === 'address2' && !isDiagnosticTurkeyAddress(address)) {
+      continue;
+    }
     const value = readDiagnosticString(address, [key]);
     if (value) {
       return {
@@ -536,8 +550,32 @@ function readRawDistrictCandidate(address: Record<string, unknown> | null, prefi
 
 function buildRawDistrictCandidateKeyPresence(address: Record<string, unknown> | null) {
   return Object.fromEntries(
-    DISTRICT_CANDIDATE_KEYS.map((key) => [key, Boolean(readDiagnosticString(address, [key]))]),
+    DISTRICT_CANDIDATE_KEYS.map((key) => [
+      key,
+      key === 'address2' ? isDiagnosticTurkeyAddress(address) && Boolean(readDiagnosticString(address, [key])) : Boolean(readDiagnosticString(address, [key])),
+    ]),
   );
+}
+
+function findPersistedDistrictSource(input: {
+  persistedValue: string | null;
+  address: Record<string, unknown> | null;
+  prefix: 'shipping_address' | 'billing_address';
+}) {
+  const persistedValue = input.persistedValue?.trim();
+  if (!persistedValue) {
+    return null;
+  }
+
+  const rawSource = readRawDistrictCandidate(input.address, input.prefix);
+  if (rawSource?.value === persistedValue) {
+    return rawSource;
+  }
+
+  return {
+    field: input.prefix === 'shipping_address' ? 'ShopifyOrder.shippingDistrict' : 'ShopifyOrder.billingDistrict',
+    value: persistedValue,
+  };
 }
 
 function readKargonomiDiagnosticId(value: unknown, keys: string[]) {
@@ -641,11 +679,17 @@ export async function getOrderDistrictReadinessDiagnostic(orderNumber: string) {
   const rawBillingDistrict = readRawDistrictCandidate(billingAddress, 'billing_address');
   const rawDistrict = rawShippingDistrict ?? rawBillingDistrict;
   const districtSource =
-    order.shippingDistrict?.trim()
-      ? { field: 'ShopifyOrder.shippingDistrict', value: order.shippingDistrict.trim() }
-      : order.billingDistrict?.trim()
-        ? { field: 'ShopifyOrder.billingDistrict', value: order.billingDistrict.trim() }
-        : rawDistrict;
+    findPersistedDistrictSource({
+      persistedValue: order.shippingDistrict,
+      address: shippingAddress,
+      prefix: 'shipping_address',
+    }) ??
+    findPersistedDistrictSource({
+      persistedValue: order.billingDistrict,
+      address: billingAddress,
+      prefix: 'billing_address',
+    }) ??
+    rawDistrict;
   const returnIds = order.allocations.flatMap((allocation) => allocation.returnRecords.map((record) => record.id));
   const firstReturnAllocation = order.allocations.find((allocation) => allocation.returnRecords.length > 0) ?? null;
   const config = firstReturnAllocation

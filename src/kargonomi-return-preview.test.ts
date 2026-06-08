@@ -255,6 +255,56 @@ describe('Kargonomi return preview', () => {
     expect(serializedPreview).not.toContain('+902121112233');
   });
 
+  it('treats address2-derived shippingDistrict as ready for Kargonomi return sender district', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(
+      baseReturnRecord({
+        vendorAllocation: {
+          assignedVendorId: 'yalispor',
+          order: {
+            customerName: 'Customer Name',
+            customerEmail: 'customer@example.test',
+            billingFullName: null,
+            customerPhone: '+905551112233',
+            billingPhone: null,
+            shippingCity: 'Istanbul',
+            shippingAddress: 'Customer full address',
+            shippingDistrict: 'Kartal',
+            webhookEvents: [
+              {
+                rawPayload: JSON.stringify({
+                  shipping_address: {
+                    country_code: 'TR',
+                    city: 'Istanbul',
+                    address2: 'Kartal',
+                  },
+                }),
+              },
+            ],
+          },
+          lineItems: [{ id: 'allocation-line-1', shopifyOrderLineItem: { sku: 'SKU-1' } }],
+        },
+      }),
+    );
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(baseShippingConfig());
+
+    const preview = await previewKargonomiReturnShipmentForReturn('return-1', {
+      role: 'vendor',
+      vendorId: 'yalispor',
+    });
+
+    expect(preview.missingFields).not.toContain('sender.district');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        sender: {
+          districtPresent: true,
+        },
+        senderDestinationResolution: {
+          senderDistrictPresent: true,
+        },
+      },
+    });
+  });
+
   it('resolves sender city and state from order shipping text when metadata is missing', async () => {
     const destinationClient = buildKargonomiDestinationClient();
     prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());

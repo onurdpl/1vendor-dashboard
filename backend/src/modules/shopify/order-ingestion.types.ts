@@ -82,6 +82,8 @@ export type ShopifyOrdersCreateWebhookPayload = {
     last_name?: string | null;
     company?: string | null;
     phone?: string | null;
+    country?: string | null;
+    country_code?: string | null;
     city?: string | null;
     district?: string | null;
     district_name?: string | null;

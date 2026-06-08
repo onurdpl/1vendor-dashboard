@@ -160,6 +160,156 @@ describe('vendor order snapshot ingestion', () => {
     );
   });
 
+  it('maps Shopify Turkey shipping address2 to shippingDistrict when explicit district fields are absent', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-tr-address2' } as never,
+      sellerInfo: {
+        'SKU-TR': 'sporjinal',
+      },
+      payload: {
+        id: 2101,
+        name: '#2101',
+        total_price: '100.00',
+        shipping_address: {
+          country_code: 'TR',
+          city: 'Istanbul',
+          address1: 'Street line',
+          address2: 'Kartal',
+        },
+        line_items: [
+          {
+            id: 3101,
+            sku: 'SKU-TR',
+            title: 'Shoe',
+            quantity: 1,
+            price: '100.00',
+          },
+        ],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          shippingDistrict: 'Kartal',
+        }),
+      }),
+    );
+  });
+
+  it('maps Shopify Turkey billing address2 to billingDistrict when explicit district fields are absent', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-tr-billing-address2' } as never,
+      sellerInfo: {
+        'SKU-TR': 'sporjinal',
+      },
+      payload: {
+        id: 2102,
+        name: '#2102',
+        total_price: '100.00',
+        billing_address: {
+          country: 'Türkiye',
+          city: 'Istanbul',
+          address1: 'Billing street',
+          address2: 'Kartal',
+        },
+        line_items: [
+          {
+            id: 3102,
+            sku: 'SKU-TR',
+            title: 'Shoe',
+            quantity: 1,
+            price: '100.00',
+          },
+        ],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          billingDistrict: 'Kartal',
+        }),
+      }),
+    );
+  });
+
+  it('keeps explicit Shopify district ahead of Turkey address2', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-tr-explicit-district' } as never,
+      sellerInfo: {
+        'SKU-TR': 'sporjinal',
+      },
+      payload: {
+        id: 2103,
+        name: '#2103',
+        total_price: '100.00',
+        shipping_address: {
+          country_code: 'TR',
+          city: 'Istanbul',
+          district: 'Kadikoy',
+          address1: 'Street line',
+          address2: 'Kartal',
+        },
+        line_items: [
+          {
+            id: 3103,
+            sku: 'SKU-TR',
+            title: 'Shoe',
+            quantity: 1,
+            price: '100.00',
+          },
+        ],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          shippingDistrict: 'Kadikoy',
+        }),
+      }),
+    );
+  });
+
+  it('does not map non-Turkey address2 to shippingDistrict', async () => {
+    await ingestShopifyOrderWebhook({
+      event: { id: 'webhook-non-tr-address2' } as never,
+      sellerInfo: {
+        'SKU-US': 'sporjinal',
+      },
+      payload: {
+        id: 2104,
+        name: '#2104',
+        total_price: '100.00',
+        shipping_address: {
+          country_code: 'US',
+          city: 'New York',
+          province: 'NY',
+          address1: 'Street line',
+          address2: 'Apartment 4',
+        },
+        line_items: [
+          {
+            id: 3104,
+            sku: 'SKU-US',
+            title: 'Shoe',
+            quantity: 1,
+            price: '100.00',
+          },
+        ],
+      },
+    });
+
+    expect(prismaMock.shopifyOrder.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          shippingDistrict: 'NY',
+        }),
+      }),
+    );
+  });
+
   it('uses Shopify GraphQL tax snapshot data before the VAT fallback', async () => {
     await ingestShopifyOrderWebhook({
       event: { id: 'webhook-1069' } as never,

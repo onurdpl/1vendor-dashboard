@@ -1709,7 +1709,7 @@ function readAddressDistrict(value: Record<string, unknown> | null) {
     return null;
   }
 
-  return readString(value, [
+  const explicitDistrict = readString(value, [
     'district',
     'district_name',
     'districtName',
@@ -1718,10 +1718,21 @@ function readAddressDistrict(value: Record<string, unknown> | null) {
     'county',
     'county_name',
     'countyName',
-    'province',
-    'province_name',
-    'provinceName',
   ]);
+  if (explicitDistrict) {
+    return explicitDistrict;
+  }
+
+  const countryCode = readString(value, ['country_code'])?.toUpperCase();
+  const country = readString(value, ['country'])?.toLocaleLowerCase('tr-TR');
+  if (countryCode === 'TR' || country === 'turkey' || country === 'türkiye' || country === 'turkiye') {
+    const address2District = readString(value, ['address2']);
+    if (address2District) {
+      return address2District;
+    }
+  }
+
+  return readString(value, ['province', 'province_name', 'provinceName']);
 }
 
 function readStoredOrderWebhookDistrict(orderRecord: Record<string, unknown>) {
