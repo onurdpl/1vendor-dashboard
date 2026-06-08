@@ -24,6 +24,10 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
+    logAuthLoginRequestStart(app, request, {
+      authAttemptId,
+      normalizedEmail,
+    });
 
     const body = request.body as Partial<Record<keyof LoginBody, unknown>> | undefined;
     const rawEmail = body?.email;
@@ -249,9 +253,37 @@ function normalizeLoginEmail(value: unknown) {
   return typeof value === 'string' ? value.trim().toLowerCase() || null : null;
 }
 
+function logAuthLoginRequestStart(
+  app: FastifyInstance,
+  request: {
+    requestId?: string;
+    id?: string;
+    method?: string;
+    routeOptions?: { url?: string };
+    url?: string;
+  },
+  input: {
+    authAttemptId: string | null;
+    normalizedEmail: string | null;
+  },
+) {
+  app.log.info(
+    {
+      event: 'AUTH_LOGIN_REQUEST_START',
+      requestId: request.requestId ?? request.id ?? null,
+      authAttemptId: input.authAttemptId,
+      normalizedEmail: input.normalizedEmail,
+      method: request.method ?? 'POST',
+      path: request.routeOptions?.url ?? request.url ?? '/auth/login',
+      timestamp: new Date().toISOString(),
+    },
+    'auth login request start',
+  );
+}
+
 function logAuthLoginDiagnostics(
   app: FastifyInstance,
-  request: { requestId?: string; id?: string },
+  request: { requestId?: string; id?: string; headers?: Record<string, string | string[] | undefined> },
   input: {
     email: string | null;
     success: boolean;
@@ -269,6 +301,7 @@ function logAuthLoginDiagnostics(
     {
       event: 'AUTH_LOGIN_DIAGNOSTICS',
       requestId: request.requestId ?? request.id ?? null,
+      authAttemptId: normalizeAuthAttemptId(request.headers?.['x-auth-attempt-id']),
       email: input.email,
       success: input.success,
       failureStage: input.failureStage,

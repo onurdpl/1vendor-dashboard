@@ -254,7 +254,9 @@ describe('auth login rate limiting', () => {
     await handlers.post['/auth/login']?.(
       {
         requestId: 'login-success-request',
-        headers: {},
+        method: 'POST',
+        routeOptions: { url: '/auth/login' },
+        headers: { 'x-auth-attempt-id': 'auth-success123' },
         body: {
           email: ' Vendor@Example.COM ',
           password: 'demo123',
@@ -267,8 +269,21 @@ describe('auth login rate limiting', () => {
     expect(reply.statusCode).toBe(200);
     expect(handlers.logInfo).toHaveBeenCalledWith(
       expect.objectContaining({
+        event: 'AUTH_LOGIN_REQUEST_START',
+        requestId: 'login-success-request',
+        authAttemptId: 'auth-success123',
+        normalizedEmail: 'vendor@example.com',
+        method: 'POST',
+        path: '/auth/login',
+        timestamp: expect.any(String),
+      }),
+      'auth login request start',
+    );
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
         event: 'AUTH_LOGIN_DIAGNOSTICS',
         requestId: 'login-success-request',
+        authAttemptId: 'auth-success123',
         email: 'vendor@example.com',
         success: true,
         failureStage: null,
@@ -293,7 +308,9 @@ describe('auth login rate limiting', () => {
     const result = await handlers.post['/auth/login']?.(
       {
         requestId: 'login-failure-request',
-        headers: {},
+        method: 'POST',
+        routeOptions: { url: '/auth/login' },
+        headers: { 'x-auth-attempt-id': 'auth-failure123' },
         body: {
           email: 'Vendor@Example.COM',
           password: 'wrong-password',
@@ -309,6 +326,7 @@ describe('auth login rate limiting', () => {
       expect.objectContaining({
         event: 'AUTH_LOGIN_DIAGNOSTICS',
         requestId: 'login-failure-request',
+        authAttemptId: 'auth-failure123',
         email: 'vendor@example.com',
         success: false,
         failureStage: 'password_verify',
