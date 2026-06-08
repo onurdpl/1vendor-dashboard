@@ -76,6 +76,7 @@ type BillingProfileFormState = {
   billingPhone: string;
   iban: string;
   legalEntityType: string;
+  logoIsbasiCustomerCode: string;
 };
 
 type LogoCommissionPreviewFormState = {
@@ -98,6 +99,7 @@ const EMPTY_BILLING_PROFILE_FORM: BillingProfileFormState = {
   billingPhone: '',
   iban: '',
   legalEntityType: '',
+  logoIsbasiCustomerCode: '',
 };
 
 const DEFAULT_LOGO_COMMISSION_PREVIEW_FORM: LogoCommissionPreviewFormState = {
@@ -131,6 +133,7 @@ function buildBillingProfileFormState(profile: VendorBillingProfile | null): Bil
     billingPhone: profile?.billingPhone ?? '',
     iban: profile?.iban ?? '',
     legalEntityType: profile?.legalEntityType ?? '',
+    logoIsbasiCustomerCode: profile?.logoIsbasiCustomerCode ?? '',
   };
 }
 
@@ -152,6 +155,7 @@ function buildBillingProfileInput(form: BillingProfileFormState): VendorBillingP
     billingPhone: normalizeOptionalBillingValue(form.billingPhone),
     iban: normalizeOptionalBillingValue(form.iban),
     legalEntityType: normalizeOptionalBillingValue(form.legalEntityType),
+    logoIsbasiCustomerCode: normalizeOptionalBillingValue(form.logoIsbasiCustomerCode),
   };
 }
 
@@ -1446,6 +1450,14 @@ export function VendorProfilePage() {
                         type="text"
                         value={billingForm.legalEntityType}
                         onChange={(event) => handleBillingFormChange('legalEntityType', event.target.value)}
+                      />
+                    </label>
+                    <label>
+                      Logo İşbaşı customer code
+                      <input
+                        type="text"
+                        value={billingForm.logoIsbasiCustomerCode}
+                        onChange={(event) => handleBillingFormChange('logoIsbasiCustomerCode', event.target.value)}
                       />
                     </label>
                     <label className="vendor-profile-billing-form-wide">

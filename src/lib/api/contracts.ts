@@ -1355,9 +1355,6 @@ export type VendorBillingProfileInput = {
   billingPhone?: string | null;
   legalEntityType?: string | null;
   logoIsbasiCustomerCode?: string | null;
-  logoIsbasiCustomerId?: string | null;
-  logoIsbasiEinvoiceEligible?: boolean | null;
-  logoIsbasiLastCheckedAt?: string | null;
 };
 
 export type LogoIsbasiLoginProbeResult = {
@@ -1441,12 +1438,13 @@ export type LogoIsbasiFirmMatchResult = {
   vendorId?: string;
   billingProfilePresent?: boolean;
   searchedBy?: {
+    logoIsbasiCustomerCodePresent: boolean;
     taxNumberOrTcknPresent: boolean;
     legalCompanyNamePresent: boolean;
   };
   count?: number;
   matchStatus?: 'exact_match' | 'possible_matches' | 'none';
-  matchMethod?: 'taxNumberOrTckn' | 'legalCompanyName' | null;
+  matchMethod?: 'logoIsbasiCustomerCode' | 'taxNumberOrTckn' | 'legalCompanyName' | null;
   exactMatch?: LogoIsbasiFirmSummary | null;
   possibleMatches?: LogoIsbasiFirmSummary[];
   warnings?: string[];

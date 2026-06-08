@@ -214,9 +214,6 @@ describe('vendor billing profile service', () => {
         billingPhone: '+905551112233',
         legalEntityType: 'limited_company',
         logoIsbasiCustomerCode: 'LOGO-CODE-1',
-        logoIsbasiCustomerId: 'LOGO-ID-1',
-        logoIsbasiEinvoiceEligible: true,
-        logoIsbasiLastCheckedAt: new Date('2026-06-05T10:00:00.000Z'),
       },
       create: {
         vendorId: 'sporjinal',
@@ -232,9 +229,6 @@ describe('vendor billing profile service', () => {
         billingPhone: '+905551112233',
         legalEntityType: 'limited_company',
         logoIsbasiCustomerCode: 'LOGO-CODE-1',
-        logoIsbasiCustomerId: 'LOGO-ID-1',
-        logoIsbasiEinvoiceEligible: true,
-        logoIsbasiLastCheckedAt: new Date('2026-06-05T10:00:00.000Z'),
       },
     });
     expect(result).toEqual(
@@ -271,26 +265,26 @@ describe('vendor billing profile service', () => {
     ).toThrow('billingEmail must be a string or null.');
   });
 
-  it('rejects invalid Logo İşbaşı optional values', () => {
-    expect(() =>
-      __vendorBillingProfileTesting.normalizeBillingProfileInput({
-        legalCompanyName: 'Company',
-        taxNumber: '1',
-        taxOffice: 'Office',
-        billingAddress: 'Address',
-        logoIsbasiEinvoiceEligible: 'yes',
-      }),
-    ).toThrow('logoIsbasiEinvoiceEligible must be a boolean or null.');
+  it('allows only Logo İşbaşı customer code through admin billing profile input', () => {
+    const result = __vendorBillingProfileTesting.normalizeBillingProfileInput({
+      legalCompanyName: 'Company',
+      taxNumber: '1',
+      taxOffice: 'Office',
+      billingAddress: 'Address',
+      logoIsbasiCustomerCode: ' CUST001 ',
+      logoIsbasiCustomerId: 'LOGO-ID-1',
+      logoIsbasiEinvoiceEligible: true,
+      logoIsbasiLastCheckedAt: '2026-06-05T10:00:00.000Z',
+    });
 
-    expect(() =>
-      __vendorBillingProfileTesting.normalizeBillingProfileInput({
-        legalCompanyName: 'Company',
-        taxNumber: '1',
-        taxOffice: 'Office',
-        billingAddress: 'Address',
-        logoIsbasiLastCheckedAt: 'not-a-date',
+    expect(result).toEqual(
+      expect.objectContaining({
+        logoIsbasiCustomerCode: 'CUST001',
       }),
-    ).toThrow('logoIsbasiLastCheckedAt must be an ISO date string or null.');
+    );
+    expect(result).not.toHaveProperty('logoIsbasiCustomerId');
+    expect(result).not.toHaveProperty('logoIsbasiEinvoiceEligible');
+    expect(result).not.toHaveProperty('logoIsbasiLastCheckedAt');
   });
 
   it('fails closed when the vendor does not exist', async () => {

@@ -51,7 +51,6 @@ const OPTIONAL_FIELDS = [
   'billingPhone',
   'legalEntityType',
   'logoIsbasiCustomerCode',
-  'logoIsbasiCustomerId',
 ] as const;
 
 function trimRequiredString(input: VendorBillingProfileInputDto, key: (typeof REQUIRED_FIELDS)[number]) {
@@ -71,36 +70,6 @@ function trimOptionalString(input: VendorBillingProfileInputDto, key: (typeof OP
     throw new Error(`${key} must be a string or null.`);
   }
   return value.trim() || null;
-}
-
-function normalizeOptionalBoolean(input: VendorBillingProfileInputDto, key: 'logoIsbasiEinvoiceEligible') {
-  const value = input[key];
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== 'boolean') {
-    throw new Error(`${key} must be a boolean or null.`);
-  }
-  return value;
-}
-
-function normalizeOptionalDate(input: VendorBillingProfileInputDto, key: 'logoIsbasiLastCheckedAt') {
-  const value = input[key];
-  if (value === undefined || value === null) {
-    return null;
-  }
-  if (typeof value !== 'string') {
-    throw new Error(`${key} must be an ISO date string or null.`);
-  }
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-  const date = new Date(trimmed);
-  if (Number.isNaN(date.getTime())) {
-    throw new Error(`${key} must be an ISO date string or null.`);
-  }
-  return date;
 }
 
 function mapBillingProfile(profile: VendorBillingProfile): VendorBillingProfileDto {
@@ -141,9 +110,6 @@ function normalizeBillingProfileInput(input: VendorBillingProfileInputDto) {
     billingPhone: trimOptionalString(input, 'billingPhone'),
     legalEntityType: trimOptionalString(input, 'legalEntityType'),
     logoIsbasiCustomerCode: trimOptionalString(input, 'logoIsbasiCustomerCode'),
-    logoIsbasiCustomerId: trimOptionalString(input, 'logoIsbasiCustomerId'),
-    logoIsbasiEinvoiceEligible: normalizeOptionalBoolean(input, 'logoIsbasiEinvoiceEligible'),
-    logoIsbasiLastCheckedAt: normalizeOptionalDate(input, 'logoIsbasiLastCheckedAt'),
   };
 }
 

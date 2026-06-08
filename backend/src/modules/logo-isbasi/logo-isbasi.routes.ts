@@ -171,6 +171,10 @@ function normalizeTaxNumber(value: string | null | undefined) {
   return value?.replace(/\D/g, '') ?? '';
 }
 
+function normalizeFirmCode(value: string | null | undefined) {
+  return value?.trim().toLocaleLowerCase('tr-TR') ?? '';
+}
+
 function readFirmTaxNumber(value: unknown) {
   return readRecordString(value, [
     'taxNumber',
@@ -390,27 +394,32 @@ function matchLogoFirmForVendor(profile: VendorBillingProfileDto | null, firms: 
     };
   }
 
+  const profileCustomerCode = normalizeFirmCode(profile.logoIsbasiCustomerCode);
   const profileTaxNumber = normalizeTaxNumber(profile.taxNumber);
   const profileName = normalizeMatchText(profile.legalCompanyName);
   const indexed = firms.map((firm) => ({
     raw: firm,
     sanitized: sanitizeLogoFirm(firm),
+    code: normalizeFirmCode(sanitizeLogoFirm(firm).code),
     taxNumber: normalizeTaxNumber(readFirmTaxNumber(firm)),
     name: normalizeMatchText(sanitizeLogoFirm(firm).name),
   }));
 
-  const exactByTax = profileTaxNumber
+  const exactByCode = profileCustomerCode
+    ? indexed.find((firm) => firm.code && firm.code === profileCustomerCode)
+    : undefined;
+  const exactByTax = !exactByCode && profileTaxNumber
     ? indexed.find((firm) => firm.taxNumber && firm.taxNumber === profileTaxNumber)
     : undefined;
-  const exactByName = !exactByTax && profileName
+  const exactByName = !exactByCode && !exactByTax && profileName
     ? indexed.find((firm) => firm.name && firm.name === profileName)
     : undefined;
-  const exact = exactByTax ?? exactByName ?? null;
+  const exact = exactByCode ?? exactByTax ?? exactByName ?? null;
 
   if (exact) {
     return {
       matchStatus: 'exact_match' as const,
-      matchMethod: exactByTax ? 'taxNumberOrTckn' : 'legalCompanyName',
+      matchMethod: exactByCode ? 'logoIsbasiCustomerCode' : exactByTax ? 'taxNumberOrTckn' : 'legalCompanyName',
       exactMatch: exact.sanitized,
       possibleMatches: [],
       warnings: [],
@@ -743,6 +752,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           vendorId,
           billingProfilePresent: Boolean(profile),
           searchedBy: {
+            logoIsbasiCustomerCodePresent: Boolean(profile?.logoIsbasiCustomerCode?.trim()),
             taxNumberOrTcknPresent: Boolean(profile?.taxNumber?.trim()),
             legalCompanyNamePresent: Boolean(profile?.legalCompanyName?.trim()),
           },

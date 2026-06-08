@@ -325,6 +325,68 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
   });
 
+  it('matches Logo firm code before tax number and name', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-by-tax',
+              code: 'TAX001',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              firmType: 'customer',
+              tcknVkn: '6490512763',
+            },
+            {
+              id: 'firm-by-code',
+              code: 'CUST001',
+              name: 'Manual Logo Customer',
+              firmType: 'customer',
+              tcknVkn: '1111111111',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      taxNumber: '6490512763',
+      legalCompanyName: 'Sporjinal Spor Malzemeleri A.S.',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/match-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'sporjinal' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        matchStatus: 'exact_match',
+        matchMethod: 'logoIsbasiCustomerCode',
+        exactMatch: expect.objectContaining({
+          id: 'firm-by-code',
+          code: 'CUST001',
+          name: 'Manual Logo Customer',
+          taxNumberMasked: '11******11',
+        }),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('1111111111');
+    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
+  });
+
   it('returns a controlled missing env response from the login probe', async () => {
     const { posts } = createRegisteredRoutes({ LOGO_ISBASI_API_KEY: undefined });
     const reply = createReply();

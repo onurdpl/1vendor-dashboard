@@ -290,6 +290,7 @@ describe('VendorProfilePage', () => {
       vendorId: 'demo-vendor-a',
       billingProfilePresent: true,
       searchedBy: {
+        logoIsbasiCustomerCodePresent: true,
         taxNumberOrTcknPresent: true,
         legalCompanyNamePresent: true,
       },
@@ -611,7 +612,7 @@ describe('VendorProfilePage', () => {
         billingCity: input.billingCity ?? null,
         billingDistrict: input.billingDistrict ?? null,
         billingEmail: input.billingEmail ?? null,
-        logoIsbasiCustomerCode: billingProfile.logoIsbasiCustomerCode,
+        logoIsbasiCustomerCode: input.logoIsbasiCustomerCode ?? null,
         logoIsbasiCustomerId: billingProfile.logoIsbasiCustomerId,
         logoIsbasiEinvoiceEligible: billingProfile.logoIsbasiEinvoiceEligible,
         logoIsbasiLastCheckedAt: billingProfile.logoIsbasiLastCheckedAt,
@@ -639,6 +640,8 @@ describe('VendorProfilePage', () => {
     await userEvent.type(within(billingSection!).getByLabelText('Billing district'), 'Konak');
     await userEvent.clear(within(billingSection!).getByLabelText('Billing email'));
     await userEvent.type(within(billingSection!).getByLabelText('Billing email'), 'updated-billing@example.test');
+    await userEvent.clear(within(billingSection!).getByLabelText('Logo İşbaşı customer code'));
+    await userEvent.type(within(billingSection!).getByLabelText('Logo İşbaşı customer code'), 'CUST001');
 
     await userEvent.click(within(billingSection!).getByRole('button', { name: 'Save billing profile' }));
 
@@ -654,15 +657,20 @@ describe('VendorProfilePage', () => {
           billingDistrict: 'Konak',
           billingEmail: 'updated-billing@example.test',
           legalEntityType: 'limited_company',
+          logoIsbasiCustomerCode: 'CUST001',
         }),
       ),
     );
+    const savedInput = updateVendorBillingProfileMock.mock.calls[0]?.[1] as Record<string, unknown>;
+    expect(savedInput).not.toHaveProperty('logoIsbasiCustomerId');
+    expect(savedInput).not.toHaveProperty('logoIsbasiEinvoiceEligible');
+    expect(savedInput).not.toHaveProperty('logoIsbasiLastCheckedAt');
     expect(await within(billingSection!).findByText('Updated Vendor Legal A.S.')).toBeInTheDocument();
     expect(within(billingSection!).getByText('2222222222')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Izmir')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Konak')).toBeInTheDocument();
     expect(within(billingSection!).getByText('updated-billing@example.test')).toBeInTheDocument();
-    expect(within(billingSection!).getByText('LOGO-CODE-1')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('CUST001')).toBeInTheDocument();
     expect(within(billingSection!).queryByRole('heading', { name: 'Billing / Legal Profile edit' })).not.toBeInTheDocument();
   }, 10000);
 
@@ -851,6 +859,35 @@ describe('VendorProfilePage', () => {
       defaultVendorId: 'demo-vendor-a',
     });
     getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+    matchVendorLogoIsbasiFirmMock.mockResolvedValue({
+      ok: true,
+      success: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'firm_match_probe',
+      writesPerformed: false,
+      externalApiCallAttempted: true,
+      vendorId: 'demo-vendor-a',
+      billingProfilePresent: true,
+      searchedBy: {
+        logoIsbasiCustomerCodePresent: true,
+        taxNumberOrTcknPresent: true,
+        legalCompanyNamePresent: true,
+      },
+      count: 2,
+      matchStatus: 'exact_match',
+      matchMethod: 'logoIsbasiCustomerCode',
+      exactMatch: {
+        id: 'firm-1',
+        code: 'CUST001',
+        name: 'Demo Vendor A Ltd.',
+        firmType: 'customer',
+        taxNumberMasked: '11******11',
+        eInvoiceResponsible: true,
+        eArchiveResponsible: false,
+      },
+      possibleMatches: [],
+      warnings: [],
+    });
 
     renderVendorProfilePage();
 
@@ -866,11 +903,13 @@ describe('VendorProfilePage', () => {
     await waitFor(() => expect(matchVendorLogoIsbasiFirmMock).toHaveBeenCalledWith('demo-vendor-a'));
     expect(await within(billingSection!).findByText('Logo vendor firm match result')).toBeInTheDocument();
     expect(within(billingSection!).getByText('exact_match')).toBeInTheDocument();
-    expect(within(billingSection!).getByText('taxNumberOrTckn')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('logoIsbasiCustomerCode')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Exact match')).toBeInTheDocument();
     const exactMatchCard = within(billingSection!).getByText('Exact match').closest('.vendor-profile-logo-match-card');
     expect(exactMatchCard).not.toBeNull();
     expect(within(exactMatchCard as HTMLElement).getByText('Demo Vendor A Ltd.')).toBeInTheDocument();
+    expect(within(exactMatchCard as HTMLElement).getByText(/code CUST001/)).toBeInTheDocument();
+    expect(within(exactMatchCard as HTMLElement).getByText(/tax 11\*\*\*\*\*\*11/)).toBeInTheDocument();
     expect(updateVendorBillingProfileMock).not.toHaveBeenCalled();
     expect(within(exactMatchCard as HTMLElement).queryByText('1111111111')).not.toBeInTheDocument();
   });
