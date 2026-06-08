@@ -1777,6 +1777,24 @@ export type OperationalSignalsResponse = {
   signals: OperationalSignal[];
 };
 
+export type DashboardOperationalSignal = Pick<
+  OperationalSignal,
+  | 'id'
+  | 'status'
+  | 'sourceArea'
+  | 'ruleKey'
+  | 'allocationId'
+  | 'financeLedgerEntryId'
+  | 'payoutBatchId'
+  | 'operationalJobId'
+  | 'title'
+  | 'description'
+>;
+
+export type DashboardOperationalSignalsResponse = {
+  signals: DashboardOperationalSignal[];
+};
+
 export type NotificationStatus = 'pending' | 'delivered' | 'read' | 'dismissed' | 'skipped' | 'failed';
 export type NotificationRecipientRole = 'admin' | 'vendor';
 export type NotificationChannel = 'in_app' | 'email_placeholder' | 'slack_placeholder';

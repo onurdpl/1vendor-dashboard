@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { registerRulesRoutes } from '../backend/src/modules/rules/rules.routes.js';
 
 const evaluateOperationalSignalsForUserMock = vi.hoisted(() => vi.fn());
+const listDashboardOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const listOperationalSignalsMock = vi.hoisted(() => vi.fn());
 const updateOperationalSignalStatusMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/rules/rules.service.js', () => ({
   evaluateOperationalSignalsForUser: evaluateOperationalSignalsForUserMock,
+  listDashboardOperationalSignals: listDashboardOperationalSignalsMock,
   listOperationalSignals: listOperationalSignalsMock,
   updateOperationalSignalStatus: updateOperationalSignalStatusMock,
 }));
@@ -32,6 +34,7 @@ type Reply = {
 describe('rules route contract', () => {
   beforeEach(() => {
     evaluateOperationalSignalsForUserMock.mockReset();
+    listDashboardOperationalSignalsMock.mockReset();
     listOperationalSignalsMock.mockReset();
     updateOperationalSignalStatusMock.mockReset();
   });
@@ -59,6 +62,35 @@ describe('rules route contract', () => {
       includeInternal: false,
       limit: 10,
     });
+    expect(evaluateOperationalSignalsForUserMock).not.toHaveBeenCalled();
+    expect(listDashboardOperationalSignalsMock).not.toHaveBeenCalled();
+  });
+
+  it('routes GET /signals/dashboard through the dashboard projection service with pagination', async () => {
+    listDashboardOperationalSignalsMock.mockResolvedValueOnce({ signals: [] });
+    const gets = new Map<string, (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string; offset?: string } }, reply: Reply) => unknown>();
+    const app = {
+      get: vi.fn((path: string, _options: unknown, handler: (request: { authUser?: { role?: string }; vendorContext?: { vendorId?: string }; query?: { limit?: string; offset?: string } }, reply: Reply) => unknown) => {
+        gets.set(path, handler);
+      }),
+      post: vi.fn(),
+    };
+
+    registerRulesRoutes(app as never, {} as never);
+    const response = await gets.get('/signals/dashboard')?.({
+      authUser: { role: 'vendor' },
+      vendorContext: { vendorId: 'sporjinal' },
+      query: { limit: '10', offset: '0' },
+    }, {} as Reply);
+
+    expect(response).toEqual({ signals: [] });
+    expect(listDashboardOperationalSignalsMock).toHaveBeenCalledWith({
+      vendorId: 'sporjinal',
+      includeInternal: false,
+      limit: 10,
+      offset: 0,
+    });
+    expect(listOperationalSignalsMock).not.toHaveBeenCalled();
     expect(evaluateOperationalSignalsForUserMock).not.toHaveBeenCalled();
   });
 

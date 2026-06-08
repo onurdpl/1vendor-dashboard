@@ -8,12 +8,12 @@ import type {
   AutomationAlert,
   DashboardDiagnosticsSummary,
   DashboardFinanceSnapshot,
+  DashboardOperationalSignal,
   DashboardNormalizedOperationalCounts,
   DashboardOperationalSummary,
   DashboardOverview,
   DashboardPriorityItem,
   FinanceTransaction,
-  OperationalSignal,
   SupportTicket,
 } from './contracts';
 import { runtimeServices } from '../../services/runtime-services';
@@ -202,7 +202,7 @@ function normalizeIssueKeyPart(value: string | null | undefined) {
   return value?.trim().toLowerCase().replace(/\s+/g, ' ') || 'unknown';
 }
 
-function getOperationalSignalEntityKey(signal: OperationalSignal) {
+function getOperationalSignalEntityKey(signal: DashboardOperationalSignal) {
   return signal.allocationId ?? signal.financeLedgerEntryId ?? signal.payoutBatchId ?? signal.operationalJobId ?? signal.id;
 }
 
@@ -215,7 +215,7 @@ function buildOperationalCountMetadata(input: {
   return input;
 }
 
-function countAutomationIssueGroups(alerts: AutomationAlert[], signals: OperationalSignal[]) {
+function countAutomationIssueGroups(alerts: AutomationAlert[], signals: DashboardOperationalSignal[]) {
   const groups = new Set<string>();
   let rawCount = 0;
 
@@ -293,7 +293,7 @@ function countFinanceReviewItems(finance: { transactions?: FinanceTransaction[] 
   };
 }
 
-function countStaleFulfillmentGroups(signals: OperationalSignal[] | null | undefined) {
+function countStaleFulfillmentGroups(signals: DashboardOperationalSignal[] | null | undefined) {
   const staleSignals = (signals ?? []).filter((signal) => {
     const normalized = `${signal.sourceArea} ${signal.ruleKey} ${signal.title}`.toLowerCase();
     return signal.status !== 'resolved' && normalized.includes('fulfillment') && normalized.includes('stale');
@@ -532,7 +532,7 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
         currentUser?.role === 'admin'
           ? withDashboardClientTiming(requestId, 'client.operations.summary', () => runtimeServices.operations.summary(dashboardSummaryReadOptions), 'deferred')
           : Promise.resolve(null),
-        withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
+        withDashboardClientTiming(requestId, 'client.signals.dashboard', () => runtimeServices.signals.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
         currentUser?.role === 'admin'
           ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
           : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),

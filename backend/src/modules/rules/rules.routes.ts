@@ -3,12 +3,17 @@ import type { AppEnv } from '../../config/env.js';
 import { createAuthMiddleware } from '../auth/auth.middleware.js';
 import { createAuthService } from '../auth/auth.service.js';
 import { requireVendorAccess } from '../vendor-access/vendor-access.middleware.js';
-import { evaluateOperationalSignalsForUser, listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
+import { evaluateOperationalSignalsForUser, listDashboardOperationalSignals, listOperationalSignals, updateOperationalSignalStatus } from './rules.service.js';
 import type { OperationalSignalLifecycleAction } from './rules.types.js';
 import { withDashboardRouteTiming } from '../../lib/dashboard-timing.js';
+import { resolvePagination } from '../../lib/pagination.js';
 
 type SignalListQuery = {
   limit?: string | number;
+};
+
+type SignalDashboardListQuery = SignalListQuery & {
+  offset?: string | number;
 };
 
 export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
@@ -28,6 +33,24 @@ export function registerRulesRoutes(app: FastifyInstance, env: AppEnv) {
           vendorId: request.vendorContext?.vendorId,
           includeInternal,
           limit: parseSignalLimit(request.query?.limit),
+        }),
+      );
+    },
+  );
+
+  app.get<{ Querystring: SignalDashboardListQuery }>(
+    '/signals/dashboard',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request) => {
+      const includeInternal = request.authUser?.role === 'admin';
+
+      return withDashboardRouteTiming('GET /signals/dashboard', () =>
+        listDashboardOperationalSignals({
+          vendorId: request.vendorContext?.vendorId,
+          includeInternal,
+          ...resolvePagination(request.query, { limit: 10 }),
         }),
       );
     },

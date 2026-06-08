@@ -44,4 +44,22 @@ export type OperationalSignalsResponseDto = {
   signals: OperationalSignalDto[];
 };
 
+export type DashboardOperationalSignalDto = Pick<
+  OperationalSignalDto,
+  | 'id'
+  | 'status'
+  | 'sourceArea'
+  | 'ruleKey'
+  | 'allocationId'
+  | 'financeLedgerEntryId'
+  | 'payoutBatchId'
+  | 'operationalJobId'
+  | 'title'
+  | 'description'
+>;
+
+export type DashboardOperationalSignalsResponseDto = {
+  signals: DashboardOperationalSignalDto[];
+};
+
 export type OperationalSignalLifecycleAction = 'acknowledge' | 'resolve' | 'ignore';

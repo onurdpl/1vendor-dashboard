@@ -8,7 +8,7 @@ vi.mock('../../lib/api-client', () => ({
   },
 }));
 
-const { listOperationalSignals } = await import('./signals');
+const { listDashboardSignals, listOperationalSignals } = await import('./signals');
 
 describe('real operational signals service', () => {
   beforeEach(() => {
@@ -40,5 +40,24 @@ describe('real operational signals service', () => {
         'X-Dashboard-Deferred-Load': 'true',
       },
     });
+  });
+
+  it('loads dashboard signals through the dashboard projection endpoint', async () => {
+    await listDashboardSignals('sporjinal', {
+      limit: 10,
+      offset: 0,
+      headers: {
+        'X-Dashboard-Deferred-Load': 'true',
+      },
+    });
+
+    expect(apiGetMock).toHaveBeenCalledWith('/signals/dashboard?limit=10&offset=0', {
+      vendorId: 'sporjinal',
+      signal: undefined,
+      headers: {
+        'X-Dashboard-Deferred-Load': 'true',
+      },
+    });
+    expect(apiGetMock).not.toHaveBeenCalledWith(expect.stringMatching(/^\/signals(?:\?|$)/), expect.anything());
   });
 });

@@ -12,6 +12,8 @@ import {
 import { prisma } from '../../db/prisma.js';
 import { getVendorFinanceDashboard } from '../finance/finance.service.js';
 import type {
+  DashboardOperationalSignalDto,
+  DashboardOperationalSignalsResponseDto,
   OperationalSignalDto,
   OperationalSignalLifecycleAction,
   OperationalSignalsResponseDto,
@@ -149,6 +151,34 @@ function mapSignal(signal: OperationalSignal): OperationalSignalDto {
     metadata: signal.metadata,
     createdAt: signal.createdAt.toISOString(),
     updatedAt: signal.updatedAt.toISOString(),
+  };
+}
+
+type DashboardOperationalSignalRow = {
+  id: string;
+  sourceArea: OperationalSignalSourceArea;
+  allocationId: string | null;
+  financeLedgerEntryId: string | null;
+  payoutBatchId: string | null;
+  operationalJobId: string | null;
+  title: string;
+  description: string;
+  status: OperationalSignalStatus;
+  ruleKey: string;
+};
+
+function mapDashboardSignal(signal: DashboardOperationalSignalRow): DashboardOperationalSignalDto {
+  return {
+    id: signal.id,
+    sourceArea: signal.sourceArea.trim().toLowerCase() as DashboardOperationalSignalDto['sourceArea'],
+    allocationId: signal.allocationId,
+    financeLedgerEntryId: signal.financeLedgerEntryId,
+    payoutBatchId: signal.payoutBatchId,
+    operationalJobId: signal.operationalJobId,
+    title: signal.title,
+    description: signal.description,
+    status: signal.status.trim().toLowerCase() as DashboardOperationalSignalDto['status'],
+    ruleKey: signal.ruleKey,
   };
 }
 
@@ -697,6 +727,52 @@ export async function listOperationalSignals(options: {
   };
   logDashboardTiming('signals.metrics_aggregation', aggregationStartedAt);
   return response;
+}
+
+export async function listDashboardOperationalSignals(options: {
+  vendorId?: string | null;
+  includeInternal?: boolean;
+  status?: OperationalSignalStatus;
+  limit?: number;
+  offset?: number;
+} = {}): Promise<DashboardOperationalSignalsResponseDto> {
+  const signals = await withDashboardTiming('signals.dashboard_signal_fetch', () => prisma.operationalSignal.findMany({
+    where: {
+      vendorId: options.vendorId ?? undefined,
+      status: options.status ?? OperationalSignalStatus.ACTIVE,
+      sourceArea: options.includeInternal
+        ? undefined
+        : {
+            notIn: [OperationalSignalSourceArea.DIAGNOSTICS, OperationalSignalSourceArea.RECONCILIATION],
+          },
+    },
+    select: {
+      id: true,
+      status: true,
+      sourceArea: true,
+      ruleKey: true,
+      allocationId: true,
+      financeLedgerEntryId: true,
+      payoutBatchId: true,
+      operationalJobId: true,
+      title: true,
+      description: true,
+    },
+    orderBy: [
+      {
+        severity: 'desc',
+      },
+      {
+        triggeredAt: 'desc',
+      },
+    ],
+    take: options.limit ?? 10,
+    skip: options.offset ?? 0,
+  }));
+
+  return {
+    signals: signals.map(mapDashboardSignal),
+  };
 }
 
 export async function evaluateOperationalSignalsForUser(options: {

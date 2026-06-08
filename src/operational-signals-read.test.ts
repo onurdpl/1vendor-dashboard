@@ -24,7 +24,7 @@ vi.mock('../backend/src/lib/dashboard-timing.js', () => ({
   withDashboardTiming: vi.fn((_step: string, action: () => unknown) => action()),
 }));
 
-const { listOperationalSignals } = await import('../backend/src/modules/rules/rules.service.js');
+const { listDashboardOperationalSignals, listOperationalSignals } = await import('../backend/src/modules/rules/rules.service.js');
 
 function buildSignal(overrides: Record<string, unknown> = {}) {
   const now = new Date('2026-05-13T10:00:00.000Z');
@@ -90,5 +90,69 @@ describe('operational signal reads', () => {
     );
     expect(prismaMock.vendor.findMany).not.toHaveBeenCalled();
     expect(prismaMock.operationalSignal.upsert).not.toHaveBeenCalled();
+  });
+
+  it('returns dashboard signal projections with only dashboard fields', async () => {
+    prismaMock.operationalSignal.findMany.mockResolvedValueOnce([buildSignal()]);
+
+    const response = await listDashboardOperationalSignals({
+      vendorId: 'sporjinal',
+      includeInternal: false,
+      limit: 10,
+      offset: 2,
+    });
+
+    expect(prismaMock.operationalSignal.findMany).toHaveBeenCalledWith({
+      where: {
+        vendorId: 'sporjinal',
+        status: 'ACTIVE',
+        sourceArea: {
+          notIn: ['DIAGNOSTICS', 'RECONCILIATION'],
+        },
+      },
+      select: {
+        id: true,
+        status: true,
+        sourceArea: true,
+        ruleKey: true,
+        allocationId: true,
+        financeLedgerEntryId: true,
+        payoutBatchId: true,
+        operationalJobId: true,
+        title: true,
+        description: true,
+      },
+      orderBy: [
+        {
+          severity: 'desc',
+        },
+        {
+          triggeredAt: 'desc',
+        },
+      ],
+      take: 10,
+      skip: 2,
+    });
+    expect(response).toEqual({
+      signals: [
+        {
+          id: 'signal-1',
+          status: 'active',
+          sourceArea: 'fulfillment',
+          ruleKey: 'fulfillment.stale_awaiting_shipment',
+          allocationId: 'alloc-1',
+          financeLedgerEntryId: null,
+          payoutBatchId: null,
+          operationalJobId: null,
+          title: 'Fulfillment is stale',
+          description: 'Allocation alloc-1 is stale.',
+        },
+      ],
+    });
+    expect(response.signals[0]).not.toHaveProperty('severity');
+    expect(response.signals[0]).not.toHaveProperty('vendorId');
+    expect(response.signals[0]).not.toHaveProperty('suggestedAction');
+    expect(response.signals[0]).not.toHaveProperty('metadata');
+    expect(response).not.toHaveProperty('summary');
   });
 });

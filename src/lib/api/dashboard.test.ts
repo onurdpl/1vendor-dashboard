@@ -110,6 +110,9 @@ function createRuntimeServices() {
         },
         signals: [],
       }),
+      dashboard: vi.fn().mockResolvedValue({
+        signals: [],
+      }),
     },
     notifications: {
       list: vi.fn().mockResolvedValue({
@@ -245,7 +248,8 @@ describe('dashboard real-mode loading', () => {
     expect(services.finance.summary).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.finance.dashboard).not.toHaveBeenCalled();
     expect(services.automation.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
-    expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.signals.dashboard).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
+    expect(services.signals.list).not.toHaveBeenCalled();
     expect(services.notifications.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).toHaveBeenCalledWith(expect.any(Object));
   });
@@ -262,6 +266,7 @@ describe('dashboard real-mode loading', () => {
     expect(services.returns.list).not.toHaveBeenCalled();
     expect(services.finance.summary).not.toHaveBeenCalled();
     expect(services.automation.dashboard).not.toHaveBeenCalled();
+    expect(services.signals.dashboard).not.toHaveBeenCalled();
     expect(services.signals.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).not.toHaveBeenCalled();
 
@@ -272,11 +277,13 @@ describe('dashboard real-mode loading', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(services.finance.summary).toHaveBeenCalledTimes(1);
     expect(services.automation.dashboard).toHaveBeenCalledTimes(1);
+    expect(services.signals.dashboard).not.toHaveBeenCalled();
     expect(services.signals.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(500);
-    expect(services.signals.list).toHaveBeenCalledTimes(1);
+    expect(services.signals.dashboard).toHaveBeenCalledTimes(1);
+    expect(services.signals.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).toHaveBeenCalledTimes(1);
 
     await overviewPromise;
@@ -309,7 +316,7 @@ describe('dashboard real-mode loading', () => {
     const returnOptions = services.returns.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number; offset?: number } | undefined;
     const financeOptions = services.finance.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
     const summaryOptions = services.dashboard.summary.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
-    const signalOptions = services.signals.list.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number } | undefined;
+    const signalOptions = services.signals.dashboard.mock.calls[0]?.[1] as { headers?: Record<string, string>; limit?: number; offset?: number } | undefined;
 
     expect(orderOptions?.headers?.['X-Request-Id']).toEqual(expect.any(String));
     expect(orderOptions?.headers?.['X-Dashboard-Deferred-Load']).toBe('true');
@@ -326,6 +333,7 @@ describe('dashboard real-mode loading', () => {
     expect(financeOptions?.headers).not.toHaveProperty('X-Dashboard-Initial-Load');
     expect(financeOptions?.limit).toBeUndefined();
     expect(signalOptions?.limit).toBe(10);
+    expect(signalOptions?.offset).toBe(0);
   });
 
   it('uses dashboard summary counts for primary metrics instead of limited arrays', async () => {
@@ -520,50 +528,31 @@ describe('dashboard real-mode loading', () => {
           closedAt: '2026-05-13T09:30:00.000Z',
         },
       ]);
-      runtimeServices.signals.list.mockResolvedValue({
-        summary: {
-          total: 2,
-          critical: 0,
-          high: 2,
-          warning: 0,
-          info: 0,
-        },
+      runtimeServices.signals.dashboard.mockResolvedValue({
         signals: [
           {
             id: 'signal-1',
-            type: 'rule',
-            severity: 'high',
             sourceArea: 'fulfillment',
-            vendorId: 'vendor-query-key',
             allocationId: 'allocation-1',
             financeLedgerEntryId: null,
             payoutBatchId: null,
             operationalJobId: null,
             title: 'Fulfillment is stale',
             description: 'Allocation is stale.',
-            suggestedAction: 'Review shipment',
             status: 'active',
             ruleKey: 'fulfillment.stale_awaiting_shipment',
-            triggeredAt: '2026-05-13T10:00:00.000Z',
-            resolvedAt: null,
           },
           {
             id: 'signal-2',
-            type: 'rule',
-            severity: 'high',
             sourceArea: 'fulfillment',
-            vendorId: 'vendor-query-key',
             allocationId: 'allocation-1',
             financeLedgerEntryId: null,
             payoutBatchId: null,
             operationalJobId: null,
             title: 'Fulfillment is stale',
             description: 'Duplicate stale evidence.',
-            suggestedAction: 'Review shipment',
             status: 'active',
             ruleKey: 'fulfillment.stale_awaiting_shipment',
-            triggeredAt: '2026-05-13T10:05:00.000Z',
-            resolvedAt: null,
           },
         ],
       });

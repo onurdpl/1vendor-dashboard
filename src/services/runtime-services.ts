@@ -29,6 +29,7 @@ import * as realVendors from './real/vendors';
 import type {
   CreateSupportTicketInput,
   DashboardNotificationsResponse,
+  DashboardOperationalSignalsResponse,
   DashboardOperationalSummary,
   DashboardReturnSummary,
   KargonomiReturnPreview,
@@ -2143,6 +2144,17 @@ export const runtimeServices = {
               warning: 0,
               info: 0,
             },
+            signals: [],
+          }),
+    dashboard: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}): Promise<DashboardOperationalSignalsResponse> =>
+      runtimeConfig.apiMode === 'real'
+        ? realSignals.listDashboardSignals(vendorId, {
+            signal: options.signal,
+            headers: options.headers,
+            limit: options.limit,
+            offset: options.offset,
+          })
+        : Promise.resolve({
             signals: [],
           }),
   },
