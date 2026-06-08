@@ -17,7 +17,7 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { getVendorFinanceDashboard, upsertVendorFinancialProfile } = await import(
+const { getVendorFinanceDashboard, getVendorFinanceSummary, upsertVendorFinancialProfile } = await import(
   '../backend/src/modules/finance/finance.service.js'
 );
 
@@ -347,5 +347,62 @@ describe('persisted vendor finance calculations', () => {
       refundedBalance: '100.00',
       pendingSettlement: '450.00',
     });
+  });
+
+  it('builds dashboard finance summary without fetching records, profile, or payout batch', async () => {
+    await upsertVendorFinancialProfile('sporjinal', {
+      commissionPercent: 15,
+      commissionVatPercent: 18,
+      deductShippingEnabled: true,
+      shippingMode: 'external_provider',
+      fixedShippingFee: 88,
+    });
+    ledgerRows.unshift(
+      buildSaleFixture({
+        id: 'fin-sporjinal-sale-new',
+        amount: 1000,
+        orderId: 'new-order',
+        orderNumber: '#1024',
+        commissionPercentSnapshot: activeProfile?.commissionPercent ?? 15,
+        commissionVatPercentSnapshot: activeProfile?.commissionVatPercent ?? 18,
+        createdAt: '2026-05-13T12:00:00.000Z',
+      }),
+      buildSaleFixture({
+        id: 'fin-sporjinal-sale-accruing',
+        amount: 500,
+        orderId: 'unfulfilled-order',
+        orderNumber: '#1025',
+        commissionPercentSnapshot: 10,
+        commissionVatPercentSnapshot: 0,
+        createdAt: '2026-05-13T12:30:00.000Z',
+        fulfilled: false,
+      }),
+    );
+    prismaMock.financeLedgerEntry.findMany.mockClear();
+    prismaMock.vendorFinancialProfile.findFirst.mockClear();
+    prismaMock.payoutBatch.findFirst.mockClear();
+
+    const summary = await getVendorFinanceSummary('sporjinal');
+
+    expect(summary).toEqual({
+      summary: {
+        grossSales: '4899.00',
+        refunds: '100.00',
+        netRevenue: '4799.00',
+        payoutEstimate: '4232.10',
+      },
+    });
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledTimes(1);
+    expect(prismaMock.vendorFinancialProfile.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.payoutBatch.findFirst).not.toHaveBeenCalled();
+    expect(prismaMock.financeLedgerEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        select: expect.not.objectContaining({
+          description: true,
+          payoutBatchLines: expect.anything(),
+          invoiceExecutions: expect.anything(),
+        }),
+      }),
+    );
   });
 });

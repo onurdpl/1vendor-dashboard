@@ -208,6 +208,77 @@ function isFulfilledForShipping(allocation: {
   );
 }
 
+type FinanceSummaryCalculationEntry = {
+  entryType: string;
+  amount: unknown;
+  commissionPercentSnapshot?: unknown;
+  commissionVatPercentSnapshot?: unknown;
+  deductShippingEnabledSnapshot?: boolean | null;
+  shippingModeSnapshot?: string | null;
+  fixedShippingFeeSnapshot?: unknown;
+  shippingCostSnapshot?: unknown;
+  shippingVatAmountSnapshot?: unknown;
+  shippingCostSourceSnapshot?: string | null;
+  shippingCostProviderSnapshot?: string | null;
+  vendorAllocation?: {
+    allocationStatus?: string;
+    fulfillmentStatus?: string | null;
+    shippingStatus?: string | null;
+    fulfillment?: { fulfilledAt: Date | null } | null;
+  } | null;
+};
+
+function calculateFinanceSummaryAmounts(
+  summaryEntries: FinanceSummaryCalculationEntry[],
+  profile: VendorFinancialProfileDto,
+) {
+  const grossSales = summaryEntries
+    .filter((entry) => normalizeType(entry.entryType) === 'sale')
+    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+  const refunds = summaryEntries
+    .filter((entry) => normalizeType(entry.entryType) === 'refund')
+    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
+  const netRevenue = grossSales - refunds;
+  const saleSummary = summaryEntries
+    .filter((entry) => normalizeType(entry.entryType) === 'sale')
+    .reduce(
+      (summary, entry) => {
+        const entryProfile = resolveCalculationProfile(entry, profile);
+        const calculation = calculateVendorPayout({
+          grossAmount: toNumber(entry.amount),
+          refundAmount: 0,
+          fulfilled: isFulfilledForShipping(entry.vendorAllocation),
+          profile: entryProfile,
+        });
+
+        return {
+          platformFee: summary.platformFee + calculation.commission,
+          commissionVat: summary.commissionVat + calculation.commissionVat,
+          shippingDeductions: summary.shippingDeductions + calculation.shippingDeduction,
+        };
+      },
+      {
+        platformFee: 0,
+        commissionVat: 0,
+        shippingDeductions: 0,
+      },
+    );
+  const platformFee = saleSummary.platformFee;
+  const commissionVat = saleSummary.commissionVat;
+  const shippingDeductions = saleSummary.shippingDeductions;
+  const payoutEstimate = grossSales - platformFee - commissionVat - shippingDeductions - refunds;
+
+  return {
+    grossSales,
+    refunds,
+    netRevenue,
+    platformFee,
+    commissionVat,
+    shippingDeductions,
+    payoutEstimate,
+  };
+}
+
 function mapCalculation(
   calculation: ReturnType<typeof calculateVendorPayout>,
   profile: CalculationProfile,
@@ -793,41 +864,15 @@ export async function getVendorFinanceDashboard(
   const aggregationStartedAt = startDashboardTimer();
   const profile = mapProfile(storedProfile, vendorId);
 
-  const grossSales = summaryEntries
-    .filter((entry) => normalizeType(entry.entryType) === 'sale')
-    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
-  const refunds = summaryEntries
-    .filter((entry) => normalizeType(entry.entryType) === 'refund')
-    .reduce((sum, entry) => sum + toNumber(entry.amount), 0);
-  const netRevenue = grossSales - refunds;
-  const saleSummary = summaryEntries
-    .filter((entry) => normalizeType(entry.entryType) === 'sale')
-    .reduce(
-      (summary, entry) => {
-        const entryProfile = resolveCalculationProfile(entry, profile);
-        const calculation = calculateVendorPayout({
-          grossAmount: toNumber(entry.amount),
-          refundAmount: 0,
-          fulfilled: isFulfilledForShipping(entry.vendorAllocation),
-          profile: entryProfile,
-        });
-
-        return {
-          platformFee: summary.platformFee + calculation.commission,
-          commissionVat: summary.commissionVat + calculation.commissionVat,
-          shippingDeductions: summary.shippingDeductions + calculation.shippingDeduction,
-        };
-      },
-      {
-        platformFee: 0,
-        commissionVat: 0,
-        shippingDeductions: 0,
-      },
-    );
-  const platformFee = saleSummary.platformFee;
-  const commissionVat = saleSummary.commissionVat;
-  const shippingDeductions = saleSummary.shippingDeductions;
-  const payoutEstimate = grossSales - platformFee - commissionVat - shippingDeductions - refunds;
+  const {
+    grossSales,
+    refunds,
+    netRevenue,
+    platformFee,
+    commissionVat,
+    shippingDeductions,
+    payoutEstimate,
+  } = calculateFinanceSummaryAmounts(summaryEntries, profile);
   const balanceSummary = summaryEntries.reduce(
     (summary, entry) => {
       const type = normalizeType(entry.entryType);
@@ -978,13 +1023,48 @@ export async function getVendorFinanceDashboard(
 }
 
 export async function getVendorFinanceSummary(vendorId: string): Promise<FinanceDashboardSummaryDto> {
-  const dashboard = await getVendorFinanceDashboard(vendorId, { limit: 0, offset: 0 });
+  const summaryEntries = await withDashboardTiming('finance.summary_entries_fetch', () => prisma.financeLedgerEntry.findMany({
+    where: {
+      vendorId,
+    },
+    select: {
+      entryType: true,
+      amount: true,
+      commissionPercentSnapshot: true,
+      commissionVatPercentSnapshot: true,
+      deductShippingEnabledSnapshot: true,
+      shippingModeSnapshot: true,
+      fixedShippingFeeSnapshot: true,
+      shippingCostSnapshot: true,
+      shippingVatAmountSnapshot: true,
+      shippingCostSourceSnapshot: true,
+      shippingCostProviderSnapshot: true,
+      vendorAllocation: {
+        select: {
+          allocationStatus: true,
+          fulfillmentStatus: true,
+          shippingStatus: true,
+          fulfillment: {
+            select: {
+              fulfilledAt: true,
+            },
+          },
+        },
+      },
+    },
+  }));
+  const defaultProfile = mapProfile(null, vendorId);
+  const { grossSales, refunds, netRevenue, payoutEstimate } = calculateFinanceSummaryAmounts(
+    summaryEntries,
+    defaultProfile,
+  );
+
   return {
     summary: {
-      grossSales: dashboard.summary.grossSales,
-      refunds: dashboard.summary.refunds,
-      netRevenue: dashboard.summary.netRevenue,
-      payoutEstimate: dashboard.summary.payoutEstimate,
+      grossSales: toAmountString(grossSales),
+      refunds: toAmountString(refunds),
+      netRevenue: toAmountString(netRevenue),
+      payoutEstimate: toAmountString(payoutEstimate),
     },
   };
 }
