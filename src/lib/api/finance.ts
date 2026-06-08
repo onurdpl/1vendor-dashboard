@@ -5,6 +5,10 @@ export function getFinanceDashboard(options: { vendorId?: string | null; signal?
   return runtimeServices.finance.dashboard(options.vendorId ?? undefined, { signal: options.signal });
 }
 
+export function getFinanceProfile(options: { vendorId?: string | null; signal?: AbortSignal } = {}) {
+  return runtimeServices.finance.profile(options.vendorId ?? undefined, { signal: options.signal });
+}
+
 export function updateVendorFinancialProfile(
   vendorId: string,
   input: {

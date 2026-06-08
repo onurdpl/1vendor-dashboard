@@ -3,13 +3,14 @@ import { registerFinanceRoutes } from '../backend/src/modules/finance/finance.ro
 
 const upsertVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 const getVendorFinanceSummaryMock = vi.hoisted(() => vi.fn());
+const getVendorFinancialProfileMock = vi.hoisted(() => vi.fn());
 
 vi.mock('../backend/src/modules/finance/finance.service.js', () => ({
   cancelPayoutBatch: vi.fn(),
   getPayoutBatch: vi.fn(),
   getVendorFinanceDashboard: vi.fn(),
   getVendorFinanceSummary: getVendorFinanceSummaryMock,
-  getVendorFinancialProfile: vi.fn(),
+  getVendorFinancialProfile: getVendorFinancialProfileMock,
   listPayoutBatches: vi.fn(),
   markPayoutBatchReview: vi.fn(),
   preparePayoutBatch: vi.fn(),
@@ -137,6 +138,16 @@ describe('finance route validation', () => {
         payoutEstimate: '67.50',
       },
     });
+    getVendorFinancialProfileMock.mockResolvedValue({
+      vendorId: 'sporjinal',
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+      deductShippingEnabled: true,
+      shippingMode: 'fixed',
+      fixedShippingFee: '30.00',
+      active: true,
+      source: 'configured',
+    });
   });
 
   it('returns only dashboard finance summary fields', async () => {
@@ -178,6 +189,47 @@ describe('finance route validation', () => {
       body: { message: 'Vendor context could not be resolved.' },
     });
     expect(getVendorFinanceSummaryMock).not.toHaveBeenCalled();
+  });
+
+  it('returns only the vendor-scoped finance profile fields', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/profile')?.(
+      {
+        vendorContext: { vendorId: 'sporjinal' },
+      },
+      reply,
+    );
+
+    expect(result).toEqual({
+      vendorId: 'sporjinal',
+      commissionPercent: '10.00',
+      commissionVatPercent: '0.00',
+      deductShippingEnabled: true,
+      shippingMode: 'fixed',
+      fixedShippingFee: '30.00',
+      active: true,
+      source: 'configured',
+    });
+    expect(getVendorFinancialProfileMock).toHaveBeenCalledWith('sporjinal');
+    expect(result).not.toHaveProperty('summary');
+    expect(result).not.toHaveProperty('records');
+    expect(result).not.toHaveProperty('payoutBatchSummary');
+    expect(result).not.toHaveProperty('transactions');
+  });
+
+  it('rejects finance profile requests without resolved vendor context', async () => {
+    const gets = createRegisteredGetRoutes();
+    const reply = createReply();
+
+    const result = await gets.get('/finance/profile')?.({}, reply);
+
+    expect(result).toEqual({
+      status: 400,
+      body: { message: 'Vendor context could not be resolved.' },
+    });
+    expect(getVendorFinancialProfileMock).not.toHaveBeenCalled();
   });
 
   it.each(['disabled', 'fixed', 'external_provider'])('accepts supported shippingMode value %s', async (shippingMode) => {

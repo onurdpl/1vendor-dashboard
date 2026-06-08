@@ -230,6 +230,13 @@ export async function getFinanceSummary(options: { vendorId?: string | null; sig
   };
 }
 
+export async function getFinanceProfile(options: { vendorId?: string | null; signal?: AbortSignal; headers?: HeadersInit } = {}): Promise<VendorFinancialProfile> {
+  const requestOptions = readVendorRequestOptions(options);
+  return requestOptions
+    ? apiClient.get<VendorFinancialProfile>('/finance/profile', requestOptions)
+    : apiClient.get<VendorFinancialProfile>('/finance/profile');
+}
+
 export async function updateVendorFinancialProfile(
   vendorId: string,
   input: {

@@ -1688,6 +1688,10 @@ export const runtimeServices = {
       runtimeConfig.apiMode === 'real'
         ? realFinance.getFinanceDashboard({ vendorId, signal: options.signal, headers: options.headers, limit: options.limit, offset: options.offset })
         : Promise.resolve(getMockFinanceDashboard(vendorId)),
+    profile: (vendorId = getCurrentVendorId(), options: ReadRequestOptions = {}) =>
+      runtimeConfig.apiMode === 'real'
+        ? realFinance.getFinanceProfile({ vendorId, signal: options.signal, headers: options.headers })
+        : Promise.resolve(getMockFinanceDashboard(vendorId).profile!),
     updateProfile: (
       vendorId: string,
       input: Parameters<typeof realFinance.updateVendorFinancialProfile>[1],

@@ -6,19 +6,20 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { VendorProfilePage } from './VendorProfilePage';
 import { ApiError } from '../lib/api/errors';
 import type {
-  FinanceDashboard,
   LogoIsbasiCommissionInvoicePreviewInput,
   LogoIsbasiCommissionInvoicePreviewResult,
   LogoIsbasiLoginProbeResult,
   SupportTicket,
   VendorBillingProfile,
   VendorBillingProfileInput,
+  VendorFinancialProfile,
   VendorShippingConfig,
 } from '../lib/api/contracts';
 import { setCurrentUser, setToken } from '../lib/auth';
 
 const getVendorShippingConfigMock = vi.fn<() => Promise<VendorShippingConfig>>();
-const getFinanceDashboardMock = vi.fn<() => Promise<FinanceDashboard>>();
+const getFinanceProfileMock = vi.fn<() => Promise<VendorFinancialProfile>>();
+const getFinanceDashboardMock = vi.fn();
 const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | null>>();
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
@@ -42,6 +43,7 @@ vi.mock('../features/finance/api', async () => {
   return {
     ...actual,
     getFinanceDashboard: () => getFinanceDashboardMock(),
+    getFinanceProfile: () => getFinanceProfileMock(),
   };
 });
 
@@ -99,35 +101,15 @@ const shippingConfig: VendorShippingConfig = {
   },
 };
 
-const financeDashboard: FinanceDashboard = {
-  summary: {
-    grossSales: '$10,000.00',
-    refunds: '$500.00',
-    netRevenue: '$9,500.00',
-    platformFee: '$1,187.50',
-    payoutEstimate: '$8,312.50',
-    totalRevenue: '$10,000.00',
-    availableBalance: '$8,312.50',
-    pendingPayouts: '$0.00',
-    refundsThisMonth: '$500.00',
-  },
-  profile: {
-    vendorId: 'demo-vendor-a',
-    commissionPercent: '12.50',
-    commissionVatPercent: '20.00',
-    deductShippingEnabled: true,
-    shippingMode: 'external_provider',
-    fixedShippingFee: null,
-    active: true,
-    source: 'configured',
-  },
-  payoutBatchSummary: {
-    eligibleRowCount: 0,
-    eligibleNetAmount: '$0.00',
-    blockedRowCount: 0,
-    latestBatch: null,
-  },
-  transactions: [],
+const financeProfile: VendorFinancialProfile = {
+  vendorId: 'demo-vendor-a',
+  commissionPercent: '12.50',
+  commissionVatPercent: '20.00',
+  deductShippingEnabled: true,
+  shippingMode: 'external_provider',
+  fixedShippingFee: null,
+  active: true,
+  source: 'configured',
 };
 
 const billingProfile: VendorBillingProfile = {
@@ -234,7 +216,9 @@ describe('VendorProfilePage', () => {
     getVendorShippingConfigMock.mockReset();
     getVendorShippingConfigMock.mockResolvedValue(shippingConfig);
     getFinanceDashboardMock.mockReset();
-    getFinanceDashboardMock.mockResolvedValue(financeDashboard);
+    getFinanceDashboardMock.mockResolvedValue({ profile: financeProfile });
+    getFinanceProfileMock.mockReset();
+    getFinanceProfileMock.mockResolvedValue(financeProfile);
     getVendorBillingProfileMock.mockReset();
     getVendorBillingProfileMock.mockResolvedValue(null);
     updateVendorBillingProfileMock.mockReset();
@@ -340,6 +324,8 @@ describe('VendorProfilePage', () => {
     expect(screen.queryByText(/Paraşüt contact source/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(getVendorBillingProfileMock).not.toHaveBeenCalled();
+    expect(getFinanceProfileMock).toHaveBeenCalled();
+    expect(getFinanceDashboardMock).not.toHaveBeenCalled();
     expect(screen.getByText('Shopify workspace')).toBeInTheDocument();
     expect(screen.getAllByText('Provider configuration status').length).toBeGreaterThan(0);
     expect(screen.getByText('Fields not modeled yet')).toBeInTheDocument();
@@ -357,13 +343,10 @@ describe('VendorProfilePage', () => {
       providerMetadata: {},
       source: 'default',
     });
-    getFinanceDashboardMock.mockResolvedValue({
-      ...financeDashboard,
-      profile: {
-        ...financeDashboard.profile!,
-        active: false,
-        source: 'default',
-      },
+    getFinanceProfileMock.mockResolvedValue({
+      ...financeProfile,
+      active: false,
+      source: 'default',
     });
 
     renderVendorProfilePage();

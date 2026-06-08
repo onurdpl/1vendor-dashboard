@@ -66,6 +66,23 @@ export function registerFinanceRoutes(app: FastifyInstance, env: AppEnv) {
   );
 
   app.get(
+    '/finance/profile',
+    {
+      preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],
+    },
+    async (request, reply) => {
+      const vendorId = request.vendorContext?.vendorId;
+      if (!vendorId) {
+        return reply.code(400).send({ message: 'Vendor context could not be resolved.' });
+      }
+
+      return withDashboardRouteTiming('GET /finance/profile', () =>
+        withSlowEndpointTiming('GET /finance/profile', () => getVendorFinancialProfile(vendorId)),
+      );
+    },
+  );
+
+  app.get(
     '/finance',
     {
       preHandler: [authMiddleware.authenticateRequest, requireVendorAccess],

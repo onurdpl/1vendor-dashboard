@@ -2,6 +2,7 @@ export {
   attachShippingCost,
   createInvoiceExecution,
   getFinanceDashboard,
+  getFinanceProfile,
   getInvoiceExecutionResponseSummary,
   preparePayoutBatch,
   retryInvoiceExecution,

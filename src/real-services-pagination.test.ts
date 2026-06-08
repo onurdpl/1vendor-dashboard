@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { listWebhookDiagnostics } from './services/real/diagnostics';
-import { getFinanceDashboard, getFinanceSummary } from './services/real/finance';
+import { getFinanceDashboard, getFinanceProfile, getFinanceSummary } from './services/real/finance';
 import { listOrders } from './services/real/orders';
 import { listAdminOperationsQueue } from './services/real/operations';
 import { listReturns } from './services/real/returns';
@@ -81,6 +81,41 @@ describe('real service pagination plumbing', () => {
       refunds: 'TRY\u00a025.00',
       netRevenue: 'TRY\u00a075.00',
       payoutEstimate: 'TRY\u00a067.50',
+    });
+  });
+
+  it('reads the vendor finance profile without calling the full finance dashboard endpoint', async () => {
+    apiClientGet.mockResolvedValueOnce({
+      vendorId: 'vendor-1',
+      commissionPercent: '12.50',
+      commissionVatPercent: '20.00',
+      deductShippingEnabled: true,
+      shippingMode: 'external_provider',
+      fixedShippingFee: null,
+      active: true,
+      source: 'configured',
+    });
+
+    const profile = await getFinanceProfile({
+      vendorId: 'vendor-1',
+    });
+
+    expect(apiClientGet).toHaveBeenCalledWith(
+      '/finance/profile',
+      expect.objectContaining({
+        vendorId: 'vendor-1',
+      }),
+    );
+    expect(apiClientGet).not.toHaveBeenCalledWith(expect.stringMatching(/^\/finance(?:\?|$)/), expect.anything());
+    expect(profile).toEqual({
+      vendorId: 'vendor-1',
+      commissionPercent: '12.50',
+      commissionVatPercent: '20.00',
+      deductShippingEnabled: true,
+      shippingMode: 'external_provider',
+      fixedShippingFee: null,
+      active: true,
+      source: 'configured',
     });
   });
 });

@@ -12,7 +12,7 @@ import {
 } from '../components/OperationalPrimitives';
 import { useMutationAction } from '../hooks/useMutationAction';
 import { useQueryResource } from '../hooks/useQueryResource';
-import { getFinanceDashboard } from '../features/finance/api';
+import { getFinanceProfile } from '../features/finance/api';
 import { getVendorShippingConfig } from '../features/orders/api';
 import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets } from '../features/support/api';
 import {
@@ -438,7 +438,7 @@ export function VendorProfilePage() {
   );
   const financeQuery = useQueryResource(
     queryKeys.vendorProfile.financeProfile(currentVendor.vendorId),
-    ({ signal }) => getFinanceDashboard({ vendorId: currentVendor.vendorId, signal }),
+    ({ signal }) => getFinanceProfile({ vendorId: currentVendor.vendorId, signal }),
     { enabled: appReadiness.ready },
   );
   const billingQuery = useQueryResource(
@@ -453,7 +453,7 @@ export function VendorProfilePage() {
   );
 
   const shippingConfig = shippingQuery.data;
-  const financeProfile = financeQuery.data?.profile ?? null;
+  const financeProfile = financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const supportTickets = useMemo(
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
