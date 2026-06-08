@@ -39,6 +39,31 @@ function formatOptionalHours(value: number | null | undefined) {
   return hasMetricValue(value) ? formatHours(value) : null;
 }
 
+function normalizeVendorDisplayText(value: string | null | undefined) {
+  return (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[çğıöşü]/g, (character) => ({
+      ç: 'c',
+      ğ: 'g',
+      ı: 'i',
+      ö: 'o',
+      ş: 's',
+      ü: 'u',
+    }[character] ?? character))
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function shouldShowVendorId(vendorName: string | null | undefined, vendorId: string) {
+  const normalizedName = normalizeVendorDisplayText(vendorName);
+  if (!normalizedName) {
+    return false;
+  }
+  return normalizedName !== normalizeVendorDisplayText(vendorId);
+}
+
 function formatPercent(value: number | null | undefined) {
   if (value === null || value === undefined || !Number.isFinite(value)) {
     return '—';
@@ -120,7 +145,7 @@ export function AdminSupportAnalyticsPage() {
   const showCategoryAvgResolution = categoryInsights.some((entry) => hasMetricValue(entry.avgResolutionHours));
   const vendorColumns = [
     'Vendor',
-    'Tickets',
+    'Total tickets',
     'Unresolved',
     'Overdue',
     'Overdue rate',
@@ -128,7 +153,7 @@ export function AdminSupportAnalyticsPage() {
   ];
   const categoryColumns = [
     'Category',
-    'Tickets',
+    'Total tickets',
     'Overdue',
     'Overdue %',
     ...(showCategoryAvgResolution ? ['Avg resolution'] : []),
@@ -142,6 +167,7 @@ export function AdminSupportAnalyticsPage() {
           <p className="eyebrow">Support analytics</p>
           <h1>Support Analytics</h1>
           <p>Operational support volume, SLA health, vendor trends, and assignment workload.</p>
+          <p className="page-description">Based on the latest 1000 support tickets.</p>
         </div>
         <Link to="/admin/support" className="button button-secondary button-link">
           Back to queue
@@ -219,7 +245,7 @@ export function AdminSupportAnalyticsPage() {
               <strong>{formatPercent(slaInsights.overduePercent)}</strong>
             </div>
             <div>
-              <span>Avg delay</span>
+              <span>Avg overdue age</span>
               <strong>{formatHours(slaInsights.avgResponseDelayHours)}</strong>
             </div>
             {slaAvgResolution ? (
@@ -257,8 +283,8 @@ export function AdminSupportAnalyticsPage() {
             {vendorInsights.map((vendor) => (
               <OperationalTableRow key={vendor.vendorId}>
                 <span role="cell">
-                  <strong>{vendor.vendorName ?? vendor.vendorId}</strong>
-                  <span>{vendor.vendorId}</span>
+                  <strong>{vendor.vendorName?.trim() || vendor.vendorId}</strong>
+                  {shouldShowVendorId(vendor.vendorName, vendor.vendorId) ? <span>{vendor.vendorId}</span> : null}
                 </span>
                 <span role="cell">{vendor.ticketCount}</span>
                 <span role="cell">{vendor.unresolvedCount}</span>
@@ -307,7 +333,7 @@ export function AdminSupportAnalyticsPage() {
             </div>
           </div>
           {assignmentInsights.length ? (
-            <OperationalTable columns={['Assignee', 'Tickets', 'Overdue', 'Avg response', 'Open unassigned']} className="support-analytics-assignment-table">
+            <OperationalTable columns={['Assignee', 'Total tickets', 'Overdue', 'Avg response', 'Unassigned open']} className="support-analytics-assignment-table">
               {assignmentInsights.map((entry) => (
                 <OperationalTableRow key={entry.assigneeName}>
                   <span role="cell">{entry.assigneeName}</span>

@@ -110,9 +110,33 @@ describe('AdminSupportAnalyticsPage readability', () => {
   });
 
   it('renders support analytics tables with desktop column structure', async () => {
-    const { container } = renderAnalyticsPage(buildAnalytics());
+    const { container } = renderAnalyticsPage(buildAnalytics({
+      vendorInsights: [
+        {
+          vendorId: 'yalispor',
+          vendorName: 'Yalı Spor',
+          ticketCount: 4,
+          unresolvedCount: 2,
+          overdueCount: 1,
+          overduePercent: 25,
+          avgResolutionHours: 8,
+          needsAttention: true,
+        },
+        {
+          vendorId: 'vendor-42',
+          vendorName: 'Acme Retail',
+          ticketCount: 2,
+          unresolvedCount: 1,
+          overdueCount: 0,
+          overduePercent: 0,
+          avgResolutionHours: 4,
+          needsAttention: false,
+        },
+      ],
+    }));
 
     expect(await screen.findByText('Operational support load')).toBeInTheDocument();
+    expect(screen.getByText('Based on the latest 1000 support tickets.')).toBeInTheDocument();
     await waitFor(() => {
       expect(container.querySelector('.support-analytics-vendor-table')).not.toBeNull();
     });
@@ -132,10 +156,20 @@ describe('AdminSupportAnalyticsPage readability', () => {
     expect(assignmentTable?.querySelector('.op-table-row')?.children).toHaveLength(5);
 
     expect(within(vendorTable as HTMLElement).getByText('Vendor')).toBeInTheDocument();
-    expect(within(vendorTable as HTMLElement).getByText('Tickets')).toBeInTheDocument();
+    expect(within(vendorTable as HTMLElement).getByText('Total tickets')).toBeInTheDocument();
     expect(within(vendorTable as HTMLElement).getByText('Unresolved')).toBeInTheDocument();
     expect(within(vendorTable as HTMLElement).getByText('Overdue rate')).toBeInTheDocument();
     expect(within(vendorTable as HTMLElement).queryByText('Signal')).not.toBeInTheDocument();
+    expect(within(categoryTable as HTMLElement).getByText('Total tickets')).toBeInTheDocument();
+    expect(within(assignmentTable as HTMLElement).getByText('Total tickets')).toBeInTheDocument();
+    expect(within(assignmentTable as HTMLElement).getByText('Unassigned open')).toBeInTheDocument();
+    expect(within(assignmentTable as HTMLElement).queryByText('Open unassigned')).not.toBeInTheDocument();
+    expect(screen.getByText('Avg overdue age')).toBeInTheDocument();
+    expect(screen.queryByText('Avg delay')).not.toBeInTheDocument();
+    expect(within(vendorTable as HTMLElement).getByText('Yalı Spor')).toBeInTheDocument();
+    expect(within(vendorTable as HTMLElement).queryByText('yalispor')).not.toBeInTheDocument();
+    expect(within(vendorTable as HTMLElement).getByText('Acme Retail')).toBeInTheDocument();
+    expect(within(vendorTable as HTMLElement).getByText('vendor-42')).toBeInTheDocument();
   });
 
   it('hides empty avg resolution fields and replaces all-zero trends with an empty state', async () => {
