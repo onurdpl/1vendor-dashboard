@@ -9,6 +9,7 @@ import type {
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
+  LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
 } from '../../lib/api/contracts';
@@ -92,6 +93,14 @@ export function previewLogoIsbasiCommissionInvoice(
   return apiClient.post<LogoIsbasiCommissionInvoicePreviewResult>(
     `/admin/vendors/${encodeURIComponent(vendorId)}/logo-isbasi/commission-invoice-preview`,
     input,
+    { skipVendorContext: true },
+  );
+}
+
+export function createLogoIsbasiTestInvoice(vendorId: string) {
+  return apiClient.post<LogoIsbasiTestInvoiceCreateResult>(
+    `/admin/vendors/${encodeURIComponent(vendorId)}/logo-isbasi/test-create-invoice`,
+    { confirmTestInvoice: true },
     { skipVendorContext: true },
   );
 }

@@ -13,6 +13,7 @@ import type {
   LogoIsbasiFirmsDiscoveryResult,
   LogoIsbasiIncomingEinvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
+  LogoIsbasiTestInvoiceCreateResult,
   SupportTicket,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -29,6 +30,7 @@ const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBil
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
 const discoverLogoIsbasiIncomingEinvoicesMock = vi.fn<() => Promise<LogoIsbasiIncomingEinvoiceListProbeResult>>();
+const createLogoIsbasiTestInvoiceMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiTestInvoiceCreateResult>>();
 const matchVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmMatchResult>>();
 const bindVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmBindResult>>();
 const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
@@ -65,6 +67,7 @@ vi.mock('../features/vendors/api', async () => {
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
     discoverLogoIsbasiFirms: () => discoverLogoIsbasiFirmsMock(),
     discoverLogoIsbasiIncomingEinvoices: () => discoverLogoIsbasiIncomingEinvoicesMock(),
+    createLogoIsbasiTestInvoice: (vendorId: string) => createLogoIsbasiTestInvoiceMock(vendorId),
     matchVendorLogoIsbasiFirm: (vendorId: string) => matchVendorLogoIsbasiFirmMock(vendorId),
     bindVendorLogoIsbasiFirm: (vendorId: string) => bindVendorLogoIsbasiFirmMock(vendorId),
     previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
@@ -314,6 +317,45 @@ describe('VendorProfilePage', () => {
           eGovermentTypeDesc: 'e-Fatura',
         },
       ],
+    });
+    createLogoIsbasiTestInvoiceMock.mockReset();
+    createLogoIsbasiTestInvoiceMock.mockResolvedValue({
+      ok: true,
+      success: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'test_invoice_create',
+      writesPerformed: true,
+      externalApiCallAttempted: true,
+      vendorId: 'demo-vendor-a',
+      httpStatus: 200,
+      upstreamStatus: 200,
+      responseKeys: ['data'],
+      invoiceId: 'logo-test-invoice-1',
+      uuid: 'logo-test-uuid-1',
+      ettn: 'logo-test-ettn-1',
+      requestPayload: {
+        invoiceId: 0,
+        customer: {
+          code: 'CUST001',
+          tcknVkn: '11******11',
+        },
+        currency: 'TL',
+        description: 'SPORGYM TEST KOMİSYON FATURASI',
+        salesInvoiceDetails: [
+          {
+            quantity: 1,
+            taxRate: '20',
+            price: '1',
+          },
+        ],
+      },
+      responseBody: {
+        data: {
+          invoiceId: 'logo-test-invoice-1',
+          uuid: 'logo-test-uuid-1',
+          ettn: 'logo-test-ettn-1',
+        },
+      },
     });
     matchVendorLogoIsbasiFirmMock.mockReset();
     matchVendorLogoIsbasiFirmMock.mockResolvedValue({
@@ -1018,6 +1060,48 @@ describe('VendorProfilePage', () => {
     expect(within(invoiceSamples).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
   });
 
+  it('requires acknowledgement before creating a Logo test invoice and renders sanitized result', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' })).toBeInTheDocument(),
+    );
+    const createButton = within(billingSection!).getByRole('button', { name: 'Create TEST Invoice' });
+    expect(createButton).toBeDisabled();
+    expect(within(billingSection!).getByText('This creates a real invoice in the Logo test tenant.')).toBeInTheDocument();
+
+    await userEvent.click(within(billingSection!).getByLabelText('I understand this creates a test invoice.'));
+    expect(createButton).toBeEnabled();
+    await userEvent.click(createButton);
+
+    await waitFor(() => expect(createLogoIsbasiTestInvoiceMock).toHaveBeenCalledWith('demo-vendor-a'));
+    expect(await within(billingSection!).findByText('Logo TEST invoice creation result')).toBeInTheDocument();
+    const testInvoicePanel = within(billingSection!).getByText('Logo TEST invoice creation result')
+      .closest('.vendor-profile-logo-result');
+    expect(testInvoicePanel).not.toBeNull();
+    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-invoice-1')).toBeInTheDocument();
+    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-uuid-1')).toBeInTheDocument();
+    expect(within(testInvoicePanel as HTMLElement).getByText('logo-test-ettn-1')).toBeInTheDocument();
+    expect(within(testInvoicePanel as HTMLElement).getByText(/11\*\*\*\*\*\*11/)).toBeInTheDocument();
+    expect(within(testInvoicePanel as HTMLElement).queryByText('1111111111')).not.toBeInTheDocument();
+    expect(within(testInvoicePanel as HTMLElement).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
+  });
+
   it('matches the selected vendor to a Logo firm without saving anything', async () => {
     setCurrentUser({
       email: 'admin@demo.com',
@@ -1116,7 +1200,8 @@ describe('VendorProfilePage', () => {
 
     expect(await within(billingSection!).findByRole('alert')).toHaveTextContent('Commission amount is required.');
     expect(previewLogoIsbasiCommissionInvoiceMock).not.toHaveBeenCalled();
-    expect(within(billingSection!).queryByRole('button', { name: /create|send invoice/i })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: 'Create invoice' })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: /send invoice/i })).not.toBeInTheDocument();
   });
 
   it('displays the sanitized Logo commission e-Fatura preview payload', async () => {
@@ -1161,7 +1246,8 @@ describe('VendorProfilePage', () => {
     expect(within(billingSection!).getByText(/"invoiceId": 0/)).toBeInTheDocument();
     expect(within(billingSection!).getByText(/"itemType": 2/)).toBeInTheDocument();
     expect(within(billingSection!).getByText(/11\*\*\*\*\*\*11/)).toBeInTheDocument();
-    expect(within(billingSection!).queryByRole('button', { name: /create|send invoice/i })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: 'Create invoice' })).not.toBeInTheDocument();
+    expect(within(billingSection!).queryByRole('button', { name: /send invoice/i })).not.toBeInTheDocument();
   });
 
   it('shows Logo commission preview validation errors when billing profile is incomplete', async () => {

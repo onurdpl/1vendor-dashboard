@@ -1631,6 +1631,30 @@ export type LogoIsbasiCommissionInvoicePreviewResult = {
   message?: string;
 };
 
+export type LogoIsbasiTestInvoiceCreateResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'test_invoice_create';
+  writesPerformed: boolean;
+  externalApiCallAttempted: boolean;
+  vendorId?: string;
+  httpStatus?: number;
+  upstreamStatus?: number;
+  responseKeys?: string[];
+  invoiceId?: string | null;
+  uuid?: string | null;
+  ettn?: string | null;
+  requestPayload?: Record<string, unknown>;
+  responseBody?: unknown;
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+  missingFields?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+  response?: LogoIsbasiUpstreamResponseDiagnostic;
+};
+
 export type PayoutCalculation = {
   grossAmount: string;
   commission: string;

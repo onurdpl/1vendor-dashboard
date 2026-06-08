@@ -584,6 +584,48 @@ export const runtimeServices = {
             },
             warnings: ['eGovernmentInvoice enum/required fields unknown; omitted in dry-run.'],
           }),
+    createLogoIsbasiTestInvoice: (vendorId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.createLogoIsbasiTestInvoice(vendorId)
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'test_invoice_create' as const,
+            writesPerformed: true,
+            externalApiCallAttempted: false,
+            vendorId,
+            httpStatus: 200,
+            upstreamStatus: 200,
+            responseKeys: ['data'],
+            invoiceId: 'mock-test-invoice-1',
+            uuid: 'mock-test-invoice-uuid',
+            ettn: 'mock-test-invoice-ettn',
+            requestPayload: {
+              invoiceId: 0,
+              customer: {
+                code: 'LOGO-MOCK-1',
+                name: 'Mock Vendor Legal Name',
+                tcknVkn: '11******11',
+              },
+              currency: 'TL',
+              description: 'SPORGYM TEST KOMİSYON FATURASI',
+              salesInvoiceDetails: [
+                {
+                  quantity: 1,
+                  taxRate: '20',
+                  price: '1',
+                },
+              ],
+            },
+            responseBody: {
+              data: {
+                id: 'mock-test-invoice-1',
+                uuid: 'mock-test-invoice-uuid',
+                ettn: 'mock-test-invoice-ettn',
+              },
+            },
+          }),
   },
   auth: {
     async login(

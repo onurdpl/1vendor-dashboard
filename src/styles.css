@@ -11468,7 +11468,35 @@ summary.provider-response-heading::-webkit-details-marker {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
+  align-items: center;
   gap: 8px;
+}
+
+.vendor-profile-logo-confirmation {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  color: #7f1d1d;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.vendor-profile-logo-confirmation input {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.button-danger {
+  border-color: #fecaca;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.button-danger:hover:not(:disabled) {
+  border-color: #fca5a5;
+  background: #fee2e2;
 }
 
 .vendor-profile-logo-result {

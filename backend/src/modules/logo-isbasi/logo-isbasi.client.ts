@@ -379,4 +379,42 @@ export class LogoIsbasiClient {
       accept: 'application/json',
     });
   }
+
+  async createIntegrationInvoice(
+    session: LogoIsbasiAuthenticatedSession,
+    payload: Record<string, unknown>,
+  ): Promise<LogoIsbasiRawResult> {
+    const requestUrl = `${this.baseUrl}/api/v1.0/invoices/integrationInvoices`;
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${session.accessToken}`,
+      tenantId: session.tenantId,
+      apiKey: this.config.apiKey,
+      'Content-Type': 'application/json; charset=utf-8',
+      Accept: 'application/json',
+      Lang: 'tr-TR',
+      DeviceType: 'WEB',
+    };
+    if (session.userId) {
+      headers.UserId = session.userId;
+    }
+    if (session.userEmail) {
+      headers.UserEmail = session.userEmail;
+    }
+    if (session.userName) {
+      headers.UserName = session.userName;
+    }
+
+    const response = await this.fetchImpl(requestUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json; charset=utf-8',
+      accept: 'application/json',
+    });
+  }
 }

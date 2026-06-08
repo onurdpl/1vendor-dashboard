@@ -43,3 +43,7 @@ export function previewLogoIsbasiCommissionInvoice(
 ) {
   return runtimeServices.vendors.previewLogoIsbasiCommissionInvoice(vendorId, input);
 }
+
+export function createLogoIsbasiTestInvoice(vendorId: string) {
+  return runtimeServices.vendors.createLogoIsbasiTestInvoice(vendorId);
+}

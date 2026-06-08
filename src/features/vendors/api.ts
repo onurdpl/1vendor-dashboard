@@ -1,5 +1,6 @@
 export {
   bindVendorLogoIsbasiFirm,
+  createLogoIsbasiTestInvoice,
   discoverLogoIsbasiFirms,
   discoverLogoIsbasiIncomingEinvoices,
   discoverLogoIsbasiInvoices,
@@ -22,6 +23,7 @@ export type {
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiInvoiceSummary,
   LogoIsbasiLoginProbeResult,
+  LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
 } from '../../lib/api/contracts';
