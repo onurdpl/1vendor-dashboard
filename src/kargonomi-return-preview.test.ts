@@ -18,6 +18,9 @@ vi.mock('../backend/src/db/prisma.js', () => ({
 const { createKargonomiReturnShipmentForReturn, previewKargonomiReturnShipmentForReturn } = await import(
   '../backend/src/modules/returns/returns.service.js'
 );
+const { clearKargonomiLocationLookupCache } = await import(
+  '../backend/src/modules/shipping/kargonomi-provider.adapter.js'
+);
 
 function buildKargonomiDestinationClient() {
   return {
@@ -156,6 +159,7 @@ describe('Kargonomi return preview', () => {
     prismaMock.returnRecord.findFirst.mockReset();
     prismaMock.returnRecord.update.mockReset();
     prismaMock.vendorShippingConfig.findUnique.mockReset();
+    clearKargonomiLocationLookupCache();
   });
 
   it('marks preview not ready when customer phone is missing', async () => {
@@ -555,6 +559,7 @@ describe('Kargonomi return preview', () => {
   });
 
   it('blocks create when preview readiness fails', async () => {
+    const adapterCreateShipment = vi.fn();
     prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(
       baseShippingConfig({
@@ -574,11 +579,20 @@ describe('Kargonomi return preview', () => {
         {
           adapter: {
             provider: 'KARGONOMI',
-            createShipment: vi.fn(),
+            createShipment: adapterCreateShipment,
           } as never,
         },
       ),
-    ).rejects.toThrow('Kargonomi return shipment is not ready.');
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Kargonomi return shipment is not ready.'),
+      details: expect.objectContaining({
+        senderCityIdPresent: true,
+        senderStateIdPresent: true,
+        receiverCityIdPresent: false,
+        receiverStateIdPresent: false,
+      }),
+    });
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
   });
 
   it('persists successful Kargonomi return shipment fields', async () => {
@@ -660,6 +674,87 @@ describe('Kargonomi return preview', () => {
       }),
     );
     expect(result.returnProviderShipmentId).toBe('2654001');
+  });
+
+  it('reuses preview-resolved sender IDs when creating Kargonomi return shipment', async () => {
+    const destinationClient = buildKargonomiDestinationClient();
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654002',
+      trackingNumber: 'KSUR2654002RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBER',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: true,
+      },
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(
+      baseShippingConfig({
+        providerMetadata: {},
+        warehouses: [
+          {
+            warehouseId: '112668',
+            provider: 'KARGONOMI',
+            isDefault: true,
+            name: 'Yalispor Warehouse',
+            address: 'Vendor full address',
+            metadata: {
+              phone: '+902121112233',
+              stateId: '42',
+              cityId: '796',
+            },
+          },
+        ],
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654002',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: 'KSUR2654002RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+      }),
+    );
+
+    await createKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        kargonomiDestinationClient: destinationClient,
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(destinationClient.listStates).toHaveBeenCalled();
+    expect(destinationClient.listCities).toHaveBeenCalledWith('34');
+    expect(adapterCreateShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          sender: expect.objectContaining({
+            sender_state_id: '34',
+            sender_city_id: '828',
+          }),
+          buyer: expect.objectContaining({
+            buyer_state_id: '42',
+            buyer_city_id: '796',
+          }),
+        }),
+      }),
+    );
   });
 
   it('blocks duplicate Kargonomi return shipment creation', async () => {

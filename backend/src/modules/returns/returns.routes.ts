@@ -66,7 +66,10 @@ type NavlungoReturnPickupAddressCompletionBody = {
 
 function sendReviewError(error: unknown, reply: { code: (status: number) => { send: (body: unknown) => unknown } }) {
   if (error instanceof ReturnReviewError) {
-    return reply.code(error.statusCode).send({ message: error.message });
+    return reply.code(error.statusCode).send({
+      message: error.message,
+      ...(error.details ? { details: error.details } : {}),
+    });
   }
 
   throw error;

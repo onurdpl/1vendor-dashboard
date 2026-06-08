@@ -28,11 +28,13 @@ import {
 
 export class ReturnReviewError extends Error {
   statusCode: number;
+  details?: Record<string, unknown>;
 
-  constructor(message: string, statusCode: number) {
+  constructor(message: string, statusCode: number, details?: Record<string, unknown>) {
     super(message);
     this.name = 'ReturnReviewError';
     this.statusCode = statusCode;
+    this.details = details;
   }
 }
 
@@ -70,6 +72,7 @@ export type NavlungoReturnStatusSyncInput = {
 
 export type KargonomiReturnShipmentCreateInput = {
   adapter?: ShippingProviderAdapter;
+  kargonomiDestinationClient?: KargonomiDestinationLookupClient;
 };
 
 export type KargonomiReturnPreviewInput = {
@@ -1761,6 +1764,45 @@ export async function previewKargonomiReturnShipmentForReturn(
   };
 }
 
+function readKargonomiReturnPreviewShipment(preview: KargonomiReturnPreviewDto) {
+  return readNestedRecord(preview.previewPayload, 'shipment');
+}
+
+function readKargonomiReturnPreviewSenderDestination(preview: KargonomiReturnPreviewDto) {
+  const shipment = readKargonomiReturnPreviewShipment(preview);
+  const sender = readNestedRecord(shipment, 'sender');
+  return {
+    senderStateId: readString(sender, ['stateId']),
+    senderCityId: readString(sender, ['cityId']),
+  };
+}
+
+function buildKargonomiReturnCreateReadinessDetails(
+  preview: KargonomiReturnPreviewDto,
+  missingFields = preview.missingFields,
+) {
+  const shipment = readKargonomiReturnPreviewShipment(preview);
+  const sender = readNestedRecord(shipment, 'sender');
+  const receiver = readNestedRecord(shipment, 'receiver');
+  return {
+    missingFields,
+    senderDestinationResolution: readNestedRecord(shipment, 'senderDestinationResolution'),
+    senderCityIdPresent: Boolean(readString(sender, ['cityId'])),
+    senderStateIdPresent: Boolean(readString(sender, ['stateId'])),
+    receiverCityIdPresent: Boolean(readString(receiver, ['cityId'])),
+    receiverStateIdPresent: Boolean(readString(receiver, ['stateId'])),
+  };
+}
+
+function buildKargonomiReturnReadinessMessage(missingFields: string[]) {
+  return [
+    'Kargonomi return shipment is not ready.',
+    ...missingFields.map((field) => `- ${field}`),
+    '',
+    'Provider request blocked before create call.',
+  ].join('\n');
+}
+
 function buildKargonomiReturnReferenceId(record: {
   id: string;
   sourceShopifyOrderNumber: string;
@@ -1815,6 +1857,10 @@ function buildKargonomiReturnShipmentPayload(input: {
       metadata: Prisma.JsonValue | null;
     }>;
   } | null;
+  resolvedSenderDestination?: {
+    senderStateId: string | null;
+    senderCityId: string | null;
+  };
 }) {
   const order = input.record.vendorAllocation.order;
   const configMetadata = input.config?.providerMetadata ?? null;
@@ -1837,20 +1883,24 @@ function buildKargonomiReturnShipmentPayload(input: {
   const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
   const senderPhone = order.customerPhone?.trim() || order.billingPhone?.trim() || null;
   const senderAddress = readOrderAddress(order);
-  const senderCityId = readKargonomiLocationId(configMetadata, [
-    'kargonomiReturnSenderCityId',
-    'returnSenderCityId',
-    'fallbackBuyerCityId',
-    'buyerCityId',
-    'buyer_city_id',
-  ]);
-  const senderStateId = readKargonomiLocationId(configMetadata, [
-    'kargonomiReturnSenderStateId',
-    'returnSenderStateId',
-    'fallbackBuyerStateId',
-    'buyerStateId',
-    'buyer_state_id',
-  ]);
+  const senderCityId =
+    input.resolvedSenderDestination?.senderCityId ??
+    readKargonomiLocationId(configMetadata, [
+      'kargonomiReturnSenderCityId',
+      'returnSenderCityId',
+      'fallbackBuyerCityId',
+      'buyerCityId',
+      'buyer_city_id',
+    ]);
+  const senderStateId =
+    input.resolvedSenderDestination?.senderStateId ??
+    readKargonomiLocationId(configMetadata, [
+      'kargonomiReturnSenderStateId',
+      'returnSenderStateId',
+      'fallbackBuyerStateId',
+      'buyerStateId',
+      'buyer_state_id',
+    ]);
   const defaultDesi = Number(input.config?.defaultDesi ?? 0);
   const content =
     input.record.vendorAllocation.lineItems
@@ -1954,16 +2004,15 @@ export async function createKargonomiReturnShipmentForReturn(
     throw new ReturnReviewError('Closed or cancelled returns cannot create Kargonomi return shipments.', 400);
   }
 
-  const preview = await previewKargonomiReturnShipmentForReturn(returnId, actor, { env });
+  const preview = await previewKargonomiReturnShipmentForReturn(returnId, actor, {
+    env,
+    kargonomiDestinationClient: input.kargonomiDestinationClient,
+  });
   if (!preview.ready) {
     throw new ReturnReviewError(
-      [
-        'Kargonomi return shipment is not ready.',
-        ...preview.missingFields.map((field) => `- ${field}`),
-        '',
-        'Provider request blocked before create call.',
-      ].join('\n'),
+      buildKargonomiReturnReadinessMessage(preview.missingFields),
       400,
+      buildKargonomiReturnCreateReadinessDetails(preview),
     );
   }
 
@@ -1973,20 +2022,21 @@ export async function createKargonomiReturnShipmentForReturn(
       warehouses: true,
     },
   });
-  const built = buildKargonomiReturnShipmentPayload({ record, config });
+  const built = buildKargonomiReturnShipmentPayload({
+    record,
+    config,
+    resolvedSenderDestination: readKargonomiReturnPreviewSenderDestination(preview),
+  });
   if (built.missingFields.length > 0) {
     throw new ReturnReviewError(
-      [
-        'Kargonomi return shipment is not ready.',
-        ...built.missingFields.map((field) => `- ${field}`),
-        '',
-        'Provider request blocked before create call.',
-      ].join('\n'),
+      buildKargonomiReturnReadinessMessage(built.missingFields),
       400,
+      buildKargonomiReturnCreateReadinessDetails(preview, built.missingFields),
     );
   }
 
   const attemptedAt = new Date().toISOString();
+  const readinessDetails = buildKargonomiReturnCreateReadinessDetails(preview, built.missingFields);
   const diagnostics = {
     provider: 'kargonomi',
     flow: 'return_shipment',
@@ -1995,6 +2045,7 @@ export async function createKargonomiReturnShipmentForReturn(
     kargonomiReturnShipmentSucceeded: false,
     kargonomiReturnMissingFields: built.missingFields,
     warehouseId: built.warehouseId,
+    senderDestinationResolution: readinessDetails.senderDestinationResolution,
     senderStateIdPresent: Boolean(built.senderStateId),
     senderCityIdPresent: Boolean(built.senderCityId),
     receiverStateIdPresent: Boolean(built.receiverStateId),
