@@ -50,7 +50,7 @@ paths:
           schema:
             type: string
             maxLength: 128
-          example: alloc-sporjinal-1001
+          example: alloc-vendor-demo-1001
       responses:
         '200':
           description: Vendor allocation order page.
@@ -62,25 +62,25 @@ paths:
                 orderPage:
                   value:
                     data:
-                      - id: alloc-sporjinal-1001
+                      - id: alloc-vendor-demo-1001
                         shopifyOrderId: gid://shopify/Order/1001
                         shopifyOrderNumber: '#1001'
                         allocationStatus: ACTIVE
                         fulfillmentStatus: Pending
                         shippingStatus: Awaiting Shipment
-                        vendorIdentifier: sporjinal
-                        originalVendorIdentifier: sporjinal
+                        vendorIdentifier: vendor-demo
+                        originalVendorIdentifier: vendor-demo
                         vendorIntegrationStatus: acknowledged
-                        vendorIntegrationStatusMessage: Order imported into provider
+                        vendorIntegrationStatusMessage: Order imported into Provider
                         vendorIntegrationStatusUpdatedAt: '2026-06-02T12:30:00.000Z'
-                        vendorIntegrationProvider: provider-name
+                        vendorIntegrationProvider: provider-test
                         shopifyCreatedAt: '2026-06-02T10:00:00.000Z'
                         createdAt: '2026-06-02T10:05:00.000Z'
                         updatedAt: '2026-06-02T12:30:00.000Z'
                         financial:
                           currency: TRY
                           financialStatus: paid
-                          paymentGatewayName: PayTR Marketplace
+                          paymentGatewayName: Marketplace Payment
                           taxesIncluded: true
                           orderTaxAmount: '118.17'
                           shippingAmount: '29.90'
@@ -109,7 +109,7 @@ paths:
                           district: Kadikoy
                           address: Shipping address
                         shipment:
-                          carrier: Yurtici Kargo
+                          carrier: Demo Carrier
                           trackingNumber: ABC123456
                           trackingUrl: https://tracking.example/ABC123456
                           fulfilledAt: null
@@ -180,7 +180,7 @@ paths:
               status:
                 value:
                   status: acknowledged
-                  message: Order imported into provider
+                  message: Order imported into Provider
       responses:
         '200':
           description: Stored provider status snapshot.
@@ -193,12 +193,12 @@ paths:
                   value:
                     idempotent: false
                     allocation:
-                      id: alloc-sporjinal-1001
-                      vendorIdentifier: sporjinal
+                      id: alloc-vendor-demo-1001
+                      vendorIdentifier: vendor-demo
                       vendorIntegrationStatus: acknowledged
-                      vendorIntegrationStatusMessage: Order imported into provider
+                      vendorIntegrationStatusMessage: Order imported into Provider
                       vendorIntegrationStatusUpdatedAt: '2026-06-02T14:30:00.000Z'
-                      vendorIntegrationProvider: provider-name
+                      vendorIntegrationProvider: provider-test
                       lastVendorIntegrationRequestId: request-id
         '400':
           $ref: '#/components/responses/BadRequest'
@@ -239,7 +239,7 @@ paths:
             examples:
               shipment:
                 value:
-                  carrier: Yurtici Kargo
+                  carrier: Demo Carrier
                   trackingNumber: ABC123456
                   trackingUrl: https://tracking.example/ABC123456
                   shippedAt: '2026-06-02T12:00:00Z'
@@ -255,9 +255,9 @@ paths:
                   value:
                     idempotent: false
                     allocation:
-                      id: alloc-sporjinal-1001
-                      vendorIdentifier: sporjinal
-                      carrier: Yurtici Kargo
+                      id: alloc-vendor-demo-1001
+                      vendorIdentifier: vendor-demo
+                      carrier: Demo Carrier
                       trackingNumber: ABC123456
                       trackingUrl: https://tracking.example/ABC123456
                       shippedAt: '2026-06-02T12:00:00.000Z'
@@ -317,8 +317,8 @@ paths:
                   value:
                     idempotent: false
                     allocation:
-                      id: alloc-sporjinal-1001
-                      vendorIdentifier: sporjinal
+                      id: alloc-vendor-demo-1001
+                      vendorIdentifier: vendor-demo
                       vendorInvoiceNumber: ABC202600001
                       vendorInvoiceDate: '2026-06-02'
                       vendorInvoiceUrl: https://provider.example/invoices/ABC202600001.pdf
@@ -354,7 +354,7 @@ components:
       description: Sporgym VendorAllocation id.
       schema:
         type: string
-      example: alloc-sporjinal-1001
+      example: alloc-vendor-demo-1001
     IdempotencyKey:
       name: Idempotency-Key
       in: header
@@ -366,7 +366,7 @@ components:
       schema:
         type: string
         minLength: 1
-      example: provider-name:shipment:alloc-sporjinal-1001:tracking-ABC123456
+      example: provider-shipment-alloc-vendor-demo-1001-tracking-ABC123456
 
   responses:
     BadRequest:

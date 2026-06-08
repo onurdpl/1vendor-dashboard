@@ -2,7 +2,7 @@
 
 ## 1. Overview
 
-Sporgym provides vendor-scoped API access for external vendor integration providers such as Entegra, Ayensoftware, or similar systems.
+Sporgym provides vendor-scoped API access for external vendor integration providers.
 
 The provider can:
 
@@ -125,25 +125,25 @@ Response schema:
 {
   "data": [
     {
-      "id": "alloc-sporjinal-1001",
+      "id": "alloc-vendor-demo-1001",
       "shopifyOrderId": "gid://shopify/Order/1001",
       "shopifyOrderNumber": "#1001",
       "allocationStatus": "ACTIVE",
       "fulfillmentStatus": "Pending",
       "shippingStatus": "Awaiting Shipment",
-      "vendorIdentifier": "sporjinal",
-      "originalVendorIdentifier": "sporjinal",
+      "vendorIdentifier": "vendor-demo",
+      "originalVendorIdentifier": "vendor-demo",
       "vendorIntegrationStatus": "acknowledged",
-      "vendorIntegrationStatusMessage": "Order imported into provider",
+      "vendorIntegrationStatusMessage": "Order imported into Provider",
       "vendorIntegrationStatusUpdatedAt": "2026-06-02T12:30:00.000Z",
-      "vendorIntegrationProvider": "provider-name",
+      "vendorIntegrationProvider": "provider-test",
       "shopifyCreatedAt": "2026-06-02T10:00:00.000Z",
       "createdAt": "2026-06-02T10:05:00.000Z",
       "updatedAt": "2026-06-02T12:30:00.000Z",
       "financial": {
         "currency": "TRY",
         "financialStatus": "paid",
-        "paymentGatewayName": "PayTR Marketplace",
+        "paymentGatewayName": "Marketplace Payment",
         "taxesIncluded": true,
         "orderTaxAmount": "118.17",
         "shippingAmount": "29.90",
@@ -174,7 +174,7 @@ Response schema:
         "address": "Shipping address"
       },
       "shipment": {
-        "carrier": "Yurtici Kargo",
+        "carrier": "Demo Carrier",
         "trackingNumber": "ABC123456",
         "trackingUrl": "https://tracking.example/ABC123456",
         "fulfilledAt": null,
@@ -260,12 +260,12 @@ Example request:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
-  -H "Idempotency-Key: provider-status-alloc-sporjinal-1001-1" \
+  -H "Idempotency-Key: provider-status-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/status" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/status" \
   -d '{
     "status": "acknowledged",
-    "message": "Order imported into provider"
+    "message": "Order imported into Provider"
   }'
 ```
 
@@ -275,12 +275,12 @@ Example response:
 {
   "idempotent": false,
   "allocation": {
-    "id": "alloc-sporjinal-1001",
-    "vendorIdentifier": "sporjinal",
+    "id": "alloc-vendor-demo-1001",
+    "vendorIdentifier": "vendor-demo",
     "vendorIntegrationStatus": "acknowledged",
-    "vendorIntegrationStatusMessage": "Order imported into provider",
+    "vendorIntegrationStatusMessage": "Order imported into Provider",
     "vendorIntegrationStatusUpdatedAt": "2026-06-02T14:30:00.000Z",
-    "vendorIntegrationProvider": "provider-name",
+    "vendorIntegrationProvider": "provider-test",
     "lastVendorIntegrationRequestId": "request-id"
   }
 }
@@ -321,11 +321,11 @@ Example request:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
-  -H "Idempotency-Key: provider-shipment-alloc-sporjinal-1001-1" \
+  -H "Idempotency-Key: provider-shipment-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/shipment" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/shipment" \
   -d '{
-    "carrier": "Yurtici Kargo",
+    "carrier": "Demo Carrier",
     "trackingNumber": "ABC123456",
     "trackingUrl": "https://tracking.example/ABC123456",
     "shippedAt": "2026-06-02T12:00:00Z"
@@ -338,9 +338,9 @@ Example response:
 {
   "idempotent": false,
   "allocation": {
-    "id": "alloc-sporjinal-1001",
-    "vendorIdentifier": "sporjinal",
-    "carrier": "Yurtici Kargo",
+    "id": "alloc-vendor-demo-1001",
+    "vendorIdentifier": "vendor-demo",
+    "carrier": "Demo Carrier",
     "trackingNumber": "ABC123456",
     "trackingUrl": "https://tracking.example/ABC123456",
     "shippedAt": "2026-06-02T12:00:00.000Z",
@@ -390,9 +390,9 @@ Example request:
 ```bash
 curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
-  -H "Idempotency-Key: provider-invoice-alloc-sporjinal-1001-1" \
+  -H "Idempotency-Key: provider-invoice-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-sporjinal-1001/invoice" \
+  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/invoice" \
   -d '{
     "invoiceNumber": "ABC202600001",
     "invoiceDate": "2026-06-02",
@@ -407,8 +407,8 @@ Example response:
 {
   "idempotent": false,
   "allocation": {
-    "id": "alloc-sporjinal-1001",
-    "vendorIdentifier": "sporjinal",
+    "id": "alloc-vendor-demo-1001",
+    "vendorIdentifier": "vendor-demo",
     "vendorInvoiceNumber": "ABC202600001",
     "vendorInvoiceDate": "2026-06-02",
     "vendorInvoiceUrl": "https://provider.example/invoices/ABC202600001.pdf",
@@ -446,9 +446,9 @@ provider-name:{operation}:{allocationId}:{provider-event-id-or-attempt-id}
 
 Examples:
 
-- `entegra:status:alloc-sporjinal-1001:import-1`
-- `entegra:shipment:alloc-sporjinal-1001:tracking-ABC123456`
-- `entegra:invoice:alloc-sporjinal-1001:ABC202600001`
+- `provider-status-alloc-vendor-demo-1001-import-1`
+- `provider-shipment-alloc-vendor-demo-1001-tracking-ABC123456`
+- `provider-invoice-alloc-vendor-demo-1001-ABC202600001`
 
 ## 11. Error Responses
 
