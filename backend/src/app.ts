@@ -28,6 +28,7 @@ import { registerNotificationRoutes } from './modules/notifications/notification
 import { registerInvoiceExecutionRoutes } from './modules/invoices/invoice-execution.routes.js';
 import { registerShippingExecutionRoutes } from './modules/shipping/shipping-execution.routes.js';
 import { registerSupportRoutes } from './modules/support/support.routes.js';
+import { registerVendorIntegrationDocsRoutes } from './modules/vendor-integration/vendor-integration.docs.routes.js';
 import { registerVendorIntegrationRoutes } from './modules/vendor-integration/vendor-integration.routes.js';
 import { registerVendorBillingProfileRoutes } from './modules/vendors/vendor-billing-profile.routes.js';
 import { registerParasutProbeRoutes } from './modules/parasut/parasut-probe.routes.js';
@@ -367,6 +368,7 @@ export function createApp() {
   registerInvoiceExecutionRoutes(app, env);
   registerShippingExecutionRoutes(app, env);
   registerSupportRoutes(app, env);
+  registerVendorIntegrationDocsRoutes(app);
   registerVendorIntegrationRoutes(app, env);
   registerVendorBillingProfileRoutes(app, env);
   registerPaymentReturnRoutes(app);

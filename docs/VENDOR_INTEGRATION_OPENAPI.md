@@ -24,6 +24,29 @@ https://backend.example.com
 
 Replace it with the target backend URL in the imported Postman environment.
 
+## Swagger UI Viewer
+
+The backend exposes a read-only Swagger UI viewer for the Vendor Integration OpenAPI file:
+
+```text
+GET /docs/vendor-integration
+```
+
+The raw OpenAPI YAML is available at:
+
+```text
+GET /docs/openapi/vendor-integration.openapi.yaml
+```
+
+For a deployed backend, replace the host with the backend base URL, for example:
+
+```text
+https://backend.example.com/docs/vendor-integration
+https://backend.example.com/docs/openapi/vendor-integration.openapi.yaml
+```
+
+The viewer renders only the provider-facing Vendor Integration OpenAPI spec. It does not expose bearer tokens, provider secrets, request bodies, response bodies, or internal admin endpoints.
+
 ## Generate Docs Later
 
 Future documentation tooling should render `docs/openapi/vendor-integration.openapi.yaml` directly. Good follow-up options include:
