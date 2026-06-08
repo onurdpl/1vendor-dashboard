@@ -115,6 +115,7 @@ function createAuthRouteHandlers(env = buildEnv()) {
   const handlers = {
     post: {} as Record<string, Handler>,
     get: {} as Record<string, Route>,
+    logInfo: vi.fn(),
   };
   const app = {
     post: vi.fn((path: string, routeHandler: Handler) => {
@@ -129,7 +130,7 @@ function createAuthRouteHandlers(env = buildEnv()) {
           };
     }),
     log: {
-      info: vi.fn(),
+      info: handlers.logInfo,
     },
   };
 
@@ -244,6 +245,85 @@ describe('auth login rate limiting', () => {
     expect(readSetCookieHeader(response.headers)).toContain(`${SESSION_COOKIE_NAME}=`);
     expect(readSetCookieHeader(response.headers)).toContain('HttpOnly');
     expect(readSetCookieHeader(response.headers)).toContain('SameSite=Lax');
+  });
+
+  it('emits structured login diagnostics for successful login without logging the password', async () => {
+    const handlers = createAuthRouteHandlers();
+    const reply = createReply();
+
+    await handlers.post['/auth/login']?.(
+      {
+        requestId: 'login-success-request',
+        headers: {},
+        body: {
+          email: ' Vendor@Example.COM ',
+          password: 'demo123',
+        },
+        ip: '127.0.0.1',
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_DIAGNOSTICS',
+        requestId: 'login-success-request',
+        email: 'vendor@example.com',
+        success: true,
+        failureStage: null,
+        failureReason: null,
+        totalDurationMs: expect.any(Number),
+        userLookupDurationMs: expect.any(Number),
+        passwordVerifyDurationMs: expect.any(Number),
+        tokenIssueDurationMs: expect.any(Number),
+        cookieSetDurationMs: expect.any(Number),
+        responseStatus: 200,
+      }),
+      'auth login diagnostics',
+    );
+    const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('demo123');
+  });
+
+  it('emits structured login diagnostics for invalid password without changing the response', async () => {
+    const handlers = createAuthRouteHandlers();
+    const reply = createReply();
+
+    const result = await handlers.post['/auth/login']?.(
+      {
+        requestId: 'login-failure-request',
+        headers: {},
+        body: {
+          email: 'Vendor@Example.COM',
+          password: 'wrong-password',
+        },
+        ip: '127.0.0.1',
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(401);
+    expect(reply.sent ? reply.payload : result).toEqual({ message: 'Invalid email or password.' });
+    expect(handlers.logInfo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: 'AUTH_LOGIN_DIAGNOSTICS',
+        requestId: 'login-failure-request',
+        email: 'vendor@example.com',
+        success: false,
+        failureStage: 'password_verify',
+        failureReason: 'invalid_password',
+        totalDurationMs: expect.any(Number),
+        userLookupDurationMs: expect.any(Number),
+        passwordVerifyDurationMs: expect.any(Number),
+        tokenIssueDurationMs: expect.any(Number),
+        cookieSetDurationMs: null,
+        responseStatus: 401,
+      }),
+      'auth login diagnostics',
+    );
+    const serializedLogs = JSON.stringify(handlers.logInfo.mock.calls);
+    expect(serializedLogs).not.toContain('wrong-password');
   });
 
   it('rejects missing email or password with the existing generic response', async () => {

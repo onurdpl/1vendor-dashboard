@@ -24,6 +24,26 @@ type UserRecordWithVendorLinks = {
   }>;
 };
 
+type AuthLoginFailureReason = 'user_not_found' | 'invalid_password' | 'inactive_user' | 'unknown';
+
+type AuthLoginDiagnosticResult =
+  | {
+      success: true;
+      token: string;
+      user: AuthUserResponse;
+      timing: AuthLoginServiceTiming;
+      failureStage: null;
+      failureReason: null;
+    }
+  | {
+      success: false;
+      token: null;
+      user: null;
+      timing: AuthLoginServiceTiming;
+      failureStage: 'user_lookup' | 'password_verify' | 'user_status' | 'unknown';
+      failureReason: AuthLoginFailureReason;
+    };
+
 function startTimer() {
   return process.hrtime.bigint();
 }
@@ -106,7 +126,7 @@ export function createAuthService(env: AppEnv) {
     return mapUserRecordToAuthResponse(user);
   }
 
-  async function login(credentials: LoginBody) {
+  async function loginWithDiagnostics(credentials: LoginBody): Promise<AuthLoginDiagnosticResult> {
     const serviceStartedAt = startTimer();
     const timing = createInitialLoginTiming();
 
@@ -131,7 +151,14 @@ export function createAuthService(env: AppEnv) {
 
     if (!user) {
       timing.serviceTotalMs = elapsedMs(serviceStartedAt);
-      return null;
+      return {
+        success: false,
+        token: null,
+        user: null,
+        timing,
+        failureStage: 'user_lookup',
+        failureReason: 'user_not_found',
+      };
     }
 
     timing.passwordHashMode = classifyPasswordHashScheme(user.passwordHash);
@@ -141,7 +168,14 @@ export function createAuthService(env: AppEnv) {
 
     if (!passwordVerification.valid) {
       timing.serviceTotalMs = elapsedMs(serviceStartedAt);
-      return null;
+      return {
+        success: false,
+        token: null,
+        user: null,
+        timing,
+        failureStage: 'password_verify',
+        failureReason: 'invalid_password',
+      };
     }
 
     if (passwordVerification.needsMigration) {
@@ -165,9 +199,25 @@ export function createAuthService(env: AppEnv) {
     timing.serviceTotalMs = elapsedMs(serviceStartedAt);
 
     return {
+      success: true,
       token,
       user: authUser,
       timing,
+      failureStage: null,
+      failureReason: null,
+    };
+  }
+
+  async function login(credentials: LoginBody) {
+    const result = await loginWithDiagnostics(credentials);
+    if (!result.success) {
+      return null;
+    }
+
+    return {
+      token: result.token,
+      user: result.user,
+      timing: result.timing,
     };
   }
 
@@ -222,6 +272,7 @@ export function createAuthService(env: AppEnv) {
 
   return {
     login,
+    loginWithDiagnostics,
     currentUserFromToken,
     requestContextFromToken,
     inspectToken,

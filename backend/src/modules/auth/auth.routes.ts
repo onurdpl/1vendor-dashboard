@@ -10,6 +10,9 @@ import { createClearSessionCookie, createSessionCookie, getSessionCookieToken } 
 
 export type ReturnTypeCreateAuthService = ReturnType<typeof createAuthService>;
 
+type LoginFailureStage = 'body_validation' | 'rate_limit' | 'user_lookup' | 'password_verify' | 'user_status' | 'unknown' | null;
+type LoginFailureReason = 'missing_credentials' | 'user_not_found' | 'invalid_password' | 'inactive_user' | 'unknown' | null;
+
 export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   const authService = createAuthService(env);
   const authMiddleware = createAuthMiddleware(authService);
@@ -17,6 +20,7 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
   app.post<{ Body: LoginBody }>('/auth/login', async (request, reply) => {
     const routeStartedAt = process.hrtime.bigint();
     const authAttemptId = normalizeAuthAttemptId(request.headers['x-auth-attempt-id']);
+    const normalizedEmail = normalizeLoginEmail((request.body as Partial<Record<keyof LoginBody, unknown>> | undefined)?.email);
     if (authAttemptId) {
       reply.header('X-Auth-Attempt-Id', authAttemptId);
     }
@@ -27,6 +31,14 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     const routeEntryToBodyValidationMs = elapsedMs(routeStartedAt);
 
     if (typeof rawEmail !== 'string' || typeof rawPassword !== 'string') {
+      logAuthLoginDiagnostics(app, request, {
+        email: normalizedEmail,
+        success: false,
+        failureStage: 'body_validation',
+        failureReason: 'missing_credentials',
+        responseStatus: 400,
+        routeStartedAt,
+      });
       return reply.code(400).send({ message: 'Email and password are required.' });
     }
 
@@ -34,6 +46,14 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
     const password = rawPassword;
 
     if (!email || !password) {
+      logAuthLoginDiagnostics(app, request, {
+        email,
+        success: false,
+        failureStage: 'body_validation',
+        failureReason: 'missing_credentials',
+        responseStatus: 400,
+        routeStartedAt,
+      });
       return reply.code(400).send({ message: 'Email and password are required.' });
     }
 
@@ -48,27 +68,61 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       },
     );
     if (loginRateLimit.limited) {
+      logAuthLoginDiagnostics(app, request, {
+        email,
+        success: false,
+        failureStage: 'rate_limit',
+        failureReason: 'unknown',
+        responseStatus: 429,
+        routeStartedAt,
+      });
       return reply.code(429).send({ message: 'Too many login attempts. Please try again later.' });
     }
 
     const serviceStartedAt = process.hrtime.bigint();
-    const loginResult = await authService.login({
-      email,
-      password,
-    });
+    let loginResult: Awaited<ReturnType<typeof authService.loginWithDiagnostics>>;
+    try {
+      loginResult = await authService.loginWithDiagnostics({
+        email,
+        password,
+      });
+    } catch (error) {
+      logAuthLoginDiagnostics(app, request, {
+        email,
+        success: false,
+        failureStage: 'unknown',
+        failureReason: 'unknown',
+        responseStatus: 500,
+        routeStartedAt,
+      });
+      throw error;
+    }
     const routeEntryToServiceStartMs = elapsedMs(routeStartedAt, serviceStartedAt);
 
-    if (!loginResult) {
+    if (!loginResult.success) {
+      logAuthLoginDiagnostics(app, request, {
+        email,
+        success: false,
+        failureStage: loginResult.failureStage,
+        failureReason: loginResult.failureReason,
+        responseStatus: 401,
+        routeStartedAt,
+        userLookupDurationMs: loginResult.timing.userLookupMs,
+        passwordVerifyDurationMs: loginResult.timing.passwordVerificationMs,
+        tokenIssueDurationMs: loginResult.timing.tokenSignMs,
+      });
       return reply.code(401).send({ message: 'Invalid email or password.' });
     }
 
     const responsePreparationStartedAt = process.hrtime.bigint();
     const csrfToken = authService.createCsrfToken(loginResult.token);
+    const cookieSetStartedAt = process.hrtime.bigint();
     reply.header('Set-Cookie', createSessionCookie(
       loginResult.token,
       getJwtMaxAgeSeconds(loginResult.token),
       shouldUseSecureSessionCookie(request, env),
     ));
+    const cookieSetDurationMs = elapsedMs(cookieSetStartedAt);
     const responseBody = {
       user: loginResult.user,
       csrfToken,
@@ -99,6 +153,18 @@ export function registerAuthRoutes(app: FastifyInstance, env: AppEnv) {
       },
       'auth login timing',
     );
+    logAuthLoginDiagnostics(app, request, {
+      email,
+      success: true,
+      failureStage: null,
+      failureReason: null,
+      responseStatus: 200,
+      routeStartedAt,
+      userLookupDurationMs: loginResult.timing.userLookupMs,
+      passwordVerifyDurationMs: loginResult.timing.passwordVerificationMs,
+      tokenIssueDurationMs: loginResult.timing.tokenSignMs,
+      cookieSetDurationMs,
+    });
 
     return responseBody;
   });
@@ -177,6 +243,45 @@ function shouldUseSecureSessionCookie(request: { headers?: Record<string, string
     .map((entry) => entry.trim().toLowerCase());
 
   return forwardedProto.includes('https') || request.protocol === 'https';
+}
+
+function normalizeLoginEmail(value: unknown) {
+  return typeof value === 'string' ? value.trim().toLowerCase() || null : null;
+}
+
+function logAuthLoginDiagnostics(
+  app: FastifyInstance,
+  request: { requestId?: string; id?: string },
+  input: {
+    email: string | null;
+    success: boolean;
+    failureStage: LoginFailureStage;
+    failureReason: LoginFailureReason;
+    responseStatus: number;
+    routeStartedAt: bigint;
+    userLookupDurationMs?: number | null;
+    passwordVerifyDurationMs?: number | null;
+    tokenIssueDurationMs?: number | null;
+    cookieSetDurationMs?: number | null;
+  },
+) {
+  app.log.info(
+    {
+      event: 'AUTH_LOGIN_DIAGNOSTICS',
+      requestId: request.requestId ?? request.id ?? null,
+      email: input.email,
+      success: input.success,
+      failureStage: input.failureStage,
+      failureReason: input.failureReason,
+      totalDurationMs: elapsedMs(input.routeStartedAt),
+      userLookupDurationMs: input.userLookupDurationMs ?? null,
+      passwordVerifyDurationMs: input.passwordVerifyDurationMs ?? null,
+      tokenIssueDurationMs: input.tokenIssueDurationMs ?? null,
+      cookieSetDurationMs: input.cookieSetDurationMs ?? null,
+      responseStatus: input.responseStatus,
+    },
+    'auth login diagnostics',
+  );
 }
 
 function elapsedMs(startedAt: bigint, endedAt: bigint = process.hrtime.bigint()) {
