@@ -389,6 +389,126 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
   });
 
+  it('discovers sanitized Logo incoming e-invoices from the documented myInvoicesList endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: {
+            accessToken: 'full-secret-access-token',
+            tenantId: 'tenant-1',
+            userId: 'user-1',
+            userEmail: 'integration-user@example.test',
+            userName: 'Integration User',
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              invoiceId: 'incoming-1',
+              uuId: 'uuid-1',
+              type: '1',
+              typeDesc: 'e-Fatura',
+              issueDate: '2026-06-08',
+              amount: '240.00',
+              currency: 'TL',
+              supplier: 'Logo Test Supplier Ltd.',
+              supplierTcknVkn: '1234567890',
+              invoiceType: 'SATIS',
+              status: 'received',
+              statusCode: '100',
+              eGovermentType: '1',
+              eGovermentTypeDesc: 'e-Fatura',
+              apiKey: 'provider-api-key-secret',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/incoming-einvoices')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/einvoices/myInvoicesList',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          apiKey: 'api-key-secret',
+          'Content-Type': 'application/json;charset=utf-8',
+          Accept: 'application/json',
+          Lang: 'tr-TR',
+          DeviceType: 'WEB',
+          UserId: 'user-1',
+          UserEmail: 'integration-user@example.test',
+          UserName: 'Integration User',
+        }),
+        body: JSON.stringify({
+          filters: [],
+          sorting: {
+            issueDate: -1,
+          },
+          paging: {
+            currentPage: 1,
+            pageSize: 20,
+          },
+          columnNames: null,
+          count: true,
+          excel: {
+            export: false,
+            allowedColumns: null,
+            lucaExport: false,
+          },
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        count: 1,
+        responseKeys: ['data'],
+        sampleInvoices: [
+          expect.objectContaining({
+            invoiceId: 'incoming-1',
+            uuId: 'uuid-1',
+            type: '1',
+            typeDesc: 'e-Fatura',
+            issueDate: '2026-06-08',
+            amount: '240.00',
+            currency: 'TL',
+            supplier: 'Logo Test Supplier Ltd.',
+            supplierTcknVknMasked: '12******90',
+            invoiceType: 'SATIS',
+            status: 'received',
+            statusCode: '100',
+            eGovermentType: '1',
+            eGovermentTypeDesc: 'e-Fatura',
+          }),
+        ],
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('1234567890');
+    expect(serialized).not.toContain('provider-api-key-secret');
+    expect(serialized).not.toContain('full-secret-access-token');
+    expect(serialized).not.toContain('api-key-secret');
+  });
+
   it('returns invoice discovery upstream diagnostics for Logo 404 responses', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(

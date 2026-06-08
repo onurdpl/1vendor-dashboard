@@ -1,6 +1,7 @@
 export {
   bindVendorLogoIsbasiFirm,
   discoverLogoIsbasiFirms,
+  discoverLogoIsbasiIncomingEinvoices,
   discoverLogoIsbasiInvoices,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
@@ -15,6 +16,8 @@ export type {
   LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiIncomingEinvoiceListProbeResult,
+  LogoIsbasiIncomingEinvoiceSummary,
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiInvoiceSummary,

@@ -18,6 +18,7 @@ import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets 
 import {
   bindVendorLogoIsbasiFirm,
   discoverLogoIsbasiFirms,
+  discoverLogoIsbasiIncomingEinvoices,
   discoverLogoIsbasiInvoices,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
@@ -35,6 +36,8 @@ import type {
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmSummary,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiIncomingEinvoiceListProbeResult,
+  LogoIsbasiIncomingEinvoiceSummary,
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiInvoiceSummary,
@@ -226,6 +229,10 @@ function isLogoInvoiceListResult(value: unknown): value is LogoIsbasiInvoiceList
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_list_discovery';
 }
 
+function isLogoIncomingEinvoiceListResult(value: unknown): value is LogoIsbasiIncomingEinvoiceListProbeResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'incoming_einvoice_discovery';
+}
+
 function isLogoInvoiceDetailResult(value: unknown): value is LogoIsbasiInvoiceDetailProbeResult {
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_detail_discovery';
 }
@@ -292,6 +299,28 @@ function buildLogoInvoiceListFailureResult(error: unknown): LogoIsbasiInvoiceLis
     externalApiCallAttempted: false,
     httpStatus: error instanceof ApiError ? error.status : undefined,
     errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INVOICE_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoIncomingEinvoiceListFailureResult(error: unknown): LogoIsbasiIncomingEinvoiceListProbeResult {
+  if (error instanceof ApiError && isLogoIncomingEinvoiceListResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'incoming_einvoice_discovery',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INCOMING_EINVOICE_DISCOVERY_FAILED',
     message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
   };
 }
@@ -372,6 +401,16 @@ function formatLogoInvoiceSummary(invoice: LogoIsbasiInvoiceSummary) {
     invoice.date ? `date ${invoice.date}` : null,
     invoice.amount && invoice.currency ? `${invoice.amount} ${invoice.currency}` : invoice.amount,
     invoice.status ? `status ${invoice.status}` : null,
+  ].filter(Boolean).join(', ') || 'No optional fields returned';
+}
+
+function formatLogoIncomingEinvoiceSummary(invoice: LogoIsbasiIncomingEinvoiceSummary) {
+  return [
+    invoice.uuId ? `uuid ${invoice.uuId}` : null,
+    invoice.issueDate ? `issue date ${invoice.issueDate}` : null,
+    invoice.amount && invoice.currency ? `${invoice.amount} ${invoice.currency}` : invoice.amount,
+    invoice.status ? `status ${invoice.status}` : null,
+    invoice.supplierTcknVknMasked ? `supplier tax ${invoice.supplierTcknVknMasked}` : null,
   ].filter(Boolean).join(', ') || 'No optional fields returned';
 }
 
@@ -592,6 +631,8 @@ export function VendorProfilePage() {
   const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
   const [logoFirmsResult, setLogoFirmsResult] = useState<LogoIsbasiFirmsDiscoveryResult | null>(null);
   const [logoInvoicesResult, setLogoInvoicesResult] = useState<LogoIsbasiInvoiceListProbeResult | null>(null);
+  const [logoIncomingEinvoicesResult, setLogoIncomingEinvoicesResult] =
+    useState<LogoIsbasiIncomingEinvoiceListProbeResult | null>(null);
   const [selectedLogoInvoiceId, setSelectedLogoInvoiceId] = useState('');
   const [logoInvoiceDetailResult, setLogoInvoiceDetailResult] = useState<LogoIsbasiInvoiceDetailProbeResult | null>(null);
   const [logoFirmMatchResult, setLogoFirmMatchResult] = useState<LogoIsbasiFirmMatchResult | null>(null);
@@ -861,6 +902,7 @@ export function VendorProfilePage() {
       onSuccess: (result) => {
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -872,6 +914,7 @@ export function VendorProfilePage() {
       onError: (error) => {
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -888,6 +931,7 @@ export function VendorProfilePage() {
       onSuccess: (result) => {
         setLogoLoginResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -899,6 +943,7 @@ export function VendorProfilePage() {
       onError: (error) => {
         setLogoLoginResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -919,6 +964,7 @@ export function VendorProfilePage() {
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
         setLogoInvoiceDetailResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoicesResult(result);
         const firstInvoiceId = result.sampleInvoices?.find((invoice) => invoice.id)?.id ?? '';
         setSelectedLogoInvoiceId(firstInvoiceId);
@@ -931,8 +977,38 @@ export function VendorProfilePage() {
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
         setLogoInvoiceDetailResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setSelectedLogoInvoiceId('');
         setLogoInvoicesResult(buildLogoInvoiceListFailureResult(error));
+      },
+    },
+  );
+
+  const logoIncomingEinvoicesMutation = useMutationAction(
+    () => discoverLogoIsbasiIncomingEinvoices(),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoIncomingEinvoicesResult(result);
+        showFeedback('Logo İşbaşı incoming e-invoices discovery completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoIncomingEinvoicesResult(buildLogoIncomingEinvoiceListFailureResult(error));
       },
     },
   );
@@ -946,6 +1022,7 @@ export function VendorProfilePage() {
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(result);
         showFeedback('Logo İşbaşı invoice shape inspection completed.', 'success');
       },
@@ -955,6 +1032,7 @@ export function VendorProfilePage() {
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(buildLogoInvoiceDetailFailureResult(error));
       },
     },
@@ -967,6 +1045,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmBindResult(null);
@@ -978,6 +1057,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmBindResult(null);
@@ -994,6 +1074,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -1022,6 +1103,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -1045,6 +1127,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -1056,6 +1139,7 @@ export function VendorProfilePage() {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
         setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
         setLogoInvoiceDetailResult(null);
         setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
@@ -1123,6 +1207,7 @@ export function VendorProfilePage() {
       setLogoLoginResult(null);
       setLogoFirmsResult(null);
       setLogoInvoicesResult(null);
+      setLogoIncomingEinvoicesResult(null);
       setLogoInvoiceDetailResult(null);
       setSelectedLogoInvoiceId('');
       setLogoFirmMatchResult(null);
@@ -1132,6 +1217,7 @@ export function VendorProfilePage() {
     setLogoLoginResult(null);
     setLogoFirmsResult(null);
     setLogoInvoicesResult(null);
+    setLogoIncomingEinvoicesResult(null);
     setLogoInvoiceDetailResult(null);
     setSelectedLogoInvoiceId('');
     setLogoFirmMatchResult(null);
@@ -1271,6 +1357,7 @@ export function VendorProfilePage() {
                         setLogoPreviewResult(null);
                         setLogoFirmsResult(null);
                         setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
@@ -1291,6 +1378,7 @@ export function VendorProfilePage() {
                         setLogoFirmBindResult(null);
                         setLogoPreviewResult(null);
                         setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoPreviewFormError(null);
@@ -1310,6 +1398,7 @@ export function VendorProfilePage() {
                         setLogoFirmBindResult(null);
                         setLogoPreviewResult(null);
                         setLogoInvoiceDetailResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoPreviewFormError(null);
                         void logoInvoicesMutation.mutateAsync(undefined).catch(() => undefined);
@@ -1325,6 +1414,29 @@ export function VendorProfilePage() {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
                         setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
+                        setLogoFirmMatchResult(null);
+                        setLogoFirmBindResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        void logoIncomingEinvoicesMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
+                      disabled={logoIncomingEinvoicesMutation.isPending}
+                    >
+                      {logoIncomingEinvoicesMutation.isPending
+                        ? 'Discovering incoming e-invoices...'
+                        : 'Discover Incoming E-Invoices'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoFirmBindResult(null);
@@ -1343,6 +1455,7 @@ export function VendorProfilePage() {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
                         setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
@@ -1365,6 +1478,7 @@ export function VendorProfilePage() {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
                         setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
@@ -1646,6 +1760,102 @@ export function VendorProfilePage() {
                         </div>
                       </div>
                     </>
+                  ) : null}
+                </div>
+              ) : null}
+              {logoIncomingEinvoicesResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo incoming e-invoices discovery result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoIncomingEinvoicesResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoIncomingEinvoicesResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Invoice count</span>
+                      <strong>{logoIncomingEinvoicesResult.count ?? 0}</strong>
+                    </div>
+                    <div>
+                      <span>responseKeys</span>
+                      <strong>{logoIncomingEinvoicesResult.responseKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                    {logoIncomingEinvoicesResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoIncomingEinvoicesResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoIncomingEinvoicesResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoIncomingEinvoicesResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoIncomingEinvoicesResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoIncomingEinvoicesResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                    {logoIncomingEinvoicesResult.request ? (
+                      <>
+                        <div>
+                          <span>Logo endpoint URL</span>
+                          <strong>{formatValue(logoIncomingEinvoicesResult.request.url)}</strong>
+                        </div>
+                        <div>
+                          <span>Request method</span>
+                          <strong>{formatValue(logoIncomingEinvoicesResult.request.method)}</strong>
+                        </div>
+                        <div>
+                          <span>Request content type</span>
+                          <strong>{formatValue(logoIncomingEinvoicesResult.request.contentType)}</strong>
+                        </div>
+                        <div>
+                          <span>Request accept</span>
+                          <strong>{formatValue(logoIncomingEinvoicesResult.request.accept)}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                    {logoIncomingEinvoicesResult.response ? (
+                      <>
+                        <div>
+                          <span>Upstream response status</span>
+                          <strong>{logoIncomingEinvoicesResult.response.status}</strong>
+                        </div>
+                        <div>
+                          <span>Upstream content type</span>
+                          <strong>{formatValue(logoIncomingEinvoicesResult.response.contentType)}</strong>
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
+                  {logoIncomingEinvoicesResult.response?.bodySnippet ? (
+                    <div className="vendor-profile-logo-match-card">
+                      <span>Upstream response body snippet</span>
+                      <pre>{logoIncomingEinvoicesResult.response.bodySnippet}</pre>
+                    </div>
+                  ) : null}
+                  {logoIncomingEinvoicesResult.sampleInvoices?.length ? (
+                    <ul className="vendor-profile-logo-firm-list" aria-label="Logo incoming e-invoice samples">
+                      {logoIncomingEinvoicesResult.sampleInvoices.map((invoice, index) => (
+                        <li key={invoice.invoiceId ?? invoice.uuId ?? `${invoice.supplier}-${index}`}>
+                          <strong>{invoice.supplier ?? invoice.invoiceId ?? 'Unnamed supplier'}</strong>
+                          <span>{formatLogoIncomingEinvoiceSummary(invoice)}</span>
+                          <small>
+                            {[
+                              invoice.typeDesc,
+                              invoice.invoiceType,
+                              invoice.eGovermentTypeDesc,
+                            ].filter(Boolean).join(' / ') || 'Invoice metadata not returned'}
+                          </small>
+                        </li>
+                      ))}
+                    </ul>
                   ) : null}
                 </div>
               ) : null}

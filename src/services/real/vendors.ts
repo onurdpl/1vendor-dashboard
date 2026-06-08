@@ -5,6 +5,7 @@ import type {
   LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiIncomingEinvoiceListProbeResult,
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
@@ -47,6 +48,14 @@ export function discoverLogoIsbasiFirms() {
 export function discoverLogoIsbasiInvoices() {
   return apiClient.post<LogoIsbasiInvoiceListProbeResult>(
     '/admin/probes/logo-isbasi/invoices',
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function discoverLogoIsbasiIncomingEinvoices() {
+  return apiClient.post<LogoIsbasiIncomingEinvoiceListProbeResult>(
+    '/admin/probes/logo-isbasi/incoming-einvoices',
     undefined,
     { skipVendorContext: true },
   );

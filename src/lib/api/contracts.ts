@@ -1461,6 +1461,23 @@ export type LogoIsbasiInvoiceSummary = {
   customerName: string | null;
 };
 
+export type LogoIsbasiIncomingEinvoiceSummary = {
+  invoiceId: string | null;
+  uuId: string | null;
+  type: string | null;
+  typeDesc: string | null;
+  issueDate: string | null;
+  amount: string | null;
+  currency: string | null;
+  supplier: string | null;
+  supplierTcknVknMasked: string | null;
+  invoiceType: string | null;
+  status: string | null;
+  statusCode: string | null;
+  eGovermentType: string | null;
+  eGovermentTypeDesc: string | null;
+};
+
 export type LogoIsbasiInvoiceShape = {
   hasEGovernmentInvoice: boolean;
   eGovernmentInvoiceKeys: string[];
@@ -1482,6 +1499,24 @@ export type LogoIsbasiInvoiceListProbeResult = {
   httpStatus?: number;
   count?: number;
   sampleInvoices?: LogoIsbasiInvoiceSummary[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+  response?: LogoIsbasiUpstreamResponseDiagnostic;
+};
+
+export type LogoIsbasiIncomingEinvoiceListProbeResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'incoming_einvoice_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  count?: number;
+  sampleInvoices?: LogoIsbasiIncomingEinvoiceSummary[];
+  responseKeys?: string[];
   errorCode?: string;
   message?: string;
   missingEnv?: string[];

@@ -406,6 +406,38 @@ export const runtimeServices = {
               },
             ],
           }),
+    discoverLogoIsbasiIncomingEinvoices: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.discoverLogoIsbasiIncomingEinvoices()
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'incoming_einvoice_discovery' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            count: 1,
+            responseKeys: ['data'],
+            sampleInvoices: [
+              {
+                invoiceId: 'mock-incoming-einvoice-1',
+                uuId: 'mock-uuid-1',
+                type: '1',
+                typeDesc: 'e-Fatura',
+                issueDate: '2026-06-08',
+                amount: '240.00',
+                currency: 'TL',
+                supplier: 'Mock Supplier Ltd.',
+                supplierTcknVknMasked: '22******22',
+                invoiceType: 'SATIS',
+                status: 'received',
+                statusCode: '100',
+                eGovermentType: '1',
+                eGovermentTypeDesc: 'e-Fatura',
+              },
+            ],
+          }),
     inspectLogoIsbasiInvoice: (invoiceId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.inspectLogoIsbasiInvoice(invoiceId)

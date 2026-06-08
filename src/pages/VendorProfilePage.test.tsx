@@ -11,6 +11,7 @@ import type {
   LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiIncomingEinvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
   SupportTicket,
   VendorBillingProfile,
@@ -27,6 +28,7 @@ const getVendorBillingProfileMock = vi.fn<() => Promise<VendorBillingProfile | n
 const updateVendorBillingProfileMock = vi.fn<(vendorId: string, input: VendorBillingProfileInput) => Promise<VendorBillingProfile>>();
 const probeLogoIsbasiLoginMock = vi.fn<() => Promise<LogoIsbasiLoginProbeResult>>();
 const discoverLogoIsbasiFirmsMock = vi.fn<() => Promise<LogoIsbasiFirmsDiscoveryResult>>();
+const discoverLogoIsbasiIncomingEinvoicesMock = vi.fn<() => Promise<LogoIsbasiIncomingEinvoiceListProbeResult>>();
 const matchVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmMatchResult>>();
 const bindVendorLogoIsbasiFirmMock = vi.fn<(vendorId: string) => Promise<LogoIsbasiFirmBindResult>>();
 const previewLogoIsbasiCommissionInvoiceMock = vi.fn<
@@ -62,6 +64,7 @@ vi.mock('../features/vendors/api', async () => {
       updateVendorBillingProfileMock(vendorId, input),
     probeLogoIsbasiLogin: () => probeLogoIsbasiLoginMock(),
     discoverLogoIsbasiFirms: () => discoverLogoIsbasiFirmsMock(),
+    discoverLogoIsbasiIncomingEinvoices: () => discoverLogoIsbasiIncomingEinvoicesMock(),
     matchVendorLogoIsbasiFirm: (vendorId: string) => matchVendorLogoIsbasiFirmMock(vendorId),
     bindVendorLogoIsbasiFirm: (vendorId: string) => bindVendorLogoIsbasiFirmMock(vendorId),
     previewLogoIsbasiCommissionInvoice: (vendorId: string, input: LogoIsbasiCommissionInvoicePreviewInput) =>
@@ -279,6 +282,36 @@ describe('VendorProfilePage', () => {
           taxNumberMasked: '11******11',
           eInvoiceResponsible: true,
           eArchiveResponsible: false,
+        },
+      ],
+    });
+    discoverLogoIsbasiIncomingEinvoicesMock.mockReset();
+    discoverLogoIsbasiIncomingEinvoicesMock.mockResolvedValue({
+      ok: true,
+      success: true,
+      provider: 'LOGO_ISBASI',
+      mode: 'incoming_einvoice_discovery',
+      writesPerformed: false,
+      externalApiCallAttempted: true,
+      httpStatus: 200,
+      count: 1,
+      responseKeys: ['data'],
+      sampleInvoices: [
+        {
+          invoiceId: 'incoming-1',
+          uuId: 'uuid-1',
+          type: '1',
+          typeDesc: 'e-Fatura',
+          issueDate: '2026-06-08',
+          amount: '240.00',
+          currency: 'TL',
+          supplier: 'Incoming Supplier Ltd.',
+          supplierTcknVknMasked: '12******90',
+          invoiceType: 'SATIS',
+          status: 'received',
+          statusCode: '100',
+          eGovermentType: '1',
+          eGovermentTypeDesc: 'e-Fatura',
         },
       ],
     });
@@ -950,6 +983,39 @@ describe('VendorProfilePage', () => {
     expect(within(firmSamples).getByText(/tax 11\*\*\*\*\*\*11/)).toBeInTheDocument();
     expect(within(firmSamples).queryByText('1111111111')).not.toBeInTheDocument();
     expect(within(firmSamples).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
+  });
+
+  it('discovers incoming Logo e-invoices and displays sanitized samples only', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue(billingProfile);
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+
+    await waitFor(() =>
+      expect(within(billingSection!).getByRole('button', { name: 'Discover Incoming E-Invoices' })).toBeInTheDocument(),
+    );
+    await userEvent.click(within(billingSection!).getByRole('button', { name: 'Discover Incoming E-Invoices' }));
+
+    await waitFor(() => expect(discoverLogoIsbasiIncomingEinvoicesMock).toHaveBeenCalled());
+    expect(await within(billingSection!).findByText('Logo incoming e-invoices discovery result')).toBeInTheDocument();
+    expect(within(billingSection!).getByText('responseKeys')).toBeInTheDocument();
+    const invoiceSamples = within(billingSection!).getByLabelText('Logo incoming e-invoice samples');
+    expect(within(invoiceSamples).getByText('Incoming Supplier Ltd.')).toBeInTheDocument();
+    expect(within(invoiceSamples).getByText(/supplier tax 12\*\*\*\*\*\*90/)).toBeInTheDocument();
+    expect(within(invoiceSamples).queryByText('1234567890')).not.toBeInTheDocument();
+    expect(within(invoiceSamples).queryByText(/api-key-secret|password-secret|full-secret-token/i)).not.toBeInTheDocument();
   });
 
   it('matches the selected vendor to a Logo firm without saving anything', async () => {

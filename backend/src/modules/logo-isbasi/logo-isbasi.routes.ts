@@ -227,6 +227,23 @@ type SanitizedLogoInvoiceSummary = {
   customerName: string | null;
 };
 
+type SanitizedLogoIncomingEinvoiceSummary = {
+  invoiceId: string | null;
+  uuId: string | null;
+  type: string | null;
+  typeDesc: string | null;
+  issueDate: string | null;
+  amount: string | null;
+  currency: string | null;
+  supplier: string | null;
+  supplierTcknVknMasked: string | null;
+  invoiceType: string | null;
+  status: string | null;
+  statusCode: string | null;
+  eGovermentType: string | null;
+  eGovermentTypeDesc: string | null;
+};
+
 export type LogoInvoiceShape = {
   hasEGovernmentInvoice: boolean;
   eGovernmentInvoiceKeys: string[];
@@ -421,6 +438,33 @@ function sanitizeLogoInvoiceSummary(value: unknown): SanitizedLogoInvoiceSummary
   };
 }
 
+function sanitizeLogoIncomingEinvoiceSummary(value: unknown): SanitizedLogoIncomingEinvoiceSummary {
+  return {
+    invoiceId: readRecordString(value, ['invoiceId', 'id', 'invoice_id']),
+    uuId: readRecordString(value, ['uuId', 'uuid', 'UUID', 'ettn']),
+    type: readRecordString(value, ['type']),
+    typeDesc: readRecordString(value, ['typeDesc', 'typeDescription', 'type_desc']),
+    issueDate: readRecordString(value, ['issueDate', 'date', 'invoiceDate']),
+    amount: readRecordString(value, ['amount', 'totalAmount', 'payableAmount', 'grandTotal', 'netTotal']),
+    currency: readRecordString(value, ['currency', 'currencyCode', 'currency_code']),
+    supplier: readRecordString(value, ['supplier', 'supplierName', 'senderName', 'title', 'commercialTitle']),
+    supplierTcknVknMasked: maskTaxNumber(readRecordString(value, [
+      'supplierTcknVkn',
+      'supplierVknTckn',
+      'supplierTaxNumber',
+      'senderTcknVkn',
+      'senderVknTckn',
+      'vknTckn',
+      'tcknVkn',
+    ])),
+    invoiceType: readRecordString(value, ['invoiceType', 'invoice_type']),
+    status: readRecordString(value, ['status', 'statusDesc', 'statusDescription']),
+    statusCode: readRecordString(value, ['statusCode', 'status_code']),
+    eGovermentType: readRecordString(value, ['eGovermentType', 'eGovernmentType', 'egovermentType']),
+    eGovermentTypeDesc: readRecordString(value, ['eGovermentTypeDesc', 'eGovernmentTypeDesc', 'egovermentTypeDesc']),
+  };
+}
+
 function sanitizeLogoInvoiceCustomer(value: unknown) {
   const customer = readInvoiceCustomerRecord(value);
   const source = customer ?? value;
@@ -469,6 +513,29 @@ function readLogoInvoicesArray(body: unknown): unknown[] {
     }
     if (isRecord(candidate)) {
       const nested = [candidate.items, candidate.invoices, candidate.salesInvoices, candidate.records, candidate.data];
+      const match = nested.find(Array.isArray);
+      if (Array.isArray(match)) {
+        return match;
+      }
+    }
+  }
+  return [];
+}
+
+function readLogoIncomingEinvoicesArray(body: unknown): unknown[] {
+  if (Array.isArray(body)) {
+    return body;
+  }
+  if (!isRecord(body)) {
+    return [];
+  }
+  const candidates = [body.data, body.items, body.invoices, body.myInvoices, body.records, body.result];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (isRecord(candidate)) {
+      const nested = [candidate.items, candidate.invoices, candidate.myInvoices, candidate.records, candidate.data];
       const match = nested.find(Array.isArray);
       if (Array.isArray(match)) {
         return match;
@@ -654,6 +721,9 @@ async function loginForLogoReadProbe(client: LogoIsbasiClient, mode: string) {
     session: {
       accessToken: session.accessToken!,
       tenantId: session.tenantId!,
+      userId: session.userId,
+      userEmail: session.userEmail,
+      userName: session.userName,
     } satisfies LogoIsbasiAuthenticatedSession,
     login,
   };
@@ -1154,6 +1224,66 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         message: 'Invoice list discovery succeeded. Detail endpoint is not confirmed yet.',
         invoiceId,
       });
+    },
+  );
+
+  app.post(
+    '/admin/probes/logo-isbasi/incoming-einvoices',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'incoming_einvoice_discovery');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      try {
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'incoming_einvoice_discovery');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.listIncomingEinvoices(login.session);
+        if (!result.ok || result.jsonParseFailed) {
+          logLogoInvoiceUpstreamFailure(app, 'incoming_einvoice_discovery', result);
+          return reply.code(502).send(buildLogoUpstreamError('incoming_einvoice_discovery', result));
+        }
+
+        const invoices = readLogoIncomingEinvoicesArray(result.body);
+        return {
+          ok: true,
+          success: true,
+          provider: 'LOGO_ISBASI',
+          mode: 'incoming_einvoice_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: result.status,
+          count: invoices.length,
+          responseKeys: isRecord(result.body) ? Object.keys(result.body).sort() : [],
+          sampleInvoices: invoices.slice(0, 20).map(sanitizeLogoIncomingEinvoiceSummary),
+        };
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'incoming_einvoice_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı incoming e-invoices discovery.',
+        });
+      }
     },
   );
 
