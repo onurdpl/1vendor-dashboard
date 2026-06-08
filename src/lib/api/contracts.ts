@@ -1428,6 +1428,68 @@ export type LogoIsbasiFirmDetailProbeResult = {
   message?: string;
 };
 
+export type LogoIsbasiInvoiceSummary = {
+  id: string | null;
+  invoiceNumber: string | null;
+  date: string | null;
+  amount: string | null;
+  currency: string | null;
+  scenario: string | null;
+  status: string | null;
+  invoiceType: string | null;
+  customerName: string | null;
+};
+
+export type LogoIsbasiInvoiceShape = {
+  hasEGovernmentInvoice: boolean;
+  eGovernmentInvoiceKeys: string[];
+  hasEArchivePortalInvoice: boolean;
+  eArchivePortalInvoiceKeys: string[];
+  currency: string | null;
+  invoiceType: string | null;
+  scenario: string | null;
+  lineItemShape: string[];
+};
+
+export type LogoIsbasiInvoiceListProbeResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'invoice_list_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  count?: number;
+  sampleInvoices?: LogoIsbasiInvoiceSummary[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+};
+
+export type LogoIsbasiInvoiceDetailProbeResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'invoice_detail_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  invoice?: {
+    invoiceId: string | null;
+    currency: string | null;
+    invoiceType: string | null;
+    scenario: string | null;
+    customer: Record<string, unknown>;
+    lineItems: Array<Record<string, unknown>>;
+    eGovernmentInvoice: unknown;
+    eArchivePortalInvoice: unknown;
+  };
+  shape?: LogoIsbasiInvoiceShape;
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+};
+
 export type LogoIsbasiFirmMatchResult = {
   ok: boolean;
   success?: boolean;

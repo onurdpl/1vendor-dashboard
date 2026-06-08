@@ -17,6 +17,14 @@ export function discoverLogoIsbasiFirms() {
   return runtimeServices.vendors.discoverLogoIsbasiFirms();
 }
 
+export function discoverLogoIsbasiInvoices() {
+  return runtimeServices.vendors.discoverLogoIsbasiInvoices();
+}
+
+export function inspectLogoIsbasiInvoice(invoiceId: string) {
+  return runtimeServices.vendors.inspectLogoIsbasiInvoice(invoiceId);
+}
+
 export function matchVendorLogoIsbasiFirm(vendorId: string) {
   return runtimeServices.vendors.matchVendorLogoIsbasiFirm(vendorId);
 }

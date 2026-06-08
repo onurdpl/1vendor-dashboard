@@ -215,6 +215,29 @@ type SanitizedLogoFirmDetail = SanitizedLogoFirm & {
   eDispatchResponsible: boolean | null;
 };
 
+type SanitizedLogoInvoiceSummary = {
+  id: string | null;
+  invoiceNumber: string | null;
+  date: string | null;
+  amount: string | null;
+  currency: string | null;
+  scenario: string | null;
+  status: string | null;
+  invoiceType: string | null;
+  customerName: string | null;
+};
+
+export type LogoInvoiceShape = {
+  hasEGovernmentInvoice: boolean;
+  eGovernmentInvoiceKeys: string[];
+  hasEArchivePortalInvoice: boolean;
+  eArchivePortalInvoiceKeys: string[];
+  currency: string | null;
+  invoiceType: string | null;
+  scenario: string | null;
+  lineItemShape: string[];
+};
+
 function sanitizeLogoFirm(value: unknown): SanitizedLogoFirm {
   return {
     id: readRecordString(value, ['id', 'firmId', 'firmID', 'firmNo', 'firm_id']),
@@ -234,6 +257,274 @@ function sanitizeLogoFirmDetail(value: unknown): SanitizedLogoFirmDetail {
     city: readRecordString(value, ['city', 'cityName', 'city_name']),
     district: readRecordString(value, ['district', 'districtName', 'district_name', 'county']),
     eDispatchResponsible: readRecordBoolean(value, ['eDispatchResponsible', 'edispatchResponsible', 'isEDispatchResponsible', 'e_dispatch_responsible']),
+  };
+}
+
+function maskEmail(value: string | null) {
+  if (!value?.trim()) {
+    return null;
+  }
+  const trimmed = value.trim();
+  const atIndex = trimmed.indexOf('@');
+  if (atIndex <= 0) {
+    return '[masked-email]';
+  }
+  const local = trimmed.slice(0, atIndex);
+  const domain = trimmed.slice(atIndex + 1);
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function maskPhone(value: string | null) {
+  if (!value?.trim()) {
+    return null;
+  }
+  const digits = value.replace(/\D/g, '');
+  if (!digits) {
+    return '[masked-phone]';
+  }
+  return `***${digits.slice(-2)}`;
+}
+
+function sanitizeDiagnosticString(value: string) {
+  return value
+    .replace(/((?:access|refresh)?token|password|secret|api[_-]?key|authorization)\s*[:=]\s*[^&\s,}]+/gi, '$1=[redacted]')
+    .replace(/\beyJ[a-z0-9_-]+\.[a-z0-9_-]+\.[a-z0-9_-]+\b/gi, '[redacted-token]')
+    .slice(0, 500);
+}
+
+function isSecretLikeKey(key: string) {
+  return /(token|authorization|api[_-]?key|password|secret|credential|card)/i.test(key);
+}
+
+function isEmailLikeKey(key: string) {
+  return /(email|e[_-]?mail|mailAddress)/i.test(key);
+}
+
+function isPhoneLikeKey(key: string) {
+  return /(phone|telephone|gsm|mobile|fax|telNo)/i.test(key);
+}
+
+function isTaxNumberLikeKey(key: string) {
+  return /(taxNumber|taxNo|tax_number|tckn|vkn|tcknVkn|vknTckn|identityNumber|taxIdentityNumber|tcKimlik)/i.test(key);
+}
+
+function sanitizeLogoInvoiceNestedValue(value: unknown, key = '', depth = 0): unknown {
+  if (isSecretLikeKey(key)) {
+    return '[redacted]';
+  }
+  if (typeof value === 'string') {
+    if (isEmailLikeKey(key)) {
+      return maskEmail(value);
+    }
+    if (isPhoneLikeKey(key)) {
+      return maskPhone(value);
+    }
+    if (isTaxNumberLikeKey(key)) {
+      return maskTaxNumber(value);
+    }
+    return sanitizeDiagnosticString(value);
+  }
+  if (typeof value === 'number' || typeof value === 'boolean' || value === null || value === undefined) {
+    return value ?? null;
+  }
+  if (depth >= 5) {
+    return '[truncated]';
+  }
+  if (Array.isArray(value)) {
+    return value.slice(0, 20).map((entry) => sanitizeLogoInvoiceNestedValue(entry, key, depth + 1));
+  }
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.entries(value)
+        .slice(0, 80)
+        .map(([entryKey, entryValue]) => [entryKey, sanitizeLogoInvoiceNestedValue(entryValue, entryKey, depth + 1)]),
+    );
+  }
+  return null;
+}
+
+function readFirstRecord(value: unknown, keys: string[]) {
+  if (!isRecord(value)) {
+    return null;
+  }
+  for (const key of keys) {
+    if (isRecord(value[key])) {
+      return value[key] as Record<string, unknown>;
+    }
+  }
+  return null;
+}
+
+function readFirstArray(value: unknown, keys: string[]) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+  if (!isRecord(value)) {
+    return [];
+  }
+  for (const key of keys) {
+    const candidate = value[key];
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (isRecord(candidate)) {
+      const nested = [candidate.items, candidate.records, candidate.data, candidate.list];
+      const match = nested.find(Array.isArray);
+      if (Array.isArray(match)) {
+        return match;
+      }
+    }
+  }
+  return [];
+}
+
+function readInvoiceCustomerRecord(value: unknown) {
+  return readFirstRecord(value, [
+    'customer',
+    'firm',
+    'account',
+    'currentAccount',
+    'currentAccountCard',
+    'customerDetail',
+    'firmDetail',
+  ]);
+}
+
+function readInvoiceLineItems(value: unknown) {
+  return readFirstArray(value, [
+    'lineItems',
+    'lines',
+    'items',
+    'salesInvoiceDetails',
+    'invoiceDetails',
+    'details',
+  ]);
+}
+
+function readInvoiceCustomerName(value: unknown) {
+  return readRecordString(value, ['customerName', 'firmName', 'accountName', 'currentAccountName', 'customerTitle'])
+    ?? readRecordString(readInvoiceCustomerRecord(value), ['name', 'firmName', 'title', 'commercialTitle', 'unvan']);
+}
+
+function sanitizeLogoInvoiceSummary(value: unknown): SanitizedLogoInvoiceSummary {
+  return {
+    id: readRecordString(value, ['id', 'invoiceId', 'invoiceID', 'invoice_id', 'salesInvoiceId']),
+    invoiceNumber: readRecordString(value, ['invoiceNumber', 'invoiceNo', 'invoice_number', 'number', 'documentNumber', 'serialNumber']),
+    date: readRecordString(value, ['date', 'invoiceDate', 'invoice_date', 'issueDate', 'documentDate', 'createdDate']),
+    amount: readRecordString(value, ['amount', 'totalAmount', 'grandTotal', 'total', 'payableAmount', 'netTotal']),
+    currency: readRecordString(value, ['currency', 'currencyCode', 'currency_code']),
+    scenario: readRecordString(value, ['scenario', 'invoiceScenario', 'invoice_scenario']),
+    status: readRecordString(value, ['status', 'invoiceStatus', 'invoice_status']),
+    invoiceType: readRecordString(value, ['invoiceType', 'invoice_type', 'type']),
+    customerName: readInvoiceCustomerName(value),
+  };
+}
+
+function sanitizeLogoInvoiceCustomer(value: unknown) {
+  const customer = readInvoiceCustomerRecord(value);
+  const source = customer ?? value;
+  return {
+    id: readRecordString(source, ['id', 'firmId', 'customerId', 'accountId']),
+    code: readRecordString(source, ['code', 'firmCode', 'customerCode', 'accountCode']),
+    name: readRecordString(source, ['name', 'firmName', 'title', 'commercialTitle', 'unvan']) ?? readInvoiceCustomerName(value),
+    firmType: readRecordString(source, ['firmType', 'firm_type', 'type', 'cardType']),
+    taxNumberMasked: maskTaxNumber(readFirmTaxNumber(source)),
+    taxOffice: readRecordString(source, ['taxOffice', 'taxOfficeName', 'tax_office', 'tax_office_name']),
+    city: readRecordString(source, ['city', 'cityName', 'city_name']),
+    district: readRecordString(source, ['district', 'districtName', 'district_name', 'county']),
+    emailMasked: maskEmail(readRecordString(source, ['email', 'emailAddress', 'eMail', 'mail'])),
+    phoneMasked: maskPhone(readRecordString(source, ['phone', 'phoneNumber', 'telephone', 'gsm', 'mobilePhone'])),
+    eInvoiceResponsible: readRecordBoolean(source, ['eInvoiceResponsible', 'einvoiceResponsible', 'isEInvoiceResponsible', 'e_invoice_responsible']),
+    eArchiveResponsible: readRecordBoolean(source, ['eArchiveResponsible', 'earchiveResponsible', 'isEArchiveResponsible', 'e_archive_responsible']),
+  };
+}
+
+function sanitizeLogoInvoiceLineItem(value: unknown) {
+  return {
+    id: readRecordString(value, ['id', 'lineId', 'detailId']),
+    productCode: readRecordString(value, ['productCode', 'itemCode', 'code', 'stockCode']),
+    name: readRecordString(value, ['name', 'productName', 'itemName', 'description']),
+    description: readRecordString(value, ['description', 'lineDescription', 'explanation']),
+    quantity: readRecordString(value, ['quantity', 'amount', 'qty']),
+    unitPrice: readRecordString(value, ['unitPrice', 'price', 'unit_price']),
+    amount: readRecordString(value, ['amount', 'lineTotal', 'total', 'netTotal']),
+    vatRate: readRecordString(value, ['vatRate', 'taxRate', 'vat_rate', 'tax_rate']),
+    currency: readRecordString(value, ['currency', 'currencyCode', 'currency_code']),
+    rawShape: isRecord(value) ? Object.keys(value).sort() : [],
+  };
+}
+
+function readLogoInvoicesArray(body: unknown): unknown[] {
+  if (Array.isArray(body)) {
+    return body;
+  }
+  if (!isRecord(body)) {
+    return [];
+  }
+  const candidates = [body.data, body.items, body.invoices, body.salesInvoices, body.records, body.result];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (isRecord(candidate)) {
+      const nested = [candidate.items, candidate.invoices, candidate.salesInvoices, candidate.records, candidate.data];
+      const match = nested.find(Array.isArray);
+      if (Array.isArray(match)) {
+        return match;
+      }
+    }
+  }
+  return [];
+}
+
+function readLogoInvoiceDetailRecord(body: unknown): unknown {
+  if (!isRecord(body)) {
+    return body;
+  }
+  for (const key of ['data', 'invoice', 'salesInvoice', 'result', 'item']) {
+    if (isRecord(body[key])) {
+      return body[key];
+    }
+  }
+  return body;
+}
+
+function readEGovernmentInvoice(value: unknown) {
+  return readFirstRecord(value, ['eGovernmentInvoice', 'e_government_invoice', 'egovernmentInvoice']);
+}
+
+function readEArchivePortalInvoice(value: unknown) {
+  return readFirstRecord(value, ['eArchivePortalInvoice', 'e_archive_portal_invoice', 'earchivePortalInvoice']);
+}
+
+export function extractInvoiceShape(value: unknown): LogoInvoiceShape {
+  const eGovernmentInvoice = readEGovernmentInvoice(value);
+  const eArchivePortalInvoice = readEArchivePortalInvoice(value);
+  const lineItems = readInvoiceLineItems(value);
+  const firstLineItem = lineItems.find(isRecord) ?? null;
+
+  return {
+    hasEGovernmentInvoice: Boolean(eGovernmentInvoice),
+    eGovernmentInvoiceKeys: eGovernmentInvoice ? Object.keys(eGovernmentInvoice).sort() : [],
+    hasEArchivePortalInvoice: Boolean(eArchivePortalInvoice),
+    eArchivePortalInvoiceKeys: eArchivePortalInvoice ? Object.keys(eArchivePortalInvoice).sort() : [],
+    currency: readRecordString(value, ['currency', 'currencyCode', 'currency_code']),
+    invoiceType: readRecordString(value, ['invoiceType', 'invoice_type', 'type']),
+    scenario: readRecordString(value, ['scenario', 'invoiceScenario', 'invoice_scenario']),
+    lineItemShape: firstLineItem ? Object.keys(firstLineItem).sort() : [],
+  };
+}
+
+function sanitizeLogoInvoiceDetail(value: unknown) {
+  return {
+    invoiceId: readRecordString(value, ['id', 'invoiceId', 'invoiceID', 'invoice_id', 'salesInvoiceId']),
+    currency: readRecordString(value, ['currency', 'currencyCode', 'currency_code']),
+    invoiceType: readRecordString(value, ['invoiceType', 'invoice_type', 'type']),
+    scenario: readRecordString(value, ['scenario', 'invoiceScenario', 'invoice_scenario']),
+    customer: sanitizeLogoInvoiceCustomer(value),
+    lineItems: readInvoiceLineItems(value).slice(0, 50).map(sanitizeLogoInvoiceLineItem),
+    eGovernmentInvoice: sanitizeLogoInvoiceNestedValue(readEGovernmentInvoice(value)),
+    eArchivePortalInvoice: sanitizeLogoInvoiceNestedValue(readEArchivePortalInvoice(value)),
   };
 }
 
@@ -730,6 +1021,135 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           externalApiCallAttempted: true,
           errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
           message: 'Network/backend request failed while calling Logo İşbaşı firm detail.',
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/probes/logo-isbasi/invoices',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'invoice_list_discovery');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      try {
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'invoice_list_discovery');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.listInvoices(login.session);
+        if (!result.ok || result.jsonParseFailed) {
+          return reply.code(502).send(buildLogoUpstreamError('invoice_list_discovery', result));
+        }
+
+        const invoices = readLogoInvoicesArray(result.body);
+        return {
+          ok: true,
+          success: true,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_list_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: result.status,
+          count: invoices.length,
+          sampleInvoices: invoices.slice(0, 20).map(sanitizeLogoInvoiceSummary),
+        };
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_list_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı invoices discovery.',
+        });
+      }
+    },
+  );
+
+  app.post<{ Params: { invoiceId: string } }>(
+    '/admin/probes/logo-isbasi/invoices/:invoiceId',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const invoiceId = request.params.invoiceId?.trim();
+      if (!invoiceId) {
+        return reply.code(400).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_detail_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          message: 'invoiceId is required.',
+        });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'invoice_detail_discovery');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      try {
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'invoice_detail_discovery');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.getInvoiceDetail(login.session, invoiceId);
+        if (!result.ok || result.jsonParseFailed) {
+          return reply.code(502).send(buildLogoUpstreamError('invoice_detail_discovery', result));
+        }
+
+        const invoice = readLogoInvoiceDetailRecord(result.body);
+        return {
+          ok: true,
+          success: true,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_detail_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: result.status,
+          invoice: sanitizeLogoInvoiceDetail(invoice),
+          shape: extractInvoiceShape(invoice),
+        };
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'invoice_detail_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı invoice detail.',
         });
       }
     },

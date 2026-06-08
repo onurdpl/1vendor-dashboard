@@ -18,7 +18,9 @@ import { createSupportTicket, listAdminSupportTickets, listVendorSupportTickets 
 import {
   bindVendorLogoIsbasiFirm,
   discoverLogoIsbasiFirms,
+  discoverLogoIsbasiInvoices,
   getVendorBillingProfile,
+  inspectLogoIsbasiInvoice,
   matchVendorLogoIsbasiFirm,
   previewLogoIsbasiCommissionInvoice,
   probeLogoIsbasiLogin,
@@ -33,6 +35,9 @@ import type {
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmSummary,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiInvoiceDetailProbeResult,
+  LogoIsbasiInvoiceListProbeResult,
+  LogoIsbasiInvoiceSummary,
   LogoIsbasiLoginProbeResult,
   SupportTicket,
   VendorBillingProfile,
@@ -184,7 +189,12 @@ function validateLogoCommissionPreviewForm(form: LogoCommissionPreviewFormState)
   return null;
 }
 
-function formatLogoProbeJson(value: LogoIsbasiLoginProbeResult | LogoIsbasiCommissionInvoicePreviewResult) {
+function formatLogoProbeJson(
+  value:
+    | LogoIsbasiLoginProbeResult
+    | LogoIsbasiCommissionInvoicePreviewResult
+    | LogoIsbasiInvoiceDetailProbeResult,
+) {
   return JSON.stringify(value, null, 2);
 }
 
@@ -210,6 +220,14 @@ function isLogoFirmMatchResult(value: unknown): value is LogoIsbasiFirmMatchResu
 
 function isLogoFirmBindResult(value: unknown): value is LogoIsbasiFirmBindResult {
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'firm_bind_probe';
+}
+
+function isLogoInvoiceListResult(value: unknown): value is LogoIsbasiInvoiceListProbeResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_list_discovery';
+}
+
+function isLogoInvoiceDetailResult(value: unknown): value is LogoIsbasiInvoiceDetailProbeResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_detail_discovery';
 }
 
 function buildLogoLoginFailureResult(error: unknown): LogoIsbasiLoginProbeResult {
@@ -252,6 +270,50 @@ function buildLogoFirmsFailureResult(error: unknown): LogoIsbasiFirmsDiscoveryRe
     externalApiCallAttempted: false,
     httpStatus: error instanceof ApiError ? error.status : undefined,
     errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_FIRMS_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoInvoiceListFailureResult(error: unknown): LogoIsbasiInvoiceListProbeResult {
+  if (error instanceof ApiError && isLogoInvoiceListResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'invoice_list_discovery',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INVOICE_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoInvoiceDetailFailureResult(error: unknown): LogoIsbasiInvoiceDetailProbeResult {
+  if (error instanceof ApiError && isLogoInvoiceDetailResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'invoice_detail_discovery',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INVOICE_DETAIL_FAILED',
     message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
   };
 }
@@ -301,6 +363,15 @@ function formatLogoFirmSummary(firm: LogoIsbasiFirmSummary) {
     firm.code ? `code ${firm.code}` : null,
     firm.firmType ? `type ${firm.firmType}` : null,
     firm.taxNumberMasked ? `tax ${firm.taxNumberMasked}` : null,
+  ].filter(Boolean).join(', ') || 'No optional fields returned';
+}
+
+function formatLogoInvoiceSummary(invoice: LogoIsbasiInvoiceSummary) {
+  return [
+    invoice.invoiceNumber ? `number ${invoice.invoiceNumber}` : null,
+    invoice.date ? `date ${invoice.date}` : null,
+    invoice.amount && invoice.currency ? `${invoice.amount} ${invoice.currency}` : invoice.amount,
+    invoice.status ? `status ${invoice.status}` : null,
   ].filter(Boolean).join(', ') || 'No optional fields returned';
 }
 
@@ -520,6 +591,9 @@ export function VendorProfilePage() {
   const [savedBillingProfile, setSavedBillingProfile] = useState<VendorBillingProfile | null>(null);
   const [logoLoginResult, setLogoLoginResult] = useState<LogoIsbasiLoginProbeResult | null>(null);
   const [logoFirmsResult, setLogoFirmsResult] = useState<LogoIsbasiFirmsDiscoveryResult | null>(null);
+  const [logoInvoicesResult, setLogoInvoicesResult] = useState<LogoIsbasiInvoiceListProbeResult | null>(null);
+  const [selectedLogoInvoiceId, setSelectedLogoInvoiceId] = useState('');
+  const [logoInvoiceDetailResult, setLogoInvoiceDetailResult] = useState<LogoIsbasiInvoiceDetailProbeResult | null>(null);
   const [logoFirmMatchResult, setLogoFirmMatchResult] = useState<LogoIsbasiFirmMatchResult | null>(null);
   const [logoFirmBindResult, setLogoFirmBindResult] = useState<LogoIsbasiFirmBindResult | null>(null);
   const [logoPreviewOpen, setLogoPreviewOpen] = useState(false);
@@ -786,6 +860,9 @@ export function VendorProfilePage() {
     {
       onSuccess: (result) => {
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
@@ -794,6 +871,9 @@ export function VendorProfilePage() {
       },
       onError: (error) => {
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
@@ -807,6 +887,9 @@ export function VendorProfilePage() {
     {
       onSuccess: (result) => {
         setLogoLoginResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
@@ -815,10 +898,64 @@ export function VendorProfilePage() {
       },
       onError: (error) => {
         setLogoLoginResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
         setLogoFirmsResult(buildLogoFirmsFailureResult(error));
+      },
+    },
+  );
+
+  const logoInvoicesMutation = useMutationAction(
+    () => discoverLogoIsbasiInvoices(),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoInvoiceDetailResult(null);
+        setLogoInvoicesResult(result);
+        const firstInvoiceId = result.sampleInvoices?.find((invoice) => invoice.id)?.id ?? '';
+        setSelectedLogoInvoiceId(firstInvoiceId);
+        showFeedback('Logo İşbaşı invoice discovery completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoInvoicesResult(buildLogoInvoiceListFailureResult(error));
+      },
+    },
+  );
+
+  const logoInvoiceDetailMutation = useMutationAction(
+    (invoiceId: string) => inspectLogoIsbasiInvoice(invoiceId),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoInvoiceDetailResult(result);
+        showFeedback('Logo İşbaşı invoice shape inspection completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoInvoiceDetailResult(buildLogoInvoiceDetailFailureResult(error));
       },
     },
   );
@@ -829,6 +966,9 @@ export function VendorProfilePage() {
       onSuccess: (result) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
         setLogoFirmMatchResult(result);
@@ -837,6 +977,9 @@ export function VendorProfilePage() {
       onError: (error) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
         setLogoFirmMatchResult(buildLogoFirmMatchFailureResult(error));
@@ -850,6 +993,9 @@ export function VendorProfilePage() {
       onSuccess: (result) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoPreviewResult(null);
         setLogoFirmBindResult(result);
@@ -875,6 +1021,9 @@ export function VendorProfilePage() {
       onError: (error) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoPreviewResult(null);
         setLogoFirmBindResult(buildLogoFirmBindFailureResult(error));
@@ -895,6 +1044,9 @@ export function VendorProfilePage() {
       onSuccess: (result) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(result);
@@ -903,6 +1055,9 @@ export function VendorProfilePage() {
       onError: (error) => {
         setLogoLoginResult(null);
         setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
         setLogoFirmMatchResult(null);
         setLogoFirmBindResult(null);
         setLogoPreviewResult(null);
@@ -967,12 +1122,18 @@ export function VendorProfilePage() {
     if (validationError) {
       setLogoLoginResult(null);
       setLogoFirmsResult(null);
+      setLogoInvoicesResult(null);
+      setLogoInvoiceDetailResult(null);
+      setSelectedLogoInvoiceId('');
       setLogoFirmMatchResult(null);
       setLogoPreviewFormError(validationError);
       return;
     }
     setLogoLoginResult(null);
     setLogoFirmsResult(null);
+    setLogoInvoicesResult(null);
+    setLogoInvoiceDetailResult(null);
+    setSelectedLogoInvoiceId('');
     setLogoFirmMatchResult(null);
     void logoPreviewMutation.mutateAsync(logoPreviewForm).catch(() => undefined);
   }
@@ -1109,6 +1270,9 @@ export function VendorProfilePage() {
                       onClick={() => {
                         setLogoPreviewResult(null);
                         setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
                         setLogoFirmBindResult(null);
                         setLogoPreviewFormError(null);
@@ -1126,6 +1290,9 @@ export function VendorProfilePage() {
                         setLogoFirmMatchResult(null);
                         setLogoFirmBindResult(null);
                         setLogoPreviewResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoPreviewFormError(null);
                         void logoFirmsMutation.mutateAsync(undefined).catch(() => undefined);
                       }}
@@ -1139,6 +1306,27 @@ export function VendorProfilePage() {
                       onClick={() => {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
+                        setLogoFirmMatchResult(null);
+                        setLogoFirmBindResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
+                        setLogoPreviewFormError(null);
+                        void logoInvoicesMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
+                      disabled={logoInvoicesMutation.isPending}
+                    >
+                      {logoInvoicesMutation.isPending ? 'Discovering invoices...' : 'Discover Logo Invoices'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoFirmBindResult(null);
                         setLogoPreviewResult(null);
                         setLogoPreviewFormError(null);
@@ -1154,6 +1342,9 @@ export function VendorProfilePage() {
                       onClick={() => {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
                         setLogoPreviewResult(null);
                         setLogoPreviewFormError(null);
@@ -1173,6 +1364,9 @@ export function VendorProfilePage() {
                       onClick={() => {
                         setLogoLoginResult(null);
                         setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoFirmMatchResult(null);
                         setLogoFirmBindResult(null);
                         setLogoPreviewOpen((current) => !current);
@@ -1322,6 +1516,126 @@ export function VendorProfilePage() {
                       ))}
                     </ul>
                   ) : null}
+                </div>
+              ) : null}
+              {logoInvoicesResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo invoices discovery result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoInvoicesResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoInvoicesResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Invoice count</span>
+                      <strong>{logoInvoicesResult.count ?? 0}</strong>
+                    </div>
+                    {logoInvoicesResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoInvoicesResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoInvoicesResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoInvoicesResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoInvoicesResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoInvoicesResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  {logoInvoicesResult.sampleInvoices?.length ? (
+                    <>
+                      <ul className="vendor-profile-logo-firm-list" aria-label="Logo invoice samples">
+                        {logoInvoicesResult.sampleInvoices.map((invoice, index) => (
+                          <li key={invoice.id ?? invoice.invoiceNumber ?? `${invoice.customerName}-${index}`}>
+                            <strong>{invoice.invoiceNumber ?? invoice.id ?? 'Unnamed invoice'}</strong>
+                            <span>{formatLogoInvoiceSummary(invoice)}</span>
+                            <small>{invoice.customerName ?? 'Customer not returned'}</small>
+                          </li>
+                        ))}
+                      </ul>
+                      <div className="vendor-profile-logo-result-grid">
+                        <label>
+                          Logo invoice
+                          <select
+                            value={selectedLogoInvoiceId}
+                            onChange={(event) => setSelectedLogoInvoiceId(event.target.value)}
+                          >
+                            <option value="">Select invoice</option>
+                            {logoInvoicesResult.sampleInvoices
+                              .filter((invoice) => invoice.id)
+                              .map((invoice) => (
+                                <option key={invoice.id!} value={invoice.id!}>
+                                  {invoice.invoiceNumber ?? invoice.id}
+                                </option>
+                              ))}
+                          </select>
+                        </label>
+                        <div>
+                          <span>Invoice shape</span>
+                          <button
+                            type="button"
+                            className="button button-secondary button-compact"
+                            onClick={() => {
+                              if (!selectedLogoInvoiceId) {
+                                return;
+                              }
+                              void logoInvoiceDetailMutation.mutateAsync(selectedLogoInvoiceId).catch(() => undefined);
+                            }}
+                            disabled={!selectedLogoInvoiceId || logoInvoiceDetailMutation.isPending}
+                          >
+                            {logoInvoiceDetailMutation.isPending ? 'Inspecting invoice...' : 'Inspect Invoice Shape'}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              {logoInvoiceDetailResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo invoice shape result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoInvoiceDetailResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoInvoiceDetailResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    {logoInvoiceDetailResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoInvoiceDetailResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoInvoiceDetailResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoInvoiceDetailResult.message}</strong>
+                      </div>
+                    ) : null}
+                    <div>
+                      <span>eGovernmentInvoice keys</span>
+                      <strong>{logoInvoiceDetailResult.shape?.eGovernmentInvoiceKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                    <div>
+                      <span>eArchivePortalInvoice keys</span>
+                      <strong>{logoInvoiceDetailResult.shape?.eArchivePortalInvoiceKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                  </div>
+                  <pre>{formatLogoProbeJson(logoInvoiceDetailResult)}</pre>
                 </div>
               ) : null}
               {logoFirmMatchResult ? (

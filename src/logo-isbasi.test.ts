@@ -33,7 +33,7 @@ const {
   buildLogoIsbasiCommissionInvoicePreview,
   sanitizeLogoIsbasiInvoicePreviewPayload,
 } = await import('../backend/src/modules/logo-isbasi/logo-isbasi-commission-preview.js');
-const { registerLogoIsbasiRoutes } = await import('../backend/src/modules/logo-isbasi/logo-isbasi.routes.js');
+const { extractInvoiceShape, registerLogoIsbasiRoutes } = await import('../backend/src/modules/logo-isbasi/logo-isbasi.routes.js');
 
 const vendorBillingProfile = {
   id: 'billing-sporjinal',
@@ -277,6 +277,238 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('+905551112233');
     expect(serialized).not.toContain('Sensitive address');
     expect(serialized).not.toContain('full-secret-access-token');
+  });
+
+  it('discovers sanitized Logo invoice list samples without exposing secrets', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'invoice-1',
+              invoiceNumber: 'INV202600001',
+              invoiceDate: '2026-06-08',
+              totalAmount: '120.00',
+              currency: 'TL',
+              scenario: 'TEMELFATURA',
+              status: 'draft',
+              invoiceType: 'SATIS',
+              customer: {
+                name: 'Sporjinal Spor Malzemeleri A.S.',
+                taxNumber: '6490512763',
+                email: 'billing@sporjinal.test',
+                phone: '+905551112233',
+              },
+              apiKey: 'provider-api-key-secret',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoices')?.(
+      { authUser: { role: 'admin' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/salesInvoices',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          apiKey: 'api-key-secret',
+        }),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        count: 1,
+        sampleInvoices: [
+          expect.objectContaining({
+            id: 'invoice-1',
+            invoiceNumber: 'INV202600001',
+            date: '2026-06-08',
+            amount: '120.00',
+            currency: 'TL',
+            scenario: 'TEMELFATURA',
+            status: 'draft',
+            invoiceType: 'SATIS',
+            customerName: 'Sporjinal Spor Malzemeleri A.S.',
+          }),
+        ],
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('6490512763');
+    expect(serialized).not.toContain('billing@sporjinal.test');
+    expect(serialized).not.toContain('+905551112233');
+    expect(serialized).not.toContain('provider-api-key-secret');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
+  it('returns sanitized Logo invoice detail and shape without exposing tokens or personal fields', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: {
+            id: 'invoice-1',
+            currency: 'TL',
+            invoiceType: 'SATIS',
+            scenario: 'TEMELFATURA',
+            customer: {
+              id: 'firm-1',
+              code: 'CUST001',
+              name: 'Sporjinal Spor Malzemeleri A.S.',
+              taxNumber: '6490512763',
+              taxOffice: 'Kadikoy',
+              city: 'Istanbul',
+              district: 'Atasehir',
+              email: 'billing@sporjinal.test',
+              phone: '+905551112233',
+            },
+            salesInvoiceDetails: [
+              {
+                id: 'line-1',
+                itemCode: 'SPORGYM-COMMISSION',
+                name: 'Pazaryeri Komisyon Hizmeti',
+                quantity: 1,
+                price: '100',
+                taxRate: '20',
+                secret: 'line-secret-value',
+              },
+            ],
+            eGovernmentInvoice: {
+              scenario: 'TEMELFATURA',
+              receiverTaxNumber: '6490512763',
+              receiverEmail: 'billing@sporjinal.test',
+              receiverPhone: '+905551112233',
+              accessToken: 'invoice-access-token-secret',
+            },
+            eArchivePortalInvoice: {
+              internetSale: false,
+              recipientTaxNumber: '11111111111',
+              recipientEmail: 'customer@example.test',
+            },
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/invoices/:invoiceId')?.(
+      { authUser: { role: 'admin' }, params: { invoiceId: 'invoice-1' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/salesInvoices/invoice-1',
+      expect.objectContaining({ method: 'GET' }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        invoice: expect.objectContaining({
+          invoiceId: 'invoice-1',
+          currency: 'TL',
+          invoiceType: 'SATIS',
+          scenario: 'TEMELFATURA',
+          customer: expect.objectContaining({
+            taxNumberMasked: '64******63',
+            emailMasked: 'b***@sporjinal.test',
+            phoneMasked: '***33',
+          }),
+          eGovernmentInvoice: expect.objectContaining({
+            scenario: 'TEMELFATURA',
+            receiverTaxNumber: '64******63',
+            receiverEmail: 'b***@sporjinal.test',
+            receiverPhone: '***33',
+            accessToken: '[redacted]',
+          }),
+          eArchivePortalInvoice: expect.objectContaining({
+            internetSale: false,
+            recipientTaxNumber: '11*******11',
+            recipientEmail: 'c***@example.test',
+          }),
+        }),
+        shape: expect.objectContaining({
+          hasEGovernmentInvoice: true,
+          eGovernmentInvoiceKeys: ['accessToken', 'receiverEmail', 'receiverPhone', 'receiverTaxNumber', 'scenario'],
+          hasEArchivePortalInvoice: true,
+          eArchivePortalInvoiceKeys: ['internetSale', 'recipientEmail', 'recipientTaxNumber'],
+          lineItemShape: ['id', 'itemCode', 'name', 'price', 'quantity', 'secret', 'taxRate'],
+        }),
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('6490512763');
+    expect(serialized).not.toContain('11111111111');
+    expect(serialized).not.toContain('billing@sporjinal.test');
+    expect(serialized).not.toContain('customer@example.test');
+    expect(serialized).not.toContain('+905551112233');
+    expect(serialized).not.toContain('invoice-access-token-secret');
+    expect(serialized).not.toContain('line-secret-value');
+    expect(serialized).not.toContain('full-secret-access-token');
+  });
+
+  it('extracts Logo invoice shape from invoice detail payloads', () => {
+    const shape = extractInvoiceShape({
+      currencyCode: 'TL',
+      type: 'SATIS',
+      invoiceScenario: 'TEMELFATURA',
+      salesInvoiceDetails: [
+        {
+          productDetail: { name: 'Pazaryeri Komisyon Hizmeti' },
+          quantity: 1,
+          taxRate: '20',
+        },
+      ],
+      eGovernmentInvoice: {
+        alias: 'urn:mail',
+        scenario: 'TEMELFATURA',
+      },
+      eArchivePortalInvoice: {
+        internetSale: false,
+      },
+    });
+
+    expect(shape).toEqual({
+      hasEGovernmentInvoice: true,
+      eGovernmentInvoiceKeys: ['alias', 'scenario'],
+      hasEArchivePortalInvoice: true,
+      eArchivePortalInvoiceKeys: ['internetSale'],
+      currency: 'TL',
+      invoiceType: 'SATIS',
+      scenario: 'TEMELFATURA',
+      lineItemShape: ['productDetail', 'quantity', 'taxRate'],
+    });
   });
 
   it('matches a vendor billing profile to a Logo firm by tax number without saving', async () => {

@@ -378,6 +378,84 @@ export const runtimeServices = {
               },
             ],
           }),
+    discoverLogoIsbasiInvoices: () =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.discoverLogoIsbasiInvoices()
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'invoice_list_discovery' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            count: 1,
+            sampleInvoices: [
+              {
+                id: 'mock-logo-invoice-1',
+                invoiceNumber: 'MCK202600001',
+                date: '2026-06-08',
+                amount: '120.00',
+                currency: 'TL',
+                scenario: 'TEMELFATURA',
+                status: 'draft',
+                invoiceType: 'SATIS',
+                customerName: 'Mock Vendor Legal Name',
+              },
+            ],
+          }),
+    inspectLogoIsbasiInvoice: (invoiceId: string) =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.inspectLogoIsbasiInvoice(invoiceId)
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'invoice_detail_discovery' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            invoice: {
+              invoiceId,
+              currency: 'TL',
+              invoiceType: 'SATIS',
+              scenario: 'TEMELFATURA',
+              customer: {
+                id: 'mock-logo-firm-1',
+                code: 'LOGO-MOCK-1',
+                name: 'Mock Vendor Legal Name',
+                taxNumberMasked: '11******11',
+                emailMasked: 'b***@example.test',
+                phoneMasked: '***33',
+              },
+              lineItems: [
+                {
+                  productCode: 'SPORGYM-COMMISSION',
+                  name: 'Pazaryeri Komisyon Hizmeti',
+                  quantity: '1',
+                  unitPrice: '100',
+                  amount: '100',
+                  vatRate: '20',
+                  rawShape: ['amount', 'name', 'productCode', 'quantity', 'unitPrice', 'vatRate'],
+                },
+              ],
+              eGovernmentInvoice: {
+                scenario: 'TEMELFATURA',
+                sendType: 'ELEKTRONIK',
+              },
+              eArchivePortalInvoice: null,
+            },
+            shape: {
+              hasEGovernmentInvoice: true,
+              eGovernmentInvoiceKeys: ['scenario', 'sendType'],
+              hasEArchivePortalInvoice: false,
+              eArchivePortalInvoiceKeys: [],
+              currency: 'TL',
+              invoiceType: 'SATIS',
+              scenario: 'TEMELFATURA',
+              lineItemShape: ['amount', 'name', 'productCode', 'quantity', 'unitPrice', 'vatRate'],
+            },
+          }),
     matchVendorLogoIsbasiFirm: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
         ? realVendors.matchVendorLogoIsbasiFirm(vendorId)

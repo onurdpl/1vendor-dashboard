@@ -5,6 +5,8 @@ import type {
   LogoIsbasiFirmBindResult,
   LogoIsbasiFirmMatchResult,
   LogoIsbasiFirmsDiscoveryResult,
+  LogoIsbasiInvoiceDetailProbeResult,
+  LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -37,6 +39,22 @@ export function probeLogoIsbasiLogin() {
 export function discoverLogoIsbasiFirms() {
   return apiClient.post<LogoIsbasiFirmsDiscoveryResult>(
     '/admin/probes/logo-isbasi/firms',
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function discoverLogoIsbasiInvoices() {
+  return apiClient.post<LogoIsbasiInvoiceListProbeResult>(
+    '/admin/probes/logo-isbasi/invoices',
+    undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function inspectLogoIsbasiInvoice(invoiceId: string) {
+  return apiClient.post<LogoIsbasiInvoiceDetailProbeResult>(
+    `/admin/probes/logo-isbasi/invoices/${encodeURIComponent(invoiceId)}`,
     undefined,
     { skipVendorContext: true },
   );

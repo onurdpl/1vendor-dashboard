@@ -238,4 +238,32 @@ export class LogoIsbasiClient {
 
     return this.parseResponse(response);
   }
+
+  async listInvoices(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/salesInvoices/salesInvoices`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        tenantId: session.tenantId,
+        apiKey: this.config.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+
+    return this.parseResponse(response);
+  }
+
+  async getInvoiceDetail(session: LogoIsbasiAuthenticatedSession, id: string): Promise<LogoIsbasiRawResult> {
+    const response = await this.fetchImpl(`${this.baseUrl}/api/v1.0/salesInvoices/${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        tenantId: session.tenantId,
+        apiKey: this.config.apiKey,
+      },
+    });
+
+    return this.parseResponse(response);
+  }
 }
