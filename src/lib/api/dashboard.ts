@@ -25,6 +25,8 @@ export const DASHBOARD_DEFERRED_LOAD_HEADER = 'X-Dashboard-Deferred-Load';
 const SLOW_DASHBOARD_OPERATION_MS = 300;
 const SLOW_DASHBOARD_TOTAL_MS = 1000;
 const DASHBOARD_DEFERRED_LIST_LIMIT = 10;
+const DASHBOARD_DEFERRED_PHASE_2_DELAY_MS = 500;
+const DASHBOARD_DEFERRED_PHASE_3_DELAY_MS = 1000;
 
 type DashboardLoadPhase = 'initial' | 'deferred';
 type DashboardRequestOptions = { signal?: AbortSignal; requestId?: string };
@@ -115,6 +117,40 @@ async function withDashboardClientTiming<T>(
   }
 }
 
+function createDashboardAbortError() {
+  if (typeof DOMException !== 'undefined') {
+    return new DOMException('Dashboard deferred loading was aborted.', 'AbortError');
+  }
+
+  const error = new Error('Dashboard deferred loading was aborted.');
+  error.name = 'AbortError';
+  return error;
+}
+
+function waitForDashboardDeferredPhase(signal: AbortSignal | undefined, delayMs: number) {
+  if (delayMs <= 0) {
+    return Promise.resolve();
+  }
+
+  if (signal?.aborted) {
+    return Promise.reject(createDashboardAbortError());
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const timeoutId = setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort);
+      resolve();
+    }, delayMs);
+
+    function handleAbort() {
+      clearTimeout(timeoutId);
+      reject(createDashboardAbortError());
+    }
+
+    signal?.addEventListener('abort', handleAbort, { once: true });
+  });
+}
+
 function readErrorStatus(error: unknown) {
   if (!error || typeof error !== 'object') {
     return null;
@@ -139,7 +175,7 @@ function isDashboardAuthError(error: unknown) {
   return (error instanceof ApiError && error.kind === 'unauthorized') || status === 401 || status === 403;
 }
 
-function throwDashboardAuthError(results: Array<PromiseSettledResult<unknown>>) {
+function throwDashboardAuthError(results: ReadonlyArray<PromiseSettledResult<unknown>>) {
   const authFailure = results.find((result) => result.status === 'rejected' && isDashboardAuthError(result.reason));
 
   if (authFailure?.status === 'rejected') {
@@ -482,29 +518,41 @@ async function buildRealDashboardDeferredOverview(vendorId?: VendorId, options: 
     };
 
     const partialDataWarnings: string[] = [];
-    const dashboardRequests = await Promise.allSettled([
+    const phase1Requests = Promise.allSettled([
       withDashboardClientTiming(requestId, 'client.dashboard.summary', () => runtimeServices.dashboard.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.orders.list', () => runtimeServices.orders.list(currentVendorId, dashboardReadOptions), 'deferred'),
       withDashboardClientTiming(requestId, 'client.returns.list', () => runtimeServices.returns.list(currentVendorId, dashboardReadOptions), 'deferred'),
-      withDashboardClientTiming(requestId, 'client.finance.summary', () => runtimeServices.finance.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
-      withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
-      currentUser?.role === 'admin'
-        ? withDashboardClientTiming(requestId, 'client.operations.summary', () => runtimeServices.operations.summary(dashboardSummaryReadOptions), 'deferred')
-        : Promise.resolve(null),
-      withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
-      currentUser?.role === 'admin'
-        ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
-        : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
-      currentUser?.role === 'admin'
-        ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
-            runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
-            'deferred',
-          )
-        : Promise.resolve(null),
-      currentUser?.role === 'admin'
-        ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
-        : Promise.resolve(null),
+    ] as const);
+    const phase2Requests = waitForDashboardDeferredPhase(options.signal, DASHBOARD_DEFERRED_PHASE_2_DELAY_MS)
+      .then(() => Promise.allSettled([
+        withDashboardClientTiming(requestId, 'client.finance.summary', () => runtimeServices.finance.summary(currentVendorId, dashboardSummaryReadOptions), 'deferred'),
+        withDashboardClientTiming(requestId, 'client.automation.dashboard', () => runtimeServices.automation.dashboard(currentVendorId, dashboardReadOptions), 'deferred'),
+      ] as const));
+    const phase3Requests = waitForDashboardDeferredPhase(options.signal, DASHBOARD_DEFERRED_PHASE_3_DELAY_MS)
+      .then(() => Promise.allSettled([
+        currentUser?.role === 'admin'
+          ? withDashboardClientTiming(requestId, 'client.operations.summary', () => runtimeServices.operations.summary(dashboardSummaryReadOptions), 'deferred')
+          : Promise.resolve(null),
+        withDashboardClientTiming(requestId, 'client.signals.list', () => runtimeServices.signals.list(currentVendorId, dashboardReadOptions), 'deferred'),
+        currentUser?.role === 'admin'
+          ? withDashboardClientTiming(requestId, 'client.support.list_admin', () => runtimeServices.support.listAdmin(dashboardReadOptions), 'deferred')
+          : withDashboardClientTiming(requestId, 'client.support.list_vendor', () => runtimeServices.support.listVendor(dashboardReadOptions), 'deferred'),
+        currentUser?.role === 'admin'
+          ? withDashboardClientTiming(requestId, 'client.diagnostics.reconciliation', () =>
+              runtimeServices.diagnostics.reconciliation(dashboardReadOptions),
+              'deferred',
+            )
+          : Promise.resolve(null),
+        currentUser?.role === 'admin'
+          ? withDashboardClientTiming(requestId, 'client.observability.summary', () => runtimeServices.observability.summary(dashboardReadOptions), 'deferred')
+          : Promise.resolve(null),
+      ] as const));
+    const [phase1Results, phase2Results, phase3Results] = await Promise.all([
+      phase1Requests,
+      phase2Requests,
+      phase3Requests,
     ]);
+    const dashboardRequests = [...phase1Results, ...phase2Results, ...phase3Results] as const;
 
     throwDashboardAuthError(dashboardRequests);
 

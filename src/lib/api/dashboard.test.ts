@@ -168,6 +168,7 @@ describe('dashboard real-mode loading', () => {
   afterEach(() => {
     vi.resetModules();
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   it('propagates 401 failures from orders instead of returning empty dashboard metrics', async () => {
@@ -237,6 +238,37 @@ describe('dashboard real-mode loading', () => {
     expect(services.signals.list).toHaveBeenCalledWith('vendor-query-key', expect.any(Object));
     expect(services.notifications.list).not.toHaveBeenCalled();
     expect(services.support.listVendor).toHaveBeenCalledWith(expect.any(Object));
+  });
+
+  it('phases deferred dashboard requests to reduce the initial request burst', async () => {
+    vi.useFakeTimers();
+    const { getDashboardDeferredOverview, services } = await importDashboardWithServices();
+
+    const overviewPromise = getDashboardDeferredOverview('vendor-query-key');
+
+    expect(services.dashboard.summary).toHaveBeenCalledTimes(1);
+    expect(services.orders.list).toHaveBeenCalledTimes(1);
+    expect(services.returns.list).toHaveBeenCalledTimes(1);
+    expect(services.finance.summary).not.toHaveBeenCalled();
+    expect(services.automation.dashboard).not.toHaveBeenCalled();
+    expect(services.signals.list).not.toHaveBeenCalled();
+    expect(services.support.listVendor).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(499);
+    expect(services.finance.summary).not.toHaveBeenCalled();
+    expect(services.automation.dashboard).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1);
+    expect(services.finance.summary).toHaveBeenCalledTimes(1);
+    expect(services.automation.dashboard).toHaveBeenCalledTimes(1);
+    expect(services.signals.list).not.toHaveBeenCalled();
+    expect(services.support.listVendor).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(500);
+    expect(services.signals.list).toHaveBeenCalledTimes(1);
+    expect(services.support.listVendor).toHaveBeenCalledTimes(1);
+
+    await overviewPromise;
   });
 
   it('uses summary-only operations and no notification request for admin dashboard aggregation', async () => {

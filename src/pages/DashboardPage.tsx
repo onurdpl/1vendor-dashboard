@@ -27,6 +27,8 @@ import { formatDateTime, safeArray } from '../services/real/formatting';
 import { getDashboardWorkflowAction, getDashboardWorkflowRoute, workflowRoutes } from '../lib/workflowActionGuidance';
 import { projectOperationalEvent } from '../lib/operationalEventProjection';
 
+const DASHBOARD_NOTIFICATION_DEFERRED_DELAY_MS = 500;
+
 function parseDashboardCount(value: string | number | null | undefined) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : null;
@@ -457,6 +459,7 @@ export function DashboardPage() {
   const [notificationOverrides, setNotificationOverrides] = useState<Record<string, Partial<NotificationIntent>>>({});
   const [pendingNotificationAction, setPendingNotificationAction] = useState<string | null>(null);
   const [shouldLoadDeferredDashboard, setShouldLoadDeferredDashboard] = useState(false);
+  const [shouldLoadDeferredNotifications, setShouldLoadDeferredNotifications] = useState(false);
   const dashboardRequestId = useMemo(() => createDashboardRequestId(), [vendorId]);
   const dashboardDeferredHeaders = useMemo(
     () => createDashboardRequestHeaders(dashboardRequestId, 'deferred'),
@@ -478,6 +481,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     setShouldLoadDeferredDashboard(false);
+    setShouldLoadDeferredNotifications(false);
   }, [vendorId]);
 
   useEffect(() => {
@@ -493,6 +497,19 @@ export function DashboardPage() {
     const timeoutId = window.setTimeout(() => setShouldLoadDeferredDashboard(true), 0);
     return () => window.clearTimeout(timeoutId);
   }, [appReadiness.ready, initialDashboard, vendorId]);
+
+  useEffect(() => {
+    setShouldLoadDeferredNotifications(false);
+    if (!shouldLoadDeferredDashboard) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(
+      () => setShouldLoadDeferredNotifications(true),
+      DASHBOARD_NOTIFICATION_DEFERRED_DELAY_MS,
+    );
+    return () => window.clearTimeout(timeoutId);
+  }, [shouldLoadDeferredDashboard, vendorId]);
 
   const {
     data: deferredDashboard,
@@ -512,7 +529,7 @@ export function DashboardPage() {
     signal,
     headers: dashboardDeferredHeaders,
   }), {
-    enabled: appReadiness.ready && shouldLoadDeferredDashboard && Boolean(initialDashboard),
+    enabled: appReadiness.ready && shouldLoadDeferredNotifications && Boolean(initialDashboard),
   });
 
   async function refetchDashboard() {
