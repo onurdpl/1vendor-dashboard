@@ -13,6 +13,7 @@ import {
   listVendorReturns,
   markReturnReceived,
   previewKargonomiReturnShipmentForReturn,
+  refreshKargonomiReturnProviderData,
   type ReturnActorScope,
   ReturnReviewError,
   reviewReturn,
@@ -348,6 +349,25 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
 
       try {
         return await createKargonomiReturnShipmentForReturn(request.params.returnId, actor.actor, env);
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { returnId: string } }>(
+    '/returns/:returnId/kargonomi-refresh-provider-data',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await refreshKargonomiReturnProviderData(request.params.returnId, actor.actor, env);
       } catch (error) {
         return sendReviewError(error, reply);
       }

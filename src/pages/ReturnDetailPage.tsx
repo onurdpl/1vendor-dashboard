@@ -12,6 +12,7 @@ import {
   createNavlungoReturnPickup,
   getKargonomiReturnPreview,
   markReturnReceived,
+  refreshKargonomiReturnProviderData,
   reviewReturn,
   saveNavlungoReturnPickupAddressCompletion,
   syncNavlungoReturnStatus,
@@ -730,6 +731,25 @@ export function ReturnDetailPage() {
       onError: async (error) => {
         await refetch();
         showFeedback(error instanceof Error ? error.message : 'Kargonomi return shipment could not be created.', 'error');
+      },
+    },
+  );
+  const kargonomiReturnRefreshMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return refreshKargonomiReturnProviderData(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: (data) => {
+        queryClient.setQueryData(returnDetailQueryKey, data);
+        showFeedback('Kargonomi return provider data refreshed.', 'success');
+      },
+      onError: async (error) => {
+        await refetch();
+        showFeedback(error instanceof Error ? error.message : 'Kargonomi return provider data could not be refreshed.', 'error');
       },
     },
   );
@@ -1936,6 +1956,16 @@ export function ReturnDetailPage() {
                     onClick={() => void kargonomiReturnCreateMutation.mutateAsync(undefined)}
                   >
                     {kargonomiReturnCreateMutation.isPending ? 'Creating...' : 'Create Kargonomi Return Shipment'}
+                  </button>
+                ) : null}
+                {returnRequest.returnProvider?.toLowerCase() === 'kargonomi' && returnRequest.returnProviderShipmentId ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={kargonomiReturnRefreshMutation.isPending}
+                    onClick={() => void kargonomiReturnRefreshMutation.mutateAsync(undefined)}
+                  >
+                    {kargonomiReturnRefreshMutation.isPending ? 'Refreshing...' : 'Refresh Kargonomi return data'}
                   </button>
                 ) : null}
               </div>

@@ -1856,6 +1856,36 @@ export const runtimeServices = {
         },
       };
     },
+    async refreshKargonomiReturnProviderData(returnId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.refreshKargonomiReturnProviderData(returnId, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      if (returnRecord.returnProvider?.toLowerCase() !== 'kargonomi' || !returnRecord.returnProviderShipmentId) {
+        throw new ApiError('Kargonomi return provider data refresh requires a stored provider shipment id.', 'server', { status: 400 });
+      }
+      return {
+        ...returnRecord,
+        returnCarrierName: returnRecord.returnCarrierName ?? 'Kargonomi',
+        returnTrackingNumber: returnRecord.returnTrackingNumber ?? 'MOCK-KARGO-RETURN-TRACK-1',
+        returnLabel: returnRecord.returnLabel ?? 'mock-kargonomi-return-label',
+        returnProviderSnapshot: {
+          ...(returnRecord.returnProviderSnapshot ?? {}),
+          provider: 'kargonomi',
+          flow: 'return_provider_data_refresh',
+          kargonomiReturnProviderDataRefreshSucceeded: true,
+          createShipmentCalled: false,
+          priceComparisonCalled: false,
+          confirmShippingPriceCalled: false,
+          getShipmentCalled: true,
+          barcodeFetchCalled: true,
+        },
+      };
+    },
     async markReceived(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.markReturnReceived(returnId, { vendorId });

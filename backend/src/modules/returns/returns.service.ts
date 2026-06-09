@@ -77,6 +77,10 @@ export type KargonomiReturnShipmentCreateInput = {
   senderTaxNumber?: string | null;
 };
 
+export type KargonomiReturnProviderDataRefreshInput = {
+  adapter?: ShippingProviderAdapter;
+};
+
 export type KargonomiReturnPreviewInput = {
   env?: AppEnv;
   kargonomiDestinationClient?: KargonomiDestinationLookupClient;
@@ -2276,6 +2280,151 @@ export async function createKargonomiReturnShipmentForReturn(
       throw new ReturnReviewError(error.message, 400);
     }
     throw new ReturnReviewError(error instanceof Error ? error.message : 'Kargonomi return shipment could not be created.', 400);
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+  return updated;
+}
+
+function isReturnCancelledOrDeleted(record: { status: string; returnLifecycleStatus: string | null }) {
+  const normalized = `${record.status ?? ''} ${record.returnLifecycleStatus ?? ''}`.toLowerCase();
+  return /\b(cancelled|canceled|deleted)\b/.test(normalized);
+}
+
+export async function refreshKargonomiReturnProviderData(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  input: KargonomiReturnProviderDataRefreshInput = {},
+): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: true,
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (isReturnCancelledOrDeleted(record)) {
+    throw new ReturnReviewError('Cancelled or deleted returns cannot refresh Kargonomi provider data.', 400);
+  }
+
+  if (record.returnProvider?.toLowerCase() !== 'kargonomi') {
+    throw new ReturnReviewError('Kargonomi return provider data refresh requires a Kargonomi return shipment.', 400);
+  }
+
+  const providerShipmentId = record.returnProviderShipmentId?.trim();
+  if (!providerShipmentId) {
+    throw new ReturnReviewError('Kargonomi return provider data refresh requires a stored provider shipment id.', 400);
+  }
+
+  const existingSnapshot = readSnapshot(record.returnProviderSnapshot) ?? {};
+  const attemptedAt = new Date().toISOString();
+  const attemptSnapshot = {
+    ...existingSnapshot,
+    provider: 'kargonomi',
+    flow: 'return_provider_data_refresh',
+    direction: 'CUSTOMER_TO_VENDOR',
+    kargonomiReturnProviderDataRefreshAttempted: true,
+    kargonomiReturnProviderDataRefreshSucceeded: false,
+    kargonomiReturnProviderDataRefreshEndpointUsed: '/returns/:returnId/kargonomi-refresh-provider-data',
+    refreshedReturnProviderShipmentId: providerShipmentId,
+    createShipmentCalled: false,
+    createShipmentDraftCalled: false,
+    priceComparisonCalled: false,
+    confirmShippingPriceCalled: false,
+    getShipmentCalled: false,
+    barcodeFetchCalled: false,
+    lastProviderStage: 'provider_data_refresh',
+    attemptedAt,
+  };
+
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      returnProviderSnapshot: attemptSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  const adapter = input.adapter ?? createShippingProviderAdapter(env, 'kargonomi');
+  if (!adapter.refreshProviderData) {
+    throw new ReturnReviewError('Kargonomi return provider data refresh is not available.', 400);
+  }
+
+  try {
+    const result = await adapter.refreshProviderData(providerShipmentId);
+    const carrier =
+      readString(result.responseSnapshot, ['shippingProviderName', 'carrierName', 'providerName']) ??
+      record.returnCarrierName ??
+      'Kargonomi';
+    const mergedSnapshot = {
+      ...attemptSnapshot,
+      ...result.responseSnapshot,
+      provider: 'kargonomi',
+      flow: 'return_provider_data_refresh',
+      direction: 'CUSTOMER_TO_VENDOR',
+      kargonomiReturnProviderDataRefreshAttempted: true,
+      kargonomiReturnProviderDataRefreshSucceeded: true,
+      kargonomiReturnProviderDataRefreshEndpointUsed: '/returns/:returnId/kargonomi-refresh-provider-data',
+      refreshedReturnProviderShipmentId: providerShipmentId,
+      createShipmentCalled: false,
+      createShipmentDraftCalled: false,
+      priceComparisonCalled: false,
+      confirmShippingPriceCalled: false,
+      returnProviderIdPresent: Boolean(result.providerShipmentId ?? providerShipmentId),
+      returnTrackingPresent: Boolean(result.trackingNumber || result.trackingUrl),
+      returnLabelPresent: Boolean(result.labelUrl),
+      returnStatus: result.shipmentStatus,
+      carrierName: carrier,
+      persistedReturnTrackingPresent: Boolean(result.trackingNumber),
+      persistedReturnTrackingUrlPresent: Boolean(result.trackingUrl),
+      persistedReturnLabelPresent: Boolean(result.labelUrl),
+      responseKeys: Object.keys(result.responseSnapshot),
+      rawResponseSummary: result.responseSnapshot,
+    };
+
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderShipmentId: result.providerShipmentId ?? providerShipmentId,
+        returnCarrierName: carrier,
+        returnTrackingNumber: result.trackingNumber,
+        returnTrackingUrl: result.trackingUrl,
+        returnLabel: result.labelUrl,
+        returnProviderSnapshot: mergedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    const providerSnapshot = error instanceof ShippingProviderExecutionError
+      ? error.responseSnapshot
+      : {
+          providerError: error instanceof Error ? error.message : 'Unknown Kargonomi return provider data refresh error.',
+        };
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: {
+          ...attemptSnapshot,
+          ...providerSnapshot,
+          kargonomiReturnProviderDataRefreshAttempted: true,
+          kargonomiReturnProviderDataRefreshSucceeded: false,
+          providerMessage: readString(providerSnapshot, ['providerErrorMessage', 'providerError', 'error', 'message']),
+          httpStatus: readNumber(providerSnapshot, ['httpStatus']),
+          responseKeys: Object.keys(providerSnapshot),
+          rawResponseSummary: providerSnapshot,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    throw new ReturnReviewError(
+      error instanceof Error ? error.message : 'Kargonomi return provider data refresh failed.',
+      400,
+    );
   }
 
   const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);

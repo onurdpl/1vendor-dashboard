@@ -15,7 +15,11 @@ vi.mock('../backend/src/db/prisma.js', () => ({
   prisma: prismaMock,
 }));
 
-const { createKargonomiReturnShipmentForReturn, previewKargonomiReturnShipmentForReturn } = await import(
+const {
+  createKargonomiReturnShipmentForReturn,
+  previewKargonomiReturnShipmentForReturn,
+  refreshKargonomiReturnProviderData,
+} = await import(
   '../backend/src/modules/returns/returns.service.js'
 );
 const { clearKargonomiLocationLookupCache } = await import(
@@ -877,6 +881,146 @@ describe('Kargonomi return preview', () => {
       }),
     );
     expect(result.returnProviderShipmentId).toBe('2654001');
+  });
+
+  it('refreshes Kargonomi return provider data without creating another shipment', async () => {
+    const adapterCreateShipment = vi.fn();
+    const adapterRefreshProviderData = vi.fn().mockResolvedValue({
+      providerShipmentId: '2668319',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBER',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        flow: 'provider_data_refresh',
+        createShipmentCalled: false,
+        createShipmentDraftCalled: false,
+        priceComparisonCalled: false,
+        confirmShippingPriceCalled: false,
+        getShipmentCalled: true,
+        barcodeFetchCalled: true,
+        shippingProviderName: 'Hepsijet',
+        labelUrlPresent: true,
+      },
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+        returnProviderSnapshot: {
+          provider: 'kargonomi',
+          flow: 'return_provider_data_refresh',
+          kargonomiReturnProviderDataRefreshSucceeded: true,
+        },
+      }),
+    );
+
+    const result = await refreshKargonomiReturnProviderData(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+          refreshProviderData: adapterRefreshProviderData,
+        } as never,
+      },
+    );
+
+    expect(adapterRefreshProviderData).toHaveBeenCalledWith('2668319');
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'return-1' },
+        data: expect.objectContaining({
+          returnProviderSnapshot: expect.objectContaining({
+            kargonomiReturnProviderDataRefreshAttempted: true,
+            createShipmentCalled: false,
+            createShipmentDraftCalled: false,
+            priceComparisonCalled: false,
+            confirmShippingPriceCalled: false,
+            getShipmentCalled: false,
+            barcodeFetchCalled: false,
+          }),
+        }),
+      }),
+    );
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'return-1' },
+        data: expect.objectContaining({
+          returnProviderShipmentId: '2668319',
+          returnCarrierName: 'Hepsijet',
+          returnTrackingNumber: 'KSUR2668319RET',
+          returnTrackingUrl: null,
+          returnLabel: 'data:application/pdf;base64,JVBER',
+          returnProviderSnapshot: expect.objectContaining({
+            kargonomiReturnProviderDataRefreshSucceeded: true,
+            createShipmentCalled: false,
+            createShipmentDraftCalled: false,
+            priceComparisonCalled: false,
+            confirmShippingPriceCalled: false,
+            getShipmentCalled: true,
+            barcodeFetchCalled: true,
+            returnTrackingPresent: true,
+            returnLabelPresent: true,
+          }),
+        }),
+      }),
+    );
+    expect(result.returnTrackingNumber).toBe('KSUR2668319RET');
+    const persistedSnapshots = prismaMock.returnRecord.update.mock.calls.map((call) => JSON.stringify(call[0])).join('\n');
+    expect(persistedSnapshots).not.toContain('+905551112233');
+    expect(persistedSnapshots).not.toContain('Customer full address');
+  });
+
+  it('blocks Kargonomi return provider refresh when provider shipment id is missing', async () => {
+    const adapterRefreshProviderData = vi.fn();
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: null,
+      }),
+    );
+
+    await expect(
+      refreshKargonomiReturnProviderData(
+        'return-1',
+        {
+          role: 'admin',
+          vendorId: null,
+        },
+        {} as never,
+        {
+          adapter: {
+            provider: 'KARGONOMI',
+            createShipment: vi.fn(),
+            refreshProviderData: adapterRefreshProviderData,
+          } as never,
+        },
+      ),
+    ).rejects.toThrow('Kargonomi return provider data refresh requires a stored provider shipment id.');
+
+    expect(adapterRefreshProviderData).not.toHaveBeenCalled();
   });
 
   it('uses Kargonomi account tax number fallback internally when creating return shipment', async () => {
