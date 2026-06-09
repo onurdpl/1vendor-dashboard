@@ -92,6 +92,33 @@ describe('vendor integration docs routes', () => {
     expect(String(reply.payload)).not.toContain('/admin/vendor-integration');
   });
 
+  it('keeps public OpenAPI examples free of real vendor, provider, and payment names', async () => {
+    const { app, gets } = createAppStub();
+    registerVendorIntegrationDocsRoutes(app as never);
+
+    const reply = createReply();
+    await gets.get('/docs/openapi/vendor-integration.openapi.yaml')?.handler({}, reply);
+
+    const yaml = String(reply.payload);
+    const bannedExamples = [
+      /sporjinal/i,
+      /yalispor/i,
+      /entegra/i,
+      /ayensoftware/i,
+      /paytr/i,
+      /yurtiçi/i,
+      /yurtici/i,
+    ];
+
+    for (const bannedExample of bannedExamples) {
+      expect(yaml).not.toMatch(bannedExample);
+    }
+    expect(yaml).toContain('alloc-vendor-demo-1001');
+    expect(yaml).toContain('vendorIdentifier: vendor-demo');
+    expect(yaml).toContain('originalVendorIdentifier: vendor-demo');
+    expect(yaml).toContain('paymentGatewayName: Marketplace Payment');
+  });
+
   it('does not change registered provider-facing vendor integration routes', () => {
     const { app, gets, posts } = createAppStub();
     registerVendorIntegrationRoutes(app as never);
