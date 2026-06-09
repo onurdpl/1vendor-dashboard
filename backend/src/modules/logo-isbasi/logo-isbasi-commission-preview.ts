@@ -136,6 +136,13 @@ function compactRecord(record: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined));
 }
 
+function readTemporaryBillingPostalCode() {
+  return {
+    postalCode: '34000',
+    warning: 'billingPostalCode is not modeled yet; using test fallback 34000',
+  };
+}
+
 export function maskTaxNumberOrTckn(value: unknown) {
   if (typeof value !== 'string' || !value.trim()) {
     return value;
@@ -184,6 +191,8 @@ export function buildLogoIsbasiCommissionInvoicePreview(
   const commissionAmount = parseLogoDecimalNumber(input.commissionAmount, 'commissionAmount');
   const vatRate = parseLogoDecimalNumber(input.vatRate, 'vatRate', { allowZero: true, max: 100 });
   const invoiceDate = formatLogoInvoiceDate(input.invoiceDate);
+  const postalCode = readTemporaryBillingPostalCode();
+  warnings.push(postalCode.warning);
   const customer = compactRecord({
     code: profile.logoIsbasiCustomerCode || undefined,
     ...customerNameFields,
@@ -192,9 +201,13 @@ export function buildLogoIsbasiCommissionInvoicePreview(
     address: profile.billingAddress,
     city: profile.billingCity,
     district: profile.billingDistrict,
+    country: 'Türkiye',
+    postalCode: postalCode.postalCode,
+    email: profile.billingEmail,
     emailAddress: profile.billingEmail,
     phone: profile.billingPhone || undefined,
     isPerson,
+    notApplyWithHolding: true,
   });
   const shippingAddress = compactRecord({
     title: profile.legalCompanyName || undefined,
@@ -202,6 +215,9 @@ export function buildLogoIsbasiCommissionInvoicePreview(
     address: profile.billingAddress,
     city: profile.billingCity,
     district: profile.billingDistrict,
+    country: 'Türkiye',
+    postalCode: postalCode.postalCode,
+    email: profile.billingEmail,
     emailAddress: profile.billingEmail,
     phone: profile.billingPhone || undefined,
   });

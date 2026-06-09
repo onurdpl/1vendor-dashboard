@@ -1053,7 +1053,12 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         customer: expect.objectContaining({
           code: 'CUST001',
           tcknVkn: '6490512763',
+          country: 'Türkiye',
+          postalCode: '34000',
+          email: 'billing@sporjinal.test',
+          emailAddress: 'billing@sporjinal.test',
           isPerson: false,
+          notApplyWithHolding: true,
         }),
         shippingAddress: expect.objectContaining({
           title: 'Sporjinal Spor Malzemeleri A.S.',
@@ -1061,6 +1066,9 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
           address: 'Billing address 1',
           city: 'Istanbul',
           district: 'Atasehir',
+          country: 'Türkiye',
+          postalCode: '34000',
+          email: 'billing@sporjinal.test',
           emailAddress: 'billing@sporjinal.test',
           phone: '+905551112233',
         }),
@@ -1388,12 +1396,22 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         currency: 'TL',
         exchangeRate: 1,
         vatIncluded: false,
+        customer: expect.objectContaining({
+          country: 'Türkiye',
+          postalCode: '34000',
+          email: 'billing@sporjinal.test',
+          emailAddress: 'billing@sporjinal.test',
+          notApplyWithHolding: true,
+        }),
         shippingAddress: expect.objectContaining({
           title: 'Sporjinal Spor Malzemeleri A.S.',
           name: 'Sporjinal Spor Malzemeleri A.S.',
           address: 'Billing address 1',
           city: 'Istanbul',
           district: 'Atasehir',
+          country: 'Türkiye',
+          postalCode: '34000',
+          email: 'billing@sporjinal.test',
           emailAddress: 'billing@sporjinal.test',
           phone: '+905551112233',
         }),
@@ -1426,7 +1444,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         isPerson: false,
       }),
     );
-    expect(preview.warnings).toEqual([]);
+    expect(preview.warnings).toEqual(['billingPostalCode is not modeled yet; using test fallback 34000']);
     const serialized = JSON.stringify(preview.payload);
     expect(serialized).not.toMatch(/shipmentAgentItem|website|eArchivePaymentType|eArchivePaymentDate/);
   });
