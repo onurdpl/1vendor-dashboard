@@ -1481,6 +1481,15 @@ export type LogoIsbasiIncomingEinvoiceSummary = {
   eGovermentTypeDesc: string | null;
 };
 
+export type LogoIsbasiProductServiceItem = {
+  id: string | null;
+  code: string | null;
+  name: string | null;
+  type: string | null;
+  vat: string | null;
+  unit: string | null;
+};
+
 export type LogoIsbasiInvoiceShape = {
   hasEGovernmentInvoice: boolean;
   eGovernmentInvoiceKeys: string[];
@@ -1519,6 +1528,24 @@ export type LogoIsbasiIncomingEinvoiceListProbeResult = {
   httpStatus?: number;
   count?: number;
   sampleInvoices?: LogoIsbasiIncomingEinvoiceSummary[];
+  responseKeys?: string[];
+  errorCode?: string;
+  message?: string;
+  missingEnv?: string[];
+  request?: LogoIsbasiUpstreamRequestDiagnostic;
+  response?: LogoIsbasiUpstreamResponseDiagnostic;
+};
+
+export type LogoIsbasiProductServiceDiscoveryResult = {
+  ok: boolean;
+  success?: boolean;
+  provider: 'LOGO_ISBASI';
+  mode: 'product_service_discovery';
+  writesPerformed: false;
+  externalApiCallAttempted: boolean;
+  httpStatus?: number;
+  count?: number;
+  sampleItems?: LogoIsbasiProductServiceItem[];
   responseKeys?: string[];
   errorCode?: string;
   message?: string;

@@ -284,6 +284,58 @@ export class LogoIsbasiClient {
     });
   }
 
+  async listProducts(
+    session: LogoIsbasiAuthenticatedSession,
+    input: { type?: number; pageSize?: number } = {},
+  ): Promise<LogoIsbasiRawResult> {
+    const requestUrl = `${this.baseUrl}/api/v1.0/products/products`;
+    const requestBody = {
+      filters: typeof input.type === 'number'
+        ? [
+            {
+              columnName: 'type',
+              operator: 17,
+              value: [input.type],
+            },
+          ]
+        : [],
+      sorting: {
+        code: 1,
+      },
+      paging: {
+        currentPage: 1,
+        pageSize: input.pageSize ?? 50,
+      },
+      columnNames: null,
+      count: true,
+      excel: {
+        export: false,
+        allowedColumns: null,
+        lucaExport: false,
+      },
+    };
+    const response = await this.fetchImpl(requestUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${session.accessToken}`,
+        tenantId: session.tenantId,
+        apiKey: this.config.apiKey,
+        'Content-Type': 'application/json; charset=utf-8',
+        Accept: 'application/json',
+        Lang: 'tr-TR',
+        DeviceType: 'WEB',
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    return this.parseResponse(response, {
+      url: requestUrl,
+      method: 'POST',
+      contentType: 'application/json; charset=utf-8',
+      accept: 'application/json',
+    });
+  }
+
   async listInvoices(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
     const requestUrl = `${this.baseUrl}/api/v1.0/invoices/invoices`;
     const requestBody = {

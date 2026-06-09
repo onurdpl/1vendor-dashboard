@@ -34,6 +34,7 @@ import type {
   DashboardReturnSummary,
   KargonomiReturnPreview,
   LogoIsbasiCommissionInvoicePreviewInput,
+  LogoIsbasiProductServiceDiscoveryResult,
   OperationsQueueDashboard,
   OperationsQueueItem,
   SupportAnalytics,
@@ -435,6 +436,30 @@ export const runtimeServices = {
                 statusCode: '100',
                 eGovermentType: '1',
                 eGovermentTypeDesc: 'e-Fatura',
+              },
+            ],
+          }),
+    discoverLogoIsbasiServices: (): Promise<LogoIsbasiProductServiceDiscoveryResult> =>
+      runtimeConfig.apiMode === 'real'
+        ? realVendors.discoverLogoIsbasiServices()
+        : Promise.resolve({
+            ok: true,
+            success: true,
+            provider: 'LOGO_ISBASI' as const,
+            mode: 'product_service_discovery' as const,
+            writesPerformed: false as const,
+            externalApiCallAttempted: false,
+            httpStatus: 200,
+            count: 1,
+            responseKeys: ['data'],
+            sampleItems: [
+              {
+                id: 'mock-service-1',
+                code: 'SPORGYM-COMMISSION',
+                name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+                type: '2',
+                vat: '20',
+                unit: 'Adet',
               },
             ],
           }),

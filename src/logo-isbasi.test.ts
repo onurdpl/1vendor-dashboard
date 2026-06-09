@@ -217,6 +217,101 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(JSON.stringify(result)).not.toContain('api-key-secret');
   });
 
+  it('discovers Logo service items with the documented products endpoint and sanitized samples', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'service-1',
+              code: 'SERVICE-COMMISSION',
+              name: 'Pazaryeri Komisyon Hizmeti',
+              type: 2,
+              vat: 20,
+              unit: 'Adet',
+              accessToken: 'provider-response-token',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/probes/logo-isbasi/products')?.(
+      { authUser: { role: 'admin' }, body: { type: 2, pageSize: 50 } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/products/products',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer full-secret-access-token',
+          tenantId: 'tenant-1',
+          apiKey: 'api-key-secret',
+          'Content-Type': 'application/json; charset=utf-8',
+          Accept: 'application/json',
+          Lang: 'tr-TR',
+          DeviceType: 'WEB',
+        }),
+        body: expect.stringContaining('"columnName":"type"'),
+      }),
+    );
+    const listBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(listBody).toEqual(
+      expect.objectContaining({
+        filters: [
+          {
+            columnName: 'type',
+            operator: 17,
+            value: [2],
+          },
+        ],
+        sorting: { code: 1 },
+        paging: { currentPage: 1, pageSize: 50 },
+        count: true,
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        ok: true,
+        success: true,
+        provider: 'LOGO_ISBASI',
+        mode: 'product_service_discovery',
+        writesPerformed: false,
+        externalApiCallAttempted: true,
+        count: 1,
+        responseKeys: ['data'],
+        sampleItems: [
+          {
+            id: 'service-1',
+            code: 'SERVICE-COMMISSION',
+            name: 'Pazaryeri Komisyon Hizmeti',
+            type: '2',
+            vat: '20',
+            unit: 'Adet',
+          },
+        ],
+      }),
+    );
+    const serialized = JSON.stringify(result);
+    expect(serialized).not.toContain('full-secret-access-token');
+    expect(serialized).not.toContain('provider-response-token');
+    expect(serialized).not.toContain('api-key-secret');
+  });
+
   it('returns sanitized Logo firm detail fields only', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(
@@ -1278,6 +1373,100 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(serialized).not.toContain('full-secret-access-token');
     expect(serialized).not.toContain('provider-response-token');
     expect(serialized).not.toContain('api-key-secret');
+  });
+
+  it('uses an existing Logo service item code for test invoice create when provided', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: {
+            accessToken: 'full-secret-access-token',
+            tenantId: 'tenant-1',
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: {
+            invoiceId: 'logo-invoice-2',
+          },
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'CUST001',
+      logoIsbasiCustomerId: 'firm-1',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/test-create-invoice')?.(
+      {
+        authUser: { role: 'admin' },
+        params: { vendorId: 'sporjinal' },
+        body: { confirmTestInvoice: true, serviceItemCode: 'SERVICE-COMMISSION' },
+      },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    const createBody = JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body));
+    expect(createBody).toEqual(
+      expect.objectContaining({
+        currency: 'TRY',
+        customer: expect.objectContaining({
+          code: 'CUST001',
+        }),
+        eGovernmentInvoice: {
+          eGovernmentType: 0,
+          invoiceTypeForEinvoice: 2,
+          eInvoiceProfile: 1,
+        },
+        eArchivePortalInvoice: {
+          eGovernmentType: 0,
+          dispatchIncluded: false,
+        },
+        salesInvoiceDetails: [
+          expect.objectContaining({
+            quantity: 1,
+            taxRate: 20,
+            price: 1,
+            description: 'SPORGYM TEST KOMİSYON FATURASI',
+            productDetail: expect.objectContaining({
+              itemCode: 'SERVICE-COMMISSION',
+              itemType: 2,
+              name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+              vat: 20,
+              unit: 'Adet',
+            }),
+          }),
+        ],
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        requestPayload: expect.objectContaining({
+          salesInvoiceDetails: [
+            expect.objectContaining({
+              productDetail: expect.objectContaining({
+                itemCode: 'SERVICE-COMMISSION',
+                itemType: 2,
+              }),
+            }),
+          ],
+        }),
+        warnings: expect.not.arrayContaining([
+          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
+        ]),
+      }),
+    );
+    expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
   });
 
   it('does not bind when Logo firm matching is not exact', async () => {

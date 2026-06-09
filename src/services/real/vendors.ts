@@ -9,6 +9,7 @@ import type {
   LogoIsbasiInvoiceDetailProbeResult,
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiLoginProbeResult,
+  LogoIsbasiProductServiceDiscoveryResult,
   LogoIsbasiTestInvoiceCreateResult,
   VendorBillingProfile,
   VendorBillingProfileInput,
@@ -58,6 +59,14 @@ export function discoverLogoIsbasiIncomingEinvoices() {
   return apiClient.post<LogoIsbasiIncomingEinvoiceListProbeResult>(
     '/admin/probes/logo-isbasi/incoming-einvoices',
     undefined,
+    { skipVendorContext: true },
+  );
+}
+
+export function discoverLogoIsbasiServices() {
+  return apiClient.post<LogoIsbasiProductServiceDiscoveryResult>(
+    '/admin/probes/logo-isbasi/products',
+    { type: 2, pageSize: 50 },
     { skipVendorContext: true },
   );
 }

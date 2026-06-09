@@ -25,6 +25,10 @@ export function discoverLogoIsbasiIncomingEinvoices() {
   return runtimeServices.vendors.discoverLogoIsbasiIncomingEinvoices();
 }
 
+export function discoverLogoIsbasiServices() {
+  return runtimeServices.vendors.discoverLogoIsbasiServices();
+}
+
 export function inspectLogoIsbasiInvoice(invoiceId: string) {
   return runtimeServices.vendors.inspectLogoIsbasiInvoice(invoiceId);
 }

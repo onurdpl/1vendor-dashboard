@@ -21,6 +21,7 @@ import {
   discoverLogoIsbasiFirms,
   discoverLogoIsbasiIncomingEinvoices,
   discoverLogoIsbasiInvoices,
+  discoverLogoIsbasiServices,
   getVendorBillingProfile,
   inspectLogoIsbasiInvoice,
   matchVendorLogoIsbasiFirm,
@@ -43,6 +44,7 @@ import type {
   LogoIsbasiInvoiceListProbeResult,
   LogoIsbasiInvoiceSummary,
   LogoIsbasiLoginProbeResult,
+  LogoIsbasiProductServiceDiscoveryResult,
   LogoIsbasiTestInvoiceCreateResult,
   SupportTicket,
   VendorBillingProfile,
@@ -236,6 +238,10 @@ function isLogoIncomingEinvoiceListResult(value: unknown): value is LogoIsbasiIn
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'incoming_einvoice_discovery';
 }
 
+function isLogoProductServiceDiscoveryResult(value: unknown): value is LogoIsbasiProductServiceDiscoveryResult {
+  return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'product_service_discovery';
+}
+
 function isLogoInvoiceDetailResult(value: unknown): value is LogoIsbasiInvoiceDetailProbeResult {
   return isRecord(value) && value.provider === 'LOGO_ISBASI' && value.mode === 'invoice_detail_discovery';
 }
@@ -328,6 +334,28 @@ function buildLogoIncomingEinvoiceListFailureResult(error: unknown): LogoIsbasiI
     externalApiCallAttempted: false,
     httpStatus: error instanceof ApiError ? error.status : undefined,
     errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_INCOMING_EINVOICE_DISCOVERY_FAILED',
+    message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
+  };
+}
+
+function buildLogoProductServiceDiscoveryFailureResult(error: unknown): LogoIsbasiProductServiceDiscoveryResult {
+  if (error instanceof ApiError && isLogoProductServiceDiscoveryResult(error.details)) {
+    return {
+      ...error.details,
+      ok: false,
+      httpStatus: error.details.httpStatus ?? error.status,
+      message: error.details.message ?? error.message,
+    };
+  }
+
+  return {
+    ok: false,
+    provider: 'LOGO_ISBASI',
+    mode: 'product_service_discovery',
+    writesPerformed: false,
+    externalApiCallAttempted: false,
+    httpStatus: error instanceof ApiError ? error.status : undefined,
+    errorCode: error instanceof ApiError && error.kind === 'network' ? 'NETWORK_OR_BACKEND_REQUEST_FAILED' : 'LOGO_ISBASI_SERVICE_DISCOVERY_FAILED',
     message: `Network/backend request failed${error instanceof Error && error.message ? `: ${error.message}` : '.'}`,
   };
 }
@@ -662,6 +690,7 @@ export function VendorProfilePage() {
   const [logoInvoicesResult, setLogoInvoicesResult] = useState<LogoIsbasiInvoiceListProbeResult | null>(null);
   const [logoIncomingEinvoicesResult, setLogoIncomingEinvoicesResult] =
     useState<LogoIsbasiIncomingEinvoiceListProbeResult | null>(null);
+  const [logoServicesResult, setLogoServicesResult] = useState<LogoIsbasiProductServiceDiscoveryResult | null>(null);
   const [selectedLogoInvoiceId, setSelectedLogoInvoiceId] = useState('');
   const [logoInvoiceDetailResult, setLogoInvoiceDetailResult] = useState<LogoIsbasiInvoiceDetailProbeResult | null>(null);
   const [logoFirmMatchResult, setLogoFirmMatchResult] = useState<LogoIsbasiFirmMatchResult | null>(null);
@@ -1049,6 +1078,39 @@ export function VendorProfilePage() {
         setLogoPreviewResult(null);
         setLogoTestInvoiceResult(null);
         setLogoIncomingEinvoicesResult(buildLogoIncomingEinvoiceListFailureResult(error));
+      },
+    },
+  );
+
+  const logoServicesMutation = useMutationAction(
+    () => discoverLogoIsbasiServices(),
+    {
+      onSuccess: (result) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoTestInvoiceResult(null);
+        setLogoServicesResult(result);
+        showFeedback('Logo İşbaşı service discovery completed.', 'success');
+      },
+      onError: (error) => {
+        setLogoLoginResult(null);
+        setLogoFirmsResult(null);
+        setLogoInvoicesResult(null);
+        setLogoIncomingEinvoicesResult(null);
+        setLogoInvoiceDetailResult(null);
+        setSelectedLogoInvoiceId('');
+        setLogoFirmMatchResult(null);
+        setLogoFirmBindResult(null);
+        setLogoPreviewResult(null);
+        setLogoTestInvoiceResult(null);
+        setLogoServicesResult(buildLogoProductServiceDiscoveryFailureResult(error));
       },
     },
   );
@@ -1520,6 +1582,27 @@ export function VendorProfilePage() {
                         setLogoIncomingEinvoicesResult(null);
                         setLogoInvoiceDetailResult(null);
                         setSelectedLogoInvoiceId('');
+                        setLogoFirmMatchResult(null);
+                        setLogoFirmBindResult(null);
+                        setLogoPreviewResult(null);
+                        setLogoPreviewFormError(null);
+                        setLogoTestInvoiceResult(null);
+                        void logoServicesMutation.mutateAsync(undefined).catch(() => undefined);
+                      }}
+                      disabled={logoServicesMutation.isPending}
+                    >
+                      {logoServicesMutation.isPending ? 'Discovering services...' : 'Discover Logo Services'}
+                    </button>
+                    <button
+                      type="button"
+                      className="button button-secondary button-compact"
+                      onClick={() => {
+                        setLogoLoginResult(null);
+                        setLogoFirmsResult(null);
+                        setLogoInvoicesResult(null);
+                        setLogoIncomingEinvoicesResult(null);
+                        setLogoInvoiceDetailResult(null);
+                        setSelectedLogoInvoiceId('');
                         setLogoFirmBindResult(null);
                         setLogoPreviewResult(null);
                         setLogoPreviewFormError(null);
@@ -1742,6 +1825,64 @@ export function VendorProfilePage() {
                           <small>
                             e-Invoice {formatBoolean(firm.eInvoiceResponsible)}, e-Archive {formatBoolean(firm.eArchiveResponsible)}
                           </small>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+              {logoServicesResult ? (
+                <div className="vendor-profile-logo-result">
+                  <span>Logo services discovery result</span>
+                  <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Status</span>
+                      <strong>{logoServicesResult.ok ? 'Success' : 'Failed'}</strong>
+                    </div>
+                    <div>
+                      <span>HTTP status</span>
+                      <strong>{logoServicesResult.httpStatus ?? 'Not available'}</strong>
+                    </div>
+                    <div>
+                      <span>Service count</span>
+                      <strong>{logoServicesResult.count ?? 0}</strong>
+                    </div>
+                    <div>
+                      <span>responseKeys</span>
+                      <strong>{logoServicesResult.responseKeys?.join(', ') || 'Not returned'}</strong>
+                    </div>
+                    {logoServicesResult.errorCode ? (
+                      <div>
+                        <span>Backend error code</span>
+                        <strong>{logoServicesResult.errorCode}</strong>
+                      </div>
+                    ) : null}
+                    {logoServicesResult.message ? (
+                      <div>
+                        <span>Message</span>
+                        <strong>{logoServicesResult.message}</strong>
+                      </div>
+                    ) : null}
+                    {logoServicesResult.missingEnv?.length ? (
+                      <div>
+                        <span>Missing env vars</span>
+                        <strong>{logoServicesResult.missingEnv.join(', ')}</strong>
+                      </div>
+                    ) : null}
+                  </div>
+                  {logoServicesResult.sampleItems?.length ? (
+                    <ul className="vendor-profile-logo-firm-list" aria-label="Logo service item samples">
+                      {logoServicesResult.sampleItems.map((item, index) => (
+                        <li key={item.id ?? item.code ?? `${item.name}-${index}`}>
+                          <strong>{item.code ?? item.name ?? 'Unnamed service'}</strong>
+                          <span>
+                            {[
+                              item.name,
+                              item.type ? `type ${item.type}` : null,
+                              item.vat ? `VAT ${item.vat}` : null,
+                              item.unit ? `unit ${item.unit}` : null,
+                            ].filter(Boolean).join(' / ') || 'No optional fields returned'}
+                          </span>
                         </li>
                       ))}
                     </ul>

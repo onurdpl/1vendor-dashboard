@@ -465,6 +465,17 @@ function sanitizeLogoIncomingEinvoiceSummary(value: unknown): SanitizedLogoIncom
   };
 }
 
+function sanitizeLogoProductServiceItem(value: unknown) {
+  return {
+    id: readRecordString(value, ['id', 'itemId', 'productId', 'serviceId']),
+    code: readRecordString(value, ['code', 'itemCode', 'productCode', 'serviceCode', 'stockCode']),
+    name: readRecordString(value, ['name', 'itemName', 'productName', 'serviceName', 'description']),
+    type: readRecordString(value, ['type', 'itemType', 'productType']),
+    vat: readRecordString(value, ['vat', 'vatRate', 'taxRate', 'vat_rate', 'tax_rate']),
+    unit: readRecordString(value, ['unit', 'unitName', 'unitCode']),
+  };
+}
+
 function sanitizeLogoInvoiceCustomer(value: unknown) {
   const customer = readInvoiceCustomerRecord(value);
   const source = customer ?? value;
@@ -536,6 +547,29 @@ function readLogoIncomingEinvoicesArray(body: unknown): unknown[] {
     }
     if (isRecord(candidate)) {
       const nested = [candidate.items, candidate.invoices, candidate.myInvoices, candidate.records, candidate.data];
+      const match = nested.find(Array.isArray);
+      if (Array.isArray(match)) {
+        return match;
+      }
+    }
+  }
+  return [];
+}
+
+function readLogoProductsArray(body: unknown): unknown[] {
+  if (Array.isArray(body)) {
+    return body;
+  }
+  if (!isRecord(body)) {
+    return [];
+  }
+  const candidates = [body.data, body.items, body.products, body.services, body.records, body.result];
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate;
+    }
+    if (isRecord(candidate)) {
+      const nested = [candidate.items, candidate.products, candidate.services, candidate.records, candidate.data];
       const match = nested.find(Array.isArray);
       if (Array.isArray(match)) {
         return match;
@@ -841,11 +875,21 @@ function buildLogoTestInvoiceCreateResponse(
   };
 }
 
-function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>) {
+function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>, serviceItemCode: string | null = null) {
   const details = Array.isArray(requestPayload.salesInvoiceDetails)
     ? requestPayload.salesInvoiceDetails.map((detail) => {
         if (!isRecord(detail)) {
           return detail;
+        }
+        if (serviceItemCode && isRecord(detail.productDetail)) {
+          return {
+            ...detail,
+            productDetail: {
+              ...detail.productDetail,
+              itemCode: serviceItemCode,
+              itemType: 2,
+            },
+          };
         }
         const { productDetail: _productDetail, ...line } = detail;
         return {
@@ -1069,6 +1113,22 @@ function readVatRate(body: Record<string, unknown>) {
     throw new Error('vatRate must be between 0 and 100.');
   }
   return value;
+}
+
+function readLogoProductDiscoveryInput(body: unknown) {
+  const source = isRecord(body) ? body : {};
+  const type = source.type === undefined ? 2 : source.type;
+  const pageSize = source.pageSize === undefined ? 50 : source.pageSize;
+  if (typeof type !== 'number' || !Number.isInteger(type) || type !== 2) {
+    throw new Error('Only Logo İşbaşı service item discovery with type=2 is supported.');
+  }
+  if (typeof pageSize !== 'number' || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    throw new Error('pageSize must be an integer between 1 and 100.');
+  }
+  return {
+    type,
+    pageSize,
+  };
 }
 
 function validateBillingProfileReady(profile: VendorBillingProfileDto | null) {
@@ -1367,6 +1427,82 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           externalApiCallAttempted: true,
           errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
           message: 'Network/backend request failed while calling Logo İşbaşı invoices discovery.',
+        });
+      }
+    },
+  );
+
+  app.post(
+    '/admin/probes/logo-isbasi/products',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      if (request.authUser?.role !== 'admin') {
+        return reply.code(403).send({ message: 'Forbidden' });
+      }
+
+      if (!adminProbesEnabled()) {
+        return reply.code(403).send({ ok: false, message: 'Admin probe endpoints are disabled.' });
+      }
+
+      const readinessError = buildLogoReadinessError(env, 'product_service_discovery');
+      if (readinessError) {
+        return reply.code(readinessError.status).send(readinessError.body);
+      }
+
+      let input: ReturnType<typeof readLogoProductDiscoveryInput>;
+      try {
+        input = readLogoProductDiscoveryInput(request.body);
+      } catch (error) {
+        return reply.code(400).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'product_service_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: false,
+          errorCode: 'LOGO_ISBASI_PRODUCT_DISCOVERY_VALIDATION_FAILED',
+          message: error instanceof Error ? error.message : 'Logo İşbaşı product/service discovery validation failed.',
+        });
+      }
+
+      try {
+        const client = buildLogoClient(env);
+        const login = await loginForLogoReadProbe(client, 'product_service_discovery');
+        if (!login.ok) {
+          return reply.code(login.status).send(login.body);
+        }
+
+        const result = await client.listProducts(login.session, input);
+        if (!result.ok || result.jsonParseFailed) {
+          logLogoInvoiceUpstreamFailure(app, 'product_service_discovery', result);
+          return reply.code(502).send(buildLogoUpstreamError('product_service_discovery', result));
+        }
+
+        const items = readLogoProductsArray(result.body);
+        return {
+          ok: true,
+          success: true,
+          provider: 'LOGO_ISBASI',
+          mode: 'product_service_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          httpStatus: result.status,
+          count: items.length,
+          responseKeys: isRecord(result.body) ? Object.keys(result.body).sort() : [],
+          sampleItems: items.slice(0, input.pageSize).map(sanitizeLogoProductServiceItem),
+        };
+      } catch {
+        return reply.code(502).send({
+          ok: false,
+          success: false,
+          provider: 'LOGO_ISBASI',
+          mode: 'product_service_discovery',
+          writesPerformed: false,
+          externalApiCallAttempted: true,
+          errorCode: 'LOGO_ISBASI_NETWORK_ERROR',
+          message: 'Network/backend request failed while calling Logo İşbaşı product/service discovery.',
         });
       }
     },
@@ -1764,12 +1900,15 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           description: 'SPORGYM TEST KOMİSYON FATURASI',
           invoiceDate: new Date().toISOString().slice(0, 10),
         });
+        const serviceItemCode = readOptionalString(body, 'serviceItemCode');
         const testInvoiceWarnings = [
           ...preview.warnings,
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
+          ...(serviceItemCode
+            ? []
+            : ['Omitting productDetail in Logo test-create to avoid test tenant item master collision.']),
         ];
-        const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload);
+        const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload, serviceItemCode);
 
         const client = buildLogoClient(env);
         const login = await loginForLogoReadProbe(client, 'test_invoice_create');
