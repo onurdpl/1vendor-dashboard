@@ -340,8 +340,26 @@ describe('VendorProfilePage', () => {
           tcknVkn: '11******11',
           isPerson: false,
         },
+        shippingAddress: {
+          title: 'Demo Vendor A Ltd.',
+          name: 'Demo Vendor A Ltd.',
+          address: 'Billing address 1',
+          city: 'Istanbul',
+          district: 'Kadikoy',
+          emailAddress: 'billing@demo.test',
+          phone: '+905551112233',
+        },
         currency: 'TL',
         description: 'SPORGYM TEST KOMİSYON FATURASI',
+        eGovernmentInvoice: {
+          eGovernmentType: 0,
+          invoiceTypeForEinvoice: 2,
+          eInvoiceProfile: 1,
+        },
+        eArchivePortalInvoice: {
+          eGovernmentType: 0,
+          dispatchIncluded: false,
+        },
         salesInvoiceDetails: [
           {
             quantity: 1,
@@ -431,8 +449,26 @@ describe('VendorProfilePage', () => {
           tcknVkn: '11******11',
           isPerson: false,
         },
+        shippingAddress: {
+          title: 'Demo Vendor A Ltd.',
+          name: 'Demo Vendor A Ltd.',
+          address: 'Billing address 1',
+          city: 'Istanbul',
+          district: 'Kadikoy',
+          emailAddress: 'billing@demo.test',
+          phone: '+905551112233',
+        },
         currency: 'TL',
         description: 'Pazaryeri komisyon hizmet bedeli',
+        eGovernmentInvoice: {
+          eGovernmentType: 0,
+          invoiceTypeForEinvoice: 2,
+          eInvoiceProfile: 1,
+        },
+        eArchivePortalInvoice: {
+          eGovernmentType: 0,
+          dispatchIncluded: false,
+        },
         salesInvoiceDetails: [
           {
             quantity: 1,
@@ -446,7 +482,7 @@ describe('VendorProfilePage', () => {
           },
         ],
       },
-      warnings: ['eGovernmentInvoice enum/required fields unknown; omitted in dry-run.'],
+      warnings: [],
     });
     listVendorSupportTicketsMock.mockReset();
     listVendorSupportTicketsMock.mockResolvedValue([]);

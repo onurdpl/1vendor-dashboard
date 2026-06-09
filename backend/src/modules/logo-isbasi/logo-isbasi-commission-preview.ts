@@ -16,8 +16,6 @@ export type LogoIsbasiCommissionInvoicePreview = {
   warnings: string[];
 };
 
-const OMITTED_E_GOVERNMENT_WARNING = 'eGovernmentInvoice enum/required fields unknown; omitted in dry-run.';
-
 function resolveLegalEntityIsPerson(value: string | null | undefined) {
   const normalized = value?.trim().toLocaleLowerCase('tr-TR').replace(/\s+/g, ' ');
   if (!normalized) {
@@ -168,7 +166,7 @@ export function buildLogoIsbasiCommissionInvoicePreview(
   input: LogoIsbasiCommissionInvoicePreviewInput,
 ): LogoIsbasiCommissionInvoicePreview {
   const profile = input.vendorBillingProfile;
-  const warnings = [OMITTED_E_GOVERNMENT_WARNING];
+  const warnings: string[] = [];
   const recommendedFields: Array<[keyof VendorBillingProfileDto, string]> = [
     ['authorizedPerson', 'authorizedPerson is missing.'],
     ['billingPhone', 'billingPhone is missing.'],
@@ -198,16 +196,35 @@ export function buildLogoIsbasiCommissionInvoicePreview(
     phone: profile.billingPhone || undefined,
     isPerson,
   });
+  const shippingAddress = compactRecord({
+    title: profile.legalCompanyName || undefined,
+    name: profile.legalCompanyName || undefined,
+    address: profile.billingAddress,
+    city: profile.billingCity,
+    district: profile.billingDistrict,
+    emailAddress: profile.billingEmail,
+    phone: profile.billingPhone || undefined,
+  });
 
   const description = input.description.trim();
   const payload = {
     invoiceId: 0,
     customer,
+    shippingAddress,
     invoiceDate,
     currency: input.currency.trim(),
     exchangeRate: 1,
     description,
     vatIncluded: false,
+    eGovernmentInvoice: {
+      eGovernmentType: 0,
+      invoiceTypeForEinvoice: 2,
+      eInvoiceProfile: 1,
+    },
+    eArchivePortalInvoice: {
+      eGovernmentType: 0,
+      dispatchIncluded: false,
+    },
     salesInvoiceDetails: [
       {
         quantity: 1,

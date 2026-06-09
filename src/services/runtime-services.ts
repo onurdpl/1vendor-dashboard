@@ -568,8 +568,26 @@ export const runtimeServices = {
                 name: 'Mock Vendor Legal Name',
                 tcknVkn: '11*******11',
               },
+              shippingAddress: {
+                title: 'Mock Vendor Legal Name',
+                name: 'Mock Vendor Legal Name',
+                address: 'Mock billing address',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                emailAddress: 'billing@mock.test',
+                phone: '+905551112233',
+              },
               currency: input.currency,
               description: input.description,
+              eGovernmentInvoice: {
+                eGovernmentType: 0,
+                invoiceTypeForEinvoice: 2,
+                eInvoiceProfile: 1,
+              },
+              eArchivePortalInvoice: {
+                eGovernmentType: 0,
+                dispatchIncluded: false,
+              },
               salesInvoiceDetails: [
                 {
                   quantity: 1,
@@ -582,7 +600,7 @@ export const runtimeServices = {
                 },
               ],
             },
-            warnings: ['eGovernmentInvoice enum/required fields unknown; omitted in dry-run.'],
+            warnings: [],
           }),
     createLogoIsbasiTestInvoice: (vendorId: string) =>
       runtimeConfig.apiMode === 'real'
@@ -609,8 +627,26 @@ export const runtimeServices = {
                 tcknVkn: '11******11',
                 isPerson: false,
               },
+              shippingAddress: {
+                title: 'Mock Vendor Legal Name',
+                name: 'Mock Vendor Legal Name',
+                address: 'Mock billing address',
+                city: 'Istanbul',
+                district: 'Kadikoy',
+                emailAddress: 'billing@mock.test',
+                phone: '+905551112233',
+              },
               currency: 'TL',
               description: 'SPORGYM TEST KOMİSYON FATURASI',
+              eGovernmentInvoice: {
+                eGovernmentType: 0,
+                invoiceTypeForEinvoice: 2,
+                eInvoiceProfile: 1,
+              },
+              eArchivePortalInvoice: {
+                eGovernmentType: 0,
+                dispatchIncluded: false,
+              },
               salesInvoiceDetails: [
                 {
                   quantity: 1,

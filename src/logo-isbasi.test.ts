@@ -1055,6 +1055,24 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
           tcknVkn: '6490512763',
           isPerson: false,
         }),
+        shippingAddress: expect.objectContaining({
+          title: 'Sporjinal Spor Malzemeleri A.S.',
+          name: 'Sporjinal Spor Malzemeleri A.S.',
+          address: 'Billing address 1',
+          city: 'Istanbul',
+          district: 'Atasehir',
+          emailAddress: 'billing@sporjinal.test',
+          phone: '+905551112233',
+        }),
+        eGovernmentInvoice: {
+          eGovernmentType: 0,
+          invoiceTypeForEinvoice: 2,
+          eInvoiceProfile: 1,
+        },
+        eArchivePortalInvoice: {
+          eGovernmentType: 0,
+          dispatchIncluded: false,
+        },
         salesInvoiceDetails: [
           expect.objectContaining({
             quantity: 1,
@@ -1092,6 +1110,15 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             tcknVkn: '64******63',
             isPerson: false,
           }),
+          eGovernmentInvoice: {
+            eGovernmentType: 0,
+            invoiceTypeForEinvoice: 2,
+            eInvoiceProfile: 1,
+          },
+          eArchivePortalInvoice: {
+            eGovernmentType: 0,
+            dispatchIncluded: false,
+          },
         }),
         responseBody: expect.objectContaining({
           data: expect.objectContaining({
@@ -1361,6 +1388,24 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         currency: 'TL',
         exchangeRate: 1,
         vatIncluded: false,
+        shippingAddress: expect.objectContaining({
+          title: 'Sporjinal Spor Malzemeleri A.S.',
+          name: 'Sporjinal Spor Malzemeleri A.S.',
+          address: 'Billing address 1',
+          city: 'Istanbul',
+          district: 'Atasehir',
+          emailAddress: 'billing@sporjinal.test',
+          phone: '+905551112233',
+        }),
+        eGovernmentInvoice: {
+          eGovernmentType: 0,
+          invoiceTypeForEinvoice: 2,
+          eInvoiceProfile: 1,
+        },
+        eArchivePortalInvoice: {
+          eGovernmentType: 0,
+          dispatchIncluded: false,
+        },
       }),
     );
     expect(preview.payload.salesInvoiceDetails).toEqual([
@@ -1381,7 +1426,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         isPerson: false,
       }),
     );
-    expect(preview.warnings).toContain('eGovernmentInvoice enum/required fields unknown; omitted in dry-run.');
+    expect(preview.warnings).toEqual([]);
     const serialized = JSON.stringify(preview.payload);
     expect(serialized).not.toMatch(/shipmentAgentItem|website|eArchivePaymentType|eArchivePaymentDate/);
   });
