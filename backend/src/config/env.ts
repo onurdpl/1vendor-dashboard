@@ -60,6 +60,7 @@ export type AppEnv = {
   KARGONOMI_API_TOKEN?: string;
   KARGONOMI_APP_KEY?: string;
   KARGONOMI_DEFAULT_WAREHOUSE_ID?: string;
+  KARGONOMI_ACCOUNT_TAX_NUMBER?: string;
   NAVLUNGO_BASE_URL?: string;
   NAVLUNGO_API_USERNAME?: string;
   NAVLUNGO_API_PASSWORD?: string;
@@ -257,6 +258,7 @@ export function loadEnv(): AppEnv {
   const kargonomiBaseUrl = process.env.KARGONOMI_BASE_URL || undefined;
   const kargonomiApiToken = process.env.KARGONOMI_API_TOKEN || undefined;
   const kargonomiDefaultWarehouseId = process.env.KARGONOMI_DEFAULT_WAREHOUSE_ID || undefined;
+  const kargonomiAccountTaxNumber = process.env.KARGONOMI_ACCOUNT_TAX_NUMBER?.trim() || undefined;
   const navlungoBaseUrl = process.env.NAVLUNGO_BASE_URL || undefined;
   const navlungoApiUsername = process.env.NAVLUNGO_API_USERNAME || undefined;
   const navlungoApiPassword = process.env.NAVLUNGO_API_PASSWORD || undefined;
@@ -417,6 +419,7 @@ export function loadEnv(): AppEnv {
     KARGONOMI_API_TOKEN: kargonomiApiToken,
     KARGONOMI_APP_KEY: process.env.KARGONOMI_APP_KEY || undefined,
     KARGONOMI_DEFAULT_WAREHOUSE_ID: kargonomiDefaultWarehouseId,
+    KARGONOMI_ACCOUNT_TAX_NUMBER: kargonomiAccountTaxNumber,
     NAVLUNGO_BASE_URL: navlungoBaseUrl,
     NAVLUNGO_API_USERNAME: navlungoApiUsername,
     NAVLUNGO_API_PASSWORD: navlungoApiPassword,

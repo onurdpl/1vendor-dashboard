@@ -255,6 +255,7 @@ describe('backend env shipping provider gates', () => {
       KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
       KARGONOMI_API_TOKEN: 'configured-token',
       KARGONOMI_DEFAULT_WAREHOUSE_ID: '112668',
+      KARGONOMI_ACCOUNT_TAX_NUMBER: 'test-account-tax-number',
       KARGONOMI_APP_KEY: undefined,
     });
 
@@ -264,6 +265,7 @@ describe('backend env shipping provider gates', () => {
     expect(env.KARGONOMI_BASE_URL).toBe('https://app.kargonomi.com.tr/api/v1');
     expect(env.KARGONOMI_API_TOKEN).toBe('configured-token');
     expect(env.KARGONOMI_DEFAULT_WAREHOUSE_ID).toBe('112668');
+    expect(env.KARGONOMI_ACCOUNT_TAX_NUMBER).toBe('test-account-tax-number');
     expect(env.KARGONOMI_APP_KEY).toBeUndefined();
   });
 

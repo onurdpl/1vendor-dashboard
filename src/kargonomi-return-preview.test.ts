@@ -229,10 +229,43 @@ describe('Kargonomi return preview', () => {
         sender: {
           phoneValid: true,
           taxNumberPresent: false,
+          taxNumberSource: 'missing',
         },
       },
     });
     expect(JSON.stringify(preview.previewPayload)).not.toContain('11111111111');
+  });
+
+  it('uses Kargonomi account tax number fallback for return preview readiness without exposing it', async () => {
+    prismaMock.returnRecord.findUnique.mockResolvedValueOnce(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValueOnce(baseShippingConfig());
+
+    const preview = await previewKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'vendor',
+        vendorId: 'yalispor',
+      },
+      {
+        env: {
+          KARGONOMI_ACCOUNT_TAX_NUMBER: 'test-account-tax-number',
+        } as never,
+      },
+    );
+
+    expect(preview.ready).toBe(true);
+    expect(preview.missingFields).not.toContain('sender.taxNumber');
+    expect(preview.previewPayload).toMatchObject({
+      shipment: {
+        sender: {
+          taxNumberPresent: true,
+          taxNumberSource: 'kargonomi_account_fallback',
+        },
+      },
+    });
+    const serializedPreview = JSON.stringify(preview.previewPayload);
+    expect(serializedPreview).not.toContain('test-account-tax-number');
+    expect(serializedPreview).not.toContain('11111111111');
   });
 
   it('marks preview not ready when Kargonomi buyer name has one word', async () => {
@@ -299,6 +332,7 @@ describe('Kargonomi return preview', () => {
           phonePresent: true,
           phoneValid: true,
           taxNumberPresent: true,
+          taxNumberSource: 'kargonomi_account_fallback',
           addressPresent: true,
           cityId: '828',
           stateId: '34',
@@ -696,6 +730,7 @@ describe('Kargonomi return preview', () => {
       details: expect.objectContaining({
         senderPhoneValid: true,
         senderTaxNumberPresent: false,
+        senderTaxNumberSource: 'missing',
         buyerNameValid: true,
       }),
     });
@@ -832,6 +867,65 @@ describe('Kargonomi return preview', () => {
       }),
     );
     expect(result.returnProviderShipmentId).toBe('2654001');
+  });
+
+  it('uses Kargonomi account tax number fallback internally when creating return shipment', async () => {
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654003',
+      trackingNumber: 'KSUR2654003RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBER',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: true,
+      },
+    });
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654003',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: 'KSUR2654003RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+      }),
+    );
+
+    await createKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {
+        KARGONOMI_ACCOUNT_TAX_NUMBER: 'test-account-tax-number',
+      } as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+      },
+    );
+
+    expect(adapterCreateShipment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestSnapshot: expect.objectContaining({
+          sender: expect.objectContaining({
+            sender_tax_number: 'test-account-tax-number',
+          }),
+        }),
+      }),
+    );
+    const persistedSnapshots = prismaMock.returnRecord.update.mock.calls.map((call) => JSON.stringify(call[0])).join('\n');
+    expect(persistedSnapshots).not.toContain('test-account-tax-number');
+    expect(persistedSnapshots).toContain('kargonomi_account_fallback');
   });
 
   it('reuses preview-resolved sender IDs when creating Kargonomi return shipment', async () => {

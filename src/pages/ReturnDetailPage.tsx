@@ -1962,6 +1962,21 @@ export function ReturnDetailPage() {
                   </strong>
                 </div>
                 <div>
+                  <span>Tax number</span>
+                  <strong>
+                    {kargonomiReturnPreview
+                      ? [
+                          kargonomiPreviewShipment.sender.taxNumberPresent === true ? 'ready' : 'missing',
+                          typeof kargonomiPreviewShipment.sender.taxNumberSource === 'string'
+                            ? String(kargonomiPreviewShipment.sender.taxNumberSource).replace(/_/g, ' ')
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(', ')
+                      : 'Not checked'}
+                  </strong>
+                </div>
+                <div>
                   <span>Warehouse</span>
                   <strong>
                     {kargonomiReturnPreview

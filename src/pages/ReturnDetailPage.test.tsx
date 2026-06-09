@@ -1582,6 +1582,8 @@ describe('ReturnDetailPage vendor review screen', () => {
             phonePresent: false,
             addressPresent: true,
             districtPresent: true,
+            taxNumberPresent: true,
+            taxNumberSource: 'kargonomi_account_fallback',
             cityId: '828',
             stateId: '34',
           },
@@ -1604,9 +1606,11 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(await screen.findByText('Not ready')).toBeInTheDocument();
     expect(screen.getByText('sender.phone, receiver.phone')).toBeInTheDocument();
     expect(screen.getByText('city 828, state 34')).toBeInTheDocument();
+    expect(screen.getByText('ready, kargonomi account fallback')).toBeInTheDocument();
     expect(screen.getByText('warehouse 112668, name ready, phone missing, address ready')).toBeInTheDocument();
     expect(screen.queryByText('+905551112233')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer full address')).not.toBeInTheDocument();
+    expect(screen.queryByText('11111111111')).not.toBeInTheDocument();
   });
 
   it('lets admins create a Kargonomi return shipment and displays provider evidence', async () => {

@@ -83,6 +83,11 @@ export type KargonomiReturnPreviewInput = {
   senderTaxNumber?: string | null;
 };
 
+type KargonomiReturnSenderTaxNumberResolution = {
+  value: string | null;
+  source: 'kargonomi_account_fallback' | 'missing';
+};
+
 export type NavlungoReturnPickupCompletionInput = NonNullable<NavlungoReturnPickupInput['customerOverrides']>;
 
 function toAmountString(value: number) {
@@ -1710,7 +1715,11 @@ export async function previewKargonomiReturnShipmentForReturn(
   const defaultDesi = Number(config?.defaultDesi ?? 0);
   const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
   const senderPhone = normalizeKargonomiPhone(order.customerPhone?.trim() || order.billingPhone?.trim() || null);
-  const senderTaxNumber = normalizeKargonomiReturnSenderTaxNumber(input.senderTaxNumber);
+  const senderTaxNumberResolution = resolveKargonomiReturnSenderTaxNumber({
+    senderTaxNumber: input.senderTaxNumber,
+    env: input.env,
+  });
+  const senderTaxNumber = senderTaxNumberResolution.value;
   const senderAddress = readOrderAddress(order);
   const buyerNameValid = hasAtLeastTwoWords(receiverName);
   const senderDestination = await resolveKargonomiReturnSenderDestination({
@@ -1775,6 +1784,7 @@ export async function previewKargonomiReturnShipmentForReturn(
           phonePresent: Boolean(senderPhone),
           phoneValid: Boolean(senderPhone),
           taxNumberPresent: Boolean(senderTaxNumber),
+          taxNumberSource: senderTaxNumberResolution.source,
           addressPresent: Boolean(senderAddress),
           districtPresent: hasDistrict,
           cityId: senderCityId,
@@ -1824,6 +1834,32 @@ function normalizeKargonomiReturnSenderTaxNumber(value: string | null | undefine
   return trimmed || null;
 }
 
+function resolveKargonomiReturnSenderTaxNumber(input: {
+  senderTaxNumber?: string | null;
+  env?: Pick<AppEnv, 'KARGONOMI_ACCOUNT_TAX_NUMBER'>;
+}): KargonomiReturnSenderTaxNumberResolution {
+  const explicitValue = normalizeKargonomiReturnSenderTaxNumber(input.senderTaxNumber);
+  if (explicitValue) {
+    return {
+      value: explicitValue,
+      source: 'kargonomi_account_fallback',
+    };
+  }
+
+  const fallbackValue = normalizeKargonomiReturnSenderTaxNumber(input.env?.KARGONOMI_ACCOUNT_TAX_NUMBER);
+  if (fallbackValue) {
+    return {
+      value: fallbackValue,
+      source: 'kargonomi_account_fallback',
+    };
+  }
+
+  return {
+    value: null,
+    source: 'missing',
+  };
+}
+
 function hasAtLeastTwoWords(value: string | null | undefined) {
   return (value ?? '').trim().split(/\s+/).filter(Boolean).length >= 2;
 }
@@ -1842,6 +1878,7 @@ function buildKargonomiReturnCreateReadinessDetails(
     senderStateIdPresent: Boolean(readString(sender, ['stateId'])),
     senderPhoneValid: readBoolean(sender, ['phoneValid']) === true,
     senderTaxNumberPresent: readBoolean(sender, ['taxNumberPresent']) === true,
+    senderTaxNumberSource: readString(sender, ['taxNumberSource']) ?? 'missing',
     buyerNameValid: readBoolean(receiver, ['nameValid']) === true,
     receiverCityIdPresent: Boolean(readString(receiver, ['cityId'])),
     receiverStateIdPresent: Boolean(readString(receiver, ['stateId'])),
@@ -1916,6 +1953,7 @@ function buildKargonomiReturnShipmentPayload(input: {
     senderCityId: string | null;
   };
   senderTaxNumber?: string | null;
+  env?: Pick<AppEnv, 'KARGONOMI_ACCOUNT_TAX_NUMBER'>;
 }) {
   const order = input.record.vendorAllocation.order;
   const configMetadata = input.config?.providerMetadata ?? null;
@@ -1937,7 +1975,11 @@ function buildKargonomiReturnShipmentPayload(input: {
   const receiverCityId = readKargonomiReceiverCityId(warehouseMetadata, configMetadata);
   const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
   const senderPhone = normalizeKargonomiPhone(order.customerPhone?.trim() || order.billingPhone?.trim() || null);
-  const senderTaxNumber = normalizeKargonomiReturnSenderTaxNumber(input.senderTaxNumber);
+  const senderTaxNumberResolution = resolveKargonomiReturnSenderTaxNumber({
+    senderTaxNumber: input.senderTaxNumber,
+    env: input.env,
+  });
+  const senderTaxNumber = senderTaxNumberResolution.value;
   const senderAddress = readOrderAddress(order);
   const buyerNameValid = hasAtLeastTwoWords(receiverName);
   const senderCityId =
@@ -2019,6 +2061,7 @@ function buildKargonomiReturnShipmentPayload(input: {
     receiverCityId,
     senderPhoneValid: Boolean(senderPhone),
     senderTaxNumberPresent: Boolean(senderTaxNumber),
+    senderTaxNumberSource: senderTaxNumberResolution.source,
     buyerNameValid,
   };
 }
@@ -2090,6 +2133,7 @@ export async function createKargonomiReturnShipmentForReturn(
     config,
     resolvedSenderDestination: readKargonomiReturnPreviewSenderDestination(preview),
     senderTaxNumber: input.senderTaxNumber,
+    env,
   });
   if (built.missingFields.length > 0) {
     throw new ReturnReviewError(
@@ -2114,6 +2158,7 @@ export async function createKargonomiReturnShipmentForReturn(
     senderCityIdPresent: Boolean(built.senderCityId),
     senderPhoneValid: built.senderPhoneValid,
     senderTaxNumberPresent: built.senderTaxNumberPresent,
+    senderTaxNumberSource: built.senderTaxNumberSource,
     buyerNameValid: built.buyerNameValid,
     receiverStateIdPresent: Boolean(built.receiverStateId),
     receiverCityIdPresent: Boolean(built.receiverCityId),
