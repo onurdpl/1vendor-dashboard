@@ -25,6 +25,7 @@ const REQUIRED_LOGO_ENV = [
   'LOGO_ISBASI_USERNAME',
   'LOGO_ISBASI_PASSWORD',
 ] as const;
+const LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE = 'SPORGYM-COMMISSION';
 
 const REQUIRED_PREVIEW_FIELDS = [
   'legalCompanyName',
@@ -875,27 +876,27 @@ function buildLogoTestInvoiceCreateResponse(
   };
 }
 
-function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>, serviceItemCode: string | null = null) {
+function buildLogoTestInvoicePayload(
+  requestPayload: Record<string, unknown>,
+  serviceItemCode = LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE,
+) {
   const details = Array.isArray(requestPayload.salesInvoiceDetails)
     ? requestPayload.salesInvoiceDetails.map((detail) => {
         if (!isRecord(detail)) {
           return detail;
         }
-        if (serviceItemCode && isRecord(detail.productDetail)) {
-          return {
-            ...detail,
-            productDetail: {
-              ...detail.productDetail,
-              itemCode: serviceItemCode,
-              itemType: 2,
-            },
-          };
-        }
-        const { productDetail: _productDetail, ...line } = detail;
         return {
-          ...line,
+          ...detail,
           discountRate: 0,
           discountValue: 0,
+          productDetail: {
+            ...(isRecord(detail.productDetail) ? detail.productDetail : {}),
+            itemCode: serviceItemCode,
+            itemType: 2,
+            name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+            vat: 20,
+            unit: 'Adet',
+          },
         };
       })
     : requestPayload.salesInvoiceDetails;
@@ -1900,13 +1901,11 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           description: 'SPORGYM TEST KOMİSYON FATURASI',
           invoiceDate: new Date().toISOString().slice(0, 10),
         });
-        const serviceItemCode = readOptionalString(body, 'serviceItemCode');
+        const serviceItemCode = readOptionalString(body, 'serviceItemCode') ?? LOGO_ISBASI_DEFAULT_TEST_SERVICE_ITEM_CODE;
         const testInvoiceWarnings = [
           ...preview.warnings,
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          ...(serviceItemCode
-            ? []
-            : ['Omitting productDetail in Logo test-create to avoid test tenant item master collision.']),
+          `Using existing Logo service item ${serviceItemCode} for test-create.`,
         ];
         const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload, serviceItemCode);
 

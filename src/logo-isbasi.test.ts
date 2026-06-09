@@ -1312,11 +1312,17 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             description: 'SPORGYM TEST KOMİSYON FATURASI',
             discountRate: 0,
             discountValue: 0,
+            productDetail: expect.objectContaining({
+              itemCode: 'SPORGYM-COMMISSION',
+              itemType: 2,
+              name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+              vat: 20,
+              unit: 'Adet',
+            }),
           }),
         ],
       }),
     );
-    expect(createBody.salesInvoiceDetails[0]).not.toHaveProperty('productDetail');
     expect(result).toEqual(
       expect.objectContaining({
         ok: true,
@@ -1334,7 +1340,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         ettn: 'logo-ettn-1',
         warnings: expect.arrayContaining([
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
-          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
+          'Using existing Logo service item SPORGYM-COMMISSION for test-create.',
         ]),
         requestPayload: expect.objectContaining({
           currency: 'TRY',
@@ -1347,6 +1353,13 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             expect.objectContaining({
               discountRate: 0,
               discountValue: 0,
+              productDetail: expect.objectContaining({
+                itemCode: 'SPORGYM-COMMISSION',
+                itemType: 2,
+                name: 'Sporgym Pazaryeri Komisyon Hizmeti',
+                vat: 20,
+                unit: 'Adet',
+              }),
             }),
           ],
           eGovernmentInvoice: {
@@ -1368,7 +1381,6 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       }),
     );
     const serialized = JSON.stringify(result);
-    expect(result?.requestPayload.salesInvoiceDetails[0]).not.toHaveProperty('productDetail');
     expect(serialized).not.toContain('6490512763');
     expect(serialized).not.toContain('full-secret-access-token');
     expect(serialized).not.toContain('provider-response-token');
@@ -1461,8 +1473,8 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             }),
           ],
         }),
-        warnings: expect.not.arrayContaining([
-          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
+        warnings: expect.arrayContaining([
+          'Using existing Logo service item SERVICE-COMMISSION for test-create.',
         ]),
       }),
     );
