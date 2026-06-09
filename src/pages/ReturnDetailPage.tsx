@@ -755,6 +755,8 @@ export function ReturnDetailPage() {
   );
   const currentReturnProviderSnapshot = returnRequest?.returnProviderSnapshot ?? {};
   const kargonomiPreviewShipment = readKargonomiPreviewShipment(kargonomiReturnPreview);
+  const hasKargonomiReturnShipment =
+    returnRequest?.returnProvider?.toLowerCase() === 'kargonomi' && Boolean(returnRequest.returnProviderShipmentId);
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
@@ -1958,7 +1960,7 @@ export function ReturnDetailPage() {
                     {kargonomiReturnCreateMutation.isPending ? 'Creating...' : 'Create Kargonomi Return Shipment'}
                   </button>
                 ) : null}
-                {returnRequest.returnProvider?.toLowerCase() === 'kargonomi' && returnRequest.returnProviderShipmentId ? (
+                {hasKargonomiReturnShipment ? (
                   <button
                     type="button"
                     className="button button-secondary"
@@ -1970,91 +1972,102 @@ export function ReturnDetailPage() {
                 ) : null}
               </div>
               <div className="return-review-summary-list">
-                <div>
-                  <span>Status</span>
-                  <strong>
-                    {kargonomiReturnPreview ? (kargonomiReturnPreview.ready ? 'Ready' : 'Not ready') : 'Not checked'}
-                  </strong>
-                </div>
-                <div>
-                  <span>Direction</span>
-                  <strong>{kargonomiReturnPreview?.direction.replace(/_/g, ' ') ?? 'Customer to vendor'}</strong>
-                </div>
-                <div>
-                  <span>City / state IDs</span>
-                  <strong>
-                    {kargonomiReturnPreview
-                      ? [
-                          kargonomiPreviewShipment.sender.cityId ? `city ${String(kargonomiPreviewShipment.sender.cityId)}` : 'city missing',
-                          kargonomiPreviewShipment.sender.stateId ? `state ${String(kargonomiPreviewShipment.sender.stateId)}` : 'state missing',
-                        ].join(', ')
-                      : 'Not checked'}
-                  </strong>
-                </div>
-                <div>
-                  <span>Tax number</span>
-                  <strong>
-                    {kargonomiReturnPreview
-                      ? [
-                          kargonomiPreviewShipment.sender.taxNumberPresent === true ? 'ready' : 'missing',
-                          typeof kargonomiPreviewShipment.sender.taxNumberSource === 'string'
-                            ? String(kargonomiPreviewShipment.sender.taxNumberSource).replace(/_/g, ' ')
-                            : null,
-                        ]
-                          .filter(Boolean)
-                          .join(', ')
-                      : 'Not checked'}
-                  </strong>
-                </div>
-                <div>
-                  <span>Warehouse</span>
-                  <strong>
-                    {kargonomiReturnPreview
-                      ? [
-                          kargonomiPreviewShipment.receiver.warehouseId
-                            ? `warehouse ${String(kargonomiPreviewShipment.receiver.warehouseId)}`
-                            : 'warehouse missing',
-                          kargonomiPreviewShipment.receiver.nameValid === true
-                            ? 'name ready'
-                            : kargonomiPreviewShipment.receiver.namePresent === true
-                              ? 'name invalid'
-                              : 'name missing',
-                          kargonomiPreviewShipment.receiver.phonePresent === true ? 'phone ready' : 'phone missing',
-                          kargonomiPreviewShipment.receiver.addressPresent === true ? 'address ready' : 'address missing',
-                        ].join(', ')
-                      : 'Not checked'}
-                  </strong>
-                </div>
-                {returnRequest.returnProvider?.toLowerCase() === 'kargonomi' && returnRequest.returnProviderShipmentId ? (
+                {hasKargonomiReturnShipment ? (
                   <>
                     <div>
-                      <span>Return shipment id</span>
-                      <strong>{returnRequest.returnProviderShipmentId}</strong>
+                      <span>Status</span>
+                      <strong>Shipment created</strong>
+                    </div>
+                    <div>
+                      <span>Tracking</span>
+                      <strong>{returnRequest.returnTrackingNumber ? 'Available' : 'Pending'}</strong>
+                    </div>
+                    <div>
+                      <span>Label</span>
+                      <strong>{returnRequest.returnLabel ? 'Available' : 'Pending'}</strong>
                     </div>
                     <div>
                       <span>Carrier</span>
                       <strong>{returnRequest.returnCarrierName ?? 'Kargonomi'}</strong>
                     </div>
                     <div>
-                      <span>Tracking</span>
-                      <strong>{returnRequest.returnTrackingNumber ?? 'pending'}</strong>
+                      <span>Provider shipment id</span>
+                      <strong>{returnRequest.returnProviderShipmentId}</strong>
                     </div>
                     <div>
-                      <span>Label</span>
-                      <strong>{returnRequest.returnLabel ? 'available' : 'pending'}</strong>
+                      <span>Note</span>
+                      <strong>Readiness validation completed successfully before shipment creation.</strong>
                     </div>
                   </>
-                ) : null}
-                <div>
-                  <span>Missing fields</span>
-                  <strong>{kargonomiReturnPreview ? formatDiagnosticList(kargonomiReturnPreview.missingFields) : 'Not checked'}</strong>
-                </div>
-                {kargonomiReturnPreview?.notes.length ? (
-                  <div>
-                    <span>Notes</span>
-                    <strong>{kargonomiReturnPreview.notes.join(' ')}</strong>
-                  </div>
-                ) : null}
+                ) : (
+                  <>
+                    <div>
+                      <span>Status</span>
+                      <strong>
+                        {kargonomiReturnPreview ? (kargonomiReturnPreview.ready ? 'Ready' : 'Not ready') : 'Not checked'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Direction</span>
+                      <strong>{kargonomiReturnPreview?.direction.replace(/_/g, ' ') ?? 'Customer to vendor'}</strong>
+                    </div>
+                    <div>
+                      <span>City / state IDs</span>
+                      <strong>
+                        {kargonomiReturnPreview
+                          ? [
+                              kargonomiPreviewShipment.sender.cityId ? `city ${String(kargonomiPreviewShipment.sender.cityId)}` : 'city missing',
+                              kargonomiPreviewShipment.sender.stateId ? `state ${String(kargonomiPreviewShipment.sender.stateId)}` : 'state missing',
+                            ].join(', ')
+                          : 'Not checked'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Tax number</span>
+                      <strong>
+                        {kargonomiReturnPreview
+                          ? [
+                              kargonomiPreviewShipment.sender.taxNumberPresent === true ? 'ready' : 'missing',
+                              typeof kargonomiPreviewShipment.sender.taxNumberSource === 'string'
+                                ? String(kargonomiPreviewShipment.sender.taxNumberSource).replace(/_/g, ' ')
+                                : null,
+                            ]
+                              .filter(Boolean)
+                              .join(', ')
+                          : 'Not checked'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Warehouse</span>
+                      <strong>
+                        {kargonomiReturnPreview
+                          ? [
+                              kargonomiPreviewShipment.receiver.warehouseId
+                                ? `warehouse ${String(kargonomiPreviewShipment.receiver.warehouseId)}`
+                                : 'warehouse missing',
+                              kargonomiPreviewShipment.receiver.nameValid === true
+                                ? 'name ready'
+                                : kargonomiPreviewShipment.receiver.namePresent === true
+                                  ? 'name invalid'
+                                  : 'name missing',
+                              kargonomiPreviewShipment.receiver.phonePresent === true ? 'phone ready' : 'phone missing',
+                              kargonomiPreviewShipment.receiver.addressPresent === true ? 'address ready' : 'address missing',
+                            ].join(', ')
+                          : 'Not checked'}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Missing fields</span>
+                      <strong>{kargonomiReturnPreview ? formatDiagnosticList(kargonomiReturnPreview.missingFields) : 'Not checked'}</strong>
+                    </div>
+                    {kargonomiReturnPreview?.notes.length ? (
+                      <div>
+                        <span>Notes</span>
+                        <strong>{kargonomiReturnPreview.notes.join(' ')}</strong>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </article>
           ) : null}

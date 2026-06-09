@@ -1708,10 +1708,17 @@ describe('ReturnDetailPage vendor review screen', () => {
     await user.click(await screen.findByRole('button', { name: 'Create Kargonomi Return Shipment' }));
 
     expect(createKargonomiReturnShipmentMock).toHaveBeenCalledWith(returnDetail.id);
-    expect((await screen.findAllByText('2654001')).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('Sürat Kargo').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('KSUR2654001RET').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('available').length).toBeGreaterThan(0);
+    const kargonomiCard = (await screen.findByText('Shipment created')).closest('article');
+    expect(kargonomiCard).toBeTruthy();
+    const card = within(kargonomiCard!);
+    expect(card.getByText('Shipment created')).toBeInTheDocument();
+    expect(card.getByText('Provider shipment id')).toBeInTheDocument();
+    expect(card.getByText('2654001')).toBeInTheDocument();
+    expect(card.getByText('Readiness validation completed successfully before shipment creation.')).toBeInTheDocument();
+    expect(card.getByText('Sürat Kargo')).toBeInTheDocument();
+    expect(card.getAllByText('Available').length).toBeGreaterThanOrEqual(2);
+    expect(card.queryByText('City / state IDs')).not.toBeInTheDocument();
+    expect(card.queryByText('Missing fields')).not.toBeInTheDocument();
   });
 
   it('lets admins refresh existing Kargonomi return provider data', async () => {
@@ -1771,8 +1778,58 @@ describe('ReturnDetailPage vendor review screen', () => {
 
     expect(refreshKargonomiReturnProviderDataMock).toHaveBeenCalledWith(returnDetail.id);
     expect(await screen.findByText('Kargonomi return provider data refreshed.')).toBeInTheDocument();
-    expect(screen.getAllByText('KSUR2668319RET').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('available').length).toBeGreaterThan(0);
+    expect(screen.getByText('Shipment created')).toBeInTheDocument();
+    expect(screen.getAllByText('Available').length).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText('City / state IDs')).not.toBeInTheDocument();
+  });
+
+  it('shows Kargonomi return shipment summary with pending tracking and label before refresh', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: null,
+    });
+    appReadinessOverride.value = {
+      status: 'ready',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+      },
+      currentVendor: { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', scope: 'admin' },
+      sessionReady: true,
+      vendorReady: true,
+      ready: true,
+      unauthorized: false,
+    };
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'kargonomi',
+      returnProviderShipmentId: '2668319',
+      returnCarrierName: 'Hepsijet',
+      returnTrackingNumber: null,
+      returnLabel: null,
+    });
+
+    renderPage();
+
+    const kargonomiCard = (await screen.findByText('Shipment created')).closest('article');
+    expect(kargonomiCard).toBeTruthy();
+    const card = within(kargonomiCard!);
+    expect(card.getByText('Shipment created')).toBeInTheDocument();
+    expect(card.getByText('Provider shipment id')).toBeInTheDocument();
+    expect(card.getByText('2668319')).toBeInTheDocument();
+    expect(card.getByText('Hepsijet')).toBeInTheDocument();
+    expect(card.getAllByText('Pending').length).toBeGreaterThanOrEqual(2);
+    expect(card.queryByText('City / state IDs')).not.toBeInTheDocument();
+    expect(card.queryByText('Tax number')).not.toBeInTheDocument();
+    expect(card.queryByText('Warehouse')).not.toBeInTheDocument();
+    expect(card.queryByText('Missing fields')).not.toBeInTheDocument();
   });
 
   it('hides vendor review actions from a vendor outside the assigned return scope', async () => {
