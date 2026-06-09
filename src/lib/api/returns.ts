@@ -20,6 +20,10 @@ export async function refreshKargonomiReturnProviderData(returnId: string, optio
   return runtimeServices.returns.refreshKargonomiReturnProviderData(returnId, options.vendorId ?? undefined);
 }
 
+export async function syncKargonomiReturnToShopify(returnId: string, options: { vendorId?: string | null } = {}) {
+  return runtimeServices.returns.syncKargonomiReturnToShopify(returnId, options.vendorId ?? undefined);
+}
+
 export async function markReturnReceived(returnId: string, options: { vendorId?: string | null } = {}) {
   return runtimeServices.returns.markReceived(returnId, options.vendorId ?? undefined);
 }

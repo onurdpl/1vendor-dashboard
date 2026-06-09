@@ -21,6 +21,7 @@ import {
   type KargonomiDestinationResolution,
 } from '../shipping/kargonomi-provider.adapter.js';
 import { withDashboardTiming } from '../../lib/dashboard-timing.js';
+import { createShopifyAdminService } from '../shopify/shopify-admin.service.js';
 import type { DashboardReturnSummaryDto, KargonomiReturnPreviewDto, ReturnDetailDto, ReturnSummaryDto } from './returns.types.js';
 import {
   backfillMissingLineItemImages,
@@ -79,6 +80,10 @@ export type KargonomiReturnShipmentCreateInput = {
 
 export type KargonomiReturnProviderDataRefreshInput = {
   adapter?: ShippingProviderAdapter;
+};
+
+export type ShopifyReturnSyncInput = {
+  shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'syncReturnShipping'>;
 };
 
 export type KargonomiReturnPreviewInput = {
@@ -200,6 +205,35 @@ function readStringArray(value: unknown) {
 
 function readSnapshot(value: unknown): Record<string, unknown> | null {
   return isRecord(value) ? value : null;
+}
+
+function toShopifyReturnGid(value: string | null | undefined) {
+  const text = value?.trim();
+  if (!text) {
+    return null;
+  }
+  return /^gid:\/\/shopify\/Return\//i.test(text) ? text : `gid://shopify/Return/${text.replace(/^#+/, '')}`;
+}
+
+function sanitizeShopifyReturnSyncMessage(value: unknown) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const text = value.trim();
+  if (!text) {
+    return null;
+  }
+  return text
+    .replace(/(access[_-]?token|refresh[_-]?token|authorization|password|secret|api[_-]?key)=?[^\s,;]+/gi, '$1=[redacted]')
+    .replace(/data:application\/pdf;base64,[a-z0-9+/=\s]+/gi, 'data:application/pdf;base64,[redacted]')
+    .slice(0, 500);
+}
+
+function sanitizeShopifyUserErrors(errors: Array<{ field?: string[]; message?: string }> | undefined) {
+  return (errors ?? []).map((error) => ({
+    field: Array.isArray(error.field) ? error.field.filter((field): field is string => typeof field === 'string') : [],
+    message: sanitizeShopifyReturnSyncMessage(error.message) ?? 'Unknown Shopify user error.',
+  }));
 }
 
 function readIsoDate(value: unknown, keys: string[]) {
@@ -2424,6 +2458,159 @@ export async function refreshKargonomiReturnProviderData(
     throw new ReturnReviewError(
       error instanceof Error ? error.message : 'Kargonomi return provider data refresh failed.',
       400,
+    );
+  }
+
+  const updated = await getVendorReturnById(record.vendorAllocation.assignedVendorId, returnId);
+  if (!updated) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+  return updated;
+}
+
+export async function syncKargonomiReturnToShopify(
+  returnId: string,
+  actor: ReturnActorScope,
+  env: AppEnv,
+  input: ShopifyReturnSyncInput = {},
+): Promise<ReturnDetailDto> {
+  const record = await prisma.returnRecord.findUnique({
+    where: { id: returnId },
+    include: {
+      vendorAllocation: true,
+    },
+  });
+
+  if (!record || !canActOnReturn(record, actor)) {
+    throw new ReturnReviewError('Return record not found.', 404);
+  }
+
+  if (actor.role !== 'admin') {
+    throw new ReturnReviewError('Admin access required for Shopify return sync.', 403);
+  }
+
+  if (isReturnCancelledOrDeleted(record)) {
+    throw new ReturnReviewError('Cancelled or deleted returns cannot sync to Shopify.', 400);
+  }
+
+  if (record.returnProvider?.toLowerCase() !== 'kargonomi') {
+    throw new ReturnReviewError('Shopify return sync currently supports Kargonomi return shipments only.', 400);
+  }
+
+  if (!record.returnProviderShipmentId?.trim()) {
+    throw new ReturnReviewError('Shopify return sync requires a Kargonomi return shipment id.', 400);
+  }
+
+  const trackingNumber = record.returnTrackingNumber?.trim();
+  if (!trackingNumber) {
+    throw new ReturnReviewError('Shopify return sync requires a return tracking number.', 400, {
+      shopifyReturnSyncSkippedReason: 'tracking_missing',
+    });
+  }
+
+  const returnGid = toShopifyReturnGid(record.sourceShopifyReturnGid ?? record.sourceShopifyReturnId);
+  if (!returnGid) {
+    throw new ReturnReviewError('Shopify return sync requires a Shopify return id.', 400, {
+      shopifyReturnSyncSkippedReason: 'shopify_return_id_missing',
+    });
+  }
+
+  const sourceLineItemId = record.sourceShopifyLineItemId?.trim();
+  if (!sourceLineItemId) {
+    throw new ReturnReviewError('Shopify return sync requires a Shopify source line item id.', 400, {
+      shopifyReturnSyncSkippedReason: 'source_line_item_missing',
+    });
+  }
+
+  const existingSnapshot = readSnapshot(record.returnProviderSnapshot) ?? {};
+  const attemptedAt = new Date().toISOString();
+  const attemptSnapshot = {
+    ...existingSnapshot,
+    provider: 'kargonomi',
+    flow: 'return_shopify_sync',
+    shopifyReturnSyncAttempted: true,
+    shopifyReturnSyncSucceeded: false,
+    shopifyReturnTrackingSynced: false,
+    shopifyReturnLabelSynced: false,
+    shopifyReturnSyncSkippedReason: null,
+    shopifyReturnSyncAttemptedAt: attemptedAt,
+    shopifyReturnIdPresent: true,
+    shopifyReturnSourceLineItemIdPresent: true,
+    returnTrackingPresent: true,
+    returnLabelPresent: Boolean(record.returnLabel?.trim()),
+    labelUploadAttempted: false,
+    labelUploadSucceeded: false,
+    labelUploadSkippedReason: null,
+  };
+
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      returnProviderSnapshot: attemptSnapshot as Prisma.InputJsonValue,
+    },
+  });
+
+  try {
+    const shopifyAdminService = input.shopifyAdminService ?? createShopifyAdminService(env);
+    const result = await shopifyAdminService.syncReturnShipping({
+      returnGid,
+      sourceLineItemId,
+      trackingNumber,
+      trackingUrl: record.returnTrackingUrl,
+      labelUrl: record.returnLabel,
+      notifyCustomer: true,
+    });
+
+    const sanitizedUserErrors = sanitizeShopifyUserErrors(result.userErrors);
+    const successSnapshot = {
+      ...attemptSnapshot,
+      shopifyReturnSyncSucceeded: result.trackingAccepted && sanitizedUserErrors.length === 0,
+      shopifyReturnTrackingSynced: result.trackingAccepted,
+      shopifyReturnLabelSynced: result.labelAccepted,
+      shopifyReturnSyncSkippedReason: result.trackingAccepted ? null : 'tracking_not_accepted',
+      shopifyReverseDeliveryId: result.reverseDeliveryId,
+      shopifyReverseFulfillmentOrderId: result.reverseFulfillmentOrderId,
+      shopifyReturnSyncUserErrors: sanitizedUserErrors,
+      labelUploadAttempted: result.labelUploadAttempted,
+      labelUploadSucceeded: result.labelUploadSucceeded,
+      labelUploadSkippedReason: result.labelUploadSkippedReason,
+      labelUploadSource: result.labelUploadSource,
+      labelInputSent: result.labelInputSent,
+      shopifyReturnSyncMutationUsed: result.mutationUsed,
+      shopifyReturnSyncCompletedAt: new Date().toISOString(),
+    };
+
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: successSnapshot as Prisma.InputJsonValue,
+      },
+    });
+  } catch (error) {
+    const safeErrorMessage =
+      sanitizeShopifyReturnSyncMessage(error instanceof Error ? error.message : 'Unknown Shopify return sync error.') ??
+      'Unknown Shopify return sync error.';
+    const failedSnapshot = {
+      ...attemptSnapshot,
+      shopifyReturnSyncSucceeded: false,
+      shopifyReturnTrackingSynced: false,
+      shopifyReturnLabelSynced: false,
+      shopifyReturnSyncSkippedReason: 'shopify_sync_failed',
+      shopifyReturnSyncErrorMessage: safeErrorMessage,
+      shopifyReturnSyncFailedAt: new Date().toISOString(),
+    };
+    await prisma.returnRecord.update({
+      where: { id: returnId },
+      data: {
+        returnProviderSnapshot: failedSnapshot as Prisma.InputJsonValue,
+      },
+    });
+    throw new ReturnReviewError(
+      safeErrorMessage,
+      400,
+      {
+        shopifyReturnSyncSkippedReason: 'shopify_sync_failed',
+      },
     );
   }
 

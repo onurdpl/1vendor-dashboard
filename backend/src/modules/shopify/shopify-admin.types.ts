@@ -130,6 +130,31 @@ export type ProbeShopifyReturnLabelUploadResult = {
   source: 'mock' | 'shopify_admin';
 };
 
+export type SyncShopifyReturnShippingInput = {
+  returnGid: string;
+  sourceLineItemId: string;
+  trackingNumber: string;
+  trackingUrl?: string | null;
+  labelUrl?: string | null;
+  notifyCustomer: boolean;
+};
+
+export type SyncShopifyReturnShippingResult = {
+  mutationUsed: 'reverseDeliveryCreateWithShipping' | 'reverseDeliveryShippingUpdate';
+  reverseFulfillmentOrderId: string | null;
+  reverseDeliveryId: string | null;
+  trackingAccepted: boolean;
+  labelAccepted: boolean;
+  returnedCarrierName: string | null;
+  userErrors: ShopifyUserError[];
+  labelInputSent: boolean;
+  labelUploadAttempted: boolean;
+  labelUploadSucceeded: boolean;
+  labelUploadSkippedReason: string | null;
+  labelUploadSource: 'public_url' | 'staged_upload' | 'missing' | 'unsupported';
+  source: 'mock' | 'shopify_admin';
+};
+
 export type ShopifyGraphqlResponse<T> = {
   data?: T;
   errors?: Array<{

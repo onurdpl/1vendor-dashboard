@@ -19,6 +19,7 @@ const {
   createKargonomiReturnShipmentForReturn,
   previewKargonomiReturnShipmentForReturn,
   refreshKargonomiReturnProviderData,
+  syncKargonomiReturnToShopify,
 } = await import(
   '../backend/src/modules/returns/returns.service.js'
 );
@@ -1181,5 +1182,137 @@ describe('Kargonomi return preview', () => {
         {} as never,
       ),
     ).rejects.toThrow('Return shipment already exists');
+  });
+
+  it('blocks Shopify return sync before provider call when tracking is missing', async () => {
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn(),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnTrackingNumber: null,
+      }),
+    );
+
+    await expect(
+      syncKargonomiReturnToShopify(
+        'return-1',
+        {
+          role: 'admin',
+          vendorId: null,
+        },
+        {} as never,
+        { shopifyAdminService },
+      ),
+    ).rejects.toThrow('requires a return tracking number');
+
+    expect(shopifyAdminService.syncReturnShipping).not.toHaveBeenCalled();
+  });
+
+  it('blocks Shopify return sync before provider call when Shopify return id is missing', async () => {
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn(),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnTrackingNumber: 'KSUR2668319RET',
+        sourceShopifyReturnId: null,
+        sourceShopifyReturnGid: null,
+      }),
+    );
+
+    await expect(
+      syncKargonomiReturnToShopify(
+        'return-1',
+        {
+          role: 'admin',
+          vendorId: null,
+        },
+        {} as never,
+        { shopifyAdminService },
+      ),
+    ).rejects.toThrow('requires a Shopify return id');
+
+    expect(shopifyAdminService.syncReturnShipping).not.toHaveBeenCalled();
+  });
+
+  it('persists sanitized Shopify return sync diagnostics without raw label base64', async () => {
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn().mockResolvedValue({
+        mutationUsed: 'reverseDeliveryCreateWithShipping',
+        reverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/1',
+        reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        trackingAccepted: true,
+        labelAccepted: true,
+        returnedCarrierName: null,
+        userErrors: [],
+        labelInputSent: true,
+        labelUploadAttempted: true,
+        labelUploadSucceeded: true,
+        labelUploadSkippedReason: null,
+        labelUploadSource: 'staged_upload',
+        source: 'shopify_admin',
+      }),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnTrackingUrl: 'https://tracking.example/KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        returnProviderSnapshot: {
+          shopifyReturnSyncSucceeded: true,
+          shopifyReturnTrackingSynced: true,
+          shopifyReturnLabelSynced: true,
+          shopifyReverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        },
+      }),
+    );
+
+    const result = await syncKargonomiReturnToShopify(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      { shopifyAdminService },
+    );
+
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledWith({
+      returnGid: 'gid://shopify/Return/1',
+      sourceLineItemId: 'line-1',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: 'https://tracking.example/KSUR2668319RET',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      notifyCustomer: true,
+    });
+    const persistedSnapshots = prismaMock.returnRecord.update.mock.calls.map((call) => JSON.stringify(call[0])).join('\n');
+    expect(persistedSnapshots).toContain('"shopifyReturnTrackingSynced":true');
+    expect(persistedSnapshots).toContain('"shopifyReturnLabelSynced":true');
+    expect(persistedSnapshots).toContain('"labelUploadSucceeded":true');
+    expect(persistedSnapshots).not.toContain('JVBER');
+    expect(persistedSnapshots).not.toContain('data:application/pdf');
+    expect(result.returnProviderSnapshot).toMatchObject({
+      shopifyReturnSyncSucceeded: true,
+      shopifyReturnTrackingSynced: true,
+      shopifyReturnLabelSynced: true,
+    });
   });
 });

@@ -1,4 +1,5 @@
 import type { AppEnv } from '../../config/env.js';
+import { Buffer } from 'node:buffer';
 import type {
   CreateFulfillmentTrackingInput,
   CreateFulfillmentTrackingResult,
@@ -15,9 +16,12 @@ import type {
   ShopifyGraphqlResponse,
   ShopifyMoneySnapshot,
   ShopifyOrderFulfillmentState,
+  ShopifyReverseDeliveryLineItem,
   ShopifyReturnLineItem,
   ShopifyTaxLineSnapshot,
   ShopifyReturnTrackingInfo,
+  SyncShopifyReturnShippingInput,
+  SyncShopifyReturnShippingResult,
 } from './shopify-admin.types.js';
 
 type OrderSellerInfoQueryResponse = {
@@ -234,6 +238,23 @@ type ShopifyReverseDeliveryMutationResponse = {
       field?: string[] | null;
       message?: string | null;
     }>;
+  } | null;
+};
+
+type ShopifyStagedUploadsCreateResponse = {
+  stagedUploadsCreate?: {
+    stagedTargets?: Array<{
+      url?: string | null;
+      resourceUrl?: string | null;
+      parameters?: Array<{
+        name?: string | null;
+        value?: string | null;
+      }> | null;
+    }> | null;
+    userErrors?: Array<{
+      field?: string[] | null;
+      message?: string | null;
+    }> | null;
   } | null;
 };
 
@@ -1197,6 +1218,379 @@ export function createShopifyAdminService(env: AppEnv) {
     }));
   }
 
+  function getShopifyIdentifierCandidates(value: string | null | undefined) {
+    const text = value?.trim();
+    if (!text) {
+      return new Set<string>();
+    }
+    const tail = extractShopifyGidTail(text);
+    return new Set([text, tail].filter((item): item is string => Boolean(item)));
+  }
+
+  function returnLineItemMatchesSource(lineItem: ShopifyReverseDeliveryLineItem, sourceLineItemId: string) {
+    const sourceCandidates = getShopifyIdentifierCandidates(sourceLineItemId);
+    const lineItemCandidates = getShopifyIdentifierCandidates(lineItem.lineItemGid);
+    return Array.from(lineItemCandidates).some((candidate) => sourceCandidates.has(candidate));
+  }
+
+  function isPublicLabelUrl(value: string | null | undefined) {
+    const text = value?.trim();
+    return Boolean(text && /^https?:\/\//i.test(text));
+  }
+
+  function decodeReturnLabelPdfBytes(value: string | null | undefined) {
+    const text = value?.trim();
+    if (!text) {
+      return null;
+    }
+
+    const dataUrlMatch = /^data:application\/pdf;base64,([a-z0-9+/=\s]+)$/i.exec(text);
+    const base64 = dataUrlMatch?.[1] ?? (/^[a-z0-9+/=\s]+$/i.test(text) ? text : null);
+    if (!base64) {
+      return null;
+    }
+
+    const normalizedBase64 = base64.replace(/\s+/g, '');
+    try {
+      const buffer = Buffer.from(normalizedBase64, 'base64');
+      const decodedPrefix = buffer.subarray(0, 4).toString('utf8');
+      if (!normalizedBase64.startsWith('JVBER') && decodedPrefix !== '%PDF') {
+        return null;
+      }
+      return new Uint8Array(buffer);
+    } catch {
+      return null;
+    }
+  }
+
+  async function uploadReturnLabelPdfToShopify(labelValue: string | null | undefined): Promise<{
+    fileUrl: string | null;
+    attempted: boolean;
+    succeeded: boolean;
+    skippedReason: string | null;
+    source: SyncShopifyReturnShippingResult['labelUploadSource'];
+    userErrors: Array<{ field?: string[] | null; message?: string | null }>;
+  }> {
+    if (!labelValue?.trim()) {
+      return {
+        fileUrl: null,
+        attempted: false,
+        succeeded: false,
+        skippedReason: 'label_missing',
+        source: 'missing',
+        userErrors: [],
+      };
+    }
+
+    if (isPublicLabelUrl(labelValue)) {
+      return {
+        fileUrl: labelValue.trim(),
+        attempted: false,
+        succeeded: false,
+        skippedReason: null,
+        source: 'public_url',
+        userErrors: [],
+      };
+    }
+
+    const pdfBytes = decodeReturnLabelPdfBytes(labelValue);
+    if (!pdfBytes) {
+      return {
+        fileUrl: null,
+        attempted: false,
+        succeeded: false,
+        skippedReason: 'unsupported_label_format',
+        source: 'unsupported',
+        userErrors: [],
+      };
+    }
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return label staged upload is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({
+          query: `
+            mutation CreateReturnLabelStagedUpload($input: [StagedUploadInput!]!) {
+              stagedUploadsCreate(input: $input) {
+                stagedTargets {
+                  url
+                  resourceUrl
+                  parameters {
+                    name
+                    value
+                  }
+                }
+                userErrors {
+                  field
+                  message
+                }
+              }
+            }
+          `,
+          variables: {
+            input: [
+              {
+                filename: 'sporgym-return-label.pdf',
+                mimeType: 'application/pdf',
+                httpMethod: 'POST',
+                resource: 'RETURN_LABEL',
+              },
+            ],
+          },
+        }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return label staged upload creation failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyStagedUploadsCreateResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return label staged upload returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const stagedUpload = json.data?.stagedUploadsCreate;
+    const userErrors = normalizeUserErrors(stagedUpload?.userErrors ?? undefined);
+    if (userErrors.length > 0) {
+      return {
+        fileUrl: null,
+        attempted: true,
+        succeeded: false,
+        skippedReason: 'staged_upload_user_error',
+        source: 'staged_upload',
+        userErrors,
+      };
+    }
+
+    const target = stagedUpload?.stagedTargets?.[0] ?? null;
+    const uploadUrl = target?.url?.trim();
+    const resourceUrl = target?.resourceUrl?.trim();
+    const targetParameters = target?.parameters ?? [];
+    if (!uploadUrl || !resourceUrl) {
+      return {
+        fileUrl: null,
+        attempted: true,
+        succeeded: false,
+        skippedReason: 'staged_upload_target_missing',
+        source: 'staged_upload',
+        userErrors: [],
+      };
+    }
+
+    const formData = new FormData();
+    for (const parameter of targetParameters) {
+      if (parameter.name && parameter.value !== null && parameter.value !== undefined) {
+        formData.append(parameter.name, parameter.value);
+      }
+    }
+    formData.append('file', new Blob([pdfBytes], { type: 'application/pdf' }), 'sporgym-return-label.pdf');
+
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!uploadResponse.ok) {
+      throw new Error(`Shopify return label staged upload failed with status ${uploadResponse.status}.`);
+    }
+
+    return {
+      fileUrl: resourceUrl,
+      attempted: true,
+      succeeded: true,
+      skippedReason: null,
+      source: 'staged_upload',
+      userErrors: [],
+    };
+  }
+
+  async function syncReturnShipping(input: SyncShopifyReturnShippingInput): Promise<SyncShopifyReturnShippingResult> {
+    const reverseInputs = await fetchReturnReverseDeliveryInputs(input.returnGid);
+    const matchedReverseFulfillmentOrder = reverseInputs.reverseFulfillmentOrders
+      .map((order) => ({
+        order,
+        lineItems: order.lineItems.filter((lineItem) => returnLineItemMatchesSource(lineItem, input.sourceLineItemId)),
+      }))
+      .find((candidate) => candidate.lineItems.length > 0);
+
+    if (!matchedReverseFulfillmentOrder) {
+      throw new Error('Shopify return did not include a reverse fulfillment order for this return line item.');
+    }
+
+    const existingReverseDelivery = matchedReverseFulfillmentOrder.order.reverseDeliveries[0] ?? null;
+    const mutationUsed = existingReverseDelivery
+      ? 'reverseDeliveryShippingUpdate'
+      : 'reverseDeliveryCreateWithShipping';
+    const labelUpload = await uploadReturnLabelPdfToShopify(input.labelUrl);
+    const labelUserErrors = normalizeUserErrors(labelUpload.userErrors);
+    const labelInput = labelUpload.fileUrl ? { fileUrl: labelUpload.fileUrl } : null;
+    const variables = existingReverseDelivery
+      ? {
+          reverseDeliveryId: existingReverseDelivery.id,
+          trackingInput: {
+            number: input.trackingNumber,
+            ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
+          },
+          ...(labelInput ? { labelInput } : {}),
+          notifyCustomer: input.notifyCustomer,
+        }
+      : {
+          reverseFulfillmentOrderId: matchedReverseFulfillmentOrder.order.id,
+          reverseDeliveryLineItems: matchedReverseFulfillmentOrder.lineItems.map((lineItem) => ({
+            reverseFulfillmentOrderLineItemId: lineItem.id,
+            quantity: lineItem.quantity,
+          })),
+          trackingInput: {
+            number: input.trackingNumber,
+            ...(input.trackingUrl ? { url: input.trackingUrl } : {}),
+          },
+          ...(labelInput ? { labelInput } : {}),
+          notifyCustomer: input.notifyCustomer,
+        };
+
+    const query = existingReverseDelivery
+      ? `
+        mutation SyncReturnReverseDeliveryShippingUpdate(
+          $reverseDeliveryId: ID!
+          $trackingInput: ReverseDeliveryTrackingInput
+          $labelInput: ReverseDeliveryLabelInput
+          $notifyCustomer: Boolean
+        ) {
+          reverseDeliveryShippingUpdate(
+            reverseDeliveryId: $reverseDeliveryId
+            trackingInput: $trackingInput
+            labelInput: $labelInput
+            notifyCustomer: $notifyCustomer
+          ) {
+            reverseDelivery {
+              id
+              deliverable {
+                ... on ReverseDeliveryShippingDeliverable {
+                  label {
+                    publicFileUrl
+                  }
+                  tracking {
+                    carrierName
+                    number
+                    url
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `
+      : `
+        mutation SyncReturnReverseDeliveryCreateWithShipping(
+          $reverseFulfillmentOrderId: ID!
+          $reverseDeliveryLineItems: [ReverseDeliveryLineItemInput!]!
+          $trackingInput: ReverseDeliveryTrackingInput
+          $labelInput: ReverseDeliveryLabelInput
+          $notifyCustomer: Boolean
+        ) {
+          reverseDeliveryCreateWithShipping(
+            reverseFulfillmentOrderId: $reverseFulfillmentOrderId
+            reverseDeliveryLineItems: $reverseDeliveryLineItems
+            trackingInput: $trackingInput
+            labelInput: $labelInput
+            notifyCustomer: $notifyCustomer
+          ) {
+            reverseDelivery {
+              id
+              deliverable {
+                ... on ReverseDeliveryShippingDeliverable {
+                  label {
+                    publicFileUrl
+                  }
+                  tracking {
+                    carrierName
+                    number
+                    url
+                  }
+                }
+              }
+            }
+            userErrors {
+              field
+              message
+            }
+          }
+        }
+      `;
+
+    if (!env.SHOPIFY_SHOP_DOMAIN || !env.SHOPIFY_ADMIN_ACCESS_TOKEN) {
+      throw new Error('Shopify return shipping sync is not configured.');
+    }
+
+    const response = await fetch(
+      `https://${env.SHOPIFY_SHOP_DOMAIN}/admin/api/${env.SHOPIFY_API_VERSION}/graphql.json`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-shopify-access-token': env.SHOPIFY_ADMIN_ACCESS_TOKEN,
+        },
+        body: JSON.stringify({ query, variables }),
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Shopify return shipping sync failed with status ${response.status}.`);
+    }
+
+    const json = (await response.json()) as ShopifyGraphqlResponse<ShopifyReverseDeliveryMutationResponse>;
+    if (json.errors?.length) {
+      throw new Error(
+        `Shopify return shipping sync returned GraphQL errors: ${json.errors.map((error) => error.message).join('; ')}`,
+      );
+    }
+
+    const mutationPayload = existingReverseDelivery
+      ? json.data?.reverseDeliveryShippingUpdate
+      : json.data?.reverseDeliveryCreateWithShipping;
+    const userErrors = [
+      ...labelUserErrors,
+      ...normalizeUserErrors(mutationPayload?.userErrors),
+    ];
+    const reverseDeliveryId = mutationPayload?.reverseDelivery?.id ?? null;
+    const deliverable = mutationPayload?.reverseDelivery?.deliverable;
+    const labelPublicFileUrl = deliverable?.label?.publicFileUrl ?? null;
+    const returnedTrackingNumber = deliverable?.tracking?.number ?? null;
+    const returnedCarrierName = deliverable?.tracking?.carrierName ?? null;
+    const trackingAccepted = Boolean(returnedTrackingNumber) && returnedTrackingNumber === input.trackingNumber && userErrors.length === 0;
+
+    return {
+      mutationUsed,
+      reverseFulfillmentOrderId: matchedReverseFulfillmentOrder.order.id,
+      reverseDeliveryId,
+      trackingAccepted,
+      labelAccepted: Boolean(labelPublicFileUrl) && userErrors.length === 0,
+      returnedCarrierName,
+      userErrors,
+      labelInputSent: Boolean(labelInput),
+      labelUploadAttempted: labelUpload.attempted,
+      labelUploadSucceeded: labelUpload.succeeded,
+      labelUploadSkippedReason: labelUpload.skippedReason,
+      labelUploadSource: labelUpload.source,
+      source: 'shopify_admin',
+    };
+  }
+
   async function probeReturnLabelUpload(input: ProbeShopifyReturnLabelUploadInput): Promise<ProbeShopifyReturnLabelUploadResult> {
     const reverseInputs = await fetchReturnReverseDeliveryInputs(input.returnGid);
     const reverseFulfillmentOrder = reverseInputs.reverseFulfillmentOrders.find((order) => order.lineItems.length > 0);
@@ -1622,6 +2016,7 @@ export function createShopifyAdminService(env: AppEnv) {
     fetchReturnDetails,
     fetchReturnReverseDeliveryInputs,
     probeReturnLabelUpload,
+    syncReturnShipping,
     fetchFulfillmentOrders,
     fetchOrderFulfillmentState,
     createFulfillmentTracking,

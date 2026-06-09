@@ -474,6 +474,44 @@ export async function refreshKargonomiReturnProviderData(
   };
 }
 
+export async function syncKargonomiReturnToShopify(
+  returnId: string,
+  options: { vendorId?: string | null } = {},
+): Promise<ReturnDetail> {
+  const requestOptions = readVendorRequestOptions(options);
+  const response = await (requestOptions
+    ? apiClient.post<ReturnDetailDto>(`/returns/${returnId}/shopify-return-sync`, {}, requestOptions)
+    : apiClient.post<ReturnDetailDto>(`/returns/${returnId}/shopify-return-sync`, {}));
+  const summary = mapSummary(response);
+  const refundedItems = response.refundedItems.map((item) => mapReturnLineItem(item, response.originalVendorId, response.assignedVendorId));
+
+  return {
+    ...summary,
+    originalVendorId: response.originalVendorId,
+    resolution: response.returnReasonNote ?? '',
+    refundMethod:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Pending return request (no refund posted yet)'
+        : 'Shopify refund',
+    processedBy:
+      response.returnRequestSource === 'shopify_return_request'
+        ? 'Shopify return lifecycle webhook ingestion via backend'
+        : 'Shopify refund webhook ingestion via backend',
+    itemTitle: summary.itemTitle,
+    displayTitle: summary.displayTitle,
+    variantTitle: summary.variantTitle,
+    refundedItems,
+    items: refundedItems,
+    timeline: [
+      {
+        label: response.returnRequestSource === 'shopify_return_request' ? 'Return requested' : 'Refund requested',
+        at: response.requestCreatedAt ?? response.createdAt,
+      },
+      { label: 'Latest backend update', at: response.updatedAt },
+    ],
+  };
+}
+
 export async function createNavlungoReturnPickup(
   returnId: string,
   input: {

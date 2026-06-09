@@ -57,6 +57,7 @@ const syncNavlungoReturnStatusMock = vi.fn<(returnId: string) => Promise<ReturnD
 const getKargonomiReturnPreviewMock = vi.fn<(returnId: string) => Promise<KargonomiReturnPreview>>();
 const createKargonomiReturnShipmentMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const refreshKargonomiReturnProviderDataMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
+const syncKargonomiReturnToShopifyMock = vi.fn<(returnId: string) => Promise<ReturnDetail>>();
 const createSupportTicketMock = vi.fn();
 const listAdminSupportTicketsMock = vi.fn();
 const listVendorSupportTicketsMock = vi.fn();
@@ -99,6 +100,7 @@ vi.mock('../features/returns/api', async () => {
     getKargonomiReturnPreview: (returnId: string) => getKargonomiReturnPreviewMock(returnId),
     createKargonomiReturnShipment: (returnId: string) => createKargonomiReturnShipmentMock(returnId),
     refreshKargonomiReturnProviderData: (returnId: string) => refreshKargonomiReturnProviderDataMock(returnId),
+    syncKargonomiReturnToShopify: (returnId: string) => syncKargonomiReturnToShopifyMock(returnId),
   };
 });
 
@@ -255,6 +257,7 @@ describe('ReturnDetailPage vendor review screen', () => {
     getKargonomiReturnPreviewMock.mockReset();
     createKargonomiReturnShipmentMock.mockReset();
     refreshKargonomiReturnProviderDataMock.mockReset();
+    syncKargonomiReturnToShopifyMock.mockReset();
     createSupportTicketMock.mockReset();
     listAdminSupportTicketsMock.mockReset();
     listAdminSupportTicketsMock.mockResolvedValue([]);
@@ -1781,6 +1784,73 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.getByText('Shipment created')).toBeInTheDocument();
     expect(screen.getAllByText('Available').length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText('City / state IDs')).not.toBeInTheDocument();
+  });
+
+  it('lets admins manually sync Kargonomi return tracking and label to Shopify', async () => {
+    const user = userEvent.setup();
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: null,
+    });
+    appReadinessOverride.value = {
+      status: 'ready',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+      },
+      currentVendor: { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', scope: 'admin' },
+      sessionReady: true,
+      vendorReady: true,
+      ready: true,
+      unauthorized: false,
+    };
+    const syncedReturn = {
+      ...returnDetail,
+      returnProvider: 'kargonomi',
+      returnProviderShipmentId: '2668319',
+      returnCarrierName: 'Hepsijet',
+      returnTrackingNumber: 'KSUR2668319RET',
+      returnLabel: 'data:application/pdf;base64,JVBER',
+      returnProviderSnapshot: {
+        provider: 'kargonomi',
+        shopifyReturnSyncAttempted: true,
+        shopifyReturnSyncSucceeded: true,
+        shopifyReturnTrackingSynced: true,
+        shopifyReturnLabelSynced: true,
+        shopifyReverseDeliveryId: 'gid://shopify/ReverseDelivery/321',
+        shopifyReturnSyncUserErrors: [],
+      },
+    } satisfies ReturnDetail;
+    getReturnMock.mockResolvedValue({
+      ...syncedReturn,
+      returnProviderSnapshot: {
+        provider: 'kargonomi',
+      },
+    });
+    syncKargonomiReturnToShopifyMock.mockResolvedValue(syncedReturn);
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Sync return to Shopify' }));
+
+    expect(syncKargonomiReturnToShopifyMock).toHaveBeenCalledWith(returnDetail.id);
+    expect(await screen.findByText('Kargonomi return synced to Shopify.')).toBeInTheDocument();
+    const kargonomiCard = screen.getByText('Shipment created').closest('article');
+    expect(kargonomiCard).toBeTruthy();
+    const card = within(kargonomiCard!);
+    expect(card.getByText('Shopify tracking synced')).toBeInTheDocument();
+    expect(card.getByText('Shopify label synced')).toBeInTheDocument();
+    expect(card.getAllByText('yes').length).toBeGreaterThanOrEqual(2);
+    expect(card.getByText('gid://shopify/ReverseDelivery/321')).toBeInTheDocument();
+    expect(card.queryByText(/JVBER/i)).not.toBeInTheDocument();
+    expect(card.queryByText(/data:application\/pdf/i)).not.toBeInTheDocument();
   });
 
   it('shows Kargonomi return shipment summary with pending tracking and label before refresh', async () => {

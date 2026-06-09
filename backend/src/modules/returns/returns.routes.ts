@@ -18,6 +18,7 @@ import {
   ReturnReviewError,
   reviewReturn,
   saveNavlungoReturnPickupAddressCompletion,
+  syncKargonomiReturnToShopify,
   syncNavlungoReturnPickupStatusForReturn,
 } from './returns.service.js';
 import { resolvePagination } from '../../lib/pagination.js';
@@ -368,6 +369,25 @@ export function registerReturnsRoutes(app: FastifyInstance, env: AppEnv) {
 
       try {
         return await refreshKargonomiReturnProviderData(request.params.returnId, actor.actor, env);
+      } catch (error) {
+        return sendReviewError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: { returnId: string } }>(
+    '/returns/:returnId/shopify-return-sync',
+    {
+      preHandler: [authMiddleware.authenticateRequest],
+    },
+    async (request, reply) => {
+      const actor = await resolveReturnActor(request, reply);
+      if (!actor.ok) {
+        return actor.response;
+      }
+
+      try {
+        return await syncKargonomiReturnToShopify(request.params.returnId, actor.actor, env);
       } catch (error) {
         return sendReviewError(error, reply);
       }

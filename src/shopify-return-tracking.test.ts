@@ -195,6 +195,7 @@ describe('Shopify return tracking fetch', () => {
       variables: {
         trackingInput: { number: string; url?: string };
         labelInput: { fileUrl: string };
+        notifyCustomer: boolean;
       };
     };
     expect(mutationBody.query).toContain('reverseDeliveryCreateWithShipping');
@@ -207,6 +208,7 @@ describe('Shopify return tracking fetch', () => {
     expect(mutationBody.variables.labelInput).toEqual({
       fileUrl: 'https://labels.example/return.pdf',
     });
+    expect(mutationBody.variables.notifyCustomer).toBe(false);
     expect(mutationBody.variables).not.toHaveProperty('carrierName');
     expect(result).toMatchObject({
       mutationUsed: 'reverseDeliveryCreateWithShipping',
@@ -302,6 +304,316 @@ describe('Shopify return tracking fetch', () => {
       labelAccepted: false,
       returnedCarrierName: 'Sürat Kargo',
       userErrors: [],
+    });
+  });
+
+  it('creates a line-scoped Shopify reverse delivery with notifyCustomer true', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        return: {
+          id: 'gid://shopify/Return/231',
+          reverseFulfillmentOrders: {
+            nodes: [
+              {
+                id: 'gid://shopify/ReverseFulfillmentOrder/other',
+                status: 'OPEN',
+                lineItems: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseFulfillmentOrderLineItem/other',
+                      totalQuantity: 1,
+                      fulfillmentLineItem: {
+                        lineItem: {
+                          id: 'gid://shopify/LineItem/12',
+                          sku: 'OTHER',
+                        },
+                      },
+                    },
+                  ],
+                },
+                reverseDeliveries: { nodes: [] },
+              },
+              {
+                id: 'gid://shopify/ReverseFulfillmentOrder/target',
+                status: 'OPEN',
+                lineItems: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseFulfillmentOrderLineItem/target',
+                      totalQuantity: 1,
+                      fulfillmentLineItem: {
+                        lineItem: {
+                          id: 'gid://shopify/LineItem/99',
+                          sku: 'SKU-99',
+                        },
+                      },
+                    },
+                  ],
+                },
+                reverseDeliveries: { nodes: [] },
+              },
+            ],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        reverseDeliveryCreateWithShipping: {
+          reverseDelivery: {
+            id: 'gid://shopify/ReverseDelivery/created',
+            deliverable: {
+              label: null,
+              tracking: {
+                carrierName: null,
+                number: 'RET-TRACK-1',
+                url: 'https://tracking.example/RET-TRACK-1',
+              },
+            },
+          },
+          userErrors: [],
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2025-07',
+    } as never).syncReturnShipping({
+      returnGid: 'gid://shopify/Return/231',
+      sourceLineItemId: '99',
+      trackingNumber: 'RET-TRACK-1',
+      trackingUrl: 'https://tracking.example/RET-TRACK-1',
+      labelUrl: null,
+      notifyCustomer: true,
+    });
+
+    const [, mutationInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const mutationBody = JSON.parse(String(mutationInit.body)) as {
+      query: string;
+      variables: {
+        reverseFulfillmentOrderId: string;
+        reverseDeliveryLineItems: Array<{ reverseFulfillmentOrderLineItemId: string; quantity: number }>;
+        trackingInput: { number: string; url?: string };
+        labelInput?: { fileUrl: string };
+        notifyCustomer: boolean;
+      };
+    };
+    expect(mutationBody.query).toContain('reverseDeliveryCreateWithShipping');
+    expect(mutationBody.variables.reverseFulfillmentOrderId).toBe('gid://shopify/ReverseFulfillmentOrder/target');
+    expect(mutationBody.variables.reverseDeliveryLineItems).toEqual([
+      {
+        reverseFulfillmentOrderLineItemId: 'gid://shopify/ReverseFulfillmentOrderLineItem/target',
+        quantity: 1,
+      },
+    ]);
+    expect(mutationBody.variables.notifyCustomer).toBe(true);
+    expect(mutationBody.variables).not.toHaveProperty('labelInput');
+    expect(result).toMatchObject({
+      mutationUsed: 'reverseDeliveryCreateWithShipping',
+      reverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/target',
+      reverseDeliveryId: 'gid://shopify/ReverseDelivery/created',
+      trackingAccepted: true,
+      labelAccepted: false,
+      labelUploadSkippedReason: 'label_missing',
+    });
+  });
+
+  it('updates an existing Shopify reverse delivery for the matched return line', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        return: {
+          id: 'gid://shopify/Return/231',
+          reverseFulfillmentOrders: {
+            nodes: [
+              {
+                id: 'gid://shopify/ReverseFulfillmentOrder/target',
+                status: 'OPEN',
+                lineItems: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseFulfillmentOrderLineItem/target',
+                      totalQuantity: 1,
+                      fulfillmentLineItem: {
+                        lineItem: {
+                          id: 'gid://shopify/LineItem/99',
+                          sku: 'SKU-99',
+                        },
+                      },
+                    },
+                  ],
+                },
+                reverseDeliveries: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseDelivery/existing',
+                      deliverable: { label: null, tracking: null },
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        reverseDeliveryShippingUpdate: {
+          reverseDelivery: {
+            id: 'gid://shopify/ReverseDelivery/existing',
+            deliverable: {
+              label: null,
+              tracking: {
+                carrierName: null,
+                number: 'RET-TRACK-2',
+                url: null,
+              },
+            },
+          },
+          userErrors: [],
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2025-07',
+    } as never).syncReturnShipping({
+      returnGid: 'gid://shopify/Return/231',
+      sourceLineItemId: 'gid://shopify/LineItem/99',
+      trackingNumber: 'RET-TRACK-2',
+      labelUrl: null,
+      notifyCustomer: true,
+    });
+
+    const [, mutationInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const mutationBody = JSON.parse(String(mutationInit.body)) as {
+      query: string;
+      variables: {
+        reverseDeliveryId: string;
+        notifyCustomer: boolean;
+      };
+    };
+    expect(mutationBody.query).toContain('reverseDeliveryShippingUpdate');
+    expect(mutationBody.variables.reverseDeliveryId).toBe('gid://shopify/ReverseDelivery/existing');
+    expect(mutationBody.variables.notifyCustomer).toBe(true);
+    expect(result).toMatchObject({
+      mutationUsed: 'reverseDeliveryShippingUpdate',
+      reverseDeliveryId: 'gid://shopify/ReverseDelivery/existing',
+      trackingAccepted: true,
+    });
+  });
+
+  it('stages a PDF data URL and sends the staged resource URL as labelInput', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        return: {
+          id: 'gid://shopify/Return/231',
+          reverseFulfillmentOrders: {
+            nodes: [
+              {
+                id: 'gid://shopify/ReverseFulfillmentOrder/target',
+                status: 'OPEN',
+                lineItems: {
+                  nodes: [
+                    {
+                      id: 'gid://shopify/ReverseFulfillmentOrderLineItem/target',
+                      totalQuantity: 1,
+                      fulfillmentLineItem: {
+                        lineItem: {
+                          id: 'gid://shopify/LineItem/99',
+                          sku: 'SKU-99',
+                        },
+                      },
+                    },
+                  ],
+                },
+                reverseDeliveries: { nodes: [] },
+              },
+            ],
+          },
+        },
+      }))
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        stagedUploadsCreate: {
+          stagedTargets: [
+            {
+              url: 'https://staged-upload.example/target',
+              resourceUrl: 'https://cdn.shopify.example/return-label.pdf',
+              parameters: [
+                { name: 'key', value: 'abc' },
+              ],
+            },
+          ],
+          userErrors: [],
+        },
+      }))
+      .mockResolvedValueOnce(new Response('', { status: 201 }))
+      .mockResolvedValueOnce(buildGraphqlResponse({
+        reverseDeliveryCreateWithShipping: {
+          reverseDelivery: {
+            id: 'gid://shopify/ReverseDelivery/created',
+            deliverable: {
+              label: {
+                publicFileUrl: 'https://cdn.shopify.example/return-label.pdf',
+              },
+              tracking: {
+                carrierName: null,
+                number: 'RET-TRACK-3',
+                url: null,
+              },
+            },
+          },
+          userErrors: [],
+        },
+      }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await createShopifyAdminService({
+      SHOPIFY_SHOP_DOMAIN: 'example.myshopify.com',
+      SHOPIFY_ADMIN_ACCESS_TOKEN: 'shpat_test',
+      SHOPIFY_API_VERSION: '2025-07',
+    } as never).syncReturnShipping({
+      returnGid: 'gid://shopify/Return/231',
+      sourceLineItemId: 'gid://shopify/LineItem/99',
+      trackingNumber: 'RET-TRACK-3',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      notifyCustomer: true,
+    });
+
+    const [, stagedInit] = fetchMock.mock.calls[1] as [string, RequestInit];
+    const stagedBody = JSON.parse(String(stagedInit.body)) as {
+      query: string;
+      variables: { input: Array<{ resource: string; mimeType: string }> };
+    };
+    expect(stagedBody.query).toContain('stagedUploadsCreate');
+    expect(stagedBody.variables.input[0]).toMatchObject({
+      resource: 'RETURN_LABEL',
+      mimeType: 'application/pdf',
+    });
+    const [uploadUrl, uploadInit] = fetchMock.mock.calls[2] as [string, RequestInit];
+    expect(uploadUrl).toBe('https://staged-upload.example/target');
+    expect(uploadInit.method).toBe('POST');
+
+    const [, mutationInit] = fetchMock.mock.calls[3] as [string, RequestInit];
+    const mutationBody = JSON.parse(String(mutationInit.body)) as {
+      variables: {
+        labelInput: { fileUrl: string };
+      };
+    };
+    expect(mutationBody.variables.labelInput).toEqual({
+      fileUrl: 'https://cdn.shopify.example/return-label.pdf',
+    });
+    expect(JSON.stringify(mutationBody)).not.toContain('JVBER');
+    expect(result).toMatchObject({
+      labelInputSent: true,
+      labelUploadAttempted: true,
+      labelUploadSucceeded: true,
+      labelUploadSkippedReason: null,
+      labelUploadSource: 'staged_upload',
+      labelAccepted: true,
     });
   });
 });

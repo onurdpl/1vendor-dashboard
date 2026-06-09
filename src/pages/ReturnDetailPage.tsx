@@ -15,6 +15,7 @@ import {
   refreshKargonomiReturnProviderData,
   reviewReturn,
   saveNavlungoReturnPickupAddressCompletion,
+  syncKargonomiReturnToShopify,
   syncNavlungoReturnStatus,
   type KargonomiReturnPreview,
   type ReturnDetail,
@@ -753,10 +754,36 @@ export function ReturnDetailPage() {
       },
     },
   );
+  const kargonomiReturnShopifySyncMutation = useMutationAction(
+    () => {
+      if (!returnId) {
+        throw new Error('Return not found.');
+      }
+
+      return syncKargonomiReturnToShopify(returnId, { vendorId: currentVendor.vendorId });
+    },
+    {
+      onSuccess: (data) => {
+        queryClient.setQueryData(returnDetailQueryKey, data);
+        showFeedback('Kargonomi return synced to Shopify.', 'success');
+      },
+      onError: async (error) => {
+        await refetch();
+        showFeedback(error instanceof Error ? error.message : 'Kargonomi return could not be synced to Shopify.', 'error');
+      },
+    },
+  );
   const currentReturnProviderSnapshot = returnRequest?.returnProviderSnapshot ?? {};
   const kargonomiPreviewShipment = readKargonomiPreviewShipment(kargonomiReturnPreview);
   const hasKargonomiReturnShipment =
     returnRequest?.returnProvider?.toLowerCase() === 'kargonomi' && Boolean(returnRequest.returnProviderShipmentId);
+  const canSyncKargonomiReturnToShopify =
+    isAdmin && Boolean(hasKargonomiReturnShipment && returnRequest?.returnTrackingNumber);
+  const shopifyReturnTrackingSynced = readSnapshotBoolean(currentReturnProviderSnapshot, 'shopifyReturnTrackingSynced');
+  const shopifyReturnLabelSynced = readSnapshotBoolean(currentReturnProviderSnapshot, 'shopifyReturnLabelSynced');
+  const shopifyReverseDeliveryId = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReverseDeliveryId');
+  const shopifyReturnSyncSkippedReason = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnSyncSkippedReason');
+  const shopifyReturnSyncErrorMessage = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnSyncErrorMessage');
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
@@ -1970,6 +1997,16 @@ export function ReturnDetailPage() {
                     {kargonomiReturnRefreshMutation.isPending ? 'Refreshing...' : 'Refresh Kargonomi return data'}
                   </button>
                 ) : null}
+                {canSyncKargonomiReturnToShopify ? (
+                  <button
+                    type="button"
+                    className="button button-secondary"
+                    disabled={kargonomiReturnShopifySyncMutation.isPending}
+                    onClick={() => void kargonomiReturnShopifySyncMutation.mutateAsync(undefined)}
+                  >
+                    {kargonomiReturnShopifySyncMutation.isPending ? 'Syncing...' : 'Sync return to Shopify'}
+                  </button>
+                ) : null}
               </div>
               <div className="return-review-summary-list">
                 {hasKargonomiReturnShipment ? (
@@ -1994,6 +2031,26 @@ export function ReturnDetailPage() {
                       <span>Provider shipment id</span>
                       <strong>{returnRequest.returnProviderShipmentId}</strong>
                     </div>
+                    <div>
+                      <span>Shopify tracking synced</span>
+                      <strong>{formatDiagnosticBoolean(shopifyReturnTrackingSynced)}</strong>
+                    </div>
+                    <div>
+                      <span>Shopify label synced</span>
+                      <strong>{formatDiagnosticBoolean(shopifyReturnLabelSynced)}</strong>
+                    </div>
+                    {shopifyReverseDeliveryId ? (
+                      <div>
+                        <span>Shopify reverse delivery id</span>
+                        <strong>{shopifyReverseDeliveryId}</strong>
+                      </div>
+                    ) : null}
+                    {shopifyReturnSyncErrorMessage || shopifyReturnSyncSkippedReason ? (
+                      <div>
+                        <span>Last Shopify sync result</span>
+                        <strong>{shopifyReturnSyncErrorMessage ?? shopifyReturnSyncSkippedReason}</strong>
+                      </div>
+                    ) : null}
                     <div>
                       <span>Note</span>
                       <strong>Readiness validation completed successfully before shipment creation.</strong>

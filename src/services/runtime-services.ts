@@ -1886,6 +1886,39 @@ export const runtimeServices = {
         },
       };
     },
+    async syncKargonomiReturnToShopify(returnId: string, vendorId = getCurrentVendorId()) {
+      if (runtimeConfig.apiMode === 'real') {
+        return realReturns.syncKargonomiReturnToShopify(returnId, { vendorId });
+      }
+
+      const returnRecord = getMockReturn(returnId, vendorId);
+      if (!returnRecord) {
+        throw new ApiError('Return not found.', 'server', { status: 404 });
+      }
+      if (returnRecord.returnProvider?.toLowerCase() !== 'kargonomi' || !returnRecord.returnProviderShipmentId) {
+        throw new ApiError('Shopify return sync currently supports Kargonomi return shipments only.', 'server', { status: 400 });
+      }
+      if (!returnRecord.returnTrackingNumber) {
+        throw new ApiError('Shopify return sync requires a return tracking number.', 'server', { status: 400 });
+      }
+      return {
+        ...returnRecord,
+        returnProviderSnapshot: {
+          ...(returnRecord.returnProviderSnapshot ?? {}),
+          shopifyReturnSyncAttempted: true,
+          shopifyReturnSyncSucceeded: true,
+          shopifyReturnTrackingSynced: true,
+          shopifyReturnLabelSynced: Boolean(returnRecord.returnLabel),
+          shopifyReturnSyncSkippedReason: null,
+          shopifyReverseDeliveryId: 'gid://shopify/ReverseDelivery/mock',
+          shopifyReverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/mock',
+          shopifyReturnSyncUserErrors: [],
+          labelUploadAttempted: Boolean(returnRecord.returnLabel),
+          labelUploadSucceeded: Boolean(returnRecord.returnLabel),
+          labelUploadSkippedReason: returnRecord.returnLabel ? null : 'label_missing',
+        },
+      };
+    },
     async markReceived(returnId: string, vendorId = getCurrentVendorId()) {
       if (runtimeConfig.apiMode === 'real') {
         return realReturns.markReturnReceived(returnId, { vendorId });
