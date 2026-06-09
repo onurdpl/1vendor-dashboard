@@ -692,11 +692,42 @@ describe('VendorProfilePage', () => {
     expect(screen.getByText('billing@example.test')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Yes')).toBeInTheDocument();
     expect(within(billingSection!).getByText('Commission invoice billing source')).toBeInTheDocument();
-    expect(within(billingSection!).getByText('Configured')).toBeInTheDocument();
+    expect(within(billingSection!).getAllByText('Configured').length).toBeGreaterThan(0);
     expect(within(billingSection!).getByRole('button', { name: 'Edit billing profile' })).toBeInTheDocument();
     expect(within(billingSection!).queryByText(/Paraşüt/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /save billing/i })).not.toBeInTheDocument();
     expect(within(billingSection!).queryByLabelText('Logo İşbaşı customer code')).not.toBeInTheDocument();
+  });
+
+  it('shows Logo binding as needing match when customer code exists without a customer id', async () => {
+    setCurrentUser({
+      email: 'admin@demo.com',
+      name: 'Demo Admin',
+      role: 'admin',
+      vendorAccess: ['demo-vendor-a'],
+      vendorDetails: [{ vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'demo-vendor-a',
+    });
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...billingProfile,
+      logoIsbasiCustomerCode: 'YSKOD1',
+      logoIsbasiCustomerId: null,
+      logoIsbasiEinvoiceEligible: null,
+      logoIsbasiLastCheckedAt: null,
+    });
+
+    renderVendorProfilePage();
+
+    const billingHeading = await screen.findByRole('heading', { name: 'Billing / Legal Profile' });
+    const billingSection = billingHeading.closest('section');
+    expect(billingSection).not.toBeNull();
+    const bindingHeading = await within(billingSection!).findByText('Current Logo Binding');
+    const bindingPanel = bindingHeading.closest('.vendor-profile-logo-result');
+    expect(bindingPanel).not.toBeNull();
+    expect(within(bindingPanel as HTMLElement).getByText('Binding status')).toBeInTheDocument();
+    expect(within(bindingPanel as HTMLElement).getByText('Needs match/rebind')).toBeInTheDocument();
+    expect(within(bindingPanel as HTMLElement).getByText('YSKOD1')).toBeInTheDocument();
   });
 
   it('opens the admin billing profile edit form and validates required fields', async () => {

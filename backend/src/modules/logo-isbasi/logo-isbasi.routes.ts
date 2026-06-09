@@ -861,6 +861,89 @@ function sanitizeFirmMatches(firms: unknown[]) {
   return firms.slice(0, 10).map(sanitizeLogoFirm);
 }
 
+const LOGO_FIRM_MATCH_PAGE_SIZE = 50;
+const LOGO_FIRM_MATCH_MAX_PAGES = 10;
+
+function buildLogoFirmListPageBody(page: number) {
+  return {
+    filters: [],
+    sorting: {
+      code: 1,
+    },
+    paging: {
+      currentPage: page,
+      pageSize: LOGO_FIRM_MATCH_PAGE_SIZE,
+    },
+    columnNames: null,
+    count: true,
+    excel: {
+      export: false,
+      allowedColumns: null,
+      lucaExport: false,
+    },
+  };
+}
+
+function getLogoFirmDedupeKey(firm: unknown, index: number) {
+  const sanitized = sanitizeLogoFirm(firm);
+  return sanitized.id || sanitized.code || `${index}`;
+}
+
+async function listLogoFirmMatchCandidates(
+  client: LogoIsbasiClient,
+  session: LogoIsbasiAuthenticatedSession,
+  mode: string,
+) {
+  const firms: unknown[] = [];
+  const seen = new Set<string>();
+  const pageStatuses: Array<{ page: number; status: number; count: number }> = [];
+
+  for (let page = 1; page <= LOGO_FIRM_MATCH_MAX_PAGES; page += 1) {
+    const result = await client.listFirms(session, buildLogoFirmListPageBody(page));
+    if (!result.ok || result.jsonParseFailed) {
+      return {
+        ok: false as const,
+        result,
+        firms,
+        diagnostics: {
+          lookupMode: 'paged_firm_match',
+          pageSize: LOGO_FIRM_MATCH_PAGE_SIZE,
+          maxPages: LOGO_FIRM_MATCH_MAX_PAGES,
+          pagesFetched: pageStatuses.length,
+          pageStatuses,
+        },
+      };
+    }
+
+    const pageFirms = readLogoFirmsArray(result.body);
+    pageStatuses.push({ page, status: result.status, count: pageFirms.length });
+    pageFirms.forEach((firm, index) => {
+      const key = getLogoFirmDedupeKey(firm, firms.length + index);
+      if (!seen.has(key)) {
+        seen.add(key);
+        firms.push(firm);
+      }
+    });
+
+    if (pageFirms.length === 0 || pageFirms.length < LOGO_FIRM_MATCH_PAGE_SIZE) {
+      break;
+    }
+  }
+
+  return {
+    ok: true as const,
+    firms,
+    diagnostics: {
+      lookupMode: 'paged_firm_match',
+      pageSize: LOGO_FIRM_MATCH_PAGE_SIZE,
+      maxPages: LOGO_FIRM_MATCH_MAX_PAGES,
+      pagesFetched: pageStatuses.length,
+      pageStatuses,
+      mode,
+    },
+  };
+}
+
 function matchLogoFirmForVendor(profile: VendorBillingProfileDto | null, firms: unknown[]) {
   if (!profile) {
     return {
@@ -1395,12 +1478,11 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           return reply.code(login.status).send(login.body);
         }
 
-        const result = await client.listFirms(login.session);
-        if (!result.ok || result.jsonParseFailed) {
-          return reply.code(502).send(buildLogoUpstreamError('firm_match_probe', result));
+        const candidates = await listLogoFirmMatchCandidates(client, login.session, 'firm_match_probe');
+        if (!candidates.ok) {
+          return reply.code(502).send(buildLogoUpstreamError('firm_match_probe', candidates.result));
         }
 
-        const firms = readLogoFirmsArray(result.body);
         return {
           ok: true,
           success: true,
@@ -1408,7 +1490,8 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           mode: 'firm_match_probe',
           writesPerformed: false,
           externalApiCallAttempted: true,
-          ...buildLogoFirmMatchResponse(vendorId, profile, firms),
+          lookup: candidates.diagnostics,
+          ...buildLogoFirmMatchResponse(vendorId, profile, candidates.firms),
         };
       } catch (error) {
         return reply.code(502).send({
@@ -1454,13 +1537,12 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           return reply.code(login.status).send(login.body);
         }
 
-        const result = await client.listFirms(login.session);
-        if (!result.ok || result.jsonParseFailed) {
-          return reply.code(502).send(buildLogoUpstreamError('firm_bind_probe', result));
+        const candidates = await listLogoFirmMatchCandidates(client, login.session, 'firm_bind_probe');
+        if (!candidates.ok) {
+          return reply.code(502).send(buildLogoUpstreamError('firm_bind_probe', candidates.result));
         }
 
-        const firms = readLogoFirmsArray(result.body);
-        const matchResponse = buildLogoFirmMatchResponse(vendorId, profile, firms);
+        const matchResponse = buildLogoFirmMatchResponse(vendorId, profile, candidates.firms);
         if (matchResponse.matchStatus !== 'exact_match' || !matchResponse.exactMatch) {
           return reply.code(422).send({
             ok: false,
@@ -1471,6 +1553,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
             externalApiCallAttempted: true,
             errorCode: 'LOGO_ISBASI_NO_EXACT_MATCH',
             message: 'Logo İşbaşı firm binding requires an exact match.',
+            lookup: candidates.diagnostics,
             ...matchResponse,
           });
         }

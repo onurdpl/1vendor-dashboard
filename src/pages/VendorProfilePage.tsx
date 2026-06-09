@@ -698,6 +698,7 @@ export function VendorProfilePage() {
   const financeProfile = financeQuery.data ?? null;
   const billingProfile = savedBillingProfile?.vendorId === currentVendor.vendorId ? savedBillingProfile : billingQuery.data ?? null;
   const logoBindingPresent = Boolean(billingProfile?.logoIsbasiCustomerCode || billingProfile?.logoIsbasiCustomerId);
+  const logoBindingNeedsMatch = Boolean(billingProfile?.logoIsbasiCustomerCode?.trim() && !billingProfile?.logoIsbasiCustomerId?.trim());
   const supportTickets = useMemo(
     () => safeArray(supportQuery.data).filter((ticket) => ticket.vendorId === currentVendor.vendorId),
     [currentVendor.vendorId, supportQuery.data],
@@ -1607,6 +1608,10 @@ export function VendorProfilePage() {
                 <div className="vendor-profile-logo-result">
                   <span>Current Logo Binding</span>
                   <div className="vendor-profile-logo-result-grid">
+                    <div>
+                      <span>Binding status</span>
+                      <strong>{logoBindingNeedsMatch ? 'Needs match/rebind' : 'Configured'}</strong>
+                    </div>
                     <div>
                       <span>Customer Code</span>
                       <strong>{formatValue(billingProfile?.logoIsbasiCustomerCode)}</strong>

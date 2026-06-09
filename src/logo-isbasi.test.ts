@@ -736,6 +736,134 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
     expect(JSON.stringify(result)).not.toContain('full-secret-access-token');
   });
 
+  it('matches a manually entered Logo firm code outside the first firms page', async () => {
+    const firstPage = Array.from({ length: 50 }, (_, index) => ({
+      id: `firm-page-1-${index}`,
+      code: `CUST${String(index).padStart(3, '0')}`,
+      name: `Logo Customer ${index}`,
+      firmType: 'customer',
+      tcknVkn: `11111111${String(index).padStart(2, '0')}`,
+    }));
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: firstPage }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-yskod1',
+              code: 'YSKOD1',
+              name: 'Yalispor Kodlu Cari',
+              firmType: 'customer',
+              tcknVkn: '2222222222',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'YSKOD1',
+      taxNumber: '6490512763',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/match-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'yalispor' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/firms/firms',
+      expect.objectContaining({
+        body: expect.stringContaining('"currentPage":1'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      'https://soho-isbasi-mwv2-test.logo-paas.com/api/v1.0/firms/firms',
+      expect.objectContaining({
+        body: expect.stringContaining('"currentPage":2'),
+      }),
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        count: 51,
+        matchStatus: 'exact_match',
+        matchMethod: 'logoIsbasiCustomerCode',
+        exactMatch: expect.objectContaining({
+          id: 'firm-yskod1',
+          code: 'YSKOD1',
+          name: 'Yalispor Kodlu Cari',
+        }),
+      }),
+    );
+  });
+
+  it('matches Logo firm code case-insensitively', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ data: { accessToken: 'full-secret-access-token', tenantId: 'tenant-1' } }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({
+          data: [
+            {
+              id: 'firm-yskod1',
+              code: 'yskod1',
+              name: 'Yalispor Kodlu Cari',
+              firmType: 'customer',
+              tcknVkn: '2222222222',
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      );
+    getVendorBillingProfileMock.mockResolvedValue({
+      ...vendorBillingProfile,
+      logoIsbasiCustomerCode: 'YSKOD1',
+    });
+    const { posts } = createRegisteredRoutes();
+    const reply = createReply();
+
+    const result = await posts.get('/admin/vendors/:vendorId/logo-isbasi/match-firm')?.(
+      { authUser: { role: 'admin' }, params: { vendorId: 'yalispor' } },
+      reply,
+    );
+
+    expect(reply.statusCode).toBe(200);
+    expect(result).toEqual(
+      expect.objectContaining({
+        matchStatus: 'exact_match',
+        matchMethod: 'logoIsbasiCustomerCode',
+        exactMatch: expect.objectContaining({
+          id: 'firm-yskod1',
+          code: 'yskod1',
+        }),
+      }),
+    );
+  });
+
   it('binds an exact matched Logo firm to the vendor billing profile', async () => {
     vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(

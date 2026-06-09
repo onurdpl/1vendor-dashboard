@@ -246,6 +246,63 @@ describe('vendor billing profile service', () => {
     );
   });
 
+  it('clears stale Logo İşbaşı binding fields when customer code changes manually', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValueOnce(
+      billingProfileRecord({
+        logoIsbasiCustomerCode: 'CUST001',
+      }),
+    );
+    prismaMock.vendorBillingProfile.upsert.mockResolvedValue(
+      billingProfileRecord({
+        logoIsbasiCustomerCode: 'YSKOD1',
+        logoIsbasiCustomerId: null,
+        logoIsbasiEinvoiceEligible: null,
+        logoIsbasiLastCheckedAt: null,
+      }),
+    );
+
+    await upsertVendorBillingProfile('sporjinal', {
+      legalCompanyName: 'Sporjinal Ltd',
+      taxNumber: '2222222222',
+      taxOffice: 'Besiktas',
+      billingAddress: 'Address 2',
+      logoIsbasiCustomerCode: 'YSKOD1',
+    });
+
+    expect(prismaMock.vendorBillingProfile.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          logoIsbasiCustomerCode: 'YSKOD1',
+          logoIsbasiCustomerId: null,
+          logoIsbasiEinvoiceEligible: null,
+          logoIsbasiLastCheckedAt: null,
+        }),
+      }),
+    );
+  });
+
+  it('does not clear Logo İşbaşı binding fields when customer code is unchanged', async () => {
+    prismaMock.vendorBillingProfile.findUnique.mockResolvedValueOnce(
+      billingProfileRecord({
+        logoIsbasiCustomerCode: 'CUST001',
+      }),
+    );
+
+    await upsertVendorBillingProfile('sporjinal', {
+      legalCompanyName: 'Sporjinal Ltd',
+      taxNumber: '2222222222',
+      taxOffice: 'Besiktas',
+      billingAddress: 'Address 2',
+      logoIsbasiCustomerCode: ' CUST001 ',
+    });
+
+    const updateData = prismaMock.vendorBillingProfile.upsert.mock.calls[0][0].update;
+    expect(updateData).toEqual(expect.objectContaining({ logoIsbasiCustomerCode: 'CUST001' }));
+    expect(updateData).not.toHaveProperty('logoIsbasiCustomerId');
+    expect(updateData).not.toHaveProperty('logoIsbasiEinvoiceEligible');
+    expect(updateData).not.toHaveProperty('logoIsbasiLastCheckedAt');
+  });
+
   it.each([
     ['legalCompanyName', { legalCompanyName: '', taxNumber: '1', taxOffice: 'Office', billingAddress: 'Address' }],
     ['taxNumber', { legalCompanyName: 'Company', taxNumber: null, taxOffice: 'Office', billingAddress: 'Address' }],

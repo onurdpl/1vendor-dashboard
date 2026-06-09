@@ -244,7 +244,10 @@ export class LogoIsbasiClient {
     };
   }
 
-  async listFirms(session: LogoIsbasiAuthenticatedSession): Promise<LogoIsbasiRawResult> {
+  async listFirms(
+    session: LogoIsbasiAuthenticatedSession,
+    body: Record<string, unknown> = {},
+  ): Promise<LogoIsbasiRawResult> {
     const requestUrl = `${this.baseUrl}/api/v1.0/firms/firms`;
     const response = await this.fetchImpl(requestUrl, {
       method: 'POST',
@@ -254,7 +257,7 @@ export class LogoIsbasiClient {
         apiKey: this.config.apiKey,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({}),
+      body: JSON.stringify(body),
     });
 
     return this.parseResponse(response, {

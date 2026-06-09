@@ -120,6 +120,10 @@ function normalizeBillingProfileInput(input: VendorBillingProfileInputDto) {
   };
 }
 
+function normalizeLogoCustomerCodeForCompare(value: string | null | undefined) {
+  return (value ?? '').trim();
+}
+
 async function assertVendorExists(vendorId: string) {
   const vendor = await prisma.vendor.findUnique({
     where: {
@@ -151,11 +155,31 @@ export async function upsertVendorBillingProfile(
 ): Promise<VendorBillingProfileDto> {
   await assertVendorExists(vendorId);
   const data = normalizeBillingProfileInput(input);
+  const existing = await prisma.vendorBillingProfile.findUnique({
+    where: {
+      vendorId,
+    },
+    select: {
+      logoIsbasiCustomerCode: true,
+    },
+  });
+  const logoCustomerCodeChanged = existing
+    ? normalizeLogoCustomerCodeForCompare(existing.logoIsbasiCustomerCode) !==
+      normalizeLogoCustomerCodeForCompare(data.logoIsbasiCustomerCode)
+    : false;
+  const updateData = logoCustomerCodeChanged
+    ? {
+        ...data,
+        logoIsbasiCustomerId: null,
+        logoIsbasiEinvoiceEligible: null,
+        logoIsbasiLastCheckedAt: null,
+      }
+    : data;
   const profile = await prisma.vendorBillingProfile.upsert({
     where: {
       vendorId,
     },
-    update: data,
+    update: updateData,
     create: {
       vendorId,
       ...data,
