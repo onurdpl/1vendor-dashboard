@@ -681,6 +681,92 @@ describe('shipping execution foundation', () => {
     );
   });
 
+  it('marks refreshed Kargonomi shipments cancelled while preserving tracking and label history', async () => {
+    const existing = buildShipmentExecution({
+      id: 'shipment-kargonomi-alloc-1',
+      provider: 'KARGONOMI',
+      providerShipmentId: '2653543',
+      trackingNumber: 'KSUR2653543SKDXP',
+      trackingUrl: 'https://tracking.test/KSUR2653543SKDXP',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'CREATED',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        shipmentId: '2653543',
+      },
+      allocation: buildAllocationWithShopifyFulfillmentData({
+        fulfillment: {
+          shopifyFulfillmentId: null,
+          shipmentCreatedAt: new Date('2026-05-15T10:00:00.000Z'),
+        },
+      }),
+    });
+    const adapter = buildAdapter({
+      provider: 'KARGONOMI' as const,
+      refreshProviderData: vi.fn().mockResolvedValue({
+        providerShipmentId: '2653543',
+        trackingNumber: null,
+        trackingUrl: null,
+        labelUrl: null,
+        shipmentStatus: 'cancelled',
+        shippingCost: null,
+        shippingVat: null,
+        currency: 'TRY',
+        responseSnapshot: {
+          provider: 'kargonomi',
+          flow: 'provider_data_refresh',
+          providerShipmentId: '2653543',
+          status: 'cancelled',
+          statusLabel: 'İptal edildi',
+          providerStatus: 'cancelled',
+          providerStatusLabel: 'İptal edildi',
+          kargonomiCancelled: true,
+          shippingProviderName: 'Sürat Kargo',
+        },
+      }),
+    });
+    prismaMock.shipmentExecution.findUnique.mockResolvedValue(existing);
+    prismaMock.vendorAllocation.findUnique.mockResolvedValue(buildAllocationWithShopifyFulfillmentData());
+    storedExecution = existing as typeof storedExecution;
+
+    const result = await refreshKargonomiShipmentProviderData(existing.id, {
+      env: {
+        ...env,
+        SHIPPING_PROVIDER: 'kargonomi',
+        KARGONOMI_BASE_URL: 'https://app.kargonomi.com.tr/api/v1',
+        KARGONOMI_API_TOKEN: 'test-token',
+      },
+      vendorId: 'sporjinal',
+      adapter,
+    });
+
+    expect(result.shipmentStatus).toBe('cancelled');
+    expect(result.trackingNumber).toBe('KSUR2653543SKDXP');
+    expect(result.labelUrl).toBe('data:application/pdf;base64,JVBERi0xLjQ=');
+    expect(result.providerResponseSummary).toMatchObject({
+      kargonomiCancelled: true,
+      providerStatus: 'cancelled',
+      providerStatusLabel: 'İptal edildi',
+      autoSyncSkippedReason: 'shipment_not_created',
+    });
+    expect(shopifyAdminMock.createFulfillmentTracking).not.toHaveBeenCalled();
+    expect(adapter.createShipment).not.toHaveBeenCalled();
+    expect(prismaMock.shipmentExecution.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          trackingNumber: 'KSUR2653543SKDXP',
+          labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+          shipmentStatus: 'CANCELLED',
+          responseSnapshot: expect.objectContaining({
+            kargonomiCancelled: true,
+            providerStatus: 'cancelled',
+            providerStatusLabel: 'İptal edildi',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('uses vendor-specific shipping config and default desi when product heuristics do not match', async () => {
     prismaMock.vendorShippingConfig.findUnique.mockResolvedValue({
       vendorId: 'sporjinal',

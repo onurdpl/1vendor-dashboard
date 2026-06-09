@@ -389,6 +389,9 @@ export type OrderShipmentExecutionDto = {
     confirmShippingPriceCalled?: boolean | null;
     getShipmentCalled?: boolean | null;
     barcodeFetchCalled?: boolean | null;
+    providerStatus?: string | null;
+    providerStatusLabel?: string | null;
+    kargonomiCancelled?: boolean | null;
     kargonomiPostCreateDiagnostics?: {
       getShipmentAfterConfirm: {
         httpStatus: number | null;

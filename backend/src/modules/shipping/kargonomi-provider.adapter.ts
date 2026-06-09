@@ -456,7 +456,7 @@ export function mapKargonomiStatusToInternalStatus(status: string | null | undef
     return 'failed';
   }
 
-  if (normalized === 'cancelled') {
+  if (normalized === 'cancelled' || normalized === 'canceled') {
     return 'cancelled';
   }
 
@@ -879,6 +879,7 @@ function buildKargonomiProviderResult(
     parseMoney(parsed.pricing.realPrice) ??
     parseMoney(parsed.pricing.estimatedPrice) ??
     readNumber(isRecord(responseBody) ? responseBody : {}, ['price', 'shipping_price', 'total_price']);
+  const kargonomiCancelled = parsed.internalStatus === 'cancelled';
 
   return {
     providerShipmentId,
@@ -899,6 +900,9 @@ function buildKargonomiProviderResult(
       shippingProviderSlug: parsed.shippingProviderSlug,
       status: parsed.status,
       statusLabel: parsed.statusLabel,
+      providerStatus: parsed.status,
+      providerStatusLabel: parsed.statusLabel,
+      kargonomiCancelled,
       barcodePresent: Boolean(labelUrl ?? parsed.shippingWebserviceBarcode ?? parsed.barcodeOfOrderId),
       labelUrlPresent: Boolean(labelUrl),
       labelUnavailableReason: labelUrl ? null : 'barcode_pdf_response_shape_unknown_or_unavailable',

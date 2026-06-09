@@ -797,6 +797,10 @@ export function ReturnDetailPage() {
           ? `skipped: ${shopifyReturnAutoSyncSkippedReason.replace(/_/g, ' ')}`
           : 'attempted'
     : null;
+  const kargonomiReturnShipmentCancelled =
+    hasKargonomiReturnShipment &&
+    (readSnapshotBoolean(currentReturnProviderSnapshot, 'kargonomiReturnCancelled') === true ||
+      readSnapshotString(currentReturnProviderSnapshot, 'returnStatus')?.toLowerCase() === 'cancelled');
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
@@ -2026,15 +2030,30 @@ export function ReturnDetailPage() {
                   <>
                     <div>
                       <span>Status</span>
-                      <strong>Shipment created</strong>
+                      <strong>
+                        {kargonomiReturnShipmentCancelled ? 'Kargonomi return shipment cancelled' : 'Shipment created'}
+                      </strong>
+                      {kargonomiReturnShipmentCancelled ? <small>Tracking and label are retained as historical data.</small> : null}
                     </div>
                     <div>
                       <span>Tracking</span>
-                      <strong>{returnRequest.returnTrackingNumber ? 'Available' : 'Pending'}</strong>
+                      <strong>
+                        {returnRequest.returnTrackingNumber
+                          ? kargonomiReturnShipmentCancelled
+                            ? 'Available (cancelled / stale)'
+                            : 'Available'
+                          : 'Pending'}
+                      </strong>
                     </div>
                     <div>
                       <span>Label</span>
-                      <strong>{returnRequest.returnLabel ? 'Available' : 'Pending'}</strong>
+                      <strong>
+                        {returnRequest.returnLabel
+                          ? kargonomiReturnShipmentCancelled
+                            ? 'Available (cancelled / stale)'
+                            : 'Available'
+                          : 'Pending'}
+                      </strong>
                     </div>
                     <div>
                       <span>Carrier</span>

@@ -862,6 +862,9 @@ function mapProviderResponseSummary(
       readOptionalBoolean(snapshot, ['getShipmentCalled']) ??
       readOptionalBoolean(snapshot, ['getShipmentAfterConfirmCalled']),
     barcodeFetchCalled: readOptionalBoolean(snapshot, ['barcodeFetchCalled']),
+    providerStatus: readString(snapshot, ['providerStatus', 'status']),
+    providerStatusLabel: readString(snapshot, ['providerStatusLabel', 'statusLabel']),
+    kargonomiCancelled: readOptionalBoolean(snapshot, ['kargonomiCancelled']),
     kargonomiPostCreateDiagnostics: kargonomiGetShipmentAfterConfirm || kargonomiBarcodeFetch
       ? {
           getShipmentAfterConfirm: kargonomiGetShipmentAfterConfirm
@@ -5846,10 +5849,17 @@ export async function refreshKargonomiShipmentProviderData(
     const carrier =
       readString(result.responseSnapshot, ['shippingProviderName', 'carrierName', 'providerName']) ??
       mapProvider(existing.provider);
+    const trackingNumber = result.trackingNumber ?? existing.trackingNumber;
+    const trackingUrl = result.trackingUrl ?? existing.trackingUrl;
+    const labelUrl = result.labelUrl ?? existing.labelUrl;
+    const kargonomiCancelled = result.shipmentStatus === 'cancelled';
     const mergedSnapshot = appendTimelineEvent(
       {
         ...attemptSnapshot,
         ...result.responseSnapshot,
+        kargonomiCancelled,
+        providerStatus: readString(result.responseSnapshot, ['providerStatus', 'status']),
+        providerStatusLabel: readString(result.responseSnapshot, ['providerStatusLabel', 'statusLabel']),
         providerDataRefreshAttempted: true,
         providerDataRefreshSucceeded: true,
         providerDataRefreshEndpointUsed: '/shipments/:id/refresh-provider-data',
@@ -5858,8 +5868,8 @@ export async function refreshKargonomiShipmentProviderData(
         createShipmentDraftCalled: false,
         confirmShippingPriceCalled: false,
         persistedProviderShipmentIdPresent: true,
-        persistedTrackingUrlPresent: Boolean(result.trackingUrl),
-        persistedBarcodePresent: Boolean(result.labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
+        persistedTrackingUrlPresent: Boolean(trackingUrl),
+        persistedBarcodePresent: Boolean(labelUrl || readString(result.responseSnapshot, ['barcode', 'barcodeNumber'])),
       },
       {
         label: 'Provider data refreshed',
@@ -5875,9 +5885,9 @@ export async function refreshKargonomiShipmentProviderData(
         },
         data: {
           providerShipmentId: result.providerShipmentId ?? providerShipmentId,
-          trackingNumber: result.trackingNumber,
-          trackingUrl: result.trackingUrl,
-          labelUrl: result.labelUrl,
+          trackingNumber,
+          trackingUrl,
+          labelUrl,
           shipmentStatus: status,
           responseSnapshot: mergedSnapshot as Prisma.InputJsonValue,
         },
@@ -5889,7 +5899,7 @@ export async function refreshKargonomiShipmentProviderData(
         },
         data: {
           shippingStatus: allocationShippingStatus(mapStatus(status)),
-          trackingNumber: result.trackingNumber,
+          trackingNumber,
           carrier,
         },
       });
@@ -5899,9 +5909,9 @@ export async function refreshKargonomiShipmentProviderData(
           vendorAllocationId: existing.allocationId,
         },
         update: {
-          trackingNumber: result.trackingNumber,
+          trackingNumber,
           carrier,
-          trackingUrl: result.trackingUrl,
+          trackingUrl,
           shipmentUpdatedAt: new Date(),
           syncStatus: 'carrier_refreshed',
           errorMessage: null,
@@ -5909,9 +5919,9 @@ export async function refreshKargonomiShipmentProviderData(
         create: {
           vendorAllocationId: existing.allocationId,
           fulfillmentStatus: 'shipment_created',
-          trackingNumber: result.trackingNumber,
+          trackingNumber,
           carrier,
-          trackingUrl: result.trackingUrl,
+          trackingUrl,
           shipmentCreatedAt: existing.allocation.fulfillment?.shipmentCreatedAt ?? new Date(),
           shipmentUpdatedAt: new Date(),
           syncStatus: 'carrier_refreshed',

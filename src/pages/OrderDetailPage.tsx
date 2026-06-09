@@ -2219,6 +2219,11 @@ export function OrderDetailPage() {
   const shipmentShopifyCarrier = formatShopifyCarrierForShipment(visibleShipmentExecution, order?.carrier);
   const navlungoProviderStatusBadge =
     visibleShipmentExecution?.provider === 'navlungo' ? getNavlungoStatusBadgeLabel(shipmentProviderSummary) : null;
+  const kargonomiShipmentCancelled =
+    visibleShipmentExecution?.provider === 'kargonomi' &&
+    (visibleShipmentStatus === 'cancelled' ||
+      shipmentProviderSummary?.kargonomiCancelled === true ||
+      shipmentProviderSummary?.providerStatus?.toLowerCase() === 'cancelled');
   const shopifyFulfillmentSyncSummary =
     order && (visibleShipmentExecution || hasTrackingSync || hasShopifyFulfillmentSyncAttempt)
       ? getShopifyFulfillmentSyncSummary(order, visibleShipmentExecution)
@@ -6265,11 +6270,21 @@ export function OrderDetailPage() {
                               <strong>{navlungoProviderStatusBadge}</strong>
                             </div>
                           ) : null}
+                          {kargonomiShipmentCancelled ? (
+                            <div className="summary-row">
+                              <span>Kargonomi status</span>
+                              <strong>Kargonomi shipment cancelled</strong>
+                              <small>Tracking and label are retained as historical data.</small>
+                            </div>
+                          ) : null}
                           <div className="summary-row">
                             <span>Tracking number</span>
                             <strong className={order.trackingNumber || visibleShipmentExecution?.trackingNumber ? '' : 'muted'}>
                               {getShipmentTrackingNumber(order, visibleShipmentExecution) ?? 'Not available'}
                             </strong>
+                            {kargonomiShipmentCancelled && getShipmentTrackingNumber(order, visibleShipmentExecution) ? (
+                              <small>Cancelled / stale</small>
+                            ) : null}
                           </div>
                           <div className="summary-row">
                             <span>Tracking link</span>
@@ -6289,9 +6304,12 @@ export function OrderDetailPage() {
                           <div className="summary-row">
                             <span>Label</span>
                             {visibleShipmentExecution?.labelUrl ? (
-                              <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
-                                Open label PDF
-                              </a>
+                              <>
+                                <a className="inline-link" href={visibleShipmentExecution.labelUrl} target="_blank" rel="noreferrer">
+                                  Open label PDF
+                                </a>
+                                {kargonomiShipmentCancelled ? <small>Cancelled / stale</small> : null}
+                              </>
                             ) : (
                               <strong className="muted">Not available</strong>
                             )}
@@ -6406,6 +6424,17 @@ export function OrderDetailPage() {
                                     <span>Provider message</span>
                                     <strong>{shipmentProviderSummary?.providerError || '—'}</strong>
                                   </div>
+                                  {kargonomiShipmentCancelled ? (
+                                    <div className="summary-row">
+                                      <span>Provider status</span>
+                                      <strong>
+                                        {[
+                                          shipmentProviderSummary?.providerStatus ?? visibleShipmentExecution.shipmentStatus,
+                                          shipmentProviderSummary?.providerStatusLabel ?? null,
+                                        ].filter(Boolean).join(' · ')}
+                                      </strong>
+                                    </div>
+                                  ) : null}
                                 </>
                               ) : null}
                             </div>
@@ -7029,6 +7058,9 @@ export function OrderDetailPage() {
                           <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
                             <strong>Kargonomi provider data refresh</strong>
                             <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                            {kargonomiShipmentCancelled ? (
+                              <span>Kargonomi shipment cancelled. Tracking and label are retained as historical data.</span>
+                            ) : null}
                             <div className="order-inline-actions">
                               <button
                                 type="button"
@@ -8080,6 +8112,9 @@ export function OrderDetailPage() {
                       <div className="shipment-recovery-actions" aria-label="Kargonomi provider data refresh">
                         <strong>Kargonomi provider data refresh</strong>
                         <span>Re-fetch shipment details and barcode for the existing provider shipment. This does not create a new shipment.</span>
+                        {kargonomiShipmentCancelled ? (
+                          <span>Kargonomi shipment cancelled. Tracking and label are retained as historical data.</span>
+                        ) : null}
                         <div className="order-inline-actions">
                           <button
                             type="button"

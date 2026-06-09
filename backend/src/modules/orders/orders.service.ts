@@ -988,6 +988,10 @@ function buildShipmentProviderResponseSummary(
           : null,
     barcodeFetchCalled:
       typeof snapshot?.barcodeFetchCalled === 'boolean' ? snapshot.barcodeFetchCalled : null,
+    providerStatus: readString(snapshot, ['providerStatus', 'status']),
+    providerStatusLabel: readString(snapshot, ['providerStatusLabel', 'statusLabel']),
+    kargonomiCancelled:
+      typeof snapshot?.kargonomiCancelled === 'boolean' ? snapshot.kargonomiCancelled : null,
     kargonomiPostCreateDiagnostics: kargonomiGetShipmentAfterConfirm || kargonomiBarcodeFetch
       ? {
           getShipmentAfterConfirm: kargonomiGetShipmentAfterConfirm

@@ -3544,6 +3544,51 @@ describe('OrderDetailPage shipment provider response visibility', () => {
     expect(screen.getByText(/Endpoint:\s*POST \/shipments\/shipment-kargonomi-alloc-sporjinal-7621783322961\/refresh-provider-data/)).toBeInTheDocument();
   });
 
+  it('shows cancelled Kargonomi shipment status while preserving historical tracking and label', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: ['sporjinal'],
+      vendorDetails: [{ vendorId: 'sporjinal', vendorName: 'Sporjinal' }],
+      canSwitchVendors: true,
+      defaultVendorId: 'sporjinal',
+    });
+    getOrderMock.mockResolvedValue({
+      ...orderWithShipmentSummary,
+      carrier: 'kargonomi',
+      trackingNumber: null,
+      trackingUrl: null,
+      shipmentExecution: {
+        ...orderWithShipmentSummary.shipmentExecution!,
+        id: 'shipment-kargonomi-alloc-sporjinal-7621783322961',
+        provider: 'kargonomi',
+        providerCarrierName: 'Sürat Kargo',
+        warehouseId: '112668',
+        providerShipmentId: '2653543',
+        trackingNumber: 'KSUR2653543SKDXP',
+        trackingUrl: 'https://tracking.test/KSUR2653543SKDXP',
+        labelUrl: 'data:application/pdf;base64,JVBER',
+        barcode: 'KSUR2653543SKDXP',
+        shipmentStatus: 'cancelled',
+        providerResponseSummary: {
+          ...orderWithShipmentSummary.shipmentExecution!.providerResponseSummary!,
+          provider: 'kargonomi',
+          kargonomiCancelled: true,
+          providerStatus: 'cancelled',
+          providerStatusLabel: 'İptal edildi',
+        },
+      },
+    });
+
+    renderOrderDetail();
+
+    expect(await screen.findByText(/Kargonomi shipment cancelled/)).toBeInTheDocument();
+    expect(screen.getByText(/Tracking and label are retained as historical data/)).toBeInTheDocument();
+    expect(screen.getByText('KSUR2653543SKDXP')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Refresh provider data' })).toBeInTheDocument();
+  });
+
   it('renders sanitized Kargonomi confirm-price diagnostics for admins', async () => {
     setCurrentUser({
       email: 'admin@example.com',

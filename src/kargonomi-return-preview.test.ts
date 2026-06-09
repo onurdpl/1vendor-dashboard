@@ -1192,6 +1192,103 @@ describe('Kargonomi return preview', () => {
     expect(persistedSnapshots).not.toContain('Customer full address');
   });
 
+  it('persists Kargonomi return cancellation during refresh without removing tracking or label history', async () => {
+    const adapterCreateShipment = vi.fn();
+    const adapterRefreshProviderData = vi.fn().mockResolvedValue({
+      providerShipmentId: '2668319',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'cancelled',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        flow: 'provider_data_refresh',
+        getShipmentCalled: true,
+        barcodeFetchCalled: true,
+        shippingProviderName: 'Hepsijet',
+        status: 'cancelled',
+        statusLabel: 'İptal edildi',
+        providerStatus: 'cancelled',
+        providerStatusLabel: 'İptal edildi',
+        kargonomiCancelled: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn(),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnTrackingUrl: 'https://tracking.example/KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnTrackingUrl: 'https://tracking.example/KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBER',
+        returnProviderSnapshot: {
+          provider: 'kargonomi',
+          flow: 'return_provider_data_refresh',
+          returnStatus: 'cancelled',
+          kargonomiReturnCancelled: true,
+        },
+      }),
+    );
+
+    const result = await refreshKargonomiReturnProviderData(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+          refreshProviderData: adapterRefreshProviderData,
+        } as never,
+        shopifyAdminService: shopifyAdminService as never,
+      },
+    );
+
+    expect(adapterRefreshProviderData).toHaveBeenCalledWith('2668319');
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(shopifyAdminService.syncReturnShipping).not.toHaveBeenCalled();
+    expect(result.returnTrackingNumber).toBe('KSUR2668319RET');
+    expect(result.returnLabel).toBe('data:application/pdf;base64,JVBER');
+    expect(prismaMock.returnRecord.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'return-1' },
+        data: expect.objectContaining({
+          returnProviderShipmentId: '2668319',
+          returnTrackingNumber: 'KSUR2668319RET',
+          returnTrackingUrl: 'https://tracking.example/KSUR2668319RET',
+          returnLabel: 'data:application/pdf;base64,JVBER',
+          returnProviderSnapshot: expect.objectContaining({
+            returnStatus: 'cancelled',
+            kargonomiReturnCancelled: true,
+            providerStatus: 'cancelled',
+            providerStatusLabel: 'İptal edildi',
+            shopifyReturnAutoSyncSkippedReason: 'kargonomi_return_cancelled',
+          }),
+        }),
+      }),
+    );
+  });
+
   it('auto-syncs refreshed Kargonomi return provider data to Shopify', async () => {
     const adapterCreateShipment = vi.fn();
     const adapterRefreshProviderData = vi.fn().mockResolvedValue({

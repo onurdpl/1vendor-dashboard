@@ -1786,6 +1786,54 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText('City / state IDs')).not.toBeInTheDocument();
   });
 
+  it('shows cancelled Kargonomi return shipment while preserving historical tracking and label', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: null,
+    });
+    appReadinessOverride.value = {
+      status: 'ready',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+      },
+      currentVendor: { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', scope: 'admin' },
+      sessionReady: true,
+      vendorReady: true,
+      ready: true,
+      unauthorized: false,
+    };
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'kargonomi',
+      returnProviderShipmentId: '2668319',
+      returnCarrierName: 'Hepsijet',
+      returnTrackingNumber: 'KSUR2668319RET',
+      returnLabel: 'data:application/pdf;base64,JVBER',
+      returnProviderSnapshot: {
+        provider: 'kargonomi',
+        flow: 'return_provider_data_refresh',
+        returnStatus: 'cancelled',
+        kargonomiReturnCancelled: true,
+        providerStatusLabel: 'İptal edildi',
+      },
+    });
+
+    renderPage();
+
+    expect(await screen.findByText('Kargonomi return shipment cancelled')).toBeInTheDocument();
+    expect(screen.getByText('Tracking and label are retained as historical data.')).toBeInTheDocument();
+    expect(screen.getAllByText('Available (cancelled / stale)').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByRole('button', { name: 'Refresh Kargonomi return data' })).toBeInTheDocument();
+  });
+
   it('lets admins manually sync Kargonomi return tracking and label to Shopify', async () => {
     const user = userEvent.setup();
     setCurrentUser({

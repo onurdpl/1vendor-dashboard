@@ -2586,6 +2586,10 @@ export async function refreshKargonomiReturnProviderData(
       readString(result.responseSnapshot, ['shippingProviderName', 'carrierName', 'providerName']) ??
       record.returnCarrierName ??
       'Kargonomi';
+    const trackingNumber = result.trackingNumber ?? record.returnTrackingNumber;
+    const trackingUrl = result.trackingUrl ?? record.returnTrackingUrl;
+    const labelUrl = result.labelUrl ?? record.returnLabel;
+    const kargonomiReturnCancelled = result.shipmentStatus === 'cancelled';
     const mergedSnapshot = {
       ...attemptSnapshot,
       ...result.responseSnapshot,
@@ -2601,13 +2605,23 @@ export async function refreshKargonomiReturnProviderData(
       priceComparisonCalled: false,
       confirmShippingPriceCalled: false,
       returnProviderIdPresent: Boolean(result.providerShipmentId ?? providerShipmentId),
-      returnTrackingPresent: Boolean(result.trackingNumber || result.trackingUrl),
-      returnLabelPresent: Boolean(result.labelUrl),
+      returnTrackingPresent: Boolean(trackingNumber || trackingUrl),
+      returnLabelPresent: Boolean(labelUrl),
       returnStatus: result.shipmentStatus,
+      kargonomiReturnCancelled,
+      providerStatus: readString(result.responseSnapshot, ['providerStatus', 'status']),
+      providerStatusLabel: readString(result.responseSnapshot, ['providerStatusLabel', 'statusLabel']),
+      ...(kargonomiReturnCancelled
+        ? {
+            shopifyReturnAutoSyncAttempted: false,
+            shopifyReturnAutoSyncSucceeded: false,
+            shopifyReturnAutoSyncSkippedReason: 'kargonomi_return_cancelled',
+          }
+        : {}),
       carrierName: carrier,
-      persistedReturnTrackingPresent: Boolean(result.trackingNumber),
-      persistedReturnTrackingUrlPresent: Boolean(result.trackingUrl),
-      persistedReturnLabelPresent: Boolean(result.labelUrl),
+      persistedReturnTrackingPresent: Boolean(trackingNumber),
+      persistedReturnTrackingUrlPresent: Boolean(trackingUrl),
+      persistedReturnLabelPresent: Boolean(labelUrl),
       responseKeys: Object.keys(result.responseSnapshot),
       rawResponseSummary: result.responseSnapshot,
     };
@@ -2617,31 +2631,33 @@ export async function refreshKargonomiReturnProviderData(
       data: {
         returnProviderShipmentId: result.providerShipmentId ?? providerShipmentId,
         returnCarrierName: carrier,
-        returnTrackingNumber: result.trackingNumber,
-        returnTrackingUrl: result.trackingUrl,
-        returnLabel: result.labelUrl,
+        returnTrackingNumber: trackingNumber,
+        returnTrackingUrl: trackingUrl,
+        returnLabel: labelUrl,
         returnProviderSnapshot: mergedSnapshot as Prisma.InputJsonValue,
       },
     });
-    try {
-      await autoSyncKargonomiReturnToShopify(
-        {
-          id: returnId,
-          sourceShopifyReturnId: record.sourceShopifyReturnId,
-          sourceShopifyReturnGid: record.sourceShopifyReturnGid,
-          sourceShopifyLineItemId: record.sourceShopifyLineItemId,
-          returnProvider: record.returnProvider,
-          returnProviderShipmentId: result.providerShipmentId ?? providerShipmentId,
-          returnTrackingNumber: result.trackingNumber,
-          returnTrackingUrl: result.trackingUrl,
-          returnLabel: result.labelUrl,
-          returnProviderSnapshot: mergedSnapshot,
-        },
-        env,
-        { shopifyAdminService: input.shopifyAdminService },
-      );
-    } catch {
-      // Auto-sync diagnostics must never roll back a successfully refreshed Kargonomi return shipment.
+    if (!kargonomiReturnCancelled) {
+      try {
+        await autoSyncKargonomiReturnToShopify(
+          {
+            id: returnId,
+            sourceShopifyReturnId: record.sourceShopifyReturnId,
+            sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+            sourceShopifyLineItemId: record.sourceShopifyLineItemId,
+            returnProvider: record.returnProvider,
+            returnProviderShipmentId: result.providerShipmentId ?? providerShipmentId,
+            returnTrackingNumber: trackingNumber,
+            returnTrackingUrl: trackingUrl,
+            returnLabel: labelUrl,
+            returnProviderSnapshot: mergedSnapshot,
+          },
+          env,
+          { shopifyAdminService: input.shopifyAdminService },
+        );
+      } catch {
+        // Auto-sync diagnostics must never roll back a successfully refreshed Kargonomi return shipment.
+      }
     }
   } catch (error) {
     const providerSnapshot = error instanceof ShippingProviderExecutionError
