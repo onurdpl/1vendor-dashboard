@@ -841,32 +841,17 @@ function buildLogoTestInvoiceCreateResponse(
   };
 }
 
-function formatLogoTestInvoiceItemCode(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, '0');
-  const timestamp = [
-    date.getUTCFullYear(),
-    pad(date.getUTCMonth() + 1),
-    pad(date.getUTCDate()),
-    pad(date.getUTCHours()),
-    pad(date.getUTCMinutes()),
-    pad(date.getUTCSeconds()),
-  ].join('');
-  return `SPORGYM-COMMISSION-TEST-${timestamp}`;
-}
-
-function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>, date = new Date()) {
-  const itemCode = formatLogoTestInvoiceItemCode(date);
+function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>) {
   const details = Array.isArray(requestPayload.salesInvoiceDetails)
     ? requestPayload.salesInvoiceDetails.map((detail) => {
-        if (!isRecord(detail) || !isRecord(detail.productDetail)) {
+        if (!isRecord(detail)) {
           return detail;
         }
+        const { productDetail: _productDetail, ...line } = detail;
         return {
-          ...detail,
-          productDetail: {
-            ...detail.productDetail,
-            itemCode,
-          },
+          ...line,
+          discountRate: 0,
+          discountValue: 0,
         };
       })
     : requestPayload.salesInvoiceDetails;
@@ -1781,8 +1766,8 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         });
         const testInvoiceWarnings = [
           ...preview.warnings,
-          'Using unique test itemCode to avoid Logo test tenant product collision.',
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
+          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
         ];
         const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload);
 

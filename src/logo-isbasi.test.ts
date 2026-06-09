@@ -1215,16 +1215,13 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             taxRate: 20,
             price: 1,
             description: 'SPORGYM TEST KOMİSYON FATURASI',
-            productDetail: expect.objectContaining({
-              itemCode: expect.stringMatching(/^SPORGYM-COMMISSION-TEST-\d{14}$/),
-              itemType: 2,
-              vat: 20,
-              unit: 'Adet',
-            }),
+            discountRate: 0,
+            discountValue: 0,
           }),
         ],
       }),
     );
+    expect(createBody.salesInvoiceDetails[0]).not.toHaveProperty('productDetail');
     expect(result).toEqual(
       expect.objectContaining({
         ok: true,
@@ -1241,8 +1238,8 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         uuid: 'logo-uuid-1',
         ettn: 'logo-ettn-1',
         warnings: expect.arrayContaining([
-          'Using unique test itemCode to avoid Logo test tenant product collision.',
           'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
+          'Omitting productDetail in Logo test-create to avoid test tenant item master collision.',
         ]),
         requestPayload: expect.objectContaining({
           currency: 'TRY',
@@ -1253,10 +1250,8 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
           }),
           salesInvoiceDetails: [
             expect.objectContaining({
-              productDetail: expect.objectContaining({
-                itemCode: expect.stringMatching(/^SPORGYM-COMMISSION-TEST-\d{14}$/),
-                itemType: 2,
-              }),
+              discountRate: 0,
+              discountValue: 0,
             }),
           ],
           eGovernmentInvoice: {
@@ -1278,6 +1273,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       }),
     );
     const serialized = JSON.stringify(result);
+    expect(result?.requestPayload.salesInvoiceDetails[0]).not.toHaveProperty('productDetail');
     expect(serialized).not.toContain('6490512763');
     expect(serialized).not.toContain('full-secret-access-token');
     expect(serialized).not.toContain('provider-response-token');
