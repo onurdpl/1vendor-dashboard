@@ -76,10 +76,12 @@ export type KargonomiReturnShipmentCreateInput = {
   adapter?: ShippingProviderAdapter;
   kargonomiDestinationClient?: KargonomiDestinationLookupClient;
   senderTaxNumber?: string | null;
+  shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'syncReturnShipping'>;
 };
 
 export type KargonomiReturnProviderDataRefreshInput = {
   adapter?: ShippingProviderAdapter;
+  shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'syncReturnShipping'>;
 };
 
 export type ShopifyReturnSyncInput = {
@@ -2155,6 +2157,173 @@ function isReturnClosedOrCancelled(record: { status: string; returnLifecycleStat
   return /\b(closed|cancelled|canceled)\b/.test(normalized);
 }
 
+type KargonomiReturnShopifyAutoSyncRecord = {
+  id: string;
+  sourceShopifyReturnId: string | null;
+  sourceShopifyReturnGid: string | null;
+  sourceShopifyLineItemId: string | null;
+  returnProvider: string | null;
+  returnProviderShipmentId: string | null;
+  returnTrackingNumber: string | null;
+  returnTrackingUrl: string | null;
+  returnLabel: string | null;
+  returnProviderSnapshot: unknown;
+};
+
+type KargonomiReturnShopifyAutoSyncInput = {
+  shopifyAdminService?: Pick<ReturnType<typeof createShopifyAdminService>, 'syncReturnShipping'>;
+};
+
+function isShopifyReturnSyncConfigured(env: AppEnv, input: KargonomiReturnShopifyAutoSyncInput) {
+  return Boolean(input.shopifyAdminService || (env.SHOPIFY_SHOP_DOMAIN && env.SHOPIFY_ADMIN_ACCESS_TOKEN && env.SHOPIFY_API_VERSION));
+}
+
+async function persistKargonomiReturnAutoSyncSnapshot(
+  returnId: string,
+  existingSnapshot: Record<string, unknown>,
+  patch: Record<string, unknown>,
+) {
+  await prisma.returnRecord.update({
+    where: { id: returnId },
+    data: {
+      returnProviderSnapshot: {
+        ...existingSnapshot,
+        ...patch,
+      } as Prisma.InputJsonValue,
+    },
+  });
+}
+
+async function autoSyncKargonomiReturnToShopify(
+  record: KargonomiReturnShopifyAutoSyncRecord,
+  env: AppEnv,
+  input: KargonomiReturnShopifyAutoSyncInput = {},
+) {
+  const existingSnapshot = readSnapshot(record.returnProviderSnapshot) ?? {};
+  const attemptedAt = new Date().toISOString();
+  const baseAutoSnapshot = {
+    shopifyReturnAutoSyncAttempted: true,
+    shopifyReturnAutoSyncSucceeded: false,
+    shopifyReturnAutoSyncAttemptedAt: attemptedAt,
+    shopifyReturnTrackingSynced: false,
+    shopifyReturnLabelSynced: false,
+    returnTrackingPresent: Boolean(record.returnTrackingNumber?.trim()),
+    returnLabelPresent: Boolean(record.returnLabel?.trim()),
+    labelUploadAttempted: false,
+    labelUploadSucceeded: false,
+    labelUploadSkippedReason: null,
+  };
+  const skip = async (reason: string, extra: Record<string, unknown> = {}) => {
+    await persistKargonomiReturnAutoSyncSnapshot(record.id, existingSnapshot, {
+      ...baseAutoSnapshot,
+      shopifyReturnAutoSyncSkippedReason: reason,
+      shopifyReturnSyncSkippedReason: reason,
+      ...extra,
+    });
+  };
+
+  if (record.returnProvider?.toLowerCase() !== 'kargonomi') {
+    await skip('provider_not_kargonomi');
+    return;
+  }
+
+  if (!record.returnProviderShipmentId?.trim()) {
+    await skip('provider_shipment_id_missing');
+    return;
+  }
+
+  const trackingNumber = record.returnTrackingNumber?.trim();
+  if (!trackingNumber) {
+    await skip('tracking_missing');
+    return;
+  }
+
+  if (!record.returnLabel?.trim()) {
+    await skip('label_missing');
+    return;
+  }
+
+  const returnGid = toShopifyReturnGid(record.sourceShopifyReturnGid ?? record.sourceShopifyReturnId);
+  if (!returnGid) {
+    await skip('shopify_return_id_missing', { shopifyReturnIdPresent: false });
+    return;
+  }
+
+  const sourceLineItemId = record.sourceShopifyLineItemId?.trim();
+  if (!sourceLineItemId) {
+    await skip('source_line_item_missing', { shopifyReturnSourceLineItemIdPresent: false });
+    return;
+  }
+
+  if (!isShopifyReturnSyncConfigured(env, input)) {
+    await skip('shopify_not_configured', {
+      shopifyReturnIdPresent: true,
+      shopifyReturnSourceLineItemIdPresent: true,
+    });
+    return;
+  }
+
+  await persistKargonomiReturnAutoSyncSnapshot(record.id, existingSnapshot, {
+    ...baseAutoSnapshot,
+    shopifyReturnAutoSyncSkippedReason: null,
+    shopifyReturnSyncSkippedReason: null,
+    shopifyReturnIdPresent: true,
+    shopifyReturnSourceLineItemIdPresent: true,
+  });
+
+  try {
+    const shopifyAdminService = input.shopifyAdminService ?? createShopifyAdminService(env);
+    const result = await shopifyAdminService.syncReturnShipping({
+      returnGid,
+      sourceLineItemId,
+      trackingNumber,
+      trackingUrl: record.returnTrackingUrl,
+      labelUrl: record.returnLabel,
+      notifyCustomer: true,
+    });
+    const sanitizedUserErrors = sanitizeShopifyUserErrors(result.userErrors);
+    const syncSucceeded = result.trackingAccepted && result.labelAccepted && sanitizedUserErrors.length === 0;
+
+    await persistKargonomiReturnAutoSyncSnapshot(record.id, existingSnapshot, {
+      ...baseAutoSnapshot,
+      shopifyReturnAutoSyncSucceeded: syncSucceeded,
+      shopifyReturnAutoSyncSkippedReason: syncSucceeded ? null : 'shopify_sync_not_fully_accepted',
+      shopifyReturnSyncAttempted: true,
+      shopifyReturnSyncSucceeded: syncSucceeded,
+      shopifyReturnTrackingSynced: result.trackingAccepted,
+      shopifyReturnLabelSynced: result.labelAccepted,
+      shopifyReturnSyncSkippedReason: syncSucceeded ? null : 'shopify_sync_not_fully_accepted',
+      shopifyReverseDeliveryId: result.reverseDeliveryId,
+      shopifyReverseFulfillmentOrderId: result.reverseFulfillmentOrderId,
+      shopifyReturnSyncUserErrors: sanitizedUserErrors,
+      labelUploadAttempted: result.labelUploadAttempted,
+      labelUploadSucceeded: result.labelUploadSucceeded,
+      labelUploadSkippedReason: result.labelUploadSkippedReason,
+      labelUploadSource: result.labelUploadSource,
+      labelInputSent: result.labelInputSent,
+      shopifyReturnSyncMutationUsed: result.mutationUsed,
+      shopifyReturnAutoSyncCompletedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    const safeErrorMessage =
+      sanitizeShopifyReturnSyncMessage(error instanceof Error ? error.message : 'Unknown Shopify return sync error.') ??
+      'Unknown Shopify return sync error.';
+    await persistKargonomiReturnAutoSyncSnapshot(record.id, existingSnapshot, {
+      ...baseAutoSnapshot,
+      shopifyReturnAutoSyncSucceeded: false,
+      shopifyReturnAutoSyncSkippedReason: 'shopify_sync_failed',
+      shopifyReturnAutoSyncErrorMessage: safeErrorMessage,
+      shopifyReturnSyncAttempted: true,
+      shopifyReturnSyncSucceeded: false,
+      shopifyReturnTrackingSynced: false,
+      shopifyReturnLabelSynced: false,
+      shopifyReturnSyncSkippedReason: 'shopify_sync_failed',
+      shopifyReturnSyncErrorMessage: safeErrorMessage,
+      shopifyReturnSyncFailedAt: new Date().toISOString(),
+    });
+  }
+}
+
 export async function createKargonomiReturnShipmentForReturn(
   returnId: string,
   actor: ReturnActorScope,
@@ -2296,6 +2465,26 @@ export async function createKargonomiReturnShipmentForReturn(
         returnProviderSnapshot: providerSnapshot as Prisma.InputJsonValue,
       },
     });
+    try {
+      await autoSyncKargonomiReturnToShopify(
+        {
+          id: returnId,
+          sourceShopifyReturnId: record.sourceShopifyReturnId,
+          sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+          sourceShopifyLineItemId: record.sourceShopifyLineItemId,
+          returnProvider: 'kargonomi',
+          returnProviderShipmentId: result.providerShipmentId,
+          returnTrackingNumber: result.trackingNumber,
+          returnTrackingUrl: result.trackingUrl,
+          returnLabel: result.labelUrl,
+          returnProviderSnapshot: providerSnapshot,
+        },
+        env,
+        { shopifyAdminService: input.shopifyAdminService },
+      );
+    } catch {
+      // Auto-sync diagnostics must never roll back a successfully persisted Kargonomi return shipment.
+    }
   } catch (error) {
     if (error instanceof ShippingProviderExecutionError) {
       await prisma.returnRecord.update({
@@ -2434,6 +2623,26 @@ export async function refreshKargonomiReturnProviderData(
         returnProviderSnapshot: mergedSnapshot as Prisma.InputJsonValue,
       },
     });
+    try {
+      await autoSyncKargonomiReturnToShopify(
+        {
+          id: returnId,
+          sourceShopifyReturnId: record.sourceShopifyReturnId,
+          sourceShopifyReturnGid: record.sourceShopifyReturnGid,
+          sourceShopifyLineItemId: record.sourceShopifyLineItemId,
+          returnProvider: record.returnProvider,
+          returnProviderShipmentId: result.providerShipmentId ?? providerShipmentId,
+          returnTrackingNumber: result.trackingNumber,
+          returnTrackingUrl: result.trackingUrl,
+          returnLabel: result.labelUrl,
+          returnProviderSnapshot: mergedSnapshot,
+        },
+        env,
+        { shopifyAdminService: input.shopifyAdminService },
+      );
+    } catch {
+      // Auto-sync diagnostics must never roll back a successfully refreshed Kargonomi return shipment.
+    }
   } catch (error) {
     const providerSnapshot = error instanceof ShippingProviderExecutionError
       ? error.responseSnapshot

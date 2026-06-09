@@ -1853,6 +1853,58 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(card.queryByText(/data:application\/pdf/i)).not.toBeInTheDocument();
   });
 
+  it('shows Kargonomi return Shopify auto-sync status when present', async () => {
+    setCurrentUser({
+      email: 'admin@example.com',
+      name: 'Admin User',
+      role: 'admin',
+      vendorAccess: [],
+      vendorDetails: [],
+      canSwitchVendors: true,
+      defaultVendorId: null,
+    });
+    appReadinessOverride.value = {
+      status: 'ready',
+      token: 'test-token',
+      currentUser: {
+        email: 'admin@example.com',
+        name: 'Admin User',
+        role: 'admin',
+      },
+      currentVendor: { vendorId: 'demo-vendor-a', vendorName: 'Demo Vendor A', scope: 'admin' },
+      sessionReady: true,
+      vendorReady: true,
+      ready: true,
+      unauthorized: false,
+    };
+    getReturnMock.mockResolvedValue({
+      ...returnDetail,
+      returnProvider: 'kargonomi',
+      returnProviderShipmentId: '2668319',
+      returnCarrierName: 'Hepsijet',
+      returnTrackingNumber: 'KSUR2668319RET',
+      returnLabel: 'data:application/pdf;base64,JVBER',
+      returnProviderSnapshot: {
+        provider: 'kargonomi',
+        shopifyReturnAutoSyncAttempted: true,
+        shopifyReturnAutoSyncSucceeded: true,
+        shopifyReturnTrackingSynced: true,
+        shopifyReturnLabelSynced: true,
+        shopifyReverseDeliveryId: 'gid://shopify/ReverseDelivery/321',
+      },
+    });
+
+    renderPage();
+
+    const kargonomiCard = (await screen.findByText('Shipment created')).closest('article');
+    expect(kargonomiCard).toBeTruthy();
+    const card = within(kargonomiCard!);
+    expect(card.getByText('Shopify auto-sync')).toBeInTheDocument();
+    expect(card.getByText('auto synced')).toBeInTheDocument();
+    expect(card.queryByText(/JVBER/i)).not.toBeInTheDocument();
+    expect(card.queryByText(/data:application\/pdf/i)).not.toBeInTheDocument();
+  });
+
   it('shows Kargonomi return shipment summary with pending tracking and label before refresh', async () => {
     setCurrentUser({
       email: 'admin@example.com',

@@ -784,6 +784,19 @@ export function ReturnDetailPage() {
   const shopifyReverseDeliveryId = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReverseDeliveryId');
   const shopifyReturnSyncSkippedReason = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnSyncSkippedReason');
   const shopifyReturnSyncErrorMessage = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnSyncErrorMessage');
+  const shopifyReturnAutoSyncAttempted = readSnapshotBoolean(currentReturnProviderSnapshot, 'shopifyReturnAutoSyncAttempted');
+  const shopifyReturnAutoSyncSucceeded = readSnapshotBoolean(currentReturnProviderSnapshot, 'shopifyReturnAutoSyncSucceeded');
+  const shopifyReturnAutoSyncSkippedReason = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnAutoSyncSkippedReason');
+  const shopifyReturnAutoSyncErrorMessage = readSnapshotString(currentReturnProviderSnapshot, 'shopifyReturnAutoSyncErrorMessage');
+  const shopifyReturnAutoSyncStatus = shopifyReturnAutoSyncAttempted
+    ? shopifyReturnAutoSyncSucceeded
+      ? 'auto synced'
+      : shopifyReturnAutoSyncErrorMessage
+        ? `failed: ${shopifyReturnAutoSyncErrorMessage}`
+        : shopifyReturnAutoSyncSkippedReason
+          ? `skipped: ${shopifyReturnAutoSyncSkippedReason.replace(/_/g, ' ')}`
+          : 'attempted'
+    : null;
   const currentReturnPickupMissingFields = collectReturnPickupMissingFields(currentReturnProviderSnapshot, message);
   const currentReturnPickupMissingFieldsKey = currentReturnPickupMissingFields.join('|');
   const retainedReturnPickupMissingFieldsKey = retainedReturnPickupMissingFields.join('|');
@@ -2039,6 +2052,12 @@ export function ReturnDetailPage() {
                       <span>Shopify label synced</span>
                       <strong>{formatDiagnosticBoolean(shopifyReturnLabelSynced)}</strong>
                     </div>
+                    {shopifyReturnAutoSyncStatus ? (
+                      <div>
+                        <span>Shopify auto-sync</span>
+                        <strong>{shopifyReturnAutoSyncStatus}</strong>
+                      </div>
+                    ) : null}
                     {shopifyReverseDeliveryId ? (
                       <div>
                         <span>Shopify reverse delivery id</span>

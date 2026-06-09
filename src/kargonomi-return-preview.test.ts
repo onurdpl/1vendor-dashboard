@@ -62,6 +62,12 @@ function buildKargonomiDestinationClient() {
   };
 }
 
+function persistedReturnProviderSnapshots() {
+  return prismaMock.returnRecord.update.mock.calls
+    .map((call) => JSON.stringify(call[0].data?.returnProviderSnapshot ?? {}))
+    .join('\n');
+}
+
 function baseReturnRecord(overrides: Record<string, unknown> = {}) {
   return {
     id: 'return-1',
@@ -884,6 +890,198 @@ describe('Kargonomi return preview', () => {
     expect(result.returnProviderShipmentId).toBe('2654001');
   });
 
+  it('auto-syncs a created Kargonomi return shipment to Shopify when tracking and label are persisted', async () => {
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654001',
+      trackingNumber: 'KSUR2654001RET',
+      trackingUrl: 'https://tracking.example/KSUR2654001RET',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn().mockResolvedValue({
+        mutationUsed: 'reverseDeliveryCreateWithShipping',
+        reverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/1',
+        reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        trackingAccepted: true,
+        labelAccepted: true,
+        returnedCarrierName: null,
+        userErrors: [],
+        labelInputSent: true,
+        labelUploadAttempted: true,
+        labelUploadSucceeded: true,
+        labelUploadSkippedReason: null,
+        labelUploadSource: 'staged_upload',
+        source: 'shopify_admin',
+      }),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654001',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: 'KSUR2654001RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        returnProviderSnapshot: {
+          shopifyReturnAutoSyncAttempted: true,
+          shopifyReturnAutoSyncSucceeded: true,
+          shopifyReturnTrackingSynced: true,
+          shopifyReturnLabelSynced: true,
+        },
+      }),
+    );
+
+    await createKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledTimes(1);
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledWith({
+      returnGid: 'gid://shopify/Return/1',
+      sourceLineItemId: 'line-1',
+      trackingNumber: 'KSUR2654001RET',
+      trackingUrl: 'https://tracking.example/KSUR2654001RET',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      notifyCustomer: true,
+    });
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncAttempted":true');
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncSucceeded":true');
+    expect(persistedSnapshots).toContain('"shopifyReturnTrackingSynced":true');
+    expect(persistedSnapshots).toContain('"shopifyReturnLabelSynced":true');
+    expect(persistedSnapshots).not.toContain('JVBERi0xLjQ=');
+    expect(persistedSnapshots).not.toContain('11111111111');
+  });
+
+  it('records label_missing instead of auto-syncing when a created Kargonomi return has no label', async () => {
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654001',
+      trackingNumber: 'KSUR2654001RET',
+      trackingUrl: null,
+      labelUrl: null,
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: false,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn(),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654001',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: 'KSUR2654001RET',
+        returnLabel: null,
+      }),
+    );
+
+    await createKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(shopifyAdminService.syncReturnShipping).not.toHaveBeenCalled();
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncSkippedReason":"label_missing"');
+  });
+
+  it('records tracking_missing instead of auto-syncing when a created Kargonomi return has no tracking', async () => {
+    const adapterCreateShipment = vi.fn().mockResolvedValue({
+      providerShipmentId: '2654001',
+      trackingNumber: null,
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        shippingProviderName: 'Sürat Kargo',
+        labelUrlPresent: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn(),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(baseReturnRecord());
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(baseShippingConfig());
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2654001',
+        returnCarrierName: 'Sürat Kargo',
+        returnTrackingNumber: null,
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      }),
+    );
+
+    await createKargonomiReturnShipmentForReturn(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        senderTaxNumber: kargonomiReturnSenderTaxInput.senderTaxNumber,
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(shopifyAdminService.syncReturnShipping).not.toHaveBeenCalled();
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncSkippedReason":"tracking_missing"');
+  });
+
   it('refreshes Kargonomi return provider data without creating another shipment', async () => {
     const adapterCreateShipment = vi.fn();
     const adapterRefreshProviderData = vi.fn().mockResolvedValue({
@@ -989,9 +1187,248 @@ describe('Kargonomi return preview', () => {
       }),
     );
     expect(result.returnTrackingNumber).toBe('KSUR2668319RET');
-    const persistedSnapshots = prismaMock.returnRecord.update.mock.calls.map((call) => JSON.stringify(call[0])).join('\n');
+    const persistedSnapshots = persistedReturnProviderSnapshots();
     expect(persistedSnapshots).not.toContain('+905551112233');
     expect(persistedSnapshots).not.toContain('Customer full address');
+  });
+
+  it('auto-syncs refreshed Kargonomi return provider data to Shopify', async () => {
+    const adapterCreateShipment = vi.fn();
+    const adapterRefreshProviderData = vi.fn().mockResolvedValue({
+      providerShipmentId: '2668319',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: 'https://tracking.example/KSUR2668319RET',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        flow: 'provider_data_refresh',
+        getShipmentCalled: true,
+        barcodeFetchCalled: true,
+        shippingProviderName: 'Hepsijet',
+        labelUrlPresent: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn().mockResolvedValue({
+        mutationUsed: 'reverseDeliveryCreateWithShipping',
+        reverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/1',
+        reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        trackingAccepted: true,
+        labelAccepted: true,
+        returnedCarrierName: null,
+        userErrors: [],
+        labelInputSent: true,
+        labelUploadAttempted: true,
+        labelUploadSucceeded: true,
+        labelUploadSkippedReason: null,
+        labelUploadSource: 'staged_upload',
+        source: 'shopify_admin',
+      }),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+        returnProviderSnapshot: {
+          shopifyReturnAutoSyncAttempted: true,
+          shopifyReturnAutoSyncSucceeded: true,
+          shopifyReturnTrackingSynced: true,
+          shopifyReturnLabelSynced: true,
+        },
+      }),
+    );
+
+    await refreshKargonomiReturnProviderData(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: adapterCreateShipment,
+          refreshProviderData: adapterRefreshProviderData,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(adapterCreateShipment).not.toHaveBeenCalled();
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledTimes(1);
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledWith({
+      returnGid: 'gid://shopify/Return/1',
+      sourceLineItemId: 'line-1',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: 'https://tracking.example/KSUR2668319RET',
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      notifyCustomer: true,
+    });
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncSucceeded":true');
+    expect(persistedSnapshots).toContain('"shopifyReturnLabelSynced":true');
+    expect(persistedSnapshots).not.toContain('JVBERi0xLjQ=');
+  });
+
+  it('does not roll back refreshed Kargonomi data when Shopify auto-sync fails', async () => {
+    const adapterRefreshProviderData = vi.fn().mockResolvedValue({
+      providerShipmentId: '2668319',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        flow: 'provider_data_refresh',
+        getShipmentCalled: true,
+        barcodeFetchCalled: true,
+        shippingProviderName: 'Hepsijet',
+        labelUrlPresent: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn().mockRejectedValue(new Error('Shopify return sync failed with token=secret-token')),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      }),
+    );
+
+    const result = await refreshKargonomiReturnProviderData(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: vi.fn(),
+          refreshProviderData: adapterRefreshProviderData,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(result.returnProviderShipmentId).toBe('2668319');
+    expect(result.returnTrackingNumber).toBe('KSUR2668319RET');
+    const persistedCalls = prismaMock.returnRecord.update.mock.calls.map((call) => JSON.stringify(call[0])).join('\n');
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedCalls).toContain('"returnProviderShipmentId":"2668319"');
+    expect(persistedSnapshots).toContain('"shopifyReturnAutoSyncSkippedReason":"shopify_sync_failed"');
+    expect(persistedSnapshots).toContain('[redacted]');
+    expect(persistedSnapshots).not.toContain('secret-token');
+    expect(persistedSnapshots).not.toContain('JVBERi0xLjQ=');
+  });
+
+  it('uses Shopify reverse delivery update path without duplicate reverse delivery creation when provider reports an existing delivery', async () => {
+    const adapterRefreshProviderData = vi.fn().mockResolvedValue({
+      providerShipmentId: '2668319',
+      trackingNumber: 'KSUR2668319RET',
+      trackingUrl: null,
+      labelUrl: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      shipmentStatus: 'created',
+      shippingCost: null,
+      shippingVat: null,
+      currency: 'TRY',
+      responseSnapshot: {
+        provider: 'kargonomi',
+        flow: 'provider_data_refresh',
+        shippingProviderName: 'Hepsijet',
+        labelUrlPresent: true,
+      },
+    });
+    const shopifyAdminService = {
+      syncReturnShipping: vi.fn().mockResolvedValue({
+        mutationUsed: 'reverseDeliveryShippingUpdate',
+        reverseFulfillmentOrderId: 'gid://shopify/ReverseFulfillmentOrder/1',
+        reverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        trackingAccepted: true,
+        labelAccepted: true,
+        returnedCarrierName: null,
+        userErrors: [],
+        labelInputSent: true,
+        labelUploadAttempted: true,
+        labelUploadSucceeded: true,
+        labelUploadSkippedReason: null,
+        labelUploadSource: 'staged_upload',
+        source: 'shopify_admin',
+      }),
+    };
+    prismaMock.returnRecord.findUnique.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnProviderSnapshot: {
+          shopifyReverseDeliveryId: 'gid://shopify/ReverseDelivery/1',
+        },
+      }),
+    );
+    prismaMock.returnRecord.update.mockResolvedValue({});
+    prismaMock.returnRecord.findFirst.mockResolvedValue(
+      baseReturnRecord({
+        returnProvider: 'kargonomi',
+        returnProviderShipmentId: '2668319',
+        returnCarrierName: 'Hepsijet',
+        returnTrackingNumber: 'KSUR2668319RET',
+        returnLabel: 'data:application/pdf;base64,JVBERi0xLjQ=',
+      }),
+    );
+
+    await refreshKargonomiReturnProviderData(
+      'return-1',
+      {
+        role: 'admin',
+        vendorId: null,
+      },
+      {} as never,
+      {
+        adapter: {
+          provider: 'KARGONOMI',
+          createShipment: vi.fn(),
+          refreshProviderData: adapterRefreshProviderData,
+        } as never,
+        shopifyAdminService,
+      },
+    );
+
+    expect(shopifyAdminService.syncReturnShipping).toHaveBeenCalledTimes(1);
+    const persistedSnapshots = persistedReturnProviderSnapshots();
+    expect(persistedSnapshots).toContain('"shopifyReturnSyncMutationUsed":"reverseDeliveryShippingUpdate"');
   });
 
   it('blocks Kargonomi return provider refresh when provider shipment id is missing', async () => {
