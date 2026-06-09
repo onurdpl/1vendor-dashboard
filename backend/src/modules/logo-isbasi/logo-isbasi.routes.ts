@@ -800,6 +800,7 @@ function buildLogoTestInvoiceCreateResponse(
   result: LogoIsbasiRawResult,
   requestPayload: Record<string, unknown>,
   vendorId: string,
+  warnings: string[] = [],
 ) {
   const invoiceRecord = readLogoCreateInvoiceRecord(result.body);
   return {
@@ -816,6 +817,7 @@ function buildLogoTestInvoiceCreateResponse(
     invoiceId: readRecordString(invoiceRecord, ['invoiceId', 'id', 'invoice_id', 'salesInvoiceId']),
     uuid: readRecordString(invoiceRecord, ['uuid', 'uuId', 'UUID']),
     ettn: readRecordString(invoiceRecord, ['ettn', 'ETTN', 'eTtn']),
+    warnings,
     requestPayload: sanitizeLogoIsbasiInvoicePreviewPayload(requestPayload),
     responseBody: sanitizeLogoInvoiceNestedValue(result.body),
     ...(result.ok && !result.jsonParseFailed
@@ -836,6 +838,42 @@ function buildLogoTestInvoiceCreateResponse(
           bodySnippet: result.responseBodySnippet ?? null,
         },
       }),
+  };
+}
+
+function formatLogoTestInvoiceItemCode(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const timestamp = [
+    date.getUTCFullYear(),
+    pad(date.getUTCMonth() + 1),
+    pad(date.getUTCDate()),
+    pad(date.getUTCHours()),
+    pad(date.getUTCMinutes()),
+    pad(date.getUTCSeconds()),
+  ].join('');
+  return `SPORGYM-COMMISSION-TEST-${timestamp}`;
+}
+
+function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>, date = new Date()) {
+  const itemCode = formatLogoTestInvoiceItemCode(date);
+  const details = Array.isArray(requestPayload.salesInvoiceDetails)
+    ? requestPayload.salesInvoiceDetails.map((detail) => {
+        if (!isRecord(detail) || !isRecord(detail.productDetail)) {
+          return detail;
+        }
+        return {
+          ...detail,
+          productDetail: {
+            ...detail.productDetail,
+            itemCode,
+          },
+        };
+      })
+    : requestPayload.salesInvoiceDetails;
+
+  return {
+    ...requestPayload,
+    salesInvoiceDetails: details,
   };
 }
 
@@ -1740,6 +1778,11 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           description: 'SPORGYM TEST KOMİSYON FATURASI',
           invoiceDate: new Date().toISOString().slice(0, 10),
         });
+        const testInvoiceWarnings = [
+          ...preview.warnings,
+          'Using unique test itemCode to avoid Logo test tenant product collision.',
+        ];
+        const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload);
 
         const client = buildLogoClient(env);
         const login = await loginForLogoReadProbe(client, 'test_invoice_create');
@@ -1747,8 +1790,8 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
           return reply.code(login.status).send(login.body);
         }
 
-        const result = await client.createIntegrationInvoice(login.session, preview.payload);
-        const response = buildLogoTestInvoiceCreateResponse(result, preview.payload, vendorId);
+        const result = await client.createIntegrationInvoice(login.session, testInvoicePayload);
+        const response = buildLogoTestInvoiceCreateResponse(result, testInvoicePayload, vendorId, testInvoiceWarnings);
         return reply.code(result.ok && !result.jsonParseFailed ? 200 : 502).send(response);
       } catch (error) {
         return reply.code(400).send({

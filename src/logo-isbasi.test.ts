@@ -1216,7 +1216,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
             price: 1,
             description: 'SPORGYM TEST KOMİSYON FATURASI',
             productDetail: expect.objectContaining({
-              itemCode: 'SPORGYM-COMMISSION',
+              itemCode: expect.stringMatching(/^SPORGYM-COMMISSION-TEST-\d{14}$/),
               itemType: 2,
               vat: 20,
               unit: 'Adet',
@@ -1240,12 +1240,23 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         invoiceId: 'logo-invoice-1',
         uuid: 'logo-uuid-1',
         ettn: 'logo-ettn-1',
+        warnings: expect.arrayContaining([
+          'Using unique test itemCode to avoid Logo test tenant product collision.',
+        ]),
         requestPayload: expect.objectContaining({
           customer: expect.objectContaining({
             code: 'CUST001',
             tcknVkn: '64******63',
             isPerson: false,
           }),
+          salesInvoiceDetails: [
+            expect.objectContaining({
+              productDetail: expect.objectContaining({
+                itemCode: expect.stringMatching(/^SPORGYM-COMMISSION-TEST-\d{14}$/),
+                itemType: 2,
+              }),
+            }),
+          ],
           eGovernmentInvoice: {
             eGovernmentType: 0,
             invoiceTypeForEinvoice: 2,
