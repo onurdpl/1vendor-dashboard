@@ -873,6 +873,7 @@ function buildLogoTestInvoicePayload(requestPayload: Record<string, unknown>, da
 
   return {
     ...requestPayload,
+    currency: 'TRY',
     salesInvoiceDetails: details,
   };
 }
@@ -1781,6 +1782,7 @@ export function registerLogoIsbasiRoutes(app: FastifyInstance, env: AppEnv) {
         const testInvoiceWarnings = [
           ...preview.warnings,
           'Using unique test itemCode to avoid Logo test tenant product collision.',
+          'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
         ];
         const testInvoicePayload = buildLogoTestInvoicePayload(preview.payload);
 

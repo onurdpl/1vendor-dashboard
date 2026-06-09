@@ -1175,7 +1175,7 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
       expect.objectContaining({
         invoiceId: 0,
         invoiceDate: expect.stringMatching(/^\d{4}-\d{2}-\d{2} 00:00:00$/),
-        currency: 'TL',
+        currency: 'TRY',
         description: 'SPORGYM TEST KOMİSYON FATURASI',
         vatIncluded: false,
         customer: expect.objectContaining({
@@ -1242,8 +1242,10 @@ describe('Logo İşbaşı client and commission invoice preview', () => {
         ettn: 'logo-ettn-1',
         warnings: expect.arrayContaining([
           'Using unique test itemCode to avoid Logo test tenant product collision.',
+          'Using TRY for Logo test-create because official integrationInvoices sample uses TRY.',
         ]),
         requestPayload: expect.objectContaining({
+          currency: 'TRY',
           customer: expect.objectContaining({
             code: 'CUST001',
             tcknVkn: '64******63',
