@@ -87,6 +87,7 @@ describe('vendor integration docs routes', () => {
     expect(reply.headers.get('content-type')).toBe('application/yaml; charset=utf-8');
     expect(result).toBe(reply.payload);
     expect(String(reply.payload)).toContain('openapi: 3.0.3');
+    expect(String(reply.payload)).toContain('url: https://api.sporgym.com');
     expect(String(reply.payload)).toContain('/api/vendor-integration/orders:');
     expect(String(reply.payload)).toContain('/api/vendor-integration/orders/{allocationId}/status:');
     expect(String(reply.payload)).not.toContain('/admin/vendor-integration');

@@ -23,7 +23,7 @@ npm run vendor-integration:create-token -- --vendorIdentifier=vendor-demo --prov
 Tokens can also be created through the guarded admin endpoint when Render Shell is unavailable:
 
 ```bash
-curl -sS -X POST "https://backend.example.com/admin/vendor-integration/tokens" \
+curl -sS -X POST "https://api.sporgym.com/admin/vendor-integration/tokens" \
   -H "content-type: application/json" \
   -H "x-admin-probe-token: $ADMIN_PROBE_TOKEN" \
   -d '{
@@ -103,7 +103,7 @@ Example:
 ```bash
 curl \
   -H "Authorization: Bearer spg_vi_..." \
-  "https://backend.example.com/api/vendor-integration/orders?limit=50"
+  "https://api.sporgym.com/api/vendor-integration/orders?limit=50"
 ```
 
 Example response:
@@ -237,7 +237,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-import-alloc-vendor-demo-1001-1" \
   -H "content-type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/status" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/status" \
   -d '{
     "status": "acknowledged",
     "message": "Order imported into Provider"
@@ -306,7 +306,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-shipment-alloc-vendor-demo-1001-1" \
   -H "content-type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/shipment" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/shipment" \
   -d '{
     "carrier": "Demo Carrier",
     "trackingNumber": "ABC123456",
@@ -379,7 +379,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-invoice-alloc-vendor-demo-1001-1" \
   -H "content-type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/invoice" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/invoice" \
   -d '{
     "invoiceNumber": "ABC202600001",
     "invoiceDate": "2026-06-02",

@@ -16,13 +16,13 @@ This file is now the source of truth for provider-facing Vendor Integration API 
 4. Select `docs/openapi/vendor-integration.openapi.yaml`.
 5. Configure the collection authorization as Bearer Token and provide a vendor integration token.
 
-The server URL in the spec is a placeholder:
+The server URL in the spec is:
 
 ```text
-https://backend.example.com
+https://api.sporgym.com
 ```
 
-Replace it with the target backend URL in the imported Postman environment.
+Use this production API domain for provider handoffs unless Sporgym explicitly issues a separate sandbox/staging base URL.
 
 ## Swagger UI Viewer
 
@@ -38,11 +38,11 @@ The raw OpenAPI YAML is available at:
 GET /docs/openapi/vendor-integration.openapi.yaml
 ```
 
-For a deployed backend, replace the host with the backend base URL, for example:
+The deployed Vendor Integration documentation is available at:
 
 ```text
-https://backend.example.com/docs/vendor-integration
-https://backend.example.com/docs/openapi/vendor-integration.openapi.yaml
+https://api.sporgym.com/docs/vendor-integration
+https://api.sporgym.com/docs/openapi/vendor-integration.openapi.yaml
 ```
 
 The viewer renders only the provider-facing Vendor Integration OpenAPI spec. It does not expose bearer tokens, provider secrets, request bodies, response bodies, or internal admin endpoints.

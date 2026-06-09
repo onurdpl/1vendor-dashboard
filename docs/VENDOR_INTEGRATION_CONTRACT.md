@@ -85,7 +85,7 @@ Provider guidance:
 Base path examples below use:
 
 ```text
-https://backend.example.com
+https://api.sporgym.com
 ```
 
 Implemented endpoints:
@@ -116,7 +116,7 @@ Example request:
 ```bash
 curl -sS \
   -H "Authorization: Bearer spg_vi_..." \
-  "https://backend.example.com/api/vendor-integration/orders?limit=50"
+  "https://api.sporgym.com/api/vendor-integration/orders?limit=50"
 ```
 
 Response schema:
@@ -262,7 +262,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-status-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/status" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/status" \
   -d '{
     "status": "acknowledged",
     "message": "Order imported into Provider"
@@ -323,7 +323,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-shipment-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/shipment" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/shipment" \
   -d '{
     "carrier": "Demo Carrier",
     "trackingNumber": "ABC123456",
@@ -392,7 +392,7 @@ curl -sS -X POST \
   -H "Authorization: Bearer spg_vi_..." \
   -H "Idempotency-Key: provider-invoice-alloc-vendor-demo-1001-1" \
   -H "Content-Type: application/json" \
-  "https://backend.example.com/api/vendor-integration/orders/alloc-vendor-demo-1001/invoice" \
+  "https://api.sporgym.com/api/vendor-integration/orders/alloc-vendor-demo-1001/invoice" \
   -d '{
     "invoiceNumber": "ABC202600001",
     "invoiceDate": "2026-06-02",

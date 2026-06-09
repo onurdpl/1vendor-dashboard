@@ -6,8 +6,8 @@ info:
     Provider-facing API for vendor-scoped order pulls and allocation-level
     status, shipment, and invoice reference writebacks.
 servers:
-  - url: https://backend.example.com
-    description: Placeholder backend base URL.
+  - url: https://api.sporgym.com
+    description: Production API base URL.
 tags:
   - name: Vendor Integration
     description: Vendor-scoped provider integration endpoints.
