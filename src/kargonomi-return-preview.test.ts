@@ -301,6 +301,7 @@ describe('Kargonomi return preview', () => {
         receiver: {
           namePresent: true,
           nameValid: false,
+          nameSource: 'warehouse_name',
         },
       },
     });
@@ -595,8 +596,11 @@ describe('Kargonomi return preview', () => {
         receiver: {
           warehouseId: '112668',
           namePresent: true,
+          nameValid: true,
+          nameSource: 'provider_metadata',
           phonePresent: true,
           addressPresent: true,
+          addressSource: 'provider_metadata',
         },
       },
     });
@@ -651,8 +655,11 @@ describe('Kargonomi return preview', () => {
         receiver: {
           warehouseId: '112666',
           namePresent: true,
+          nameValid: true,
+          nameSource: 'warehouse_metadata_contact_name',
           phonePresent: true,
           addressPresent: true,
+          addressSource: 'warehouse_address',
           stateId: '34',
           cityId: '828',
         },
@@ -781,6 +788,9 @@ describe('Kargonomi return preview', () => {
         senderPhoneValid: true,
         senderTaxNumberPresent: true,
         buyerNameValid: false,
+        receiverNamePresent: true,
+        receiverNameValid: false,
+        receiverNameSource: 'warehouse_name',
       }),
     });
     expect(adapterCreateShipment).not.toHaveBeenCalled();

@@ -1590,6 +1590,7 @@ describe('ReturnDetailPage vendor review screen', () => {
           receiver: {
             warehouseId: '112668',
             namePresent: true,
+            nameValid: true,
             phonePresent: false,
             addressPresent: true,
           },
@@ -1611,6 +1612,51 @@ describe('ReturnDetailPage vendor review screen', () => {
     expect(screen.queryByText('+905551112233')).not.toBeInTheDocument();
     expect(screen.queryByText('Customer full address')).not.toBeInTheDocument();
     expect(screen.queryByText('11111111111')).not.toBeInTheDocument();
+  });
+
+  it('marks Kargonomi return receiver name invalid when it has only one word', async () => {
+    const user = userEvent.setup();
+    getReturnMock.mockResolvedValue(returnDetail);
+    getKargonomiReturnPreviewMock.mockResolvedValueOnce({
+      ok: true,
+      provider: 'KARGONOMI',
+      mode: 'return_preview',
+      returnId: returnDetail.id,
+      ready: false,
+      missingFields: ['receiver.name'],
+      direction: 'CUSTOMER_TO_VENDOR',
+      senderSource: 'CUSTOMER_ORDER_ADDRESS',
+      receiverSource: 'VENDOR_KARGONOMI_WAREHOUSE',
+      previewPayload: {
+        shipment: {
+          sender: {
+            namePresent: true,
+            phonePresent: true,
+            addressPresent: true,
+            districtPresent: true,
+            taxNumberPresent: true,
+            taxNumberSource: 'kargonomi_account_fallback',
+            cityId: '828',
+            stateId: '34',
+          },
+          receiver: {
+            warehouseId: '112666',
+            namePresent: true,
+            nameValid: false,
+            nameSource: 'warehouse_name',
+            phonePresent: true,
+            addressPresent: true,
+          },
+        },
+      },
+      notes: ['Preview only. No Kargonomi API call was made.'],
+    });
+
+    renderPage();
+
+    await user.click(await screen.findByRole('button', { name: 'Kargonomi return preview' }));
+
+    expect(await screen.findByText('warehouse 112666, name invalid, phone ready, address ready')).toBeInTheDocument();
   });
 
   it('lets admins create a Kargonomi return shipment and displays provider evidence', async () => {

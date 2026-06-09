@@ -1348,6 +1348,11 @@ function buildShippingConfigUpdate(
   }
 
   if (draft.preferredProvider === 'kargonomi') {
+    const selectedWarehouseId = draft.defaultWarehouseId.trim();
+    const selectedWarehouse =
+      currentConfig?.warehouses.find(
+        (warehouse) => warehouse.provider === 'kargonomi' && warehouse.warehouseId === selectedWarehouseId,
+      ) ?? existingDefaultWarehouse;
     const providerMetadata = { ...metadata };
     delete providerMetadata.kargonomiBuyerStateId;
     delete providerMetadata.kargonomiBuyerCityId;
@@ -1390,13 +1395,13 @@ function buildShippingConfigUpdate(
     return {
       ...baseUpdate,
       cargoIntegrationId: null,
-      defaultWarehouseId: draft.defaultWarehouseId.trim(),
+      defaultWarehouseId: selectedWarehouseId,
       providerMetadata,
       warehouses: [
         {
-          warehouseId: draft.defaultWarehouseId.trim(),
-          name: existingDefaultWarehouse?.name ?? 'Default warehouse',
-          address: existingDefaultWarehouse?.address ?? null,
+          warehouseId: selectedWarehouseId,
+          name: selectedWarehouse?.name ?? 'Default warehouse',
+          address: selectedWarehouse?.address ?? null,
           isDefault: true,
           provider: 'kargonomi',
         },

@@ -1392,12 +1392,47 @@ function readKargonomiWarehousePhone(warehouseMetadata: unknown, configMetadata:
 }
 
 function readKargonomiWarehouseContactName(warehouseMetadata: unknown, configMetadata: unknown, fallback?: string | null) {
+  return resolveKargonomiReceiverName(warehouseMetadata, configMetadata, fallback).value;
+}
+
+function resolveKargonomiReceiverName(warehouseMetadata: unknown, configMetadata: unknown, fallback?: string | null) {
+  const metadataName = readString(warehouseMetadata, ['contactName', 'contact_name']);
+  if (metadataName) {
+    return { value: metadataName, source: 'warehouse_metadata_contact_name' };
+  }
+
   const fallbackName = fallback?.trim() || null;
-  return (
-    readString(warehouseMetadata, ['contactName', 'contact_name']) ??
-    fallbackName ??
-    readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName'])
-  );
+  if (fallbackName) {
+    return { value: fallbackName, source: 'warehouse_name' };
+  }
+
+  const providerMetadataName = readString(configMetadata, ['kargonomiReturnReceiverName', 'returnReceiverName']);
+  if (providerMetadataName) {
+    return { value: providerMetadataName, source: 'provider_metadata' };
+  }
+
+  return { value: null, source: 'missing' };
+}
+
+function resolveKargonomiReceiverAddress(
+  warehouse: { address: string | null } | null | undefined,
+  configMetadata: unknown,
+) {
+  const warehouseAddress = warehouse?.address?.trim() || null;
+  if (warehouseAddress) {
+    return { value: warehouseAddress, source: 'warehouse_address' };
+  }
+
+  const providerMetadataAddress = readString(configMetadata, [
+    'kargonomiReturnReceiverAddress',
+    'returnReceiverAddress',
+    'warehouseAddress',
+  ]);
+  if (providerMetadataAddress) {
+    return { value: providerMetadataAddress, source: 'provider_metadata' };
+  }
+
+  return { value: null, source: 'missing' };
 }
 
 function readKargonomiLocationId(source: unknown, keys: string[]) {
@@ -1705,11 +1740,11 @@ export async function previewKargonomiReturnShipmentForReturn(
     kargonomiWarehouses[0] ??
     null;
   const warehouseId = warehouse?.warehouseId ?? config?.defaultWarehouseId ?? null;
-  const receiverName = readKargonomiWarehouseContactName(warehouse?.metadata ?? null, configMetadata, warehouse?.name);
+  const receiverNameResolution = resolveKargonomiReceiverName(warehouse?.metadata ?? null, configMetadata, warehouse?.name);
+  const receiverName = receiverNameResolution.value;
   const receiverPhone = normalizeKargonomiPhone(readKargonomiWarehousePhone(warehouse?.metadata ?? null, configMetadata));
-  const receiverAddress =
-    warehouse?.address?.trim() ||
-    readString(configMetadata, ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress']);
+  const receiverAddressResolution = resolveKargonomiReceiverAddress(warehouse, configMetadata);
+  const receiverAddress = receiverAddressResolution.value;
   const receiverStateId = readKargonomiReceiverStateId(warehouse?.metadata ?? null, configMetadata);
   const receiverCityId = readKargonomiReceiverCityId(warehouse?.metadata ?? null, configMetadata);
   const defaultDesi = Number(config?.defaultDesi ?? 0);
@@ -1796,9 +1831,11 @@ export async function previewKargonomiReturnShipmentForReturn(
           warehouseId,
           namePresent: Boolean(receiverName),
           nameValid: buyerNameValid,
+          nameSource: receiverNameResolution.source,
           phonePresent: Boolean(receiverPhone),
           phoneValid: Boolean(receiverPhone),
           addressPresent: Boolean(receiverAddress),
+          addressSource: receiverAddressResolution.source,
           cityId: receiverCityId,
           stateId: receiverStateId,
         },
@@ -1880,6 +1917,11 @@ function buildKargonomiReturnCreateReadinessDetails(
     senderTaxNumberPresent: readBoolean(sender, ['taxNumberPresent']) === true,
     senderTaxNumberSource: readString(sender, ['taxNumberSource']) ?? 'missing',
     buyerNameValid: readBoolean(receiver, ['nameValid']) === true,
+    receiverNamePresent: readBoolean(receiver, ['namePresent']) === true,
+    receiverNameValid: readBoolean(receiver, ['nameValid']) === true,
+    receiverNameSource: readString(receiver, ['nameSource']) ?? 'missing',
+    receiverAddressPresent: readBoolean(receiver, ['addressPresent']) === true,
+    receiverAddressSource: readString(receiver, ['addressSource']) ?? 'missing',
     receiverCityIdPresent: Boolean(readString(receiver, ['cityId'])),
     receiverStateIdPresent: Boolean(readString(receiver, ['stateId'])),
   };
@@ -1966,11 +2008,11 @@ function buildKargonomiReturnShipmentPayload(input: {
     kargonomiWarehouses[0] ??
     null;
   const warehouseMetadata = warehouse?.metadata ?? null;
-  const receiverName = readKargonomiWarehouseContactName(warehouseMetadata, configMetadata, warehouse?.name);
+  const receiverNameResolution = resolveKargonomiReceiverName(warehouseMetadata, configMetadata, warehouse?.name);
+  const receiverName = receiverNameResolution.value;
   const receiverPhone = normalizeKargonomiPhone(readKargonomiWarehousePhone(warehouseMetadata, configMetadata));
-  const receiverAddress =
-    warehouse?.address?.trim() ||
-    readString(configMetadata, ['kargonomiReturnReceiverAddress', 'returnReceiverAddress', 'warehouseAddress']);
+  const receiverAddressResolution = resolveKargonomiReceiverAddress(warehouse, configMetadata);
+  const receiverAddress = receiverAddressResolution.value;
   const receiverStateId = readKargonomiReceiverStateId(warehouseMetadata, configMetadata);
   const receiverCityId = readKargonomiReceiverCityId(warehouseMetadata, configMetadata);
   const senderName = order.customerName?.trim() || order.billingFullName?.trim() || null;
@@ -2063,6 +2105,10 @@ function buildKargonomiReturnShipmentPayload(input: {
     senderTaxNumberPresent: Boolean(senderTaxNumber),
     senderTaxNumberSource: senderTaxNumberResolution.source,
     buyerNameValid,
+    receiverNamePresent: Boolean(receiverName),
+    receiverNameSource: receiverNameResolution.source,
+    receiverAddressPresent: Boolean(receiverAddress),
+    receiverAddressSource: receiverAddressResolution.source,
   };
 }
 
@@ -2160,6 +2206,11 @@ export async function createKargonomiReturnShipmentForReturn(
     senderTaxNumberPresent: built.senderTaxNumberPresent,
     senderTaxNumberSource: built.senderTaxNumberSource,
     buyerNameValid: built.buyerNameValid,
+    receiverNamePresent: built.receiverNamePresent,
+    receiverNameValid: built.buyerNameValid,
+    receiverNameSource: built.receiverNameSource,
+    receiverAddressPresent: built.receiverAddressPresent,
+    receiverAddressSource: built.receiverAddressSource,
     receiverStateIdPresent: Boolean(built.receiverStateId),
     receiverCityIdPresent: Boolean(built.receiverCityId),
     attemptedAt,

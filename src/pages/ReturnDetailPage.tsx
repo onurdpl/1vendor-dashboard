@@ -1984,7 +1984,11 @@ export function ReturnDetailPage() {
                           kargonomiPreviewShipment.receiver.warehouseId
                             ? `warehouse ${String(kargonomiPreviewShipment.receiver.warehouseId)}`
                             : 'warehouse missing',
-                          kargonomiPreviewShipment.receiver.namePresent === true ? 'name ready' : 'name missing',
+                          kargonomiPreviewShipment.receiver.nameValid === true
+                            ? 'name ready'
+                            : kargonomiPreviewShipment.receiver.namePresent === true
+                              ? 'name invalid'
+                              : 'name missing',
                           kargonomiPreviewShipment.receiver.phonePresent === true ? 'phone ready' : 'phone missing',
                           kargonomiPreviewShipment.receiver.addressPresent === true ? 'address ready' : 'address missing',
                         ].join(', ')

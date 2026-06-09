@@ -2402,6 +2402,29 @@ export async function upsertVendorShippingConfig(
 
     for (const warehouseInput of warehouseInputs) {
       const warehouseProvider = normalizeProvider(warehouseInput.provider ?? mapProvider(preferredProvider));
+      const existingWarehouse = (existingConfig?.warehouses ?? []).find(
+        (warehouse) => warehouse.provider === warehouseProvider && warehouse.warehouseId === warehouseInput.warehouseId,
+      );
+      const incomingName = typeof warehouseInput.name === 'string' && warehouseInput.name.trim()
+        ? warehouseInput.name.trim()
+        : null;
+      const incomingAddress = typeof warehouseInput.address === 'string' && warehouseInput.address.trim()
+        ? warehouseInput.address.trim()
+        : null;
+      const isDefault = Boolean(warehouseInput.isDefault) || warehouseInput.warehouseId === input.defaultWarehouseId;
+
+      if (isDefault) {
+        await tx.vendorShippingWarehouse.updateMany({
+          where: {
+            vendorId,
+            provider: warehouseProvider,
+          },
+          data: {
+            isDefault: false,
+          },
+        });
+      }
+
       await tx.vendorShippingWarehouse.upsert({
         where: {
           vendorId_provider_warehouseId: {
@@ -2412,18 +2435,18 @@ export async function upsertVendorShippingConfig(
         },
         update: {
           configId: savedConfig.id,
-          name: warehouseInput.name ?? null,
-          address: warehouseInput.address ?? null,
-          isDefault: Boolean(warehouseInput.isDefault) || warehouseInput.warehouseId === input.defaultWarehouseId,
+          name: incomingName ?? existingWarehouse?.name ?? null,
+          address: incomingAddress ?? existingWarehouse?.address ?? null,
+          isDefault,
         },
         create: {
           configId: savedConfig.id,
           vendorId,
           provider: warehouseProvider,
           warehouseId: warehouseInput.warehouseId,
-          name: warehouseInput.name ?? null,
-          address: warehouseInput.address ?? null,
-          isDefault: Boolean(warehouseInput.isDefault) || warehouseInput.warehouseId === input.defaultWarehouseId,
+          name: incomingName,
+          address: incomingAddress,
+          isDefault,
         },
       });
     }

@@ -13,6 +13,7 @@ const prismaMock = vi.hoisted(() => ({
   vendorShippingWarehouse: {
     upsert: vi.fn(),
     update: vi.fn(),
+    updateMany: vi.fn(),
   },
   shipmentExecution: {
     findUnique: vi.fn(),
@@ -418,6 +419,7 @@ describe('shipping execution foundation', () => {
     prismaMock.vendorShippingConfig.upsert.mockReset();
     prismaMock.vendorShippingWarehouse.upsert.mockReset();
     prismaMock.vendorShippingWarehouse.update.mockReset();
+    prismaMock.vendorShippingWarehouse.updateMany.mockReset();
     prismaMock.shipmentExecution.findUnique.mockReset();
     prismaMock.shipmentExecution.findFirst.mockReset();
     prismaMock.shipmentExecution.findMany.mockReset();
@@ -6959,6 +6961,111 @@ describe('shipping execution foundation', () => {
       navlungoReturnRecipientAddressId: '77701',
       navlungoCarrierId: '10',
     });
+  });
+
+  it('preserves synced Kargonomi warehouse details when saving config without address metadata', async () => {
+    const syncedMetadata = {
+      legacy: 'kept',
+      contactName: 'Sporjinal Depo',
+      phone: '+902121112233',
+      stateName: 'Konya',
+      cityName: 'Selçuklu',
+      stateId: '42',
+      cityId: '796',
+      lookupStatus: 'resolved',
+      lookupError: null,
+      kargonomiWarehouseSyncedAt: '2026-06-08T11:35:43.443Z',
+    };
+    const existingConfig = {
+      id: 'shipping-config-sporjinal',
+      vendorId: 'sporjinal',
+      preferredProvider: 'KARGONOMI',
+      shippingEnabled: true,
+      defaultDesi: 3,
+      cargoIntegrationId: null,
+      defaultWarehouseId: '112666',
+      shippingVatPercent: 18,
+      providerMetadata: {},
+      warehouses: [
+        {
+          id: 'warehouse-stale-default',
+          vendorId: 'sporjinal',
+          configId: 'shipping-config-sporjinal',
+          provider: 'KARGONOMI',
+          warehouseId: '112668',
+          name: 'Old default warehouse',
+          address: null,
+          metadata: null,
+          isDefault: true,
+          createdAt: new Date('2026-06-08T11:00:00.000Z'),
+          updatedAt: new Date('2026-06-08T11:00:00.000Z'),
+        },
+        {
+          id: 'warehouse-synced-default',
+          vendorId: 'sporjinal',
+          configId: 'shipping-config-sporjinal',
+          provider: 'KARGONOMI',
+          warehouseId: '112666',
+          name: 'Sporjinal',
+          address: 'Synced warehouse address',
+          metadata: syncedMetadata,
+          isDefault: true,
+          createdAt: new Date('2026-06-08T11:05:00.000Z'),
+          updatedAt: new Date('2026-06-08T11:35:43.443Z'),
+        },
+      ],
+      updatedAt: new Date('2026-06-08T11:35:54.540Z'),
+    };
+    prismaMock.vendorShippingConfig.findUnique.mockResolvedValue(existingConfig);
+    prismaMock.vendorShippingConfig.upsert.mockResolvedValue(existingConfig);
+    prismaMock.vendorShippingConfig.findUniqueOrThrow.mockResolvedValue({
+      ...existingConfig,
+      warehouses: existingConfig.warehouses.map((warehouse) => ({
+        ...warehouse,
+        isDefault: warehouse.warehouseId === '112666',
+      })),
+    });
+
+    await upsertVendorShippingConfig('sporjinal', {
+      preferredProvider: 'kargonomi',
+      defaultDesi: 3,
+      defaultWarehouseId: '112666',
+      warehouses: [
+        {
+          warehouseId: '112666',
+          name: null,
+          address: null,
+          isDefault: true,
+          provider: 'kargonomi',
+        },
+      ],
+    });
+
+    expect(prismaMock.vendorShippingWarehouse.updateMany).toHaveBeenCalledWith({
+      where: {
+        vendorId: 'sporjinal',
+        provider: 'KARGONOMI',
+      },
+      data: {
+        isDefault: false,
+      },
+    });
+    expect(prismaMock.vendorShippingWarehouse.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: {
+        vendorId_provider_warehouseId: {
+          vendorId: 'sporjinal',
+          provider: 'KARGONOMI',
+          warehouseId: '112666',
+        },
+      },
+      update: expect.objectContaining({
+        name: 'Sporjinal',
+        address: 'Synced warehouse address',
+        isDefault: true,
+      }),
+    }));
+    const upsertCall = prismaMock.vendorShippingWarehouse.upsert.mock.calls.at(-1)?.[0];
+    expect(upsertCall?.update).not.toHaveProperty('metadata');
   });
 
   it('blocks Navlungo return pickup when recipient address id is not configured', async () => {
